@@ -7,13 +7,13 @@ edition = "2021"
 
 [profile.release] # grab a cup of coffee, this'll take a bit
 codegen-units = 1
-strip = true
+strip = "symbols"
 lto = true
 panic = "abort"
 
 [profile.release.build-override]
 opt-level = 3
-strip = true
+strip = "symbols"
 debug = false
 debug-assertions = false
 overflow-checks = false

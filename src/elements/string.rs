@@ -25,21 +25,6 @@ impl NbtString {
     pub fn new(str: String) -> NbtString {
         NbtString { str }
     }
-
-    #[inline]
-    pub fn unwrap(&self) -> &str {
-        &self.str
-    }
-
-    #[inline]
-    pub fn unwrap_mut(&mut self) -> &mut String {
-        &mut self.str
-    }
-
-    #[inline]
-    pub fn set(&mut self, str: String) {
-        self.str = str
-    }
 }
 
 impl ToString for NbtString {

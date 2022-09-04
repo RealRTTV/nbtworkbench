@@ -30,17 +30,6 @@ impl NbtDouble {
     pub fn unwrap(&self) -> &f64 {
         &self.double
     }
-
-    #[inline]
-    pub fn unwrap_mut(&mut self) -> &mut f64 {
-        &mut self.double
-    }
-
-
-    #[inline]
-    pub fn set(&mut self, double: f64) {
-        self.double = double
-    }
 }
 
 impl ToString for NbtDouble {

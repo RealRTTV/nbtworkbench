@@ -57,7 +57,8 @@ pub struct NbtWorkbench {
     window_height: u32,
     held_mouse_keys: HashSet<MouseButton>,
     held_keys: HashSet<VirtualKeyCode>,
-    held_entry: Option<u8>
+    held_entry: Option<u8>,
+    selected_name: Option<(u32, bool)> // y of entry, not parent && bool ? key : value
 }
 
 impl Default for NbtWorkbench {
@@ -71,7 +72,8 @@ impl Default for NbtWorkbench {
             window_height: 0,
             held_mouse_keys: HashSet::new(),
             held_keys: HashSet::new(),
-            held_entry: None
+            held_entry: None,
+            selected_name: None
         };
         let mut compound = NbtCompound::new();
         compound.put("bytes".to_string(), ByteArray(NbtByteArray::new(vec![1, 2, 3, 4, 5, 6, 7, 8, 9].iter().map(|x| Byte(NbtByte::new(*x))).collect())));
@@ -158,6 +160,7 @@ impl NbtWorkbench {
             self.held_entry = None;
         } else {
             self.held_mouse_keys.insert(*button);
+            self.selected_name = None;
             if self.mouse_y >= 23 && self.mouse_y < 39 {
                 self.hold_entry(button);
             }
@@ -171,7 +174,7 @@ impl NbtWorkbench {
         if *button == MouseButton::Right {
             let x = self.mouse_x / 16;
             let y = (self.mouse_y - HEADER_SIZE) / 16;
-            let scroll = self.scroll();
+            let scroll = self.scroll() / 16;
             if let Some(entry) = self.tab_mut() {
                 let mut first_parent = false;
                 let first_parent_mut = &mut first_parent as *mut bool;
@@ -202,7 +205,7 @@ impl NbtWorkbench {
         let start = time::Instant::now();
         let x = self.mouse_x / 16;
         let y = (self.mouse_y - HEADER_SIZE) / 16;
-        let scroll = self.scroll();
+        let scroll = self.scroll() / 16;
         if let Some(entry) = self.tab_mut() {
             let success = false;
             let success_mut = &success as *const bool as *mut bool;
@@ -282,24 +285,33 @@ impl NbtWorkbench {
         if *button == MouseButton::Left || *button == MouseButton::Right {
             let x = self.mouse_x / 16;
             let y = (self.mouse_y - HEADER_SIZE) / 16;
-            let scroll = self.scroll();
+            let scroll = self.scroll() / 16;
             if let Some(entry) = self.tab_mut() {
-                let change = 0;
-                let change_mut = &change as *const i32 as *mut i32;
+                let mut change = 0;
+                let change_mut = &mut change as *mut i32;
+                let mut selected_entry = false;
+                let selected_entry_mut = &mut selected_entry as *mut bool;
                 let _ = entry.value.stack(&mut (y + scroll), &mut 0, 0, &mut |parent| {
                     if change < 0 {
                         parent.decrement(-change as u32);
                     } else {
                         parent.increment(change as u32);
                     }
-                }, &mut |tail, depth, _| {
+                }, &mut |tail, depth, index| {
                     let before = tail.height();
                     if (depth == x || x == depth + 1) && tail.toggle() {
                         unsafe { // let's just assume this runs on one thread
                             *change_mut = tail.height() as i32 - before as i32;
                         }
+                    } else if x > depth {
+                        unsafe {
+                            *selected_entry_mut = true;
+                        }
                     }
                 });
+                if selected_entry {
+                    self.selected_name = Some((y + scroll, *button == MouseButton::Left));
+                }
             }
         }
         println!("toggle: {}ms", time::Instant::now().duration_since(start).as_nanos() as f64 / 1_000_000.0)
@@ -311,6 +323,23 @@ impl NbtWorkbench {
             ElementState::Pressed => {
                 if let Some(x) = key.virtual_keycode {
                     self.held_keys.insert(x);
+                    let char = self.char_from_key(x);
+                    let mut first_parent = true;
+                    let first_parent_mut = &mut first_parent as *mut bool;
+                    if let Some((mut y, is_key)) = self.selected_name {
+                        if let Some(char) = char {
+                            if let Some(entry) = self.tab_mut() {
+                                entry.value.stack(&mut y, &mut 0, 0, &mut |parent| {
+                                    if is_key && first_parent {
+                                        // todo, append to thing
+                                    }
+                                    unsafe { *first_parent_mut = false; }
+                                }, &mut |tail, _, _| if !is_key {
+                                    // todo, append to thing, handle if too large
+                                });
+                            }
+                        }
+                    }
                 }
             }
             ElementState::Released => {
@@ -438,6 +467,84 @@ impl NbtWorkbench {
             builder.draw_texture(i << 4, 45, 0, 64, 16, 2);
         }
     }
+
+    #[inline]
+    fn char_from_key(&self, key: VirtualKeyCode) -> Option<char> {
+        let shift = self.held_keys.contains(&VirtualKeyCode::LShift) || self.held_keys.contains(&VirtualKeyCode::RShift);
+        Some(match key {
+            VirtualKeyCode::Key1 => if shift { '!' } else { '1' },
+            VirtualKeyCode::Key2 => if shift { '@' } else { '2' },
+            VirtualKeyCode::Key3 => if shift { '#' } else { '3' },
+            VirtualKeyCode::Key4 => if shift { '$' } else { '4' },
+            VirtualKeyCode::Key5 => if shift { '%' } else { '5' },
+            VirtualKeyCode::Key6 => if shift { '^' } else { '6' },
+            VirtualKeyCode::Key7 => if shift { '&' } else { '7' },
+            VirtualKeyCode::Key8 => if shift { '*' } else { '8' },
+            VirtualKeyCode::Key9 => if shift { '(' } else { '9' },
+            VirtualKeyCode::Key0 => if shift { ')' } else { '0' },
+            VirtualKeyCode::A => if shift { 'A' } else { 'a' },
+            VirtualKeyCode::B => if shift { 'B' } else { 'b' },
+            VirtualKeyCode::C => if shift { 'C' } else { 'c' },
+            VirtualKeyCode::D => if shift { 'D' } else { 'd' },
+            VirtualKeyCode::E => if shift { 'E' } else { 'e' },
+            VirtualKeyCode::F => if shift { 'F' } else { 'f' },
+            VirtualKeyCode::G => if shift { 'G' } else { 'g' },
+            VirtualKeyCode::H => if shift { 'H' } else { 'h' },
+            VirtualKeyCode::I => if shift { 'I' } else { 'i' },
+            VirtualKeyCode::J => if shift { 'J' } else { 'j' },
+            VirtualKeyCode::K => if shift { 'K' } else { 'k' },
+            VirtualKeyCode::L => if shift { 'L' } else { 'l' },
+            VirtualKeyCode::M => if shift { 'M' } else { 'm' },
+            VirtualKeyCode::N => if shift { 'N' } else { 'n' },
+            VirtualKeyCode::O => if shift { 'O' } else { 'o' },
+            VirtualKeyCode::P => if shift { 'P' } else { 'p' },
+            VirtualKeyCode::Q => if shift { 'Q' } else { 'q' },
+            VirtualKeyCode::R => if shift { 'R' } else { 'r' },
+            VirtualKeyCode::S => if shift { 'S' } else { 's' },
+            VirtualKeyCode::T => if shift { 'T' } else { 't' },
+            VirtualKeyCode::U => if shift { 'U' } else { 'u' },
+            VirtualKeyCode::V => if shift { 'V' } else { 'v' },
+            VirtualKeyCode::W => if shift { 'W' } else { 'w' },
+            VirtualKeyCode::X => if shift { 'X' } else { 'x' },
+            VirtualKeyCode::Y => if shift { 'Y' } else { 'y' },
+            VirtualKeyCode::Z => if shift { 'Z' } else { 'z' },
+            VirtualKeyCode::Space => ' ',
+            VirtualKeyCode::Caret => '^',
+            VirtualKeyCode::Numpad0 => '0',
+            VirtualKeyCode::Numpad1 => '1',
+            VirtualKeyCode::Numpad2 => '2',
+            VirtualKeyCode::Numpad3 => '3',
+            VirtualKeyCode::Numpad4 => '4',
+            VirtualKeyCode::Numpad5 => '5',
+            VirtualKeyCode::Numpad6 => '6',
+            VirtualKeyCode::Numpad7 => '7',
+            VirtualKeyCode::Numpad8 => '8',
+            VirtualKeyCode::Numpad9 => '9',
+            VirtualKeyCode::NumpadAdd => '+',
+            VirtualKeyCode::NumpadDivide => '/',
+            VirtualKeyCode::NumpadDecimal => '.',
+            VirtualKeyCode::NumpadComma => ',',
+            VirtualKeyCode::NumpadEquals => '=',
+            VirtualKeyCode::NumpadMultiply => '*',
+            VirtualKeyCode::NumpadSubtract => '-',
+            VirtualKeyCode::Apostrophe => if shift { '"' } else { '\'' },
+            VirtualKeyCode::Asterisk => '*',
+            VirtualKeyCode::Backslash => if shift { '|' } else { '\\' },
+            VirtualKeyCode::Colon => if shift { ':' } else { ';' },
+            VirtualKeyCode::Comma => if shift { '<' } else { ',' },
+            VirtualKeyCode::Equals => if shift { '+' } else { '=' },
+            VirtualKeyCode::Grave => if shift { '~' } else { '`' },
+            VirtualKeyCode::LBracket => if shift { '{' } else { '[' },
+            VirtualKeyCode::Minus => if shift { '_' } else { '-' },
+            VirtualKeyCode::Period => if shift { '>' } else { '.' },
+            VirtualKeyCode::Plus => '+',
+            VirtualKeyCode::RBracket => if shift { '}' } else { ']' },
+            VirtualKeyCode::Semicolon => ';',
+            VirtualKeyCode::Slash => if shift { '?' } else { '/' },
+            VirtualKeyCode::Tab => '\t',
+            _ => return None
+        })
+    }
 }
 
 #[repr(C)]
@@ -464,4 +571,3 @@ impl FileEntry {
         }
     }
 }
-

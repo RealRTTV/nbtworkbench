@@ -45,11 +45,6 @@ impl NbtCompound {
     }
 
     #[inline]
-    pub fn get(&self, str: &str) -> Option<&NbtElement> {
-        self.entries.get(str)
-    }
-
-    #[inline]
     pub fn put(&mut self, str: String, element: NbtElement) {
         match self.entries.get(&*str) {
             None => self.keys.push(str.to_string()),
@@ -57,23 +52,6 @@ impl NbtCompound {
         }
         self.increment(element.height());
         self.entries.insert(str, element);
-    }
-
-    #[inline]
-    pub fn remove(&mut self, str: &str) -> bool {
-        match self.entries.remove(str) {
-            Some(x) => {
-                for i in 0..self.keys.len() {
-                    if self.keys[i] == str {
-                        self.keys.remove(i);
-                        break;
-                    }
-                }
-                self.decrement(x.height());
-                true
-            }
-            None => false
-        }
     }
 
     #[inline]
@@ -110,10 +88,14 @@ impl NbtCompound {
         true
     }
 
-
     #[inline]
     pub fn open(&self) -> bool {
         self.open
+    }
+
+    #[inline]
+    pub fn keys_mut(&mut self) -> &mut Vec<String> {
+        &mut self.keys
     }
 
     #[inline]

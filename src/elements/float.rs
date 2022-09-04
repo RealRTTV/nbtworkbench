@@ -30,16 +30,6 @@ impl NbtFloat {
     pub fn unwrap(&self) -> &f32 {
         &self.float
     }
-
-    #[inline]
-    pub fn unwrap_mut(&mut self) -> &mut f32 {
-        &mut self.float
-    }
-
-    #[inline]
-    pub fn set(&mut self, float: f32) {
-        self.float = float
-    }
 }
 
 impl ToString for NbtFloat {
