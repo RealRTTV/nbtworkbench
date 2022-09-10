@@ -1,7 +1,7 @@
 use std::slice::Iter;
 use crate::decoder::{read_i64, read_u32};
 use crate::elements::long::NbtLong;
-use crate::encoder::{write_i64, write_u32};
+use crate::encoder::{write_u32};
 use crate::{NbtElement, VertexBufferBuilder};
 use crate::NbtElement::Long;
 
@@ -26,7 +26,7 @@ impl NbtLongArray {
     pub fn to_bytes(&self, writer: &mut Vec<u8>) {
         write_u32(writer, self.longs.len() as u32);
         for long in &self.longs {
-            write_i64(writer, if let Long(long) = long { *long.unwrap() } else { panic!() })
+            long.to_bytes(writer);
         }
     }
 }
@@ -65,6 +65,11 @@ impl NbtLongArray {
     #[inline]
     pub fn open(&self) -> bool {
         self.open
+    }
+
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.longs.len()
     }
 }
 

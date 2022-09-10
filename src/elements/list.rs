@@ -76,6 +76,11 @@ impl NbtList {
     pub fn open(&self) -> bool {
         self.open
     }
+    
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.elements.len()
+    }
 }
 
 impl ToString for NbtList {

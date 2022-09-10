@@ -1,7 +1,7 @@
 use std::slice::Iter;
 use crate::decoder::{read_i8, read_u32};
 use crate::elements::byte::NbtByte;
-use crate::encoder::{write_i8, write_u32};
+use crate::encoder::{write_u32};
 use crate::{NbtElement, VertexBufferBuilder};
 use crate::NbtElement::Byte;
 
@@ -26,7 +26,7 @@ impl NbtByteArray {
     pub fn to_bytes(&self, writer: &mut Vec<u8>) {
         write_u32(writer, self.bytes.len() as u32);
         for byte in self.bytes.iter().map(|byte| if let Byte(byte) = byte { byte } else { panic!() }) {
-            write_i8(writer, *byte.unwrap());
+            byte.to_bytes(writer);
         }
     }
 }
@@ -65,6 +65,11 @@ impl NbtByteArray {
     #[inline]
     pub fn open(&self) -> bool {
         self.open
+    }
+    
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.bytes.len()
     }
 }
 

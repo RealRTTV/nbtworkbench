@@ -14,6 +14,7 @@ use crate::elements::long_array::NbtLongArray;
 use crate::elements::short::NbtShort;
 use crate::elements::string::NbtString;
 use crate::{elements, VertexBufferBuilder};
+use std::string::String;
 
 #[repr(C)]
 #[repr(u8)]
@@ -148,6 +149,39 @@ impl NbtElement {
     }
 
     #[inline]
+    pub fn value_render(&self) -> String {
+        match self {
+            Null => String::new(),
+            Byte(_) => format!(": {}", self.value().unwrap()),
+            Short(_) => format!(": {}", self.value().unwrap()),
+            Int(_) => format!(": {}", self.value().unwrap()),
+            Long(_) => format!(": {}", self.value().unwrap()),
+            Float(_) => format!(": {}", self.value().unwrap()),
+            Double(_) => format!(": {}", self.value().unwrap()),
+            ByteArray(bytes) => format!(": {} entr{}", bytes.len(), if bytes.len() == 1 { "y" } else { "ies" }),
+            String(_) => self.value().unwrap(),
+            List(list) => format!(": {} entr{}", list.len(), if list.len() == 1 { "y" } else { "ies" }),
+            Compound(compound) => format!(": {} entr{}", compound.len(), if compound.len() == 1 { "y" } else { "ies" }),
+            IntArray(ints) => format!(": {} entr{}", ints.len(), if ints.len() == 1 { "y" } else { "ies" }),
+            LongArray(longs) => format!(": {} entr{}", longs.len(), if longs.len() == 1 { "y" } else { "ies" }),
+        }
+    }
+
+    #[inline]
+    pub fn value(&self) -> Option<String> {
+        Some(match self {
+            Byte(byte) => byte.to_string(),
+            Short(short) => short.to_string(),
+            Int(int) => int.to_string(),
+            Long(long) => long.to_string(),
+            Float(float) => float.to_string(),
+            Double(double) => double.to_string(),
+            String(string) => string.unwrap().to_string(),
+            _ => return None
+        })
+    }
+
+    #[inline]
     pub fn render_icon(id: u8, x: u32, y: u32, builder: &mut VertexBufferBuilder) {
         match id {
             0 => {}
@@ -195,6 +229,20 @@ impl NbtElement {
                     true
                 }
             }
+        }
+    }
+
+    #[inline]
+    pub fn set_value(&mut self, value: &str) {
+        match self {
+            Byte(byte) => byte.set(value.parse().unwrap_or(0)),
+            Short(short) => short.set(value.parse().unwrap_or(0)),
+            Int(int) => int.set(value.parse().unwrap_or(0)),
+            Long(long) => long.set(value.parse().unwrap_or(0)),
+            Float(float) => float.set(value.parse().unwrap_or(0.0)),
+            Double(double) => double.set(value.parse().unwrap_or(0.0)),
+            String(string) => string.set(value.to_string()),
+            _ => {}
         }
     }
 

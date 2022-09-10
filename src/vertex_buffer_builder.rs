@@ -67,13 +67,7 @@ impl VertexBufferBuilder {
     }
 
     pub fn draw_text_z_color(&mut self, x: u32, y: u32, z: f32, text: &str, dropshadow: bool, color: u32) -> u32 {
-        let mut offset = 0;
-        let bytes = text.as_bytes();
-        for byte in bytes {
-            let byte = *byte;
-            offset += self.draw_char(byte, x + offset, y, z, dropshadow, color);
-        }
-        offset
+        text.chars().fold(0, |offset, char| offset + if char as u32 <= 0xFF || true { self.draw_char(char as u8, x + offset, y, z, dropshadow, color) } else { panic!("todo: custom shader with bit vertices") })
     }
 
     fn draw_char(&mut self, c: u8, x: u32, y: u32, z: f32, dropshadow: bool, color: u32) -> u32 {

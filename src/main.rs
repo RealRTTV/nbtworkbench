@@ -1,19 +1,22 @@
 #![feature(unchecked_math)]
 #![feature(linked_list_remove)]
-#![feature(arbitrary_enum_discriminant)]
 #![windows_subsystem = "windows"]
 
-use elements::element_type::NbtElement;
-use vertex_buffer_builder::VertexBufferBuilder;
 use std::collections::{HashSet, LinkedList};
 use std::ffi::OsString;
 use std::fs::read;
 use std::io::Read;
 use std::path::PathBuf;
+use std::string::String;
 use std::time;
+
 use flate2::read::GzDecoder;
 use winit::dpi::PhysicalPosition;
 use winit::event::{ElementState, KeyboardInput, MouseButton, MouseScrollDelta, VirtualKeyCode};
+
+use elements::element_type::NbtElement;
+use vertex_buffer_builder::VertexBufferBuilder;
+
 use crate::assets::HEADER_SIZE;
 use crate::elements::byte::NbtByte;
 use crate::elements::byte_array::NbtByteArray;
@@ -37,7 +40,6 @@ fn main() {
     {
         // todo, screen updating
         // todo, saving
-        // todo, editing item key/values
 
         // todo, copy-paste
         // todo, scrollbar
@@ -58,7 +60,119 @@ pub struct NbtWorkbench {
     held_mouse_keys: HashSet<MouseButton>,
     held_keys: HashSet<VirtualKeyCode>,
     held_entry: Option<u8>,
-    selected_name: Option<(u32, bool)> // y of entry, not parent && bool ? key : value
+    selected_text: Option<SelectedText>
+}
+
+pub struct SelectedText { // expires on click, no need to mutate the y value
+    x: u32,
+    y: u32,
+    index: Option<(u32, std::string::String)>, // index and value name (if parent is a compound)
+    cursor: u32,
+    value: String,
+    original_width: u32,
+    selection: i32 // todo, (selection relative)
+}
+
+impl SelectedText {
+    #[inline]
+    pub fn new(x: u32, y: u32, index: Option<(u32, String)>, value: String) -> SelectedText {
+        SelectedText { x, y, index, cursor: value.len() as u32, original_width: VertexBufferBuilder::width(&value), value, selection: 0 }
+    }
+
+    #[inline]
+    pub fn on_key_press(&mut self, key: VirtualKeyCode, char: Option<char>, ctrl: bool) -> bool {
+        if ctrl {
+            if key == VirtualKeyCode::Back {
+                let cursor = self.cursor as usize;
+                let pos = self.value.char_indices().take(cursor).filter(|&(_, x)| is_jump_point_char(x)).map(|(x, _)| x).collect::<Vec<_>>().pop().unwrap_or(0);
+                let (left, _) = self.value.split_at(pos);
+                let (_, right) = self.value.split_at(cursor);
+                self.value = format!("{}{}", left, right);
+                self.cursor = pos as u32;
+                return false;
+            } else if key == VirtualKeyCode::Delete {
+                let cursor = self.cursor as usize;
+                let pos = if self.value.chars().skip(cursor).next().filter(|&x| is_jump_point_char(x)).is_some() { cursor + 1 } else { self.value.char_indices().skip(cursor).filter(|&(_, x)| is_jump_point_char(x)).next().map_or(0, |(x, _)| x) };
+                let (left, _) = self.value.split_at(cursor);
+                let (_, right) = self.value.split_at(pos);
+                self.value = format!("{}{}", left, right);
+                return false;
+            } else if key == VirtualKeyCode::Left {
+                let cursor = self.cursor as usize;
+                self.cursor = self.value.char_indices().take(cursor).filter(|&(_, x)| is_jump_point_char(x)).map(|(x, _)| x as u32).collect::<Vec<_>>().pop().unwrap_or(0);
+                return false;
+            } else if key == VirtualKeyCode::Right {
+                let cursor = self.cursor as usize;
+                self.cursor = if self.value.chars().skip(cursor).next().filter(|&x| is_jump_point_char(x)).is_some() { (cursor + 1) as u32 } else { self.value.char_indices().skip(cursor).filter(|&(_, x)| is_jump_point_char(x)).next().map_or(0, |(x, _)| x as u32) };
+                return false;
+            }
+        }
+
+        if key == VirtualKeyCode::Escape || key == VirtualKeyCode::Return || key == VirtualKeyCode::NumpadEnter {
+            return true;
+        } else if key == VirtualKeyCode::Back && self.cursor > 0 {
+            let cursor = self.cursor as usize;
+            let (left, right) = self.value.split_at(cursor);
+            let left = left.split_at(left.len() - 1).0;
+            self.value = format!("{}{}", left, right);
+            self.cursor -= 1;
+        } else if key == VirtualKeyCode::Delete && self.cursor < self.value.len() as u32 {
+            let cursor = self.cursor as usize;
+            let (left, right) = self.value.split_at(cursor);
+            let right = right.split_at(1).1;
+            self.value = format!("{}{}", left, right);
+        } else if let Some(char) = char {
+            let cursor = self.cursor as usize;
+            let (left, right) = self.value.split_at(cursor);
+            self.value = format!("{}{}{}", left, char, right);
+            self.cursor += 1;
+        } else if key == VirtualKeyCode::Left && self.cursor != 0 {
+            self.cursor = if ctrl { 0 } else { self.cursor - 1 };
+        } else if key == VirtualKeyCode::Right && self.cursor != self.value.len() as u32 {
+            self.cursor = if ctrl { self.value.len() as u32 } else { self.cursor + 1 };
+        }
+        false
+    }
+
+    #[inline]
+    pub fn render(&self, builder: &mut VertexBufferBuilder) {
+        let x = self.x;
+        let y = self.y;
+        let width = VertexBufferBuilder::width(&self.value).max(1); // I can cache this if i really want
+        {
+            let mut offset = x;
+            let mut remaining_width = self.original_width + self.index.as_ref().map(|(_, x)| VertexBufferBuilder::width(x)).unwrap_or(0);
+            while remaining_width > 0 {
+                builder.draw_texture(offset, y, 112, 16, remaining_width.min(16), 16);
+                remaining_width = if remaining_width <= 16 { 0 } else { remaining_width - 16 };
+                offset += 16
+            }
+        }
+        {
+            builder.draw_texture(x, y + 13, 0, 16, 1, 3);
+            let mut offset = x + 1;
+            let mut remaining_width = width - 1;
+            while remaining_width > 0 {
+                builder.draw_texture(offset, y + 13, 1, 16, remaining_width.min(14), 3);
+                remaining_width = if remaining_width <= 14 {
+                    builder.draw_texture(offset + remaining_width, y + 13, 15, 16, 1, 3);
+                    0
+                } else {
+                    remaining_width - 14
+                };
+                offset += 14;
+            }
+        }
+        if let Some(compound_value) = self.index.as_ref().map(|x| &x.1) {
+            builder.draw_text(x + VertexBufferBuilder::width(&self.value), y + 4, compound_value, true);
+        }
+        builder.draw_text(x, y + 4, &self.value, true);
+    }
+}
+
+#[inline]
+pub fn is_jump_point_char(char: char) -> bool {
+    char == ' '
 }
 
 impl Default for NbtWorkbench {
@@ -73,12 +187,12 @@ impl Default for NbtWorkbench {
             held_mouse_keys: HashSet::new(),
             held_keys: HashSet::new(),
             held_entry: None,
-            selected_name: None
+            selected_text: None
         };
         let mut compound = NbtCompound::new();
-        compound.put("bytes".to_string(), ByteArray(NbtByteArray::new(vec![1, 2, 3, 4, 5, 6, 7, 8, 9].iter().map(|x| Byte(NbtByte::new(*x))).collect())));
-        compound.put("ints".to_string(), IntArray(NbtIntArray::new(vec![1, 2, 3, 4, 5, 6, 7, 8, 9].iter().map(|x| Int(NbtInt::new(*x))).collect())));
-        compound.put("longs".to_string(), LongArray(NbtLongArray::new(vec![1, 2, 3, 4, 5, 6, 7, 8, 9].iter().map(|x| Long(NbtLong::new(*x))).collect())));
+        compound.put("bytes§4".to_string(), ByteArray(NbtByteArray::new(vec![1, 2, 3, 4, 5, 6, 7, 8, 9].iter().map(|&x| Byte(NbtByte::new(x))).collect())));
+        compound.put("ints".to_string(), IntArray(NbtIntArray::new(vec![1, 2, 3, 4, 5, 6, 7, 8, 9].iter().map(|&x| Int(NbtInt::new(x))).collect())));
+        compound.put("longs".to_string(), LongArray(NbtLongArray::new(vec![1, 2, 3, 4, 5, 6, 7, 8, 9].iter().map(|&x| Long(NbtLong::new(x))).collect())));
         let shell = Compound(compound);
         workbench.tabs.push_front(FileEntry {
             value: shell,
@@ -126,13 +240,13 @@ impl NbtWorkbench {
     pub fn on_scroll(&mut self, scroll: &MouseScrollDelta) -> bool {
         match scroll {
             MouseScrollDelta::LineDelta(_, v) => {
-                let value = -*v as i32;
-                if value.is_negative() && self.scroll < -value as u32 * 48 {
+                let value = -*v;
+                if value.is_sign_negative() && self.scroll < (-value * 48.0) as u32 {
                     self.scroll = 0;
-                } else if value.is_negative() {
-                    self.scroll -= -value as u32 * 48;
+                } else if value.is_sign_negative() {
+                    self.scroll -= (-value * 48.0) as u32;
                 } else {
-                    self.scroll += value as u32 * 48;
+                    self.scroll += (value * 48.0) as u32;
                 }
             }
             MouseScrollDelta::PixelDelta(_) => {}
@@ -160,7 +274,10 @@ impl NbtWorkbench {
             self.held_entry = None;
         } else {
             self.held_mouse_keys.insert(*button);
-            self.selected_name = None;
+            if self.selected_text.is_some() {
+                self.close_selected_text();
+            }
+            self.selected_text = None;
             if self.mouse_y >= 23 && self.mouse_y < 39 {
                 self.hold_entry(button);
             }
@@ -286,35 +403,79 @@ impl NbtWorkbench {
             let x = self.mouse_x / 16;
             let y = (self.mouse_y - HEADER_SIZE) / 16;
             let scroll = self.scroll() / 16;
+            let selected_text_mut = &mut self.selected_text as *mut Option<SelectedText>;
             if let Some(entry) = self.tab_mut() {
                 let mut change = 0;
                 let change_mut = &mut change as *mut i32;
-                let mut selected_entry = false;
-                let selected_entry_mut = &mut selected_entry as *mut bool;
+                let mut depth = 0;
+                let depth_mut = &mut depth as *mut u32;
+                let mut index = 0;
+                let index_mut = &mut index as *mut u32;
+                let mut first_parent = false;
+                let first_parent_mut = &mut first_parent as *mut bool;
+                let mut value: Option<std::string::String> = None;
+                let value_mut = &mut value as *mut Option<std::string::String>;
                 let _ = entry.value.stack(&mut (y + scroll), &mut 0, 0, &mut |parent| {
                     if change < 0 {
                         parent.decrement(-change as u32);
                     } else {
                         parent.increment(change as u32);
                     }
+
+                    if first_parent {
+                        unsafe {
+                            *first_parent_mut = false;
+                            *selected_text_mut = if *button == MouseButton::Left { if let Compound(compound) = parent {
+                                Some(SelectedText::new(depth + 16 + 39, y * 16 + HEADER_SIZE, Some((index, compound.get(index).unwrap().value_render())), compound.key(index).to_string()))
+                            }else{None}} else if *button == MouseButton::Right { if let Some(value) = &value {
+                                Some(SelectedText::new(depth * 16 + 40 + if let Compound(compound) = parent { VertexBufferBuilder::width(compound.key(index)) + VertexBufferBuilder::width(": ") } else { 0 }, y * 16 + HEADER_SIZE, None, value.to_string()))
+                            }else{None}} else {
+                                None
+                            };
+                        }
+                    }
                 }, &mut |tail, depth, index| {
                     let before = tail.height();
                     if (depth == x || x == depth + 1) && tail.toggle() {
-                        unsafe { // let's just assume this runs on one thread
+                        unsafe {
                             *change_mut = tail.height() as i32 - before as i32;
                         }
                     } else if x > depth {
                         unsafe {
-                            *selected_entry_mut = true;
+                            *value_mut = tail.value();
+                            *depth_mut = depth;
+                            *index_mut = index;
+                            *first_parent_mut = true;
                         }
                     }
                 });
-                if selected_entry {
-                    self.selected_name = Some((y + scroll, *button == MouseButton::Left));
-                }
             }
         }
         println!("toggle: {}ms", time::Instant::now().duration_since(start).as_nanos() as f64 / 1_000_000.0)
+    }
+
+    #[inline]
+    pub fn close_selected_text(&mut self) {
+        let values = if self.selected_text.is_some() {
+            let selected_text = self.selected_text.as_ref().unwrap();
+            Some(((selected_text.y - HEADER_SIZE) / 16, selected_text.value.clone(), selected_text.index.as_ref().map(|x| *(&x.0, &x.1).0)))
+        } else {
+            None
+        };
+        if let Some((y, value, index)) = values {
+            let scroll = self.scroll() / 16;
+            let mut first_parent = index.is_some();
+            let first_parent_mut = &mut first_parent as *mut bool;
+            self.tab_mut().unwrap().value.stack(&mut if scroll > y { 0 } else { y - scroll }, &mut 0, 0, &mut |parent| if first_parent {
+                unsafe { *first_parent_mut = false; }
+                if let Compound(compound) = parent {
+                    if let Some(index) = index {
+                        compound.update_key(index, value.clone());
+                    }
+                }
+            },
+            &mut |tail, _, _| if index.is_none() { tail.set_value(&value) });
+        }
     }
 
     #[inline]
@@ -324,20 +485,10 @@ impl NbtWorkbench {
                 if let Some(x) = key.virtual_keycode {
                     self.held_keys.insert(x);
                     let char = self.char_from_key(x);
-                    let mut first_parent = true;
-                    let first_parent_mut = &mut first_parent as *mut bool;
-                    if let Some((mut y, is_key)) = self.selected_name {
-                        if let Some(char) = char {
-                            if let Some(entry) = self.tab_mut() {
-                                entry.value.stack(&mut y, &mut 0, 0, &mut |parent| {
-                                    if is_key && first_parent {
-                                        // todo, append to thing
-                                    }
-                                    unsafe { *first_parent_mut = false; }
-                                }, &mut |tail, _, _| if !is_key {
-                                    // todo, append to thing, handle if too large
-                                });
-                            }
+                    if let Some(selected_text) = &mut self.selected_text {
+                        if selected_text.on_key_press(x, char, self.held_keys.contains(&VirtualKeyCode::LControl) || self.held_keys.contains(&VirtualKeyCode::RControl)) {
+                            self.close_selected_text();
+                            self.selected_text = None
                         }
                     }
                 }
@@ -412,6 +563,9 @@ impl NbtWorkbench {
         self.render_icons(builder);
         if let Some(entry) = self.tab() {
             entry.render(builder);
+            if let Some(selected_text) = &self.selected_text {
+                selected_text.render(builder);
+            }
         }
         self.render_held_entry(builder);
     }

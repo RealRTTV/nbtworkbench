@@ -52,7 +52,7 @@ impl NbtByte {
     #[inline]
     pub fn render(&self, builder: &mut VertexBufferBuilder, x_offset: &mut u32, y_offset: &mut u32, name: Option<&str>) {
         builder.draw_texture(*x_offset, *y_offset, 0, 0, 16, 16);
-        builder.draw_text(*x_offset + 20, *y_offset + 4, &name.map(|x| format!("{}: {}b", x, self.byte)).unwrap_or_else(|| self.byte.to_string()), true);
+        builder.draw_text(*x_offset + 20, *y_offset + 4, &name.map(|x| format!("{}: {}", x, self.byte)).unwrap_or_else(|| self.byte.to_string()), true);
         *y_offset += 16;
     }
 }

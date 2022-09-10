@@ -94,8 +94,28 @@ impl NbtCompound {
     }
 
     #[inline]
-    pub fn keys_mut(&mut self) -> &mut Vec<String> {
-        &mut self.keys
+    pub fn update_key(&mut self, index: u32, name: String) {
+        let key = self.keys.get_mut(index as usize);
+        if let Some(key) = key {
+            let value = self.entries.remove(key).unwrap();
+            *key = name.clone();
+            self.entries.insert(name, value);
+        }
+    }
+
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    #[inline]
+    pub fn key(&self, index: u32) -> &str {
+        self.keys.get(index as usize).unwrap()
+    }
+
+    #[inline]
+    pub fn get(&self, index: u32) -> Option<&NbtElement> {
+        self.entries.get(self.keys.get(index as usize)?)
     }
 
     #[inline]
