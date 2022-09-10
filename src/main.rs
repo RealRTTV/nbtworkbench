@@ -113,7 +113,7 @@ impl SelectedText {
         } else if key == VirtualKeyCode::Back && self.cursor > 0 {
             let cursor = self.cursor as usize;
             let (left, right) = self.value.split_at(cursor);
-            let left = left.split_at(left.len() - 1).0;
+            let (left, _) = left.split_at(left.len() - 1);
             self.value = format!("{}{}", left, right);
             self.cursor -= 1;
         } else if key == VirtualKeyCode::Delete && self.cursor < self.value.len() as u32 {
@@ -127,9 +127,13 @@ impl SelectedText {
             self.value = format!("{}{}{}", left, char, right);
             self.cursor += 1;
         } else if key == VirtualKeyCode::Left && self.cursor != 0 {
-            self.cursor = if ctrl { 0 } else { self.cursor - 1 };
+            self.cursor -= 1;
         } else if key == VirtualKeyCode::Right && self.cursor != self.value.len() as u32 {
-            self.cursor = if ctrl { self.value.len() as u32 } else { self.cursor + 1 };
+            self.cursor += 1;
+        } else if key == VirtualKeyCode::Home {
+            self.cursor = 0;
+        } else if key == VirtualKeyCode::End {
+            self.cursor = self.value.len() as u32;
         }
         false
     }

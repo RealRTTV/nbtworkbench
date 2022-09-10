@@ -1,8 +1,10 @@
 use std::time::SystemTime;
 
-pub const ATLAS: &[u8] = include_bytes!("assets/atlas.hex");
+pub const ATLAS: &'static [u8] = include_bytes!("assets/atlas.hex");
 pub const ATLAS_WIDTH: u32 = 256;
 pub const ATLAS_HEIGHT: u32 = 256;
+
+pub const UNICODE: &'static [u8] = include_bytes!("assets/text.hex");
 
 pub const ICON_WIDTH: u32 = 128;
 pub const ICON_HEIGHT: u32 = 128;
