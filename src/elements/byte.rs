@@ -1,4 +1,5 @@
 use std::slice::Iter;
+
 use crate::decoder::read_i8;
 use crate::encoder::write_i8;
 use crate::VertexBufferBuilder;
@@ -32,11 +33,6 @@ impl NbtByte {
     }
 
     #[inline]
-    pub fn unwrap_mut(&mut self) -> &mut i8 {
-        &mut self.byte
-    }
-
-    #[inline]
     pub fn set(&mut self, byte: i8) {
         self.byte = byte
     }
@@ -50,9 +46,11 @@ impl ToString for NbtByte {
 
 impl NbtByte {
     #[inline]
-    pub fn render(&self, builder: &mut VertexBufferBuilder, x_offset: &mut u32, y_offset: &mut u32, name: Option<&str>) {
+    pub fn render(&self, builder: &mut VertexBufferBuilder, x_offset: &mut u32, y_offset: &mut u32, name: Option<&str>, forbidden_y: Option<u32>) {
         builder.draw_texture(*x_offset, *y_offset, 0, 0, 16, 16);
-        builder.draw_text(*x_offset + 20, *y_offset + 4, &name.map(|x| format!("{}: {}", x, self.byte)).unwrap_or_else(|| self.byte.to_string()), true);
+        if Some(*y_offset) != forbidden_y {
+            builder.draw_text(*x_offset + 20, *y_offset, &name.map(|x| format!("{}: {}", x, self.byte)).unwrap_or_else(|| self.byte.to_string()), true);
+        }
         *y_offset += 16;
     }
 }

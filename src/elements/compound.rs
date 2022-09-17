@@ -1,7 +1,8 @@
 use std::collections::HashMap;
-use std::slice::Iter;
-use crate::assets::HEADER_SIZE;
 
+use std::slice::Iter;
+
+use crate::assets::HEADER_SIZE;
 use crate::decoder::{read_string, read_u8};
 use crate::elements::element_type::NbtElement;
 use crate::encoder::{write_string, write_u8};
@@ -45,11 +46,23 @@ impl NbtCompound {
     }
 
     #[inline]
-    pub fn put(&mut self, str: String, element: NbtElement) {
-        match self.entries.get(&*str) {
-            None => self.keys.push(str.to_string()),
-            Some(x) => self.decrement(x.height())
+    pub fn drop_index(&mut self, index: u32, str: String, element: NbtElement) -> bool {
+        if self.entries.contains_key(&str) {
+            false
+        } else {
+            self.keys.insert(index as usize, str.clone());
+            self.increment(element.height());
+            self.entries.insert(str, element);
+            true
         }
+    }
+
+    #[inline]
+    pub fn put(&mut self, str: String, element: NbtElement) {
+        if let Some(_) = self.entries.get(&*str) {
+            panic!("key cannot already exist, how did this happen")
+        }
+        self.keys.push(str.to_string());
         self.increment(element.height());
         self.entries.insert(str, element);
     }
@@ -76,15 +89,6 @@ impl NbtCompound {
     #[inline]
     pub fn toggle(&mut self) -> bool {
         self.open = !self.open && !self.keys.is_empty();
-        if !self.open {
-            for key in &self.keys {
-                let value = self.entries.get_mut(key).unwrap();
-                if value.open() {
-                    value.toggle();
-                }
-            }
-            self.height = self.keys.len() as u32 + 1;
-        }
         true
     }
 
@@ -119,19 +123,21 @@ impl NbtCompound {
     }
 
     #[inline]
-    pub fn render_root(&self, builder: &mut VertexBufferBuilder, str: &str) {
+    pub fn render_root(&self, builder: &mut VertexBufferBuilder, str: &str, forbidden_y: Option<u32>) {
         let x_offset = &mut 20;
         let y_offset = &mut HEADER_SIZE;
         let remaining_scroll = &mut builder.scroll();
         if *remaining_scroll >= 16 {
             *remaining_scroll -= 16;
         } else {
-            builder.draw_texture(*x_offset, *y_offset, 192, 0, 16, 16);
-            builder.draw_texture(*x_offset - 16, *y_offset, 208, 0, 16, 9);
+            builder.draw_texture(*x_offset, *y_offset, 64, 16, 16, 16);
+            builder.draw_texture(*x_offset - 16, *y_offset, 80, 16, 16, 9);
             if !self.keys.is_empty() {
-                builder.draw_texture(*x_offset - 16, *y_offset, 224 + if self.open { 0 } else { 16 }, 0, 16, 16);
+                builder.draw_texture(*x_offset - 16, *y_offset, 96 + if self.open { 0 } else { 16 }, 16, 16, 16);
             }
-            builder.draw_text(*x_offset + 20, *y_offset + 4, &format!("{} [{} entr{}]", str, self.keys.len(), if self.keys.len() == 1 { "y" } else { "ies" }), true);
+            if Some(*y_offset) != forbidden_y {
+                builder.draw_text(*x_offset + 20, *y_offset, &format!("{} [{} entr{}]", str, self.keys.len(), if self.keys.len() == 1 { "y" } else { "ies" }), true);
+            }
             *y_offset += 16;
         }
         *x_offset += 16;
@@ -147,13 +153,13 @@ impl NbtCompound {
                     }
 
                     if *remaining_scroll < 16 {
-                        builder.draw_texture(*x_offset - 16, *y_offset, 208, 0, 16, if index != self.keys.len() - 1 { 16 } else { 9 });
+                        builder.draw_texture(*x_offset - 16, *y_offset, 80, 16, 16, if index != self.keys.len() - 1 { 16 } else { 9 });
                     }
 
                     if entry.height() == 1 && *remaining_scroll >= 16 {
                         *remaining_scroll -= 16;
                     } else {
-                        entry.render(x_offset, y_offset, remaining_scroll, builder, Some(name), index == self.keys.len() - 1);
+                        entry.render(x_offset, y_offset, remaining_scroll, builder, Some(name), index == self.keys.len() - 1, forbidden_y);
                     }
                 }
             }
@@ -182,20 +188,19 @@ impl ToString for NbtCompound {
 
 impl NbtCompound {
     #[inline]
-    pub fn render(&self, builder: &mut VertexBufferBuilder, x_offset: &mut u32, y_offset: &mut u32, name: Option<&str>, remaining_scroll: &mut u32, tail: bool) {
+    pub fn render(&self, builder: &mut VertexBufferBuilder, x_offset: &mut u32, y_offset: &mut u32, name: Option<&str>, remaining_scroll: &mut u32, tail: bool, forbidden_y: Option<u32>) {
         let x_before = *x_offset - 16;
-        let y_before;
         if *remaining_scroll >= 16 {
-            *remaining_scroll -= 16;
-            y_before = *y_offset + 16;
+            *remaining_scroll -= 16
         } else {
-            builder.draw_texture(*x_offset, *y_offset, 176, 0, 16, 16);
+            builder.draw_texture(*x_offset, *y_offset, 48, 16, 16, 16);
             if !self.keys.is_empty() {
-                builder.draw_texture(*x_offset - 16, *y_offset, 224 + if self.open { 0 } else { 16 }, 0, 16, 16);
+                builder.draw_texture(*x_offset - 16, *y_offset, 96 + if self.open { 0 } else { 16 }, 16, 16, 16);
             }
-            builder.draw_text(*x_offset + 20, *y_offset + 4, &format!("{}{} entr{}", name.map(|x| format!("{}: ", x)).unwrap_or_else(|| "".to_string()), self.keys.len(), if self.keys.len() == 1 { "y" } else { "ies" }), true);
-            *y_offset += 16;
-            y_before = *y_offset;
+            if Some(*y_offset) != forbidden_y {
+                builder.draw_text(*x_offset + 20, *y_offset, &format!("{}{} entr{}", name.map(|x| format!("{}: ", x)).unwrap_or_else(|| "".to_string()), self.keys.len(), if self.keys.len() == 1 { "y" } else { "ies" }), true);
+            }
+            *y_offset += 16
         }
         *x_offset += 16;
         if self.open {
@@ -210,18 +215,19 @@ impl NbtCompound {
                     }
 
                     if *remaining_scroll < 16 {
-                        builder.draw_texture(*x_offset - 16, *y_offset, 208, 0, 16, if index != self.keys.len() - 1 { 16 } else { 9 });
+                        builder.draw_texture(*x_offset - 16, *y_offset, 80, 16, 16, if index != self.keys.len() - 1 { 16 } else { 9 });
                     }
 
                     if entry.height() == 1 && *remaining_scroll >= 16 {
                         *remaining_scroll -= 16;
                     } else {
-                        entry.render(x_offset, y_offset, remaining_scroll, builder, Some(name), tail && index == self.keys.len() - 1);
+                        let y_before = *y_offset;
+                        entry.render(x_offset, y_offset, remaining_scroll, builder, Some(name), tail && index == self.keys.len() - 1, forbidden_y);
                         let difference = *y_offset - y_before;
-                        if difference >= 16 && !tail {
-                            for i in 0..difference / 16 + 1 {
-                                let y = y_before + i * 16 - 16;
-                                builder.draw_texture(x_before, y, 112, 64, 8, 16);
+                        if !tail {
+                            for i in 0..difference / 16 {
+                                let y = y_before + i * 16;
+                                builder.draw_texture(x_before, y, 80, 16, 8, 16);
                             }
                         }
                     }
@@ -231,10 +237,10 @@ impl NbtCompound {
         *x_offset -= 16;
     }
 
-    pub fn stack<F: FnMut(&mut NbtElement), G: FnMut(&mut NbtElement, u32, u32)>(wrapped: &mut NbtElement, y: &mut u32, depth: &mut u32, index: u32, parent: &mut F, tail: &mut G) -> bool {
+    pub fn stack<F: FnMut(&mut NbtElement, u32), G: FnOnce(&mut NbtElement, u32, u32)>(wrapped: &mut NbtElement, y: &mut u32, depth: &mut u32, index: u32, parent: &mut F, mut tail: G) -> Option<G> {
         if *y == 0 {
             tail(wrapped, *depth, index);
-            true
+            None
         } else {
             *y -= 1;
             let compound = if let NbtElement::Compound(compound) = wrapped { compound } else { panic!() };
@@ -242,21 +248,29 @@ impl NbtCompound {
                 *depth += 1;
                 for (index, key) in compound.keys.iter().enumerate() {
                     let value = compound.entries.get_mut(key).expect("has key, has value");
-                    if value.stack(y, depth, index as u32, parent, tail) {
-                        parent(wrapped);
-                        return true;
+                    let x = value.stack(y, depth, index as u32, parent, tail);
+                    if let Some(x) = x {
+                        tail = x;
+                    } else {
+                        parent(wrapped, *y);
+                        return None;
                     }
                 }
                 *depth -= 1;
             }
-            false
+            Some(tail)
         }
     }
 
     #[inline]
-    pub fn delete(&mut self, index: u32) {
+    pub fn delete(&mut self, index: u32) -> Option<NbtElement> {
         let key = self.keys.remove(index as usize);
-        self.entries.remove(&key);
+        self.entries.remove(&key)
+    }
+
+    #[inline]
+    pub fn child_height(&self, index: u32) -> u32 {
+        self.entries.get(self.key(index)).map(|x| x.height()).unwrap_or(0)
     }
 
     #[inline]
@@ -274,5 +288,5 @@ impl NbtCompound {
 
 #[inline]
 pub fn render_icon(x: u32, y: u32, builder: &mut VertexBufferBuilder) {
-    builder.draw_texture(x, y, 176, 0, 16, 16);
+    builder.draw_texture(x, y, 48, 16, 16, 16);
 }

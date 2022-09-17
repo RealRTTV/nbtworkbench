@@ -1,4 +1,5 @@
 use std::slice::Iter;
+
 use crate::decoder::read_i64;
 use crate::encoder::write_i64;
 use crate::VertexBufferBuilder;
@@ -32,11 +33,6 @@ impl NbtLong {
     }
 
     #[inline]
-    pub fn unwrap_mut(&mut self) -> &mut i64 {
-        &mut self.long
-    }
-
-    #[inline]
     pub fn set(&mut self, long: i64) {
         self.long = long
     }
@@ -50,9 +46,11 @@ impl ToString for NbtLong {
 
 impl NbtLong {
     #[inline]
-    pub fn render(&self, builder: &mut VertexBufferBuilder, x_offset: &mut u32, y_offset: &mut u32, name: Option<&str>) {
+    pub fn render(&self, builder: &mut VertexBufferBuilder, x_offset: &mut u32, y_offset: &mut u32, name: Option<&str>, forbidden_y: Option<u32>) {
         builder.draw_texture(*x_offset, *y_offset, 48, 0, 16, 16);
-        builder.draw_text(*x_offset + 20, *y_offset + 4, &name.map(|x| format!("{}: {}", x, self.long)).unwrap_or_else(|| self.long.to_string()), true);
+        if Some(*y_offset) != forbidden_y {
+            builder.draw_text(*x_offset + 20, *y_offset, &name.map(|x| format!("{}: {}", x, self.long)).unwrap_or_else(|| self.long.to_string()), true);
+        }
         *y_offset += 16;
     }
 }

@@ -7,13 +7,13 @@ edition = "2021"
 
 [profile.release] # grab a cup of coffee, this'll take a bit
 codegen-units = 1
-strip = "symbols"
+strip = true
 lto = true
 panic = "abort"
 
 [profile.release.build-override]
 opt-level = 3
-strip = "symbols"
+strip = true
 debug = false
 debug-assertions = false
 overflow-checks = false
@@ -25,3 +25,4 @@ flate2 = "1.0.24"
 winit = "0.27.1"
 wgpu = "0.13.1"
 pollster = "0.2"
+unicode-segmentation = "1.10.0"

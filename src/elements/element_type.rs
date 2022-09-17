@@ -1,5 +1,7 @@
 use std::slice::Iter;
+use std::string::String;
 
+use crate::{elements, VertexBufferBuilder};
 use crate::elements::byte::NbtByte;
 use crate::elements::byte_array::NbtByteArray;
 use crate::elements::compound::NbtCompound;
@@ -13,8 +15,6 @@ use crate::elements::long::NbtLong;
 use crate::elements::long_array::NbtLongArray;
 use crate::elements::short::NbtShort;
 use crate::elements::string::NbtString;
-use crate::{elements, VertexBufferBuilder};
-use std::string::String;
 
 #[repr(C)]
 #[repr(u8)]
@@ -130,21 +130,21 @@ impl NbtElement {
     }
 
     #[inline]
-    pub fn render(&self, x: &mut u32, y: &mut u32, remaining_scroll: &mut u32, builder: &mut VertexBufferBuilder, str: Option<&str>, tail: bool) {
+    pub fn render(&self, x: &mut u32, y: &mut u32, remaining_scroll: &mut u32, builder: &mut VertexBufferBuilder, str: Option<&str>, tail: bool, forbidden_y: Option<u32>) {
         match self {
             Null => *x += 8,
-            Byte(byte) => byte.render(builder, x, y, str),
-            Short(short) => short.render(builder, x, y, str),
-            Int(int) => int.render(builder, x, y, str),
-            Long(long) => long.render(builder, x, y, str),
-            Float(float) => float.render(builder, x, y, str),
-            Double(double) => double.render(builder, x, y, str),
-            ByteArray(byte_array) => byte_array.render(builder, x, y, str, remaining_scroll, tail),
-            String(string) => string.render(builder, x, y, str),
-            List(list) => list.render(builder, x, y, str, remaining_scroll, tail),
-            Compound(compound) => compound.render(builder, x, y, str, remaining_scroll, tail),
-            IntArray(int_array) => int_array.render(builder, x, y, str, remaining_scroll, tail),
-            LongArray(long_array) => long_array.render(builder, x, y, str, remaining_scroll, tail),
+            Byte(byte) => byte.render(builder, x, y, str, forbidden_y),
+            Short(short) => short.render(builder, x, y, str, forbidden_y),
+            Int(int) => int.render(builder, x, y, str, forbidden_y),
+            Long(long) => long.render(builder, x, y, str, forbidden_y),
+            Float(float) => float.render(builder, x, y, str, forbidden_y),
+            Double(double) => double.render(builder, x, y, str, forbidden_y),
+            ByteArray(byte_array) => byte_array.render(builder, x, y, str, remaining_scroll, tail, forbidden_y),
+            String(string) => string.render(builder, x, y, str, forbidden_y),
+            List(list) => list.render(builder, x, y, str, remaining_scroll, tail, forbidden_y),
+            Compound(compound) => compound.render(builder, x, y, str, remaining_scroll, tail, forbidden_y),
+            IntArray(int_array) => int_array.render(builder, x, y, str, remaining_scroll, tail, forbidden_y),
+            LongArray(long_array) => long_array.render(builder, x, y, str, remaining_scroll, tail, forbidden_y),
         }
     }
 
@@ -168,7 +168,24 @@ impl NbtElement {
     }
 
     #[inline]
-    pub fn value(&self) -> Option<String> {
+    pub fn len(&self) -> Option<u32> {
+        Some(match self {
+            ByteArray(bytes) => bytes.len(),
+            List(list) => list.len(),
+            Compound(compound) => compound.len(),
+            IntArray(ints) => ints.len(),
+            LongArray(longs) => longs.len(),
+            _ => return None
+        } as u32)
+    }
+
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.len().map(|x| x > 0).unwrap_or(false)
+    }
+
+    #[inline]
+    pub fn value(&self) -> Option<std::string::String> {
         Some(match self {
             Byte(byte) => byte.to_string(),
             Short(short) => short.to_string(),
@@ -213,10 +230,10 @@ impl NbtElement {
     }
 
     #[inline]
-    pub fn stack<F: FnMut(&mut NbtElement), G: FnMut(&mut NbtElement, u32, u32)>(&mut self, y: &mut u32, depth: &mut u32, index: u32, parent: &mut F, tail: &mut G) -> bool {
+    pub fn stack<F: FnMut(&mut NbtElement, u32), G: FnOnce(&mut NbtElement, u32, u32)>(&mut self, y: &mut u32, depth: &mut u32, index: u32, parent: &mut F, tail: G) -> Option<G> {
         if *y >= self.height() {
             *y -= self.height();
-            false
+            Some(tail)
         } else {
             match self {
                 ByteArray(_) => NbtByteArray::stack(self, y, depth, index, parent, tail),
@@ -226,35 +243,75 @@ impl NbtElement {
                 Compound(_) => NbtCompound::stack(self, y, depth, index, parent, tail),
                 x => {
                     tail(x, *depth, index);
-                    true
+                    None
                 }
             }
         }
     }
 
     #[inline]
-    pub fn set_value(&mut self, value: &str) {
+    pub fn set_value(&mut self, value: &str) -> Option<std::string::String> {
+        Some(match self {
+            Byte(byte) => {
+                let before = byte.to_string();
+                byte.set(value.parse().unwrap_or(0));
+                before
+            },
+            Short(short) => {
+                let before = short.to_string();
+                short.set(value.parse().unwrap_or(0));
+                before
+            },
+            Int(int) => {
+                let before = int.to_string();
+                int.set(value.parse().unwrap_or(0));
+                before
+            },
+            Long(long) => {
+                let before = long.to_string();
+                long.set(value.parse().unwrap_or(0));
+                before
+            },
+            Float(float) => {
+                let before = float.to_string();
+                float.set(value.parse().unwrap_or(0.0));
+                before
+            },
+            Double(double) => {
+                let before = double.to_string();
+                double.set(value.parse().unwrap_or(0.0));
+                before
+            },
+            String(string) => {
+                let before = string.unwrap().to_owned();
+                string.set(value.to_string());
+                before
+            },
+            _ => return None
+        })
+    }
+
+    #[inline]
+    pub fn child_height(&self, index: u32) -> u32 {
         match self {
-            Byte(byte) => byte.set(value.parse().unwrap_or(0)),
-            Short(short) => short.set(value.parse().unwrap_or(0)),
-            Int(int) => int.set(value.parse().unwrap_or(0)),
-            Long(long) => long.set(value.parse().unwrap_or(0)),
-            Float(float) => float.set(value.parse().unwrap_or(0.0)),
-            Double(double) => double.set(value.parse().unwrap_or(0.0)),
-            String(string) => string.set(value.to_string()),
-            _ => {}
+            ByteArray(bytes) => bytes.child_height(index),
+            List(list) => list.child_height(index),
+            Compound(compound) => compound.child_height(index),
+            IntArray(ints) => ints.child_height(index),
+            LongArray(longs) => longs.child_height(index),
+            _ => 0
         }
     }
 
     #[inline]
-    pub fn delete(&mut self, index: u32) {
+    pub fn delete(&mut self, index: u32) -> Option<NbtElement> {
         match self {
             ByteArray(bytes) => bytes.delete(index),
             List(list) => list.delete(index),
             Compound(compound) => compound.delete(index),
             IntArray(ints) => ints.delete(index),
             LongArray(longs) => longs.delete(index),
-            _ => {}
+            _ => None
         }
     }
 
@@ -314,6 +371,18 @@ impl NbtElement {
             Compound(compound) => compound.drop(other),
             IntArray(ints) => ints.drop(other),
             LongArray(longs) => longs.drop(other),
+            _ => false
+        }
+    }
+
+    #[inline]
+    pub fn drop_index(&mut self, index: u32, other: Self) -> bool {
+        match self {
+            ByteArray(bytes) => bytes.drop_index(index, other),
+            List(list) => list.drop_index(index, other),
+            Compound(compound) => compound.drop_index(index, "_".to_owned(), other),
+            IntArray(ints) => ints.drop_index(index, other),
+            LongArray(longs) => longs.drop_index(index, other),
             _ => false
         }
     }

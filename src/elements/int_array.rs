@@ -1,8 +1,9 @@
 use std::slice::Iter;
+
+use crate::{NbtElement, VertexBufferBuilder};
 use crate::decoder::{read_i32, read_u32};
 use crate::elements::int::NbtInt;
-use crate::encoder::{write_u32};
-use crate::{NbtElement, VertexBufferBuilder};
+use crate::encoder::write_u32;
 use crate::NbtElement::Int;
 
 pub struct NbtIntArray {
@@ -90,15 +91,17 @@ impl ToString for NbtIntArray {
 
 impl NbtIntArray {
     #[inline]
-    pub fn render(&self, builder: &mut VertexBufferBuilder, x_offset: &mut u32, y_offset: &mut u32, name: Option<&str>, remaining_scroll: &mut u32, tail: bool) {
+    pub fn render(&self, builder: &mut VertexBufferBuilder, x_offset: &mut u32, y_offset: &mut u32, name: Option<&str>, remaining_scroll: &mut u32, tail: bool, forbidden_y: Option<u32>) {
         if *remaining_scroll >= 16 {
             *remaining_scroll -= 16;
         } else {
             builder.draw_texture(*x_offset, *y_offset, 112, 0, 16, 16);
             if !self.ints.is_empty() {
-                builder.draw_texture(*x_offset - 16, *y_offset, 224 + if self.open { 0 } else { 16 }, 0, 16, 16);
+                builder.draw_texture(*x_offset - 16, *y_offset, 96 + if self.open { 0 } else { 16 }, 16, 16, 16);
             }
-            builder.draw_text(*x_offset + 20, *y_offset + 4, &format!("{}{} entr{}", name.map(|x| format!("{}: ", x)).unwrap_or_else(|| "".to_string()), self.ints.len(), if self.ints.len() == 1 { "y" } else { "ies" }), true);
+            if Some(*y_offset) != forbidden_y {
+                builder.draw_text(*x_offset + 20, *y_offset, &format!("{}{} entr{}", name.map(|x| format!("{}: ", x)).unwrap_or_else(|| "".to_string()), self.ints.len(), if self.ints.len() == 1 { "y" } else { "ies" }), true);
+            }
             *y_offset += 16;
         }
         *x_offset += 16;
@@ -113,11 +116,11 @@ impl NbtIntArray {
                     }
 
                     if *remaining_scroll < 16 {
-                        builder.draw_texture(*x_offset - 16, *y_offset, 208, 0, 16, if index != self.ints.len() - 1 { 16 } else { 9 });
+                        builder.draw_texture(*x_offset - 16, *y_offset, 80, 16, 16, if index != self.ints.len() - 1 { 16 } else { 9 });
                         if !tail {
-                            builder.draw_texture(*x_offset - 32, *y_offset, 208, 0, 8, 16);
+                            builder.draw_texture(*x_offset - 32, *y_offset, 80, 16, 8, 16);
                         }
-                        element.render(x_offset, y_offset, remaining_scroll, builder, None, false);
+                        element.render(x_offset, y_offset, remaining_scroll, builder, None, false, forbidden_y);
                     }
                 }
             }
@@ -125,10 +128,10 @@ impl NbtIntArray {
         *x_offset -= 16;
     }
 
-    pub fn stack<F: FnMut(&mut NbtElement), G: FnMut(&mut NbtElement, u32, u32)>(wrapped: &mut NbtElement, y: &mut u32, depth: &mut u32, index: u32, parent: &mut F, tail: &mut G) -> bool {
+    pub fn stack<F: FnMut(&mut NbtElement, u32), G: FnOnce(&mut NbtElement, u32, u32)>(wrapped: &mut NbtElement, y: &mut u32, depth: &mut u32, index: u32, parent: &mut F, tail: G) -> Option<G> {
         if *y == 0 {
             tail(wrapped, *depth, index);
-            true
+            None
         } else {
             *y -= 1;
             let ints = if let NbtElement::IntArray(ints) = wrapped { ints } else { panic!() };
@@ -136,26 +139,42 @@ impl NbtIntArray {
                 for (index, int) in ints.ints.iter_mut().enumerate() {
                     if *y == 0 {
                         tail(int, *depth + 1, index as u32);
-                        parent(wrapped);
-                        return true;
+                        parent(wrapped, *y);
+                        return None;
                     } else {
                         *y -= 1;
                     }
                 }
             }
-            false
+            Some(tail)
         }
     }
 
     #[inline]
-    pub fn delete(&mut self, index: u32) {
-        self.ints.remove(index as usize);
+    pub fn delete(&mut self, index: u32) -> Option<NbtElement> {
+        Some(self.ints.remove(index as usize))
+    }
+
+    #[inline]
+    pub fn child_height(&self, _: u32) -> u32 {
+        1
     }
 
     #[inline]
     pub fn drop(&mut self, other: NbtElement) -> bool {
         if let Int(_) = other {
             self.ints.push(other);
+            self.increment(1);
+            true
+        } else {
+            false
+        }
+    }
+
+    #[inline]
+    pub fn drop_index(&mut self, index: u32, other: NbtElement) -> bool {
+        if let Int(_) = other {
+            self.ints.insert(index as usize, other);
             self.increment(1);
             true
         } else {

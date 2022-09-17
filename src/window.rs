@@ -1,4 +1,4 @@
-use std::num::NonZeroU32;
+use std::num::{NonZeroU32, NonZeroU64};
 
 use wgpu::*;
 use wgpu::util::{BufferInitDescriptor, DeviceExt};
@@ -26,25 +26,25 @@ pub async fn run() {
 
     event_loop.run(move |event, _, control_flow| match event {
         Event::RedrawRequested(window_id) if window_id == window.id() => {
-            state.update();
             match state.render(&mut workbench) {
-                Ok(_) => {}
+                Ok(_) => {},
                 Err(SurfaceError::Lost) => state.surface.configure(&state.device, &state.config),
                 Err(SurfaceError::OutOfMemory) => *control_flow = ControlFlow::ExitWithCode(1),
                 Err(e) => eprintln!("{:?}", e)
             }
         },
-        Event::WindowEvent {
-            ref event,
-            window_id,
+        Event::WindowEvent { ref event, window_id, } if window_id == window.id() => {
+            if !state.input(event, &mut workbench) {
+                match event {
+                    WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
+                    WindowEvent::Resized(new_size) => state.resize(&mut workbench, *new_size),
+                    WindowEvent::ScaleFactorChanged { new_inner_size: new_size, .. } => state.resize(&mut workbench, **new_size),
+                    _ => {}
+                }
+            } else {
+                window.request_redraw()
+            }
         }
-
-        if window_id == window.id() && !state.input(event, &mut workbench) => match event {
-            WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
-            WindowEvent::Resized(new_size) => state.resize(&mut workbench, *new_size),
-            WindowEvent::ScaleFactorChanged { new_inner_size: new_size, .. } => state.resize(&mut workbench, **new_size),
-            _ => {}
-        },
         _ => {}
     })
 }
@@ -56,7 +56,9 @@ struct State {
     config: SurfaceConfiguration,
     render_pipeline: RenderPipeline,
     size: PhysicalSize<u32>,
-    diffuse_bind_group: BindGroup
+    diffuse_bind_group: BindGroup,
+    text_render_pipeline: RenderPipeline,
+    unicode_bind_group: BindGroup,
 }
 
 impl State {
@@ -64,13 +66,11 @@ impl State {
         let size = window.inner_size();
         let instance = Instance::new(Backends::all());
         let surface = unsafe { instance.create_surface(window) };
-        let adapter = instance.request_adapter(
-            &RequestAdapterOptions {
-                power_preference: PowerPreference::LowPower,
-                compatible_surface: Some(&surface),
-                force_fallback_adapter: false
-            }
-        ).await.unwrap();
+        let adapter = instance.request_adapter(&RequestAdapterOptions {
+            power_preference: PowerPreference::HighPerformance,
+            force_fallback_adapter: true,
+            compatible_surface: Some(&surface)
+        }).await.unwrap();
         let (device, queue) = adapter.request_device(&DeviceDescriptor {
                 features: Features::empty(),
                 limits: if cfg!(target_arch = "wasm32") {
@@ -167,7 +167,7 @@ impl State {
             ],
             label: Some("Diffuse Bind Group")
         });
-        let shader = device.create_shader_module(include_wgsl!("assets/shader.wgsl"));
+        let shader = device.create_shader_module(include_wgsl!("shader.wgsl"));
         let render_pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
             label: Some("Render Pipeline Layout"),
             bind_group_layouts: &[&texture_bind_group_layout],
@@ -181,14 +181,90 @@ impl State {
                 entry_point: "vs_main",
                 buffers: &[
                     VertexBufferLayout {
-                        array_stride: 24 as BufferAddress,
+                        array_stride: 20,
                         step_mode: VertexStepMode::Vertex,
-                        attributes: &vertex_attr_array![0 => Float32x3, 1 => Float32x2, 2 => Uint32]
+                        attributes: &vertex_attr_array![0 => Float32x3, 1 => Float32x2]
                     }
                 ]
             },
             fragment: Some(FragmentState {
                 module: &shader,
+                entry_point: "fs_main",
+                targets: &[Some(ColorTargetState {
+                    format: config.format,
+                    blend: Some(BlendState::ALPHA_BLENDING),
+                    write_mask: ColorWrites::ALL
+                })]
+            }),
+            primitive: PrimitiveState {
+                topology: PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: FrontFace::Ccw,
+                cull_mode: Some(Face::Back),
+                polygon_mode: PolygonMode::Fill,
+                unclipped_depth: false,
+                conservative: false
+            },
+            depth_stencil: None,
+            multisample: MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false
+            },
+            multiview: None
+        });
+        let unicode_buffer = device.create_buffer_init(&BufferInitDescriptor {
+            label: Some("Unicode Buffer"),
+            contents: assets::UNICODE,
+            usage: BufferUsages::STORAGE
+        });
+        let unicode_bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+            label: Some("Unicode Bind Group Layout"),
+            entries: &[BindGroupLayoutEntry {
+                binding: 0,
+                visibility: ShaderStages::FRAGMENT,
+                ty: BindingType::Buffer {
+                    ty: BufferBindingType::Storage { read_only: true },
+                    has_dynamic_offset: false,
+                    min_binding_size: NonZeroU64::new(1_818_624)
+                },
+                count: None
+            }]
+        });
+        let unicode_bind_group = device.create_bind_group(&BindGroupDescriptor {
+            label: Some("Unicode Bind Group"),
+            layout: &unicode_bind_group_layout,
+            entries: &[BindGroupEntry {
+                binding: 0,
+                resource: BindingResource::Buffer(BufferBinding {
+                    buffer: &unicode_buffer,
+                    offset: 0,
+                    size: None
+                })
+            }]
+        });
+        let text_shader = device.create_shader_module(include_wgsl!("text_shader.wgsl"));
+        let text_render_pipeline_payout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
+            label: Some("Text Render Pipeline Layout"),
+            bind_group_layouts: &[&unicode_bind_group_layout],
+            push_constant_ranges: &[]
+        });
+        let text_render_pipeline = device.create_render_pipeline(&RenderPipelineDescriptor {
+            label: Some("Text Render Pipeline"),
+            layout: Some(&text_render_pipeline_payout),
+            vertex: VertexState {
+                module: &text_shader,
+                entry_point: "vs_main",
+                buffers: &[
+                    VertexBufferLayout {
+                        array_stride: 24,
+                        step_mode: VertexStepMode::Vertex,
+                        attributes: &vertex_attr_array![0 => Float32x3, 1 => Uint32, 2 => Float32x2]
+                    }
+                ]
+            },
+            fragment: Some(FragmentState {
+                module: &text_shader,
                 entry_point: "fs_main",
                 targets: &[Some(ColorTargetState {
                     format: config.format,
@@ -221,7 +297,9 @@ impl State {
             config,
             render_pipeline,
             size,
-            diffuse_bind_group
+            diffuse_bind_group,
+            text_render_pipeline,
+            unicode_bind_group
         }
     }
 
@@ -263,10 +341,6 @@ impl State {
         }
     }
 
-    fn update(&mut self) {
-
-    }
-
     fn render(&mut self, workbench: &mut NbtWorkbench) -> Result<(), SurfaceError> {
         let output = self.surface.get_current_texture()?;
         let view = output.texture.create_view(&TextureViewDescriptor::default());
@@ -277,6 +351,8 @@ impl State {
         {
             let vertex_buffer;
             let index_buffer;
+            let text_vertex_buffer;
+            let text_index_buffer;
             {
                 let mut render_pass = encoder.begin_render_pass(&RenderPassDescriptor {
                     label: Some("Render Pass"),
@@ -318,6 +394,26 @@ impl State {
                 render_pass.set_index_buffer(index_buffer.slice(..), IndexFormat::Uint16);
 
                 render_pass.draw_indexed(0..builder.indices_len(), 0, 0..1);
+
+                render_pass.set_pipeline(&self.text_render_pipeline);
+                render_pass.set_bind_group(0, &self.unicode_bind_group, &[]);
+
+                text_vertex_buffer = self.device.create_buffer_init(&BufferInitDescriptor {
+                    label: Some("Text Vertex Buffer"),
+                    contents: builder.text_vertices(),
+                    usage: BufferUsages::VERTEX
+                });
+
+                text_index_buffer = self.device.create_buffer_init(&BufferInitDescriptor {
+                    label: Some("Text Index Buffer"),
+                    contents: builder.text_indices(),
+                    usage: BufferUsages::INDEX
+                });
+
+                render_pass.set_vertex_buffer(0, text_vertex_buffer.slice(..));
+                render_pass.set_index_buffer(text_index_buffer.slice(..), IndexFormat::Uint16);
+
+                render_pass.draw_indexed(0..builder.text_indices_len(), 0, 0..1);
             }
         }
 
