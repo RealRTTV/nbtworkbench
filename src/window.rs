@@ -67,8 +67,8 @@ impl State {
         let instance = Instance::new(Backends::all());
         let surface = unsafe { instance.create_surface(window) };
         let adapter = instance.request_adapter(&RequestAdapterOptions {
-            power_preference: PowerPreference::HighPerformance,
-            force_fallback_adapter: true,
+            power_preference: PowerPreference::LowPower,
+            force_fallback_adapter: false,
             compatible_surface: Some(&surface)
         }).await.unwrap();
         let (device, queue) = adapter.request_device(&DeviceDescriptor {
@@ -116,7 +116,7 @@ impl State {
             assets::ATLAS,
             ImageDataLayout {
                 offset: 0,
-                bytes_per_row: NonZeroU32::new(4 * assets::ATLAS_WIDTH), // must be divisible by 256, 1024 % 256 == 0
+                bytes_per_row: NonZeroU32::new(4 * assets::ATLAS_WIDTH),
                 rows_per_image: NonZeroU32::new(assets::ATLAS_HEIGHT)
             },
             texture_size
@@ -226,7 +226,7 @@ impl State {
                 ty: BindingType::Buffer {
                     ty: BufferBindingType::Storage { read_only: true },
                     has_dynamic_offset: false,
-                    min_binding_size: NonZeroU64::new(1_818_624)
+                    min_binding_size: NonZeroU64::new(assets::UNICODE.len() as u64)
                 },
                 count: None
             }]
@@ -257,9 +257,9 @@ impl State {
                 entry_point: "vs_main",
                 buffers: &[
                     VertexBufferLayout {
-                        array_stride: 24,
+                        array_stride: 16,
                         step_mode: VertexStepMode::Vertex,
-                        attributes: &vertex_attr_array![0 => Float32x3, 1 => Uint32, 2 => Float32x2]
+                        attributes: &vertex_attr_array![0 => Float32x3, 1 => Uint32]
                     }
                 ]
             },
@@ -365,7 +365,7 @@ impl State {
                                 g: 0.013,
                                 b: 0.013,
                                 a: 1.0
-                            })/*Load*/,
+                            }),
                             store: true
                         }
                     })],

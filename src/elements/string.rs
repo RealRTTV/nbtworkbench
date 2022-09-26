@@ -1,6 +1,5 @@
-use std::slice::Iter;
-
-use crate::decoder::read_string;
+use crate::assets::STRING_UV;
+use crate::decoder::Decoder;
 use crate::encoder::write_string;
 use crate::VertexBufferBuilder;
 
@@ -11,8 +10,11 @@ pub struct NbtString {
 
 impl NbtString {
     #[inline]
-    pub fn from_bytes(iter: &mut Iter<u8>) -> Option<Self> {
-        Some(NbtString::new(read_string(iter)?))
+    pub fn from_bytes(decoder: &mut Decoder) -> Self {
+        unsafe {
+            decoder.assert_len(2);
+            NbtString::new(decoder.string())
+        }
     }
 
     #[inline]
@@ -47,7 +49,7 @@ impl ToString for NbtString {
 impl NbtString {
     #[inline]
     pub fn render(&self, builder: &mut VertexBufferBuilder, x_offset: &mut u32, y_offset: &mut u32, name: Option<&str>, forbidden_y: Option<u32>) {
-        builder.draw_texture(*x_offset, *y_offset, 16, 16, 16, 16);
+        render_icon(*x_offset, *y_offset, builder);
         if Some(*y_offset) != forbidden_y {
             builder.draw_text(*x_offset + 20, *y_offset, &name.map(|x| format!("{}: {}", x, self.str)).unwrap_or_else(|| self.str.clone()), true);
         }
@@ -57,5 +59,5 @@ impl NbtString {
 
 #[inline]
 pub fn render_icon(x: u32, y: u32, builder: &mut VertexBufferBuilder) {
-    builder.draw_texture(x, y, 16, 16, 16, 16);
+    builder.draw_texture((x, y), STRING_UV, (16, 16));
 }

@@ -1,6 +1,5 @@
-use std::slice::Iter;
-
-use crate::decoder::read_f32;
+use crate::assets::FLOAT_UV;
+use crate::decoder::Decoder;
 use crate::encoder::write_f32;
 use crate::VertexBufferBuilder;
 
@@ -11,8 +10,11 @@ pub struct NbtFloat {
 
 impl NbtFloat {
     #[inline]
-    pub fn from_bytes(iter: &mut Iter<u8>) -> Option<Self> {
-        Some(NbtFloat::new(read_f32(iter)?))
+    pub fn from_bytes(decoder: &mut Decoder) -> Self {
+        unsafe {
+            decoder.assert_len(4);
+            NbtFloat::new(decoder.f32())
+        }
     }
 
     #[inline]
@@ -33,8 +35,10 @@ impl NbtFloat {
     }
 
     #[inline]
-    pub fn set(&mut self, float: f32) {
-        self.float = float;
+    pub fn set(&mut self, float: Option<f32>) {
+        if let Some(float) = float {
+            self.float = float;
+        }
     }
 }
 
@@ -47,7 +51,7 @@ impl ToString for NbtFloat {
 impl NbtFloat {
     #[inline]
     pub fn render(&self, builder: &mut VertexBufferBuilder, x_offset: &mut u32, y_offset: &mut u32, name: Option<&str>, forbidden_y: Option<u32>) {
-        builder.draw_texture(*x_offset, *y_offset, 80, 0, 16, 16);
+        render_icon(*x_offset, *y_offset, builder);
         if Some(*y_offset) != forbidden_y {
             builder.draw_text(*x_offset + 20, *y_offset, &name.map(|x| format!("{}: {}", x, self.float)).unwrap_or_else(|| self.float.to_string()), true);
         }
@@ -57,5 +61,5 @@ impl NbtFloat {
 
 #[inline]
 pub fn render_icon(x: u32, y: u32, builder: &mut VertexBufferBuilder) {
-    builder.draw_texture(x, y, 80, 0, 16, 16);
+    builder.draw_texture((x, y), FLOAT_UV, (16, 16));
 }

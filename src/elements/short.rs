@@ -1,6 +1,5 @@
-use std::slice::Iter;
-
-use crate::decoder::read_i16;
+use crate::assets::SHORT_UV;
+use crate::decoder::Decoder;
 use crate::encoder::write_i16;
 use crate::VertexBufferBuilder;
 
@@ -11,8 +10,11 @@ pub struct NbtShort {
 
 impl NbtShort {
     #[inline]
-    pub fn from_bytes(iter: &mut Iter<u8>) -> Option<Self> {
-        Some(NbtShort::new(read_i16(iter)?))
+    pub fn from_bytes(decoder: &mut Decoder) -> Self {
+        unsafe {
+            decoder.assert_len(2);
+            NbtShort::new(decoder.i16())
+        }
     }
 
     #[inline]
@@ -33,8 +35,10 @@ impl NbtShort {
     }
 
     #[inline]
-    pub fn set(&mut self, short: i16) {
-        self.short = short
+    pub fn set(&mut self, short: Option<i16>) {
+        if let Some(short) = short {
+            self.short = short
+        }
     }
 }
 
@@ -47,7 +51,7 @@ impl ToString for NbtShort {
 impl NbtShort {
     #[inline]
     pub fn render(&self, builder: &mut VertexBufferBuilder, x_offset: &mut u32, y_offset: &mut u32, name: Option<&str>, forbidden_y: Option<u32>) {
-        builder.draw_texture(*x_offset, *y_offset, 16, 0, 16, 16);
+        render_icon(*x_offset, *y_offset, builder);
         if Some(*y_offset) != forbidden_y {
             builder.draw_text(*x_offset + 20, *y_offset, &name.map(|x| format!("{}: {}", x, self.short)).unwrap_or_else(|| self.short.to_string()), true);
         }
@@ -57,5 +61,5 @@ impl NbtShort {
 
 #[inline]
 pub fn render_icon(x: u32, y: u32, builder: &mut VertexBufferBuilder) {
-    builder.draw_texture(x, y, 16, 0, 16, 16);
+    builder.draw_texture((x, y), SHORT_UV, (16, 16));
 }

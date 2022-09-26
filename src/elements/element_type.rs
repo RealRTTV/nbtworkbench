@@ -1,7 +1,9 @@
-use std::slice::Iter;
+use std::panic::catch_unwind;
 use std::string::String;
+use std::time::Instant;
 
 use crate::{elements, VertexBufferBuilder};
+use crate::decoder::Decoder;
 use crate::elements::byte::NbtByte;
 use crate::elements::byte_array::NbtByteArray;
 use crate::elements::compound::NbtCompound;
@@ -35,22 +37,22 @@ pub enum NbtElement {
 }
 
 impl NbtElement {
-    pub fn from_bytes(element: &u8, iter: &mut Iter<u8>) -> Option<Self> {
+    pub fn from_bytes(element: u8, decoder: &mut Decoder) -> Self {
         match element {
-            0 => Some(Null),
-            1 => Some(Byte(NbtByte::from_bytes(iter)?)),
-            2 => Some(Short(NbtShort::from_bytes(iter)?)),
-            3 => Some(Int(NbtInt::from_bytes(iter)?)),
-            4 => Some(Long(NbtLong::from_bytes(iter)?)),
-            5 => Some(Float(NbtFloat::from_bytes(iter)?)),
-            6 => Some(Double(NbtDouble::from_bytes(iter)?)),
-            7 => Some(ByteArray(NbtByteArray::from_bytes(iter)?)),
-            8 => Some(String(NbtString::from_bytes(iter)?)),
-            9 => Some(List(NbtList::from_bytes(iter)?)),
-            10 => Some(Compound(NbtCompound::from_bytes(iter)?)),
-            11 => Some(IntArray(NbtIntArray::from_bytes(iter)?)),
-            12 => Some(LongArray(NbtLongArray::from_bytes(iter)?)),
-            _ => None
+            0 => Null,
+            1 => Byte(NbtByte::from_bytes(decoder)),
+            2 => Short(NbtShort::from_bytes(decoder)),
+            3 => Int(NbtInt::from_bytes(decoder)),
+            4 => Long(NbtLong::from_bytes(decoder)),
+            5 => Float(NbtFloat::from_bytes(decoder)),
+            6 => Double(NbtDouble::from_bytes(decoder)),
+            7 => ByteArray(NbtByteArray::from_bytes(decoder)),
+            8 => String(NbtString::from_bytes(decoder)),
+            9 => List(NbtList::from_bytes(decoder)),
+            10 => Compound(NbtCompound::from_bytes(decoder)),
+            11 => IntArray(NbtIntArray::from_bytes(decoder)),
+            12 => LongArray(NbtLongArray::from_bytes(decoder)),
+            _ => panic!()
         }
     }
 
@@ -102,8 +104,8 @@ impl NbtElement {
             5 => Float(NbtFloat::new(0.0)),
             6 => Double(NbtDouble::new(0.0)),
             7 => ByteArray(NbtByteArray::new(Vec::new())),
-            8 => String(NbtString::new("".to_string())),
-            9 => List(NbtList::new(Vec::new(), 0xFF)),
+            8 => String(NbtString::new("".to_owned())),
+            9 => List(NbtList::new(Vec::new(), 0x1)),
             10 => Compound(NbtCompound::new()),
             11 => IntArray(NbtIntArray::new(Vec::new())),
             _ => LongArray(NbtLongArray::new(Vec::new()))
@@ -112,11 +114,15 @@ impl NbtElement {
 
     #[inline]
     pub fn from_file(bytes: &[u8]) -> Option<Self> {
-        let mut iter = bytes.iter();
-        iter.next();
-        iter.next();
-        iter.next();
-        Some(Compound(NbtCompound::from_bytes(&mut iter)?))
+        let start = Instant::now();
+        let res = catch_unwind(|| {
+            let mut decoder = Decoder::new(bytes);
+            decoder.assert_len(3);
+            unsafe { decoder.skip(3); }
+            Compound(NbtCompound::from_bytes(&mut decoder))
+        }).ok();
+        println!("{}ms", Instant::now().duration_since(start).as_nanos() as f64 / 1_000_000.0);
+        res
     }
 
     #[inline]
@@ -145,6 +151,25 @@ impl NbtElement {
             Compound(compound) => compound.render(builder, x, y, str, remaining_scroll, tail, forbidden_y),
             IntArray(int_array) => int_array.render(builder, x, y, str, remaining_scroll, tail, forbidden_y),
             LongArray(long_array) => long_array.render(builder, x, y, str, remaining_scroll, tail, forbidden_y),
+        }
+    }
+
+    #[inline]
+    pub fn can_accept(&self, id: u8) -> bool {
+        match self {
+            Null => false,
+            Byte(_) => false,
+            Short(_) => false,
+            Int(_) => false,
+            Long(_) => false,
+            Float(_) => false,
+            Double(_) => false,
+            ByteArray(_) => id == 1,
+            String(_) => false,
+            List(list) => id == list.id(),
+            Compound(_) => true,
+            IntArray(_) => id == 3,
+            LongArray(_) => id == 4,
         }
     }
 
@@ -193,7 +218,7 @@ impl NbtElement {
             Long(long) => long.to_string(),
             Float(float) => float.to_string(),
             Double(double) => double.to_string(),
-            String(string) => string.unwrap().to_string(),
+            String(string) => string.unwrap().to_owned(),
             _ => return None
         })
     }
@@ -254,37 +279,37 @@ impl NbtElement {
         Some(match self {
             Byte(byte) => {
                 let before = byte.to_string();
-                byte.set(value.parse().unwrap_or(0));
+                byte.set(value.parse().ok());
                 before
             },
             Short(short) => {
                 let before = short.to_string();
-                short.set(value.parse().unwrap_or(0));
+                short.set(value.parse().ok());
                 before
             },
             Int(int) => {
                 let before = int.to_string();
-                int.set(value.parse().unwrap_or(0));
+                int.set(value.parse().ok());
                 before
             },
             Long(long) => {
                 let before = long.to_string();
-                long.set(value.parse().unwrap_or(0));
+                long.set(value.parse().ok());
                 before
             },
             Float(float) => {
                 let before = float.to_string();
-                float.set(value.parse().unwrap_or(0.0));
+                float.set(value.parse().ok());
                 before
             },
             Double(double) => {
                 let before = double.to_string();
-                double.set(value.parse().unwrap_or(0.0));
+                double.set(value.parse().ok());
                 before
             },
             String(string) => {
-                let before = string.unwrap().to_owned();
-                string.set(value.to_string());
+                let before = string.unwrap().to_string();
+                string.set(value.to_owned());
                 before
             },
             _ => return None
@@ -364,14 +389,14 @@ impl NbtElement {
     }
 
     #[inline]
-    pub fn drop(&mut self, other: Self) -> bool {
+    pub fn drop(&mut self, element: Self, y: &mut u32, parent_y: u32) -> Result<NbtElement, (u32, Option<(u32, u32)>)> {
         match self {
-            ByteArray(bytes) => bytes.drop(other),
-            List(list) => list.drop(other),
-            Compound(compound) => compound.drop(other),
-            IntArray(ints) => ints.drop(other),
-            LongArray(longs) => longs.drop(other),
-            _ => false
+            ByteArray(bytes) => bytes.drop(element, y, parent_y),
+            List(list) => list.drop(element, y, parent_y),
+            Compound(compound) => compound.drop(element, y, parent_y),
+            IntArray(ints) => ints.drop(element, y, parent_y),
+            LongArray(longs) => longs.drop(element, y, parent_y),
+            _ => Ok(element)
         }
     }
 
@@ -391,7 +416,7 @@ impl NbtElement {
 impl ToString for NbtElement {
     fn to_string(&self) -> std::string::String {
         match self {
-            Null => "null".to_string(),
+            Null => "null".to_owned(),
             Byte(byte) => byte.to_string(),
             Short(short) => short.to_string(),
             Int(int) => int.to_string(),

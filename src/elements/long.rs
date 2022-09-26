@@ -1,6 +1,5 @@
-use std::slice::Iter;
-
-use crate::decoder::read_i64;
+use crate::assets::LONG_UV;
+use crate::decoder::Decoder;
 use crate::encoder::write_i64;
 use crate::VertexBufferBuilder;
 
@@ -11,8 +10,11 @@ pub struct NbtLong {
 
 impl NbtLong {
     #[inline]
-    pub fn from_bytes(iter: &mut Iter<u8>) -> Option<Self> {
-        Some(NbtLong::new(read_i64(iter)?))
+    pub fn from_bytes(decoder: &mut Decoder) -> Self {
+        unsafe {
+            decoder.assert_len(8);
+            NbtLong::new(decoder.i64())
+        }
     }
 
     #[inline]
@@ -33,8 +35,10 @@ impl NbtLong {
     }
 
     #[inline]
-    pub fn set(&mut self, long: i64) {
-        self.long = long
+    pub fn set(&mut self, long: Option<i64>) {
+        if let Some(long) = long {
+            self.long = long;
+        }
     }
 }
 
@@ -47,7 +51,7 @@ impl ToString for NbtLong {
 impl NbtLong {
     #[inline]
     pub fn render(&self, builder: &mut VertexBufferBuilder, x_offset: &mut u32, y_offset: &mut u32, name: Option<&str>, forbidden_y: Option<u32>) {
-        builder.draw_texture(*x_offset, *y_offset, 48, 0, 16, 16);
+        render_icon(*x_offset, *y_offset, builder);
         if Some(*y_offset) != forbidden_y {
             builder.draw_text(*x_offset + 20, *y_offset, &name.map(|x| format!("{}: {}", x, self.long)).unwrap_or_else(|| self.long.to_string()), true);
         }
@@ -57,5 +61,5 @@ impl NbtLong {
 
 #[inline]
 pub fn render_icon(x: u32, y: u32, builder: &mut VertexBufferBuilder) {
-    builder.draw_texture(x, y, 48, 0, 16, 16);
+    builder.draw_texture((x, y), LONG_UV, (16, 16));
 }

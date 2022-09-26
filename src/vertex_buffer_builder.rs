@@ -81,46 +81,38 @@ impl VertexBufferBuilder {
             let z = z;
             let char = *(&((char as u32) | ((color as u32) << 24)) as *const u32 as *const f32);
 
-            let x0 = ((x / self.window_width) * 2.0f32) - 1.0f32;
-            let x1 = (((x + 16.0) / self.window_width) * 2.0f32) - 1.0; // todo, optimize-able
-            let y0 = -((((y + 16.0) / self.window_height) * 2.0) - 1.0);
-            let y1 = -(((y / self.window_height) * 2.0) - 1.0); // todo, optimize-able
+            let x0 = (x / self.window_width) * 2.0f32 - 1.0f32;
+            let x1 = x0 + 32.0 / self.window_width;
+            let y1 = (y / self.window_height) * -2.0 + 1.0;
+            let y0 = y1 - 32.0 / self.window_height;
 
             let len = self.text_vertices_len;
             let vec = &mut self.text_vertices;
 
             let vertices_len = vec.len();
             let ptr = vec.as_mut_ptr().add(vertices_len) as *mut f32;
-
+            // top left, 0 -> 1.0, 0.0
             *ptr                = x1;
             *(ptr.add(1)) = y1;
             *(ptr.add(2)) = z;
             *(ptr.add(3)) = char;
-            *(ptr.add(4)) = 1.0;
-            *(ptr.add(5)) = 0.0;
-            // top right
-            *(ptr.add(6)) = x0;
-            *(ptr.add(7)) = y1;
-            *(ptr.add(8)) = z;
-            *(ptr.add(9)) = char;
-            *(ptr.add(10)) = 0.0;
-            *(ptr.add(11)) = 0.0;
-            // bottom left
-            *(ptr.add(12)) = x0;
+            // top right, 1 -> 0.0, 0.0
+            *(ptr.add(4)) = x0;
+            *(ptr.add(5)) = y1;
+            *(ptr.add(6)) = z;
+            *(ptr.add(7)) = char;
+            // bottom left, 2 -> 0.0, 1.0
+            *(ptr.add(8)) = x0;
+            *(ptr.add(9)) = y0;
+            *(ptr.add(10)) = z;
+            *(ptr.add(11)) = char;
+            // bottom right, 3 -> 1.0, 1.0
+            *(ptr.add(12)) = x1;
             *(ptr.add(13)) = y0;
             *(ptr.add(14)) = z;
             *(ptr.add(15)) = char;
-            *(ptr.add(16)) = 0.0;
-            *(ptr.add(17)) = 1.0;
-            // bottom right
-            *(ptr.add(18)) = x1;
-            *(ptr.add(19)) = y0;
-            *(ptr.add(20)) = z;
-            *(ptr.add(21)) = char;
-            *(ptr.add(22)) = 1.0;
-            *(ptr.add(23)) = 1.0;
 
-            vec.set_len(vertices_len + 96);
+            vec.set_len(vertices_len + 64);
 
             let indices_len = self.text_indices.len();
             let ptr = self.text_indices.as_mut_ptr().add(indices_len);
@@ -185,34 +177,24 @@ impl VertexBufferBuilder {
     }
 
     #[inline]
-    pub fn draw_texture(&mut self, x: u32, y: u32, u: u32, v: u32, width: u32, height: u32) {
-        self.draw_texture_stretched(x, y, u, v, width, height, 1f32, 1f32);
+    pub fn draw_texture(&mut self, pos: (u32, u32), uv: (u32, u32), dims: (u32, u32)) {
+        self.draw_texture_z(pos, 0.0, uv, dims);
     }
 
     #[inline]
-    pub fn draw_texture_z(&mut self, x: u32, y: u32, z: f32, u: u32, v: u32, width: u32, height: u32) {
-        self.draw_texture_stretched_z(x, y, z, u, v, width, height, 1f32, 1f32);
-    }
-
-    #[inline]
-    pub fn draw_texture_stretched(&mut self, x: u32, y: u32, u: u32, v: u32, width: u32, height: u32, x_scale: f32, y_scale: f32) {
-        self.draw_texture_stretched_z(x, y, 0.0, u, v, width, height, x_scale, y_scale);
-    }
-
-    #[inline]
-    pub fn draw_texture_stretched_z(&mut self, x: u32, y: u32, z: f32, u: u32, v: u32, width: u32, height: u32, x_scale: f32, y_scale: f32) {
+    pub fn draw_texture_z(&mut self, pos: (u32, u32), z: f32, uv: (u32, u32), dims: (u32, u32)) {
         unsafe {
-            let x = x as f32;
-            let y = y as f32;
-            let u = u as f32;
-            let v = v as f32;
-            let width = width as f32;
-            let height = height as f32;
+            let x = pos.0 as f32;
+            let y = pos.1 as f32;
+            let u = uv.0 as f32;
+            let v = uv.1 as f32;
+            let width = dims.0 as f32;
+            let height = dims.1 as f32;
 
-            let x0 = ((x / self.window_width) * 2.0f32) - 1.0f32;
-            let x1 = (((x + (width * x_scale)) / self.window_width) * 2.0f32) - 1.0;
-            let y0 = -((((y + (height * y_scale)) / self.window_height) * 2.0) - 1.0);
-            let y1 = -(((y / self.window_height) * 2.0) - 1.0);
+            let x0 = (x / self.window_width) * 2.0f32 - 1.0f32;
+            let x1 = x0 + (2.0 * width) / self.window_width;
+            let y1 = (y / self.window_height) * -2.0 + 1.0;
+            let y0 = y1 + (-2.0 * height) / self.window_height;
             let u0 = u / self.texture_width;
             let u1 = (u + width) / self.texture_width;
             let v0 = v / self.texture_height;

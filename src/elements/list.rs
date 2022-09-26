@@ -1,7 +1,6 @@
-use std::ops::{Range, RangeInclusive};
-use std::slice::Iter;
+use crate::assets::LIST_UV;
+use crate::decoder::Decoder;
 
-use crate::decoder::{read_u32, read_u8};
 use crate::elements::element_type::NbtElement;
 use crate::encoder::{write_u32, write_u8};
 use crate::VertexBufferBuilder;
@@ -15,14 +14,17 @@ pub struct NbtList {
 
 impl NbtList {
     #[inline]
-    pub fn from_bytes(iter: &mut Iter<u8>) -> Option<Self> {
-        let element = read_u8(iter)?;
-        let length = read_u32(iter)? as usize;
-        let mut elements = Vec::with_capacity(length);
-        for _ in 0..length {
-            elements.push(NbtElement::from_bytes(&element, iter)?);
+    pub fn from_bytes(decoder: &mut Decoder) -> Self {
+        unsafe {
+            decoder.assert_len(5);
+            let element = decoder.u8();
+            let length = decoder.u32() as usize;
+            let mut elements = Vec::with_capacity(length);
+            for _ in 0..length {
+                elements.push(NbtElement::from_bytes(element, decoder));
+            }
+            NbtList::new(elements, element)
         }
-        Some(NbtList::new(elements, element))
     }
 
     #[inline]
@@ -61,6 +63,11 @@ impl NbtList {
     }
 
     #[inline]
+    pub fn id(&self) -> u8 {
+        self.element
+    }
+
+    #[inline]
     pub fn toggle(&mut self) -> bool {
         self.open = !self.open && !self.elements.is_empty();
         true
@@ -74,6 +81,11 @@ impl NbtList {
     #[inline]
     pub fn len(&self) -> usize {
         self.elements.len()
+    }
+
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.elements.is_empty()
     }
 }
 
@@ -99,12 +111,12 @@ impl NbtList {
         if *remaining_scroll >= 16 {
             *remaining_scroll -= 16
         } else {
-            builder.draw_texture(*x_offset, *y_offset, 32, 16, 16, 16);
+            render_icon(*x_offset, *y_offset, builder);
             if !self.elements.is_empty() {
-                builder.draw_texture(*x_offset - 16, *y_offset, 96 + if self.open { 0 } else { 16 }, 16, 16, 16);
+                builder.draw_texture((*x_offset - 16, *y_offset), (96 + if self.open { 0 } else { 16 }, 16), (16, 16));
             }
             if Some(*y_offset) != forbidden_y {
-                builder.draw_text(*x_offset + 20, *y_offset, &format!("{}{} entr{}", name.map(|x| format!("{}: ", x)).unwrap_or_else(|| "".to_string()), self.elements.len(), if self.elements.len() == 1 { "y" } else { "ies" }), true);
+                builder.draw_text(*x_offset + 20, *y_offset, &format!("{}{} entr{}", name.map(|x| format!("{}: ", x)).unwrap_or_else(|| "".to_owned()), self.elements.len(), if self.elements.len() == 1 { "y" } else { "ies" }), true);
             }
             *y_offset += 16
         }
@@ -120,7 +132,7 @@ impl NbtList {
                     }
 
                     if *remaining_scroll < 16 {
-                        builder.draw_texture(*x_offset - 16, *y_offset, 80, 16, 16, if index != self.elements.len() - 1 { 16 } else { 9 });
+                        builder.draw_texture((*x_offset - 16, *y_offset), (80, 16), (16, if index != self.elements.len() - 1 { 16 } else { 9 }));
                     }
 
                     if element.height() == 1 && *remaining_scroll >= 16 {
@@ -132,7 +144,7 @@ impl NbtList {
                         if !tail {
                             for i in 0..difference / 16 {
                                 let y = y_before + i * 16;
-                                builder.draw_texture(x_before, y, 80, 16, 8, 16);
+                                builder.draw_texture((x_before, y), (80, 16), (8, 16));
                             }
                         }
                     }
@@ -177,14 +189,38 @@ impl NbtList {
     }
 
     #[inline]
-    pub fn drop(&mut self, other: NbtElement) -> bool {
-        if self.element == other.id() || self.elements.is_empty() {
-            self.element = other.id();
-            self.elements.push(other);
-            self.increment(1);
-            true
+    pub fn drop(&mut self, element: NbtElement, y: &mut u32, parent_y: u32) -> Result<NbtElement, (u32, Option<(u32, u32)>)> {
+        if *y < 16 {
+            *y = 0;
+            Ok(element)
         } else {
-            false
+            *y -= 16;
+            let mut child_y = parent_y + 1;
+            for (index, value) in self.elements.iter_mut().enumerate() {
+                if *y < value.height() * 16 + if (value.open() || value.len().filter(|&x| x == 0).is_some()) && value.can_accept(element.id()) { 16 } else { 0 } {
+                    let height = element.height();
+                    return Err(match value.drop(element, y, child_y) {
+                        Ok(element) => {
+                            self.drop_index(index as u32, element);
+                            (height, Some((index as u32, parent_y)))
+                        },
+                        Err((increment, index)) => {
+                            self.increment(increment);
+                            (increment, index)
+                        }
+                    })
+                } else {
+                    *y -= value.height() * 16;
+                    child_y += value.height();
+                }
+            }
+            if *y < 8 {
+                let height = element.height();
+                self.drop_index(self.len() as u32, element);
+                Err((height, Some((self.len() as u32 - 1, parent_y))))
+            } else {
+                Err((0, None))
+            }
         }
     }
 
@@ -203,5 +239,5 @@ impl NbtList {
 
 #[inline]
 pub fn render_icon(x: u32, y: u32, builder: &mut VertexBufferBuilder) {
-    builder.draw_texture(x, y, 32, 16, 16, 16);
+    builder.draw_texture((x, y), LIST_UV, (16, 16));
 }

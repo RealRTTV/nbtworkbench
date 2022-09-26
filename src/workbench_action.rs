@@ -84,4 +84,14 @@ impl WorkbenchAction {
             }
         }
     }
+    
+    #[inline]
+    pub fn mutation(&self) -> bool {
+        match self {
+            WorkbenchAction::Toggle { .. } => false,
+            WorkbenchAction::Remove { .. } => true,
+            WorkbenchAction::Add { .. } => true,
+            WorkbenchAction::Rename { .. } => true
+        }
+    }
 }

@@ -1,7 +1,6 @@
-use std::slice::Iter;
-
 use crate::{NbtElement, VertexBufferBuilder};
-use crate::decoder::{read_i8, read_u32};
+use crate::assets::BYTE_ARRAY_UV;
+use crate::decoder::Decoder;
 use crate::elements::byte::NbtByte;
 use crate::encoder::write_u32;
 use crate::NbtElement::Byte;
@@ -14,13 +13,16 @@ pub struct NbtByteArray {
 
 impl NbtByteArray {
     #[inline]
-    pub fn from_bytes(iter: &mut Iter<u8>) -> Option<Self> {
-        let count = read_u32(iter)? as usize;
-        let mut bytes = Vec::with_capacity(count);
-        for _ in 0..count {
-            bytes.push(Byte(NbtByte::new(read_i8(iter)?)))
+    pub fn from_bytes(decoder: &mut Decoder) -> Self {
+        unsafe {
+            let count = decoder.u32() as usize;
+            let mut bytes = Vec::with_capacity(count);
+            decoder.assert_len(count);
+            for _ in 0..count {
+                bytes.push(Byte(NbtByte::new(decoder.i8())))
+            }
+            NbtByteArray::new(bytes)
         }
-        Some(NbtByteArray::new(bytes))
     }
 
     #[inline]
@@ -72,6 +74,11 @@ impl NbtByteArray {
     pub fn len(&self) -> usize {
         self.bytes.len()
     }
+
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.bytes.is_empty()
+    }
 }
 
 impl ToString for NbtByteArray {
@@ -96,12 +103,12 @@ impl NbtByteArray {
         if *remaining_scroll >= 16 {
             *remaining_scroll -= 16;
         } else {
-            builder.draw_texture(*x_offset, *y_offset, 96, 0, 16, 16);
+            render_icon(*x_offset, *y_offset, builder);
             if !self.bytes.is_empty() {
-                builder.draw_texture(*x_offset - 16, *y_offset, 96 + if self.open { 0 } else { 16 }, 16, 16, 16);
+                builder.draw_texture((*x_offset - 16, *y_offset), (96 + if self.open { 0 } else { 16 }, 16), (16, 16));
             }
             if Some(*y_offset) != forbidden_y {
-                builder.draw_text(*x_offset + 20, *y_offset, &format!("{}{} entr{}", name.map(|x| format!("{}: ", x)).unwrap_or_else(|| "".to_string()), self.bytes.len(), if self.bytes.len() == 1 { "y" } else { "ies" }), true);
+                builder.draw_text(*x_offset + 20, *y_offset, &format!("{}{} entr{}", name.map(|x| format!("{}: ", x)).unwrap_or_else(|| "".to_owned()), self.bytes.len(), if self.bytes.len() == 1 { "y" } else { "ies" }), true);
             }
             *y_offset += 16;
         }
@@ -117,9 +124,9 @@ impl NbtByteArray {
                     }
 
                     if *remaining_scroll < 16 {
-                        builder.draw_texture(*x_offset - 16, *y_offset, 80, 16, 16, if index != self.bytes.len() - 1 { 16 } else { 9 });
+                        builder.draw_texture((*x_offset - 16, *y_offset), (80, 16), (16, if index != self.bytes.len() - 1 { 16 } else { 9 }));
                         if !tail {
-                            builder.draw_texture(*x_offset - 32, *y_offset, 80, 16, 8, 16);
+                            builder.draw_texture((*x_offset - 32, *y_offset), (80, 16), (8, 16));
                         }
                         element.render(x_offset, y_offset, remaining_scroll, builder, None, false, forbidden_y);
                     }
@@ -157,13 +164,38 @@ impl NbtByteArray {
     }
 
     #[inline]
-    pub fn drop(&mut self, other: NbtElement) -> bool {
-        if let Byte(_) = other {
-            self.bytes.push(other);
-            self.increment(1);
-            true
+    pub fn drop(&mut self, element: NbtElement, y: &mut u32, parent_y: u32) -> Result<NbtElement, (u32, Option<(u32, u32)>)> {
+        if *y < 16 {
+            *y = 0;
+            Ok(element)
         } else {
-            false
+            *y -= 16;
+            let mut child_y = parent_y + 1;
+            for (index, value) in self.bytes.iter_mut().enumerate() {
+                if *y < 16 {
+                    let height = element.height();
+                    return Err(match value.drop(element, y, child_y) {
+                        Ok(element) => {
+                            self.drop_index(index as u32, element);
+                            (height, Some((index as u32, parent_y)))
+                        },
+                        Err((increment, index)) => {
+                            self.increment(increment);
+                            (increment, index)
+                        }
+                    })
+                } else {
+                    *y -= 16;
+                    child_y += value.height();
+                }
+            }
+            if *y < 8 {
+                let height = element.height();
+                self.drop_index(self.len() as u32, element);
+                Err((height, Some((self.len() as u32 - 1, parent_y))))
+            } else {
+                Err((0, None))
+            }
         }
     }
 
@@ -186,5 +218,5 @@ impl NbtByteArray {
 
 #[inline]
 pub fn render_icon(x: u32, y: u32, builder: &mut VertexBufferBuilder) {
-    builder.draw_texture(x, y, 96, 0, 16, 16);
+    builder.draw_texture((x, y), BYTE_ARRAY_UV, (16, 16));
 }

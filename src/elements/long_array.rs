@@ -1,7 +1,6 @@
-use std::slice::Iter;
-
 use crate::{NbtElement, VertexBufferBuilder};
-use crate::decoder::{read_i64, read_u32};
+use crate::assets::LONG_ARRAY_UV;
+use crate::decoder::Decoder;
 use crate::elements::long::NbtLong;
 use crate::encoder::write_u32;
 use crate::NbtElement::Long;
@@ -14,13 +13,17 @@ pub struct NbtLongArray {
 
 impl NbtLongArray {
     #[inline]
-    pub fn from_bytes(iter: &mut Iter<u8>) -> Option<Self> {
-        let length = read_u32(iter)? as usize;
-        let mut vec = Vec::with_capacity(length);
-        for _ in 0..length {
-            vec.push(Long(NbtLong::new(read_i64(iter)?)));
+    pub fn from_bytes(decoder: &mut Decoder) -> Self {
+        unsafe {
+            decoder.assert_len(4);
+            let length = decoder.u32() as usize;
+            decoder.assert_len(length * 8);
+            let mut vec = Vec::with_capacity(length);
+            for _ in 0..length {
+                vec.push(Long(NbtLong::new(decoder.i64())));
+            }
+            NbtLongArray::new(vec)
         }
-        Some(NbtLongArray::new(vec))
     }
 
     #[inline]
@@ -72,12 +75,17 @@ impl NbtLongArray {
     pub fn len(&self) -> usize {
         self.longs.len()
     }
+
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.longs.is_empty()
+    }
 }
 
 impl ToString for NbtLongArray {
     fn to_string(&self) -> String {
         let mut builder = String::with_capacity(self.longs.len() * 6);
-        builder.push_str("[L;"); // todo, check
+        builder.push_str("[L;");
         for i in 0..self.longs.len() {
             builder.push_str(&self.longs[i].to_string());
             if i < self.longs.len() - 1 {
@@ -95,12 +103,12 @@ impl NbtLongArray {
         if *remaining_scroll >= 16 {
             *remaining_scroll -= 16;
         } else {
-            builder.draw_texture(*x_offset, *y_offset, 0, 16, 16, 16);
+            render_icon(*x_offset, *y_offset, builder);
             if !self.longs.is_empty() {
-                builder.draw_texture(*x_offset - 16, *y_offset, 96 + if self.open { 0 } else { 16 }, 16, 16, 16);
+                builder.draw_texture((*x_offset - 16, *y_offset), (96 + if self.open { 0 } else { 16 }, 16), (16, 16));
             }
             if Some(*y_offset) != forbidden_y {
-                builder.draw_text(*x_offset + 20, *y_offset, &format!("{}{} entr{}", name.map(|x| format!("{}: ", x)).unwrap_or_else(|| "".to_string()), self.longs.len(), if self.longs.len() == 1 { "y" } else { "ies" }), true);
+                builder.draw_text(*x_offset + 20, *y_offset, &format!("{}{} entr{}", name.map(|x| format!("{}: ", x)).unwrap_or_else(|| "".to_owned()), self.longs.len(), if self.longs.len() == 1 { "y" } else { "ies" }), true);
             }
             *y_offset += 16;
         }
@@ -116,9 +124,9 @@ impl NbtLongArray {
                     }
 
                     if *remaining_scroll < 16 {
-                        builder.draw_texture(*x_offset - 16, *y_offset, 80, 16, 16, if index != self.longs.len() - 1 { 16 } else { 9 });
+                        builder.draw_texture((*x_offset - 16, *y_offset), (80, 16), (16, if index != self.longs.len() - 1 { 16 } else { 9 }));
                         if !tail {
-                            builder.draw_texture(*x_offset - 32, *y_offset, 80, 16, 8, 16);
+                            builder.draw_texture((*x_offset - 32, *y_offset), (80, 16), (8, 16));
                         }
                         element.render(x_offset, y_offset, remaining_scroll, builder, None, false, forbidden_y);
                     }
@@ -161,13 +169,38 @@ impl NbtLongArray {
     }
 
     #[inline]
-    pub fn drop(&mut self, other: NbtElement) -> bool {
-        if let Long(_) = other {
-            self.longs.push(other);
-            self.increment(1);
-            true
+    pub fn drop(&mut self, element: NbtElement, y: &mut u32, parent_y: u32) -> Result<NbtElement, (u32, Option<(u32, u32)>)> {
+        if *y < 16 {
+            *y = 0;
+            Ok(element)
         } else {
-            false
+            let mut child_y = parent_y + 1;
+            *y -= 16;
+            for (index, value) in self.longs.iter_mut().enumerate() {
+                if *y < 16 {
+                    let height = element.height();
+                    return Err(match value.drop(element, y, child_y) {
+                        Ok(element) => {
+                            self.drop_index(index as u32, element);
+                            (height, Some((index as u32, parent_y)))
+                        },
+                        Err((increment, index)) => {
+                            self.increment(increment);
+                            (increment, index)
+                        }
+                    })
+                } else {
+                    *y -= 16;
+                    child_y += value.height();
+                }
+            }
+            if *y < 8 {
+                let height = element.height();
+                self.drop_index(self.len() as u32, element);
+                Err((height, Some((self.len() as u32 - 1, parent_y))))
+            } else {
+                Err((0, None))
+            }
         }
     }
 
@@ -185,5 +218,5 @@ impl NbtLongArray {
 
 #[inline]
 pub fn render_icon(x: u32, y: u32, builder: &mut VertexBufferBuilder) {
-    builder.draw_texture(x, y, 0, 16, 16, 16);
+    builder.draw_texture((x, y), LONG_ARRAY_UV, (16, 16));
 }

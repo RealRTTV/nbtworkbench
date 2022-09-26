@@ -1,15 +1,28 @@
 use std::time::SystemTime;
 
+pub const HEADER_SIZE: u32 = 48;
+
 pub const ATLAS: &[u8] = include_bytes!("assets/atlas.hex");
 pub const ATLAS_WIDTH: u32 = 128;
 pub const ATLAS_HEIGHT: u32 = 128;
 
-pub const UNICODE: &[u8] = include_bytes!("assets/text.hex");
+pub const UNICODE: &[u8] = include_bytes!("assets/unicode.hex");
 
 pub const ICON_WIDTH: u32 = 128;
 pub const ICON_HEIGHT: u32 = 128;
 
-pub const HEADER_SIZE: u32 = 48;
+pub const BYTE_UV: (u32, u32) = (0, 0);
+pub const SHORT_UV: (u32, u32) = (16, 0);
+pub const INT_UV: (u32, u32) = (32, 0);
+pub const LONG_UV: (u32, u32) = (48, 0);
+pub const FLOAT_UV: (u32, u32) = (64, 0);
+pub const DOUBLE_UV: (u32, u32) = (80, 0);
+pub const BYTE_ARRAY_UV: (u32, u32) = (96, 0);
+pub const INT_ARRAY_UV: (u32, u32) = (112, 0);
+pub const LONG_ARRAY_UV: (u32, u32) = (0, 16);
+pub const STRING_UV: (u32, u32) = (16, 16);
+pub const LIST_UV: (u32, u32) = (32, 16);
+pub const COMPOUND_UV: (u32, u32) = (48, 16);
 
 const OTHERSIDE_MUSIC_DISC_ICON: &[u8] = include_bytes!("assets/otherside.hex");
 const WAIT_MUSIC_DISC_ICON: &[u8] = include_bytes!("assets/wait.hex");

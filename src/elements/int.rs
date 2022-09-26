@@ -1,6 +1,5 @@
-use std::slice::Iter;
-
-use crate::decoder::read_i32;
+use crate::assets::INT_UV;
+use crate::decoder::Decoder;
 use crate::encoder::write_i32;
 use crate::VertexBufferBuilder;
 
@@ -11,8 +10,11 @@ pub struct NbtInt {
 
 impl NbtInt {
     #[inline]
-    pub fn from_bytes(iter: &mut Iter<u8>) -> Option<Self> {
-        Some(NbtInt::new(read_i32(iter)?))
+    pub fn from_bytes(decoder: &mut Decoder) -> Self {
+        unsafe {
+            decoder.assert_len(4);
+            NbtInt::new(decoder.i32())
+        }
     }
 
     #[inline]
@@ -33,8 +35,10 @@ impl NbtInt {
     }
 
     #[inline]
-    pub fn set(&mut self, int: i32) {
-        self.int = int
+    pub fn set(&mut self, int: Option<i32>) {
+        if let Some(int) = int {
+            self.int = int
+        }
     }
 }
 
@@ -47,7 +51,7 @@ impl ToString for NbtInt {
 impl NbtInt {
     #[inline]
     pub fn render(&self, builder: &mut VertexBufferBuilder, x_offset: &mut u32, y_offset: &mut u32, name: Option<&str>, forbidden_y: Option<u32>) {
-        builder.draw_texture(*x_offset, *y_offset, 32, 0, 16, 16);
+        render_icon(*x_offset, *y_offset, builder);
         if Some(*y_offset) != forbidden_y {
             builder.draw_text(*x_offset + 20, *y_offset, &name.map(|x| format!("{}: {}", x, self.int)).unwrap_or_else(|| self.int.to_string()), true);
         }
@@ -57,5 +61,5 @@ impl NbtInt {
 
 #[inline]
 pub fn render_icon(x: u32, y: u32, builder: &mut VertexBufferBuilder) {
-    builder.draw_texture(x, y, 32, 0, 16, 16);
+    builder.draw_texture((x, y), INT_UV, (16, 16));
 }
