@@ -36,21 +36,22 @@ fn main() {
     block_on(window::run());
     {
         // todo, up down arrows, you know what they'll do
+        // todo, pull element out
+
         // todo, windows icon
         // todo, web assembly ver
         // todo, smart screen
     }
     {
-        // todo, ctrl + c to copy hovered element, or selected text
-        // todo, ctrl + v or drag it into existance from **the** void/portal slot, or just text paste
-        // todo, double click to expand
-        // todo, pull element out
-        // todo, ctrl + x, to cut hovered element, or selected text
-        // todo, ctrl + r, reload current page / currently hovered entry
-        // todo, ctrl + s, click the icon
-        // todo, ctrl + y, haha, no
-        // todo, ctrl + d, duplicate hovered element below thyself
         // todo, ctrl + h, open a playground nbt file to test in
+        // todo, ctrl + s, click the icon
+        // todo, ctrl + r, reload current page / currently hovered entry
+        // todo, ctrl + c to copy hovered element, or selected text
+        // todo, ctrl + d, duplicate hovered element below thyself
+        // todo, ctrl + v or drag it into existance from **the** void/portal slot, or just text paste
+        // todo, ctrl + x, to cut hovered element, or selected text
+
+        // todo, ctrl + y, haha, no
     }
 }
 
@@ -62,7 +63,7 @@ pub struct NbtWorkbench {
     window_height: u32,
     held_mouse_keys: HashSet<MouseButton>,
     held_keys: HashSet<VirtualKeyCode>,
-    held_entry: Option<NbtElement>,
+    held_entry: Option<(NbtElement, bool)>,
     selected_text: Option<SelectedText>
 }
 
@@ -232,7 +233,7 @@ impl SelectedText {
     #[inline]
     pub fn render(&self, builder: &mut VertexBufferBuilder) {
         let x = self.x;
-        let y = self.y;
+        let y = if builder.scroll() / 16 * 16 > self.y { return } else { self.y - builder.scroll() / 16 * 16 };
         builder.draw_texture((x + VertexBufferBuilder::width(self.value.split_at(grapheme_to_byte_index(&self.value, self.cursor)).0) , y), (0, 32), (1, 16));
         if let Some(compound_value) = self.index.as_ref().map(|x| &x.1) {
             builder.draw_text(x + VertexBufferBuilder::width(&self.value), y, compound_value, true);
@@ -331,8 +332,8 @@ impl NbtWorkbench {
     }
 
     #[inline]
-    pub fn forbidden_y(&self) -> Option<u32> {
-        self.selected_text.as_ref().map(|x| x.y)
+    pub fn forbidden_y(&self, scroll: u32) -> Option<u32> {
+        self.selected_text.as_ref().map(|x| x.y).and_then(|x| if scroll > x { None } else { Some(x - scroll) })
     }
 
     #[inline]
@@ -372,7 +373,6 @@ impl NbtWorkbench {
             }
             MouseScrollDelta::PixelDelta(_) => {}
         }
-        self.close_selected_text();
         true
     }
 
@@ -387,7 +387,7 @@ impl NbtWorkbench {
             } else if y > HEADER_SIZE {
                 if (y - HEADER_SIZE) / 16 == 0 && x > 36 {
                     self.rename(x);
-                } else if let Some(x) = self.held_entry.take() {
+                } else if let Some((x, _)) = self.held_entry.take() {
                     self.drop(x);
                 } else {
                     self.toggle(button)
@@ -408,7 +408,7 @@ impl NbtWorkbench {
 
     #[inline]
     fn rename(&mut self, offset: u32) {
-        self.selected_text = SelectedText::new(40, HEADER_SIZE, None, self.tab().expect("tab exists").path.as_ref().and_then(|x| x.to_str().map(|x| x.to_owned())).unwrap_or_else(|| self.tab().expect("tab exists").name.to_owned()), offset, None);
+        self.selected_text = SelectedText::new(40, HEADER_SIZE + (self.scroll() / 16) * 16, None, self.tab().expect("tab exists").path.as_ref().and_then(|x| x.to_str().map(|x| x.to_owned())).unwrap_or_else(|| self.tab().expect("tab exists").name.to_owned()), offset, None);
     }
 
     #[inline]
@@ -465,18 +465,18 @@ impl NbtWorkbench {
     fn hold_entry(&mut self, button: &MouseButton) {
         if *button == MouseButton::Left {
             self.held_entry = match self.mouse_x / 16 {
-                0 => Some(NbtElement::from_id(1)),
-                1 => Some(NbtElement::from_id(2)),
-                2 => Some(NbtElement::from_id(3)),
-                3 => Some(NbtElement::from_id(4)),
-                4 => Some(NbtElement::from_id(5)),
-                5 => Some(NbtElement::from_id(6)),
-                6 => Some(NbtElement::from_id(7)),
-                7 => Some(NbtElement::from_id(11)),
-                8 => Some(NbtElement::from_id(12)),
-                9 => Some(NbtElement::from_id(8)),
-                10 => Some(NbtElement::from_id(9)),
-                11 => Some(NbtElement::from_id(10)),
+                0 => Some((NbtElement::from_id(1), true)),
+                1 => Some((NbtElement::from_id(2), true)),
+                2 => Some((NbtElement::from_id(3), true)),
+                3 => Some((NbtElement::from_id(4), true)),
+                4 => Some((NbtElement::from_id(5), true)),
+                5 => Some((NbtElement::from_id(6), true)),
+                6 => Some((NbtElement::from_id(7), true)),
+                7 => Some((NbtElement::from_id(11), true)),
+                8 => Some((NbtElement::from_id(12), true)),
+                9 => Some((NbtElement::from_id(8), true)),
+                10 => Some((NbtElement::from_id(9), true)),
+                11 => Some((NbtElement::from_id(10), true)),
                 _ => None
             }
         }
@@ -540,14 +540,14 @@ impl NbtWorkbench {
                         unsafe {
                             first_parent = false;
                             let key = if let Compound(compound) = parent {
-                                SelectedText::new(depth * 16 + 40, y * 16 + HEADER_SIZE, Some((index, compound.get(index).unwrap().value_render())), compound.key(index).to_owned(), mouse_x, None)
+                                SelectedText::new(depth * 16 + 40, y * 16 + HEADER_SIZE + scroll * 16, Some((index, compound.get(index).unwrap().value_render())), compound.key(index).to_owned(), mouse_x, None)
                             } else {
                                 None
                             };
                             if key.is_some() {
                                 *selected_text_mut = key
                             } else {
-                                *selected_text_mut = value.as_ref().and_then(|value| { SelectedText::new(depth * 16 + 40 + if let Compound(compound) = parent {
+                                *selected_text_mut = value.as_ref().and_then(|value| { SelectedText::new(depth * 16 + 40 + scroll * 16 + if let Compound(compound) = parent {
                                                                                                                                           VertexBufferBuilder::width(compound.key(index)) + VertexBufferBuilder::width(": ")
                                                                                                                                       } else {
                                                                                                                                           0
@@ -563,10 +563,14 @@ impl NbtWorkbench {
                     }
                 }, |tail, depth, index| {
                     let before = tail.height();
-                    if (depth == x || x == depth + 1) && tail.toggle() {
+                    if depth == x && tail.toggle() {
                         unsafe {
                             *change_mut = tail.height() as i32 - before as i32;
                             *action_mut = Some(WorkbenchAction::Toggle { y: y + scroll })
+                        }
+                    } else if depth == x + 1 {
+                        unsafe {
+                            *first_parent_mut = true;
                         }
                     } else if x > depth {
                         unsafe {
@@ -604,19 +608,18 @@ impl NbtWorkbench {
             None
         };
         if let Some((y, value, index)) = values {
-            let scroll = self.scroll() / 16;
             let mut first_parent = index.is_some();
             let tab = self.tab_mut().unwrap();
             let mut action = None;
             let action_mut = &mut action as *mut Option<WorkbenchAction>;
-            tab.value.stack(&mut (y + scroll), &mut 0, 0, &mut |parent, _| if first_parent {
+            tab.value.stack(&mut y.clone(), &mut 0, 0, &mut |parent, _| if first_parent {
                 first_parent = false;
                 if let Compound(compound) = parent {
                     if let Some(index) = index {
                         let key = compound.key(index).to_owned();
                         unsafe {
                             *action_mut = Some(WorkbenchAction::Rename {
-                                y: y + scroll,
+                                y,
                                 before: key,
                                 key: true
                             })
@@ -629,7 +632,7 @@ impl NbtWorkbench {
                 if let Some(before) = tail.set_value(&value).filter(|x| x == &value) {
                     unsafe {
                         *action_mut = Some(WorkbenchAction::Rename {
-                            y: y + scroll,
+                            y,
                             before,
                             key: false
                         })
@@ -764,7 +767,7 @@ impl NbtWorkbench {
         self.render_tabs(builder);
         self.render_icons(builder);
         if let Some(entry) = self.tab() {
-            entry.render(builder, self.forbidden_y());
+            entry.render(builder, self.forbidden_y(builder.scroll() / 16 * 16));
             if let Some(selected_text) = &self.selected_text {
                 selected_text.render(builder);
             }
@@ -774,7 +777,7 @@ impl NbtWorkbench {
 
     #[inline]
     fn render_held_entry(&self, builder: &mut VertexBufferBuilder) {
-        if let Some(x) = &self.held_entry {
+        if let Some((x, _)) = &self.held_entry {
             NbtElement::render_icon(x.id(), self.mouse_x, self.mouse_y, builder);
         }
     }

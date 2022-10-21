@@ -184,7 +184,7 @@ impl NbtElement {
             Float(_) => format!(": {}", self.value().unwrap()),
             Double(_) => format!(": {}", self.value().unwrap()),
             ByteArray(bytes) => format!(": {} entr{}", bytes.len(), if bytes.len() == 1 { "y" } else { "ies" }),
-            String(_) => self.value().unwrap(),
+            String(_) => ": ".to_owned() + &self.value().unwrap(),
             List(list) => format!(": {} entr{}", list.len(), if list.len() == 1 { "y" } else { "ies" }),
             Compound(compound) => format!(": {} entr{}", compound.len(), if compound.len() == 1 { "y" } else { "ies" }),
             IntArray(ints) => format!(": {} entr{}", ints.len(), if ints.len() == 1 { "y" } else { "ies" }),
