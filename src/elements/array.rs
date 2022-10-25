@@ -1,46 +1,48 @@
-use crate::assets::LIST_UV;
+use std::slice::IterMut;
 use crate::decoder::Decoder;
+use crate::{DeleteFn, DropFn, LeftClickFn, NbtElement, VertexBufferBuilder};
+use crate::encoder::write_u32;
 
-use crate::elements::element_type::NbtElement;
-use crate::encoder::{write_u32, write_u8};
-use crate::{DeleteFn, DropFn, LeftClickFn, VertexBufferBuilder};
-
-pub struct NbtList {
-    elements: Vec<NbtElement>,
-    element: u8,
+pub struct NbtArray<const I: u8, const C: char, const U: u32, const V: u32, const L: usize> {
+    values: Vec<NbtElement>,
     open: bool,
     height: u32
 }
 
-impl NbtList {
+impl<const I: u8, const C: char, const U: u32, const V: u32, const L: usize> NbtArray<I, C, U, V, L> {
     #[inline]
-    pub fn from_bytes(decoder: &mut Decoder) -> Self {
+    pub fn new() -> NbtArray<I, C, U, V, L> {
+        NbtArray {
+            values: Vec::new(),
+            open: false,
+            height: 1
+        }
+    }
+
+    #[inline]
+    pub fn from_bytes<F: Fn(&mut Decoder) -> NbtElement>(decoder: &mut Decoder, f: F) -> Self {
         unsafe {
-            decoder.assert_len(5);
-            let element = decoder.u8();
-            let length = decoder.u32() as usize;
-            let mut elements = Vec::with_capacity(length);
-            for _ in 0..length {
-                elements.push(NbtElement::from_bytes(element, decoder));
+            decoder.assert_len(4);
+            let len = decoder.u32() as usize;
+            decoder.assert_len(len * L);
+            let mut vec = Vec::with_capacity(len);
+            for i in 0..len {
+                *(vec.as_mut_ptr() as *mut NbtElement).add(i) = f(decoder)
             }
-            NbtList::new(elements, element)
+            NbtArray {
+                values: vec,
+                open: false,
+                height: len as u32 + 1
+            }
         }
     }
 
     #[inline]
     pub fn to_bytes(&self, writer: &mut Vec<u8>) {
-        write_u8(writer, self.element);
-        write_u32(writer, self.elements.len() as u32);
-        for element in &self.elements {
-            NbtElement::to_bytes(element, writer)
+        drop(write_u32(writer, self.values.len() as u32));
+        for element in &self.values {
+            element.to_bytes(writer)
         }
-    }
-}
-
-impl NbtList {
-    #[inline]
-    pub fn new(elements: Vec<NbtElement>, element: u8) -> Self {
-        NbtList { height: elements.iter().map(|x| x.height()).sum::<u32>() + 1, elements, element, open: false }
     }
 
     #[inline]
@@ -63,13 +65,8 @@ impl NbtList {
     }
 
     #[inline]
-    pub fn id(&self) -> u8 {
-        self.element
-    }
-
-    #[inline]
     pub fn toggle(&mut self) -> bool {
-        self.open = !self.open && !self.elements.is_empty();
+        self.open = !self.open && !self.values.is_empty();
         true
     }
 
@@ -77,76 +74,48 @@ impl NbtList {
     pub fn open(&self) -> bool {
         self.open
     }
-    
+
     #[inline]
     pub fn len(&self) -> usize {
-        self.elements.len()
+        self.values.len()
     }
 
     #[inline]
     pub fn is_empty(&self) -> bool {
-        self.elements.is_empty()
+        self.values.is_empty()
     }
-}
 
-impl ToString for NbtList {
-    fn to_string(&self) -> String {
-        let mut builder = String::with_capacity(self.elements.len() * 8); // i hope, i really hope
-        builder.push('[');
-        for i in 0..self.elements.len() {
-            builder.push_str(&self.elements[i].to_string());
-            if i < self.elements.len() - 1 {
-                builder.push_str(", ");
-            }
-        }
-        builder.push(']');
-        builder
-    }
-}
-
-impl NbtList {
     #[inline]
     pub fn render(&self, builder: &mut VertexBufferBuilder, x_offset: &mut u32, y_offset: &mut u32, name: Option<&str>, remaining_scroll: &mut u32, tail: bool, forbidden_y: Option<u32>) {
-        let x_before = *x_offset - 16;
         if *remaining_scroll >= 16 {
-            *remaining_scroll -= 16
+            *remaining_scroll -= 16;
         } else {
-            render_icon(*x_offset, *y_offset, builder);
-            if !self.elements.is_empty() {
+            Self::render_icon(*x_offset, *y_offset, builder);
+            if !self.values.is_empty() {
                 builder.draw_texture((*x_offset - 16, *y_offset), (96 + if self.open { 0 } else { 16 }, 16), (16, 16));
             }
             if Some(*y_offset) != forbidden_y {
-                builder.draw_text(*x_offset + 20, *y_offset, &format!("{}{} entr{}", name.map(|x| format!("{}: ", x)).unwrap_or_else(|| "".to_owned()), self.elements.len(), if self.elements.len() == 1 { "y" } else { "ies" }), true);
+                builder.draw_text(*x_offset + 20, *y_offset, &format!("{}{} entr{}", name.map(|x| format!("{}: ", x)).unwrap_or_else(|| "".to_owned()), self.values.len(), if self.values.len() == 1 { "y" } else { "ies" }), true);
             }
-            *y_offset += 16
+            *y_offset += 16;
         }
         *x_offset += 16;
         if self.open {
-            for (index, element) in self.elements.iter().enumerate() {
+            for (index, element) in self.values.iter().enumerate() {
                 if *y_offset > builder.window_height() {
                     break
                 } else {
-                    if *remaining_scroll >= element.height() * 16 {
-                        *remaining_scroll -= element.height() * 16;
+                    if *remaining_scroll >= 16 {
+                        *remaining_scroll -= 16;
                         continue;
                     }
 
                     if *remaining_scroll < 16 {
-                        builder.draw_texture((*x_offset - 16, *y_offset), (80, 16), (16, if index != self.elements.len() - 1 { 16 } else { 9 }));
-                    }
-
-                    if element.height() == 1 && *remaining_scroll >= 16 {
-                        *remaining_scroll -= 16;
-                    } else {
-                        let y_before = *y_offset;
-                        element.render(x_offset, y_offset, remaining_scroll, builder, None, tail && index == self.elements.len() - 1, forbidden_y);
-                        let difference = *y_offset - y_before;
+                        builder.draw_texture((*x_offset - 16, *y_offset), (80, 16), (16, if index != self.values.len() - 1 { 16 } else { 9 }));
                         if !tail {
-                            for i in 0..difference / 16 {
-                                let y = y_before + i * 16;
-                                builder.draw_texture((x_before, y), (80, 16), (8, 16));
-                            }
+                            builder.draw_texture((*x_offset - 32, *y_offset), (80, 16), (8, 16));
                         }
+                        element.render(x_offset, y_offset, remaining_scroll, builder, None, false, forbidden_y);
                     }
                 }
             }
@@ -154,25 +123,26 @@ impl NbtList {
         *x_offset -= 16;
     }
 
-    pub fn stack<F: FnMut(&mut NbtElement, u32), G: FnOnce(&mut NbtElement, u32, u32)>(wrapped: &mut NbtElement, y: &mut u32, depth: &mut u32, index: u32, parent: &mut F, mut tail: G) -> Option<G> {
+    pub fn iter_mut(&mut self) -> IterMut<'_, NbtElement> {
+        self.values.iter_mut()
+    }
+
+    pub fn stack<F: FnMut(&mut NbtElement, u32), G: FnOnce(&mut NbtElement, u32, u32)>(wrapped: &mut NbtElement, y: &mut u32, depth: &mut u32, index: u32, parent: &mut F, tail: G) -> Option<G> {
         if *y == 0 {
             tail(wrapped, *depth, index);
             None
         } else {
             *y -= 1;
-            let list = if let NbtElement::List(list) = wrapped { list } else { panic!() };
-            if list.open {
-                *depth += 1;
-                for (index, element) in list.elements.iter_mut().enumerate() {
-                    let x = element.stack(y, depth, index as u32, parent, tail);
-                    if let Some(x) = x {
-                        tail = x;
-                    } else {
+            if wrapped.open() {
+                for (index, value) in unsafe { wrapped.array_iter_mut().unwrap_unchecked() }.enumerate() {
+                    if *y == 0 {
+                        tail(value, *depth + 1, index as u32);
                         parent(wrapped, *y);
                         return None;
+                    } else {
+                        *y -= 1;
                     }
                 }
-                *depth -= 1;
             }
             Some(tail)
         }
@@ -180,12 +150,12 @@ impl NbtList {
 
     #[inline]
     pub fn delete_index(&mut self, index: u32) -> Option<NbtElement> {
-        Some(self.elements.remove(index as usize))
+        Some(self.values.remove(index as usize))
     }
 
     #[inline]
-    pub fn child_height(&self, index: u32) -> u32 {
-        self.elements.get(index as usize).map(|x| x.height()).unwrap_or(0)
+    pub fn child_height(&self, _: u32) -> u32 {
+        1
     }
 
     #[inline]
@@ -194,11 +164,11 @@ impl NbtList {
             *y = 0;
             Ok(element)
         } else {
-            *y -= 16;
             let mut child_y = parent_y + 1;
-            for (index, value) in self.elements.iter_mut().enumerate() {
-                if *y < value.height() * 16 + if (value.open() || value.len().filter(|&x| x == 0).is_some()) && value.can_accept(element.id()) { 16 } else { 0 } {
-                    let height = element.height();
+            *y -= 16;
+            for (index, value) in self.values.iter_mut().enumerate() {
+                if *y < 16 {
+                    let height = value.height();
                     return Err(match value.drop(element, y, child_y) {
                         Ok(element) => {
                             self.drop_index(index as u32, element);
@@ -210,7 +180,7 @@ impl NbtList {
                         }
                     })
                 } else {
-                    *y -= value.height() * 16;
+                    *y -= 16;
                     child_y += value.height();
                 }
             }
@@ -232,7 +202,7 @@ impl NbtList {
             let y_before = *y;
             *y -= 1;
             if self.open {
-                for (index, element) in self.elements.iter_mut().enumerate() {
+                for (index, element) in self.values.iter_mut().enumerate() {
                     match element.delete(y, depth + 1) {
                         None => {} // found nothing, not here, go to next element
                         Some(None) => { // found something, i am the parent
@@ -253,14 +223,18 @@ impl NbtList {
 
     #[inline]
     pub fn drop_index(&mut self, index: u32, other: NbtElement) -> bool {
-        if self.element == other.id() || self.elements.is_empty() {
-            self.element = other.id();
-            self.elements.insert(index as usize, other);
+        if other.id() == I {
+            self.values.insert(index as usize, other);
             self.increment(1);
             true
         } else {
             false
         }
+    }
+
+    #[inline]
+    pub fn render_icon(x: u32, y: u32, builder: &mut VertexBufferBuilder) {
+        builder.draw_texture((x, y), (U, V), (16, 16));
     }
 
     #[inline]
@@ -279,7 +253,7 @@ impl NbtList {
         } else {
             *y -= 1;
             if self.open {
-                for (index, element) in self.elements.iter_mut().enumerate() {
+                for (index, element) in self.values.iter_mut().enumerate() {
                     match element.left_click(y, depth + 1, mouse_x, index as u32, None) {
                         None => {}, // next element
                         Some(Ok(change)) => {
@@ -299,7 +273,19 @@ impl NbtList {
     }
 }
 
-#[inline]
-pub fn render_icon(x: u32, y: u32, builder: &mut VertexBufferBuilder) {
-    builder.draw_texture((x, y), LIST_UV, (16, 16));
+impl<const I: u8, const C: char, const U: u32, const V: u32, const L: usize> ToString for NbtArray<I, C, U, V, L> {
+    fn to_string(&self) -> String {
+        let mut builder = String::with_capacity(self.values.len() * 4); // just a guess
+        builder.push('[');
+        builder.push(C);
+        builder.push(';');
+        for i in 0..self.values.len() {
+            builder.push_str(&unsafe { self.values.get_unchecked(i) }.to_string());
+            if i < self.values.len() - 1 {
+                builder.push_str(", ");
+            }
+        }
+        builder.push(']');
+        builder
+    }
 }

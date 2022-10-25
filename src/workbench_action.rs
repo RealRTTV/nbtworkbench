@@ -60,7 +60,7 @@ impl WorkbenchAction {
                 }, |tail, _, _| unsafe {
                     *height_mut = tail.child_height(index);
                     tail.decrement(height);
-                    tail.delete(index);
+                    tail.delete_index(index);
                 });
             }
             WorkbenchAction::Rename { mut y, before, key } => {

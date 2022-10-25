@@ -5,7 +5,7 @@ use crate::assets::{COMPOUND_UV, HEADER_SIZE};
 use crate::decoder::Decoder;
 use crate::elements::element_type::NbtElement;
 use crate::encoder::{write_string, write_u8};
-use crate::VertexBufferBuilder;
+use crate::{DeleteFn, DropFn, LeftClickFn, VertexBufferBuilder};
 
 pub struct NbtCompound {
     entries: HashMap<String, NbtElement>,
@@ -283,7 +283,7 @@ impl NbtCompound {
     }
 
     #[inline]
-    pub fn delete(&mut self, index: u32) -> Option<NbtElement> {
+    pub fn delete_index(&mut self, index: u32) -> Option<NbtElement> {
         let key = self.keys.remove(index as usize);
         self.entries.remove(&key)
     }
@@ -294,7 +294,7 @@ impl NbtCompound {
     }
 
     #[inline]
-    pub fn drop(&mut self, element: NbtElement, y: &mut u32, parent_y: u32) -> Result<NbtElement, (u32, Option<(u32, u32)>)> {
+    pub fn drop(&mut self, element: NbtElement, y: &mut u32, parent_y: u32) -> DropFn {
         if *y < 16 {
             *y = 0;
             Ok(element)
@@ -327,6 +327,72 @@ impl NbtCompound {
             } else {
                 Err((0, None))
             }
+        }
+    }
+
+    #[inline]
+    pub fn delete(&mut self, y: &mut u32, depth: u32) -> DeleteFn {
+        if *y == 0 {
+            Some(None)
+        } else {
+            let y_before = *y;
+            *y -= 1;
+            if self.open {
+                for (index, key) in self.keys.iter().enumerate() {
+                    let element = self.entries.get_mut(key).expect("key has value");
+                    match element.delete(y, depth + 1) {
+                        None => {} // found nothing, not here, go to next element
+                        Some(None) => { // found something, i am the parent
+                            let key = Some(key.clone());
+                            let height = element.height();
+                            self.decrement(height);
+                            return Some(self.delete_index(index as u32).map(|x| (x, y_before, key, index as u32, depth + 1)))
+                        }
+                        x => { // found something deeper, throw to caller fn
+                            unsafe { self.decrement(x.as_ref().unwrap_unchecked().as_ref().unwrap_unchecked().0.height()); }
+                            return x;
+                        }
+                    }
+                }
+            }
+            None
+        }
+    }
+
+    #[inline]
+    pub fn left_click(&mut self, y: &mut u32, depth: u32, mouse_x: u32, index: u32, other_value: Option<String>) -> LeftClickFn {
+        if *y == 0 {
+            if mouse_x / 16 == depth { // toggle button
+                let before = self.height();
+                self.toggle();
+                let change = self.height() as i32 - before as i32;
+                Some(Ok(change))
+            } else if mouse_x / 16 >= depth + 1 { // ooh probably a text selection
+                Some(Err((depth * 16 + 40, *y, index, None, mouse_x, other_value)))
+            } else { // too small to do anything
+                None
+            }
+        } else {
+            *y -= 1;
+            if self.open {
+                for (index, key) in self.keys.iter().enumerate() {
+                    let element = self.entries.get_mut(key).expect("key has value");
+                    let key = key.clone();
+                    match element.left_click(y, depth + 1, mouse_x, index as u32, Some(key)) {
+                        None => {}, // next element
+                        Some(Ok(change)) => {
+                            if change < 0 {
+                                self.decrement(-change as u32);
+                            } else {
+                                self.increment(change as u32);
+                            }
+                            return Some(Ok(change))
+                        },
+                        x => return x
+                    }
+                }
+            }
+            None
         }
     }
 }

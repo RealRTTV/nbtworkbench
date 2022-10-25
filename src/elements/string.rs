@@ -42,7 +42,7 @@ impl NbtString {
 
 impl ToString for NbtString {
     fn to_string(&self) -> String {
-        format!("\"{}\"", &*self.str.clone().replace('\\', "\\\\").replace('"', "\\\"").replace('\n', "\\\n").replace('\r', "\\\r"))
+        format!("{:#?}", self.str)
     }
 }
 

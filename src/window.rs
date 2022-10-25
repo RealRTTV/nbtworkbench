@@ -87,7 +87,8 @@ impl State {
             format: surface.get_supported_formats(&adapter)[0],
             width: size.width,
             height: size.height,
-            present_mode: PresentMode::Immediate
+            present_mode: PresentMode::Immediate,
+            alpha_mode: CompositeAlphaMode::Auto
         };
         surface.configure(&device, &config);
         let texture_size = Extent3d {

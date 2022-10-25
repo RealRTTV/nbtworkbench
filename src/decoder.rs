@@ -27,17 +27,23 @@ impl Decoder {
 
     #[inline]
     pub unsafe fn u16(&mut self) -> u16 {
-        ((self.u8() as u16) << 8) | (self.u8() as u16)
+        let val = (self.data as *const u16).read_unaligned();
+        self.data = self.data.add(2);
+        val
     }
 
     #[inline]
     pub unsafe fn u32(&mut self) -> u32 {
-        ((self.u8() as u32) << 24) | ((self.u8() as u32) << 16) | ((self.u8() as u32) << 8) | self.u8() as u32
+        let val = (self.data as *const u32).read_unaligned();
+        self.data = self.data.add(4);
+        val
     }
 
     #[inline]
     pub unsafe fn u64(&mut self) -> u64 {
-        ((self.u8() as u64) << 56) | ((self.u8() as u64) << 48) | ((self.u8() as u64) << 40) | ((self.u8() as u64) << 32) | ((self.u8() as u64) << 24) | ((self.u8() as u64) << 16) | ((self.u8() as u64) << 8) | self.u8() as u64
+        let val = (self.data as *const u64).read_unaligned();
+        self.data = self.data.add(4);
+        val
     }
 
     #[inline]
