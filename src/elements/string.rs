@@ -1,63 +1,83 @@
+use std::fmt::{Display, Formatter};
+use std::io::Write;
+
+use crate::{RenderContext, UnescapeStart, VertexBufferBuilder};
 use crate::assets::STRING_UV;
 use crate::decoder::Decoder;
 use crate::encoder::write_string;
-use crate::VertexBufferBuilder;
 
+#[derive(Clone)]
 #[repr(transparent)]
 pub struct NbtString {
-    str: String
+    str: Box<str>,
 }
 
 impl NbtString {
-    #[inline]
-    pub fn from_bytes(decoder: &mut Decoder) -> Self {
+    pub const ID: u8 = 8;
+
+    pub(in crate::elements) fn from_str0(s: &str) -> Option<(&str, Self)> {
+        if !s.starts_with('"') && s.starts_with("'") { return None }
+        let (str, s) = s.snbt_string_read()?;
+        Some((s, Self { str: str.into_boxed_str() }))
+    }
+
+    pub fn from_bytes(decoder: &mut Decoder) -> Option<Self> {
         unsafe {
             decoder.assert_len(2);
-            NbtString::new(decoder.string())
+            Some(NbtString::new(decoder.string()?))
         }
     }
 
-    #[inline]
-    pub fn to_bytes(&self, writer: &mut Vec<u8>) {
+    pub fn to_bytes<W: Write>(&self, writer: &mut W) {
         write_string(writer, &self.str)
     }
 }
 
 impl NbtString {
     #[inline]
-    pub fn new(str: String) -> NbtString {
+    pub fn new(str: Box<str>) -> NbtString {
         NbtString { str }
     }
-    
+
     #[inline]
     pub fn unwrap(&self) -> &str {
         &self.str
     }
 
     #[inline]
-    pub fn set(&mut self, str: String) {
-        self.str = str;
+    pub fn set<T: Into<Box<str>>>(&mut self, str: T) {
+        self.str = str.into();
     }
 }
 
-impl ToString for NbtString {
-    fn to_string(&self) -> String {
-        format!("{:#?}", self.str)
+impl Display for NbtString {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:#?}", self.str)
     }
 }
 
 impl NbtString {
     #[inline]
-    pub fn render(&self, builder: &mut VertexBufferBuilder, x_offset: &mut u32, y_offset: &mut u32, name: Option<&str>, forbidden_y: Option<u32>) {
+    pub fn render(&self, builder: &mut VertexBufferBuilder, x_offset: &mut usize, y_offset: &mut usize, name: Option<&str>, line_number: &mut usize, ctx: &RenderContext) {
+        use std::fmt::Write;
+
+        ctx.line_number(*y_offset, line_number, builder);
         render_icon(*x_offset, *y_offset, builder);
-        if Some(*y_offset) != forbidden_y {
-            builder.draw_text(*x_offset + 20, *y_offset, &name.map(|x| format!("{}: {}", x, self.str)).unwrap_or_else(|| self.str.clone()), true);
+        ctx.highlight((*x_offset, *y_offset), builder);
+
+        if ctx.forbid(*y_offset) {
+            builder.settings(*x_offset + 20, *y_offset, true);
+            let _ = match name {
+                Some(x) => write!(builder, "{x}: {}", self.str),
+                None => write!(builder, "{}", self.str),
+            };
         }
+
         *y_offset += 16;
     }
 }
 
 #[inline]
-pub fn render_icon(x: u32, y: u32, builder: &mut VertexBufferBuilder) {
+pub fn render_icon(x: usize, y: usize, builder: &mut VertexBufferBuilder) {
     builder.draw_texture((x, y), STRING_UV, (16, 16));
 }

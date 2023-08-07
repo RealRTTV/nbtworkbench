@@ -1,19 +1,19 @@
 use std::time::SystemTime;
 
-pub const HEADER_SIZE: u32 = 48;
+pub const HEADER_SIZE: usize = 48;
 
 pub const ATLAS: &[u8] = include_bytes!("assets/atlas.hex");
-pub const ATLAS_WIDTH: u32 = 128;
-pub const ATLAS_HEIGHT: u32 = 128;
+pub const ATLAS_WIDTH: usize = 128;
+pub const ATLAS_HEIGHT: usize = 128;
 
 pub const UNICODE: &[u8] = include_bytes!("assets/unicode.hex");
 
-pub const ICON_WIDTH: u32 = 128;
-pub const ICON_HEIGHT: u32 = 128;
+pub const ICON_WIDTH: usize = 128;
+pub const ICON_HEIGHT: usize = 128;
 
-pub const STRING_UV: (u32, u32) = (16, 16);
-pub const LIST_UV: (u32, u32) = (32, 16);
-pub const COMPOUND_UV: (u32, u32) = (48, 16);
+pub const STRING_UV: (usize, usize) = (16, 16);
+pub const LIST_UV: (usize, usize) = (32, 16);
+pub const COMPOUND_UV: (usize, usize) = (48, 16);
 
 const OTHERSIDE_MUSIC_DISC_ICON: &[u8] = include_bytes!("assets/otherside.hex");
 const WAIT_MUSIC_DISC_ICON: &[u8] = include_bytes!("assets/wait.hex");

@@ -1,52 +1,88 @@
-use std::collections::hash_map::Entry;
-use std::collections::HashMap;
+use std::fmt::{Display, Formatter, Write};
+use std::intrinsics::likely;
+use std::ops::Deref;
 
+use fxhash::FxBuildHasher;
+use indexmap::IndexMap;
+
+use crate::{DeleteFn, DropFn, RenderContext, StealFn, ToggleFn, TrySelectTextFn, UnescapeStart, VertexBufferBuilder};
 use crate::assets::{COMPOUND_UV, HEADER_SIZE};
 use crate::decoder::Decoder;
 use crate::elements::element_type::NbtElement;
-use crate::encoder::{write_string, write_u8};
-use crate::{DeleteFn, DropFn, LeftClickFn, VertexBufferBuilder};
+use crate::encoder::write_string;
 
+#[derive(Clone)]
 pub struct NbtCompound {
-    entries: HashMap<String, NbtElement>,
-    keys: Vec<String>,
+    entries: Box<IndexMap<Box<str>, NbtElement, FxBuildHasher>>,
     open: bool,
-    height: u32
+    height: usize,
+    true_height: usize,
 }
 
 impl NbtCompound {
-    #[inline]
-    pub fn from_bytes(decoder: &mut Decoder) -> Self {
+    pub const ID: u8 = 10;
+
+    pub(in crate::elements) fn from_str0(mut s: &str) -> Option<(&str, NbtCompound)> {
+        s = s.strip_prefix("{")?.trim_start();
+        let mut compound = NbtCompound::new();
+        'a: while !s.is_empty() && !s.starts_with('}') {
+            let (key, s2) = s.snbt_string_read()?;
+            s = s2.trim_start().strip_prefix(':')?.trim_start();
+            let (s2, value) = NbtElement::from_str0(s)?;
+            compound.put(key.into_boxed_str(), value);
+            s = s2.trim_start();
+            match s.strip_prefix(',') {
+                Some(s2) => match s2.trim_start().strip_prefix('}') {
+                    Some(_) => break 'a,
+                    None => {
+                        s = s2;
+                        continue
+                    }
+                }
+                None => match s.strip_prefix('}') {
+                    Some(_) => break 'a,
+                    None => return None,
+                }
+            }
+        }
+        s = s.trim_start().strip_prefix('}')?;
+        Some((s, compound))
+    }
+
+    pub fn from_bytes(decoder: &mut Decoder) -> Option<Self> {
         let mut compound = NbtCompound::new();
         unsafe {
-            decoder.assert_len(1);
+            decoder.assert_len(1)?;
             let mut current_element = decoder.u8();
             while current_element != 0 {
-                decoder.assert_len(2);
-                compound.put(decoder.string(), NbtElement::from_bytes(current_element, decoder));
-                decoder.assert_len(1);
+                decoder.assert_len(2)?;
+                let key = decoder.string()?;
+                let value = NbtElement::from_bytes(current_element, decoder)?;
+                compound.put(key, value);
+                match decoder.assert_len(1) {
+                    Some(()) => {},
+                    None => break, // wow mojang, saving one byte, so cool of you
+                };
                 current_element = decoder.u8();
             }
-            compound
+            Some(compound)
         }
     }
 
-    #[inline]
-    pub fn to_bytes(&self, writer: &mut Vec<u8>) {
-        for key in &self.keys {
-            let value = self.entries.get(key).unwrap();
-            write_u8(writer, value.id());
+    pub fn to_bytes<W: std::io::Write>(&self, writer: &mut W) {
+        for (key, value) in self.entries.deref() {
+            let _ = writer.write(&[value.id()]);
             write_string(writer, key);
             NbtElement::to_bytes(value, writer);
         }
-        write_u8(writer, 0);
+        let _ = writer.write(&[0x00]);
     }
 }
 
 impl Default for NbtCompound {
     #[inline]
     fn default() -> Self {
-        Self { height: 1, entries: HashMap::new(), keys: Vec::new(), open: false }
+        Self { height: 1, entries: Box::new(IndexMap::with_hasher(Default::default())), open: false, true_height: 1 }
     }
 }
 
@@ -57,42 +93,49 @@ impl NbtCompound {
     }
 
     #[inline]
-    pub fn drop_index(&mut self, index: u32, mut str: String, element: NbtElement) -> bool {
+    pub fn insert_full(&mut self, idx: usize, mut str: String, value: NbtElement) -> Option<NbtElement> {
         loop {
-            if let Entry::Vacant(e) = self.entries.entry(str.clone()) {
-                self.keys.insert(index as usize, e.key().to_owned());
-                let height = element.height();
-                e.insert(element);
-                self.increment(height);
-                return true;
+            if !self.entries.contains_key(str.as_str()) {
+                self.height += value.height();
+                self.true_height += value.true_height();
+                let (new_idx, _) = self.entries.insert_full(str.into_boxed_str(), value);
+                self.entries.move_index(new_idx, idx);
+                return None
             } else {
                 str += " - Copy"
             }
         }
     }
 
-    #[inline] // must only use for raw files
-    pub unsafe fn put(&mut self, str: String, element: NbtElement) {
-        if self.entries.get(&*str).is_some() {
-            panic!("key cannot already exist, how did this happen")
+    #[inline] // must only use for files, unless im stupid
+    pub fn put(&mut self, str: Box<str>, element: NbtElement) {
+        self.height += element.height();
+        self.true_height += element.true_height();
+        if let Some(element) = self.entries.insert(str, element) {
+            self.height -= element.height();
+            self.true_height -= element.true_height();
         }
-        self.keys.push(str.to_owned());
-        self.increment(element.height());
-        self.entries.insert(str, element);
     }
 
     #[inline]
-    pub fn increment(&mut self, amount: u32) {
+    pub fn remove_idx(&mut self, idx: usize) -> Option<(Box<str>, NbtElement)> {
+        self.entries.shift_remove_index(idx)
+    }
+
+    #[inline]
+    pub fn increment(&mut self, amount: usize, true_amount: usize) {
         self.height += amount;
+        self.true_height += true_amount;
     }
 
     #[inline]
-    pub fn decrement(&mut self, amount: u32) {
+    pub fn decrement(&mut self, amount: usize, true_amount: usize) {
         self.height -= amount;
+        self.true_height -= true_amount;
     }
 
     #[inline]
-    pub fn height(&self) -> u32 {
+    pub fn height(&self) -> usize {
         if self.open {
             self.height
         } else {
@@ -101,9 +144,14 @@ impl NbtCompound {
     }
 
     #[inline]
-    pub fn toggle(&mut self) -> bool {
-        self.open = !self.open && !self.keys.is_empty();
-        true
+    pub fn true_height(&self) -> usize {
+        self.true_height
+    }
+
+    #[inline]
+    pub fn toggle(&mut self) -> Option<()> {
+        self.open = !self.open && !self.entries.is_empty();
+        Some(())
     }
 
     #[inline]
@@ -111,13 +159,13 @@ impl NbtCompound {
         self.open
     }
 
-    #[inline]
-    pub fn update_key(&mut self, index: u32, name: String) {
-        let key = self.keys.get_mut(index as usize);
-        if let Some(key) = key {
-            let value = self.entries.remove(key).unwrap();
-            *key = name.clone();
-            self.entries.insert(name, value);
+    pub fn update_key(&mut self, idx: usize, key: Box<str>) -> Option<Box<str>> {
+        if !self.entries.contains_key(key.as_ref()) && let Some((old_key, value)) = self.entries.swap_remove_index(idx)  {
+            let (end_idx, _) = self.entries.insert_full(key, value);
+            self.entries.swap_indices(end_idx, idx);
+            Some(old_key)
+        } else {
+            None
         }
     }
 
@@ -132,272 +180,439 @@ impl NbtCompound {
     }
 
     #[inline]
-    pub fn key(&self, index: u32) -> &str {
-        self.keys.get(index as usize).unwrap()
+    pub fn get(&self, idx: usize) -> Option<(&Box<str>, &NbtElement)> {
+        self.entries.get_index(idx)
     }
 
     #[inline]
-    pub fn get(&self, index: u32) -> Option<&NbtElement> {
-        self.entries.get(self.keys.get(index as usize)?)
+    pub fn get_mut(&mut self, idx: usize) -> Option<(&Box<str>, &mut NbtElement)> {
+        self.entries.get_index_mut(idx)
     }
 
-    #[inline]
-    #[allow(const_item_mutation)]
-    pub fn render_root(&self, builder: &mut VertexBufferBuilder, str: &str, forbidden_y: Option<u32>) {
-        let x_offset = &mut 20;
-        let y_offset = &mut HEADER_SIZE;
-        let remaining_scroll = &mut builder.scroll();
-        if *remaining_scroll >= 16 {
-            *remaining_scroll -= 16;
-        } else {
-            render_icon(*x_offset, *y_offset, builder);
-            builder.draw_texture((*x_offset - 16, *y_offset), (80, 16), (16, 9));
-            if !self.keys.is_empty() {
-                builder.draw_texture((*x_offset - 16, *y_offset), (96 + if self.open { 0 } else { 16 }, 16), (16, 16));
+    pub fn render_root(&self, builder: &mut VertexBufferBuilder, str: &str, ctx: &RenderContext) {
+        let mut x_offset = 16 + ctx.left_margin;
+        let mut y_offset = HEADER_SIZE;
+        let mut remaining_scroll = builder.scroll() / 16;
+        let mut line_number = 1;
+        'head: {
+            if remaining_scroll > 0 {
+                remaining_scroll -= 1;
+                line_number += 1;
+                break 'head
             }
-            if Some(*y_offset) != forbidden_y {
-                builder.draw_text(*x_offset + 20, *y_offset, &format!("{} [{} entr{}]", str, self.keys.len(), if self.keys.len() == 1 { "y" } else { "ies" }), true);
+
+            ctx.line_number(y_offset, &mut line_number, builder);
+            builder.draw_texture((x_offset, y_offset), (64, 16), (16, 16));
+            ctx.highlight((x_offset, y_offset), builder);
+            builder.draw_texture((x_offset - 16, y_offset), (80, 16), (16, 9));
+            if !self.is_empty() { builder.draw_texture((x_offset - 16, y_offset), (96 + self.open as usize * 16, 16), (16, 16)); }
+            if ctx.forbid(y_offset) {
+                builder.settings(x_offset + 20, y_offset, true);
+                let _ = write!(builder, "{} [{n} {suffix}]", str, n = self.len(), suffix = { if self.len() == 1 { "entry" } else { "entries" } });
             }
-            *y_offset += 16;
+
+            if ctx.ghost(x_offset + 16, y_offset + 16, builder, |x, y| x == x_offset + 16 && y == y_offset + 8) {
+                builder.draw_texture((x_offset, y_offset + 16), (80, 16), (16, (self.height() != 1) as usize * 7 + 9));
+                y_offset += 16;
+            }
+
+            if self.height() == 1 && ctx.ghost(x_offset + 16, y_offset + 16, builder, |x, y| x == x_offset + 16 && y == y_offset + 16) {
+                builder.draw_texture((x_offset, y_offset + 16), (80, 16), (16, 9));
+                y_offset += 16;
+            }
+
+            y_offset += 16;
         }
-        *x_offset += 16;
+
+        x_offset += 16;
+
         if self.open {
-            for (index, name) in self.keys.iter().enumerate() {
-                if *y_offset > builder.window_height() {
-                    break
+            for (idx, (name, value)) in self.entries.iter().enumerate() {
+                if y_offset > builder.window_height() { break }
+
+                let height = value.height();
+                if remaining_scroll >= height {
+                    remaining_scroll -= height;
+                    line_number += value.true_height();
+                    continue;
+                }
+
+                if ctx.ghost(x_offset, y_offset, builder, |x, y| x_offset == x && y_offset == y) {
+                    builder.draw_texture((x_offset - 16, y_offset), (80, 16), (16, 16));
+                    y_offset += 16;
+                }
+
+                let ghost_tail_mod = if let Some((_, x, y)) = ctx.ghost && x == x_offset && y == y_offset + height * 16 - remaining_scroll * 16 - 8 {
+                    false
                 } else {
-                    let entry = self.entries.get(name).expect("has key, has value");
-                    if *remaining_scroll >= entry.height() * 16 {
-                        *remaining_scroll -= entry.height() * 16;
-                        continue;
-                    }
+                    true
+                };
 
-                    if *remaining_scroll < 16 {
-                        builder.draw_texture((*x_offset - 16, *y_offset), (80, 16), (16, if index != self.keys.len() - 1 { 16 } else { 9 }));
-                    }
+                if remaining_scroll == 0 { builder.draw_texture((x_offset - 16, y_offset), (80, 16), (16, (idx != self.len() - 1 || !ghost_tail_mod) as usize * 7 + 9)); }
+                value.render(&mut x_offset, &mut y_offset, &mut remaining_scroll, builder, Some(name.as_ref()), idx == self.len() - 1 && ghost_tail_mod, &mut line_number, ctx);
 
-                    if entry.height() == 1 && *remaining_scroll >= 16 {
-                        *remaining_scroll -= 16;
-                    } else {
-                        entry.render(x_offset, y_offset, remaining_scroll, builder, Some(name), index == self.keys.len() - 1, forbidden_y);
-                    }
+                if ctx.ghost(x_offset, y_offset, builder, |x, y| x_offset == x && y_offset - 8 == y) {
+                    builder.draw_texture((x_offset - 16, y_offset), (80, 16), (16, (idx != self.len() - 1) as usize * 7 + 9));
+                    y_offset += 16;
                 }
             }
+        } else {
+            // unrequired tbh
+            // line_number += self.true_height - 1;
         }
-        *x_offset -= 16;
+        // unrequired tbh
+        // x_offset -= 16;
     }
 }
 
-impl ToString for NbtCompound {
-    fn to_string(&self) -> String {
-        let mut builder = String::with_capacity(self.keys.len() * 8);
-        builder.push('{');
-        for (i, key) in self.keys.iter().enumerate() {
-            let value = &self.entries[key];
-            builder.push_str(key);
-            builder.push_str(": ");
-            builder.push_str(&value.to_string());
-            if i < self.keys.len() - 1 {
-                builder.push_str(", ");
+impl Display for NbtCompound {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{{")?;
+        for (idx, (key, value)) in self.entries.iter().enumerate() {
+            write!(f, "{key:?}:{value}")?;
+            if likely(idx < self.len() - 1) {
+                write!(f, ",")?;
             }
         }
-        builder.push('}');
-        builder
+        write!(f, "}}")
     }
 }
 
 impl NbtCompound {
     #[inline]
-    pub fn render(&self, builder: &mut VertexBufferBuilder, x_offset: &mut u32, y_offset: &mut u32, name: Option<&str>, remaining_scroll: &mut u32, tail: bool, forbidden_y: Option<u32>) {
-        let x_before = *x_offset - 16;
-        if *remaining_scroll >= 16 {
-            *remaining_scroll -= 16
-        } else {
+    pub fn render(&self, builder: &mut VertexBufferBuilder, x_offset: &mut usize, y_offset: &mut usize, name: Option<&str>, remaining_scroll: &mut usize, tail: bool, line_number: &mut usize, ctx: &RenderContext) {
+        let mut y_before = *y_offset;
+
+        'head: {
+            if *remaining_scroll > 0 {
+                *remaining_scroll -= 1;
+                *line_number += 1;
+                break 'head
+            }
+
+            ctx.line_number(*y_offset, line_number, builder);
             render_icon(*x_offset, *y_offset, builder);
-            if !self.keys.is_empty() {
-                builder.draw_texture((*x_offset - 16, *y_offset), (96 + if self.open { 0 } else { 16 }, 16), (16, 16));
+            ctx.highlight((*x_offset, *y_offset), builder);
+            if !self.is_empty() { builder.draw_texture((*x_offset - 16, *y_offset), (96 + self.open as usize * 16, 16), (16, 16)); }
+            if ctx.forbid(*y_offset) {
+                builder.settings(*x_offset + 20, *y_offset, true);
+                let _ = match name {
+                    Some(x) => write!(builder, "{x}: {n} {suffix}", n = self.len(), suffix = { if self.len() == 1 { "entry" } else { "entries" } }),
+                    None => write!(builder, "{n} {suffix}", n = self.len(), suffix = { if self.len() == 1 { "entry" } else { "entries" } }),
+                };
             }
-            if Some(*y_offset) != forbidden_y {
-                builder.draw_text(*x_offset + 20, *y_offset, &format!("{}{} entr{}", name.map(|x| format!("{}: ", x)).unwrap_or_else(|| "".to_owned()), self.keys.len(), if self.keys.len() == 1 { "y" } else { "ies" }), true);
+
+            if ctx.ghost(*x_offset + 16, *y_offset + 16, builder, |x, y| x == *x_offset + 16 && y == *y_offset + 8) {
+                builder.draw_texture((*x_offset, *y_offset + 16), (80, 16), (16, (self.height() != 1) as usize * 7 + 9));
+                if !tail { builder.draw_texture((*x_offset - 16, *y_offset + 16), (80, 16), (8, 16)); }
+                *y_offset += 16;
+            } else if self.height() == 1 && ctx.ghost(*x_offset + 16, *y_offset + 16, builder, |x, y| x == *x_offset + 16 && y == *y_offset + 16) {
+                builder.draw_texture((*x_offset, *y_offset + 16), (80, 16), (16, 9));
+                if !tail { builder.draw_texture((*x_offset - 16, *y_offset + 16), (80, 16), (8, 16)); }
+                *y_offset += 16;
             }
-            *y_offset += 16
+
+            *y_offset += 16;
+            y_before += 16;
         }
-        *x_offset += 16;
+
+        let x_before = *x_offset - 16;
+
         if self.open {
-            for (index, name) in self.keys.iter().enumerate() {
-                if *y_offset > builder.window_height() {
-                    break
+            *x_offset += 16;
+
+            for (idx, (key, entry)) in self.entries.iter().enumerate() {
+                if *y_offset > builder.window_height() { break }
+
+                let height = entry.height();
+                if *remaining_scroll >= height {
+                    *remaining_scroll -= height;
+                    *line_number += entry.true_height();
+                    continue;
+                }
+
+                if ctx.ghost(*x_offset, *y_offset, builder, |x, y| *x_offset == x && *y_offset == y) {
+                    builder.draw_texture((*x_offset - 16, *y_offset), (80, 16), (16, 16));
+                    *y_offset += 16;
+                }
+
+                let ghost_tail_mod = if let Some((_, x, y)) = ctx.ghost && x == *x_offset && y == *y_offset + height * 16 - *remaining_scroll * 16 - 8 {
+                    false
                 } else {
-                    let entry = self.entries.get(name).unwrap();
-                    if *remaining_scroll >= entry.height() * 16 {
-                        *remaining_scroll -= entry.height() * 16;
-                        continue;
-                    }
+                    true
+                };
 
-                    if *remaining_scroll < 16 {
-                        builder.draw_texture((*x_offset - 16, *y_offset), (80, 16), (16, if index != self.keys.len() - 1 { 16 } else { 9 }));
-                    }
+                if *remaining_scroll == 0 { builder.draw_texture((*x_offset - 16, *y_offset), (80, 16), (16, (idx != self.len() - 1 || !ghost_tail_mod) as usize * 7 + 9)); }
+                entry.render(x_offset, y_offset, remaining_scroll, builder, Some(key.as_ref()), idx == self.len() - 1 && ghost_tail_mod, line_number, ctx);
 
-                    if entry.height() == 1 && *remaining_scroll >= 16 {
-                        *remaining_scroll -= 16;
-                    } else {
-                        let y_before = *y_offset;
-                        entry.render(x_offset, y_offset, remaining_scroll, builder, Some(name), tail && index == self.keys.len() - 1, forbidden_y);
-                        let difference = *y_offset - y_before;
-                        if !tail {
-                            for i in 0..difference / 16 {
-                                let y = y_before + i * 16;
-                                builder.draw_texture((x_before, y), (80, 16), (8, 16));
-                            }
-                        }
-                    }
+                if ctx.ghost(*x_offset, *y_offset, builder, |x, y| *x_offset == x && *y_offset - 8 == y) {
+                    builder.draw_texture((*x_offset - 16, *y_offset), (80, 16), (16, (idx != self.len() - 1) as usize * 7 + 9));
+                    *y_offset += 16;
                 }
             }
-        }
-        *x_offset -= 16;
-    }
 
-    pub fn stack<F: FnMut(&mut NbtElement, u32), G: FnOnce(&mut NbtElement, u32, u32)>(wrapped: &mut NbtElement, y: &mut u32, depth: &mut u32, index: u32, parent: &mut F, mut tail: G) -> Option<G> {
-        if *y == 0 {
-            tail(wrapped, *depth, index);
-            None
+            let difference = *y_offset - y_before;
+            if !tail {
+                for i in 0..difference / 16 {
+                    builder.draw_texture((x_before, y_before + i * 16), (80, 16), (8, 16));
+                }
+            }
+
+            *x_offset -= 16;
         } else {
-            *y -= 1;
-            let compound = if let NbtElement::Compound(compound) = wrapped { compound } else { panic!() };
-            if compound.open {
-                *depth += 1;
-                for (index, key) in compound.keys.iter().enumerate() {
-                    let value = compound.entries.get_mut(key).expect("has key, has value");
-                    let x = value.stack(y, depth, index as u32, parent, tail);
-                    if let Some(x) = x {
-                        tail = x;
-                    } else {
-                        parent(wrapped, *y);
-                        return None;
-                    }
-                }
-                *depth -= 1;
-            }
-            Some(tail)
+            *line_number += self.true_height - 1;
         }
     }
 
     #[inline]
-    pub fn delete_index(&mut self, index: u32) -> Option<NbtElement> {
-        let key = self.keys.remove(index as usize);
-        self.entries.remove(&key)
+    pub fn child_height(&self, idx: usize) -> usize {
+        self.entries.get_index(idx).map(|(_, x)| x.height()).unwrap_or(0)
     }
 
     #[inline]
-    pub fn child_height(&self, index: u32) -> u32 {
-        self.entries.get(self.key(index)).map(|x| x.height()).unwrap_or(0)
-    }
+    pub fn drop(&mut self, mut key: Option<Box<str>>, mut element: NbtElement, y: &mut usize, depth: usize, target_depth: usize, indices: &mut Vec<usize>) -> DropFn {
+        if *y < 16 && *y >= 8 && depth == target_depth {
+            let open_before = self.open;
+            let before = (self.height(), self.true_height());
+            self.open = true;
+            self.insert_full(0, key.map(str::into_string).unwrap_or_else(|| "_".to_owned()), element);
+            indices.push(0);
+            return DropFn::Dropped(self.height - before.0, self.true_height - before.1, !open_before)
+        }
 
-    #[inline]
-    pub fn drop(&mut self, element: NbtElement, y: &mut u32, parent_y: u32) -> DropFn {
+        if self.height() == 1 && *y < 24 && *y >= 16 && depth == target_depth {
+            let open_before = self.open;
+            let before = self.true_height();
+            self.open = true;
+            indices.push(self.len());
+            self.insert_full(self.len(), key.map(str::into_string).unwrap_or_else(|| "_".to_owned()), element);
+            return DropFn::Dropped(self.height - 1, self.true_height - before, !open_before)
+        }
+
         if *y < 16 {
-            *y = 0;
-            Ok(element)
+            return DropFn::Missed(key, element)
         } else {
             *y -= 16;
-            let mut child_y = parent_y + 1;
-            for (index, key) in self.keys.iter().enumerate() {
-                let value = self.entries.get_mut(key).expect("has key, has value");
-                if *y < value.height() * 16 + if (value.open() || value.len().filter(|&x| x == 0).is_some()) && value.can_accept(element.id()) { 8 } else { 0 } {
-                    let height = value.height();
-                    return Err(match value.drop(element, y, child_y) {
-                        Ok(element) => {
-                            self.drop_index(index as u32, "_".to_owned(), element);
-                            (height, Some((index as u32, parent_y)))
-                        },
-                        Err((increment, index)) => {
-                            self.increment(increment);
-                            (increment, index)
-                        }
-                    })
-                } else {
-                    *y -= value.height() * 16;
-                    child_y += value.height();
+        }
+
+        if self.open && !self.is_empty() {
+            indices.push(0);
+            let ptr = unsafe { &mut *indices.as_mut_ptr().add(indices.len() - 1) };
+            for (idx, (_, value)) in self.entries.iter_mut().enumerate() {
+                *ptr = idx;
+                let heights = (element.height(), element.true_height());
+                if *y < 8 && depth == target_depth {
+                    *y = 0;
+                    self.insert_full(idx, key.map(str::into_string).unwrap_or_else(|| "_".to_owned()), element);
+                    return DropFn::Dropped(heights.0, heights.1, false)
+                } else if *y >= value.height() * 16 - 8 && *y < value.height() * 16 && depth == target_depth {
+                    *y = 0;
+                    *ptr = idx + 1;
+                    self.insert_full(idx + 1, key.map(str::into_string).unwrap_or_else(|| "_".to_owned()), element);
+                    return DropFn::Dropped(heights.0, heights.1, false)
+                }
+
+                match value.drop(key, element, y, depth + 1, target_depth, indices) {
+                    x @ DropFn::InvalidType(_, _) => return x,
+                    DropFn::Missed(k, e) => {
+                        key = k;
+                        element = e;
+                    },
+                    DropFn::Dropped(increment, true_increment, opened) => {
+                        self.increment(increment, true_increment);
+                        return DropFn::Dropped(increment, true_increment, opened)
+                    }
                 }
             }
-            if *y < 8 {
-                let height = element.height();
-                self.drop_index(self.len() as u32, "_".to_owned(), element);
-                Err((height, Some((self.len() as u32 - 1, parent_y))))
+            indices.pop();
+        }
+        DropFn::Missed(key, element)
+    }
+
+    pub unsafe fn duplicate(&mut self, y: &mut usize, indices: &mut Vec<usize>) {
+        *y -= 1;
+        indices.push(0);
+        let ptr = unsafe { &mut *indices.as_mut_ptr().add(indices.len() - 1) };
+        for (idx, (key, element)) in self.entries.iter_mut().enumerate() {
+            *ptr = idx;
+            let heights = (element.height(), element.true_height());
+            if *y == 0 {
+                let element = element.clone();
+                let key = key.clone().into_string();
+                self.insert_full(idx + 1, key, element);
+                return
+            } else if *y < heights.0 {
+                element.duplicate(y, indices);
+                let heights2 = (element.height(), element.true_height());
+                self.increment(heights2.0 - heights.0, heights2.1 - heights.1);
+                return
             } else {
-                Err((0, None))
+                *y -= heights.0;
             }
         }
+        core::hint::unreachable_unchecked()
     }
 
-    #[inline]
-    pub fn delete(&mut self, y: &mut u32, depth: u32) -> DeleteFn {
+    pub unsafe fn drop_simple(&mut self, y: &mut usize, key: Option<Box<str>>, element: NbtElement, idx: usize, indices: &mut Vec<usize>) -> usize {
+        let heights = (element.height(), element.true_height());
         if *y == 0 {
-            Some(None)
-        } else {
-            let y_before = *y;
+            indices.push(idx);
+            let before = self.height();
+            self.insert_full(idx, key.unwrap_unchecked().into_string(), element);
+            return self.height - before
+        }
+
+        *y -= 1;
+        indices.push(0);
+        let ptr = unsafe { &mut *indices.as_mut_ptr().add(indices.len() - 1) };
+        for (jdx, (_, value)) in self.entries.iter_mut().enumerate() {
+            *ptr = jdx;
+            let vh = value.height();
+            if *y < vh {
+                let res = value.drop_simple(y, key, element, idx, indices);
+                self.increment(res, heights.1);
+                return self.open as usize * res
+            } else {
+                *y -= vh;
+            }
+        }
+        core::hint::unreachable_unchecked()
+    }
+
+    pub fn copy(&self, y: &mut usize, parent: Option<String>) {
+        if *y == 0 {
+            let _ = cli_clipboard::set_contents(format!("{}{self}", parent.map(|x| x + ":").unwrap_or(String::new())));
+        } else if *y < self.height() {
             *y -= 1;
-            if self.open {
-                for (index, key) in self.keys.iter().enumerate() {
-                    let element = self.entries.get_mut(key).expect("key has value");
-                    match element.delete(y, depth + 1) {
-                        None => {} // found nothing, not here, go to next element
-                        Some(None) => { // found something, i am the parent
-                            let key = Some(key.clone());
-                            let height = element.height();
-                            self.decrement(height);
-                            return Some(self.delete_index(index as u32).map(|x| (x, y_before, key, index as u32, depth + 1)))
-                        }
-                        x => { // found something deeper, throw to caller fn
-                            unsafe { self.decrement(x.as_ref().unwrap_unchecked().as_ref().unwrap_unchecked().0.height()); }
-                            return x;
-                        }
-                    }
+            for (key, element) in self.entries.iter() {
+                let height = element.height();
+                if *y < height {
+                    element.copy(y, Some(format!("{key:?}")));
+                    break
+                } else {
+                    *y -= height;
                 }
             }
-            None
+            unsafe { core::hint::unreachable_unchecked() }
         }
     }
 
-    #[inline]
-    pub fn left_click(&mut self, y: &mut u32, depth: u32, mouse_x: u32, index: u32, other_value: Option<String>) -> LeftClickFn {
+    pub fn toggle_fn(&mut self, y: &mut usize, target_depth: usize, depth: usize, indices: &mut Vec<usize>) -> ToggleFn {
         if *y == 0 {
-            if mouse_x / 16 == depth { // toggle button
-                let before = self.height();
+            if depth == target_depth {
                 self.toggle();
-                let change = self.height() as i32 - before as i32;
-                Some(Ok(change))
-            } else if mouse_x / 16 >= depth + 1 { // ooh probably a text selection
-                Some(Err((depth * 16 + 40, *y, index, None, mouse_x, other_value)))
-            } else { // too small to do anything
-                None
+                Ok((self.height - 1).wrapping_mul((self.open as usize * 2).wrapping_sub(1)))
+            } else {
+                Err(())
             }
         } else {
             *y -= 1;
-            if self.open {
-                for (index, key) in self.keys.iter().enumerate() {
-                    let element = self.entries.get_mut(key).expect("key has value");
-                    let key = key.clone();
-                    match element.left_click(y, depth + 1, mouse_x, index as u32, Some(key)) {
-                        None => {}, // next element
-                        Some(Ok(change)) => {
-                            if change < 0 {
-                                self.decrement(-change as u32);
-                            } else {
-                                self.increment(change as u32);
-                            }
-                            return Some(Ok(change))
-                        },
-                        x => return x
+            let depth = depth + 1;
+            indices.push(0);
+            let ptr = unsafe { &mut *indices.as_mut_ptr().add(indices.len() - 1) };
+            for (idx, (_, value)) in self.entries.iter_mut().enumerate() {
+                *ptr = idx;
+
+                let height = value.height();
+                if *y >= height {
+                    *y -= height;
+                    continue
+                } else if depth <= target_depth {
+                    return match value.toggle_fn(y, target_depth, depth, indices) {
+                        Ok(change) => {
+                            self.height = self.height.wrapping_add(change);
+                            Ok(change)
+                        }
+                        Err(()) => Err(()),
                     }
+                } else {
+                    return Err(())
                 }
             }
-            None
+            unsafe { core::hint::unreachable_unchecked() }
         }
+    }
+
+    pub unsafe fn try_select_text(&self, y: &mut usize, indices: &mut Vec<usize>) -> TrySelectTextFn {
+        *y -= 1;
+        indices.push(0);
+        let ptr = unsafe { &mut *indices.as_mut_ptr().add(indices.len() - 1) };
+        for (idx, (key, value)) in self.entries.iter().enumerate() {
+            *ptr = idx;
+
+            let height = value.height();
+            if *y >= height {
+                *y -= height;
+                continue
+            } else if *y == 0 {
+                return (Some((key.clone(), true)), Some(value.value()))
+            } else {
+                return value.try_select_text(y, indices)
+            }
+        }
+        core::hint::unreachable_unchecked()
+    }
+
+    pub unsafe fn delete(&mut self, y: &mut usize, indices: &mut Vec<usize>) -> DeleteFn {
+        *y -= 1;
+        indices.push(0);
+        let ptr = unsafe { &mut *indices.as_mut_ptr().add(indices.len() - 1) };
+        for (idx, (_, value)) in self.entries.iter_mut().enumerate() {
+            *ptr = idx;
+            let heights = (value.height(), value.true_height());
+            if *y >= heights.0 {
+                *y -= heights.0;
+                continue
+            } else if *y == 0 {
+                // SAFETY: lets stop playin' around, we know it exists
+                let (key, value) = unsafe { self.entries.shift_remove_index(idx).unwrap_unchecked() };
+                self.decrement(heights.0, heights.1);
+                return (Some(key), value, (heights.0 * self.open as usize, heights.1 * self.open as usize))
+            } else {
+                let mut res = value.delete(y, indices);
+                self.decrement(res.2.0, res.2.1);
+                res.2 = (res.2.0 * self.open as usize, res.2.1 * self.open as usize);
+                return res
+            }
+        }
+        unsafe { core::hint::unreachable_unchecked() }
+    }
+
+    pub fn steal(&mut self, y: &mut usize, depth: usize, target_depth: usize, indices: &mut Vec<usize>) -> StealFn {
+        *y -= 1;
+        if self.open {
+            indices.push(0);
+            let ptr = unsafe { &mut *indices.as_mut_ptr().add(indices.len() - 1) };
+            for (idx, (_, value)) in self.entries.iter_mut().enumerate() {
+                *ptr = idx;
+
+                let heights = (value.height(), value.true_height());
+                if *y >= heights.0 {
+                    *y -= heights.0;
+                    continue
+                } else if *y == 0 {
+                    return if depth + 1 == target_depth {
+                        // SAFETY: lets stop playin' around, we know it exists
+                        let (key, value) = unsafe { self.entries.shift_remove_index(idx).unwrap_unchecked() };
+                        self.decrement(heights.0, heights.1);
+                        Ok((Some(key), value, heights))
+                    } else {
+                        Err(())
+                    }
+                } else if let Ok((key, element, (decrement, true_decrement))) = value.steal(y, depth + 1, target_depth, indices) {
+                    self.decrement(decrement, true_decrement);
+                    return Ok((key, element, (decrement, true_decrement)))
+                } else {
+                    break
+                }
+            }
+            indices.pop();
+        }
+        Err(())
     }
 }
 
 #[inline]
-pub fn render_icon(x: u32, y: u32, builder: &mut VertexBufferBuilder) {
+pub fn render_icon(x: usize, y: usize, builder: &mut VertexBufferBuilder) {
     builder.draw_texture((x, y), COMPOUND_UV, (16, 16));
 }

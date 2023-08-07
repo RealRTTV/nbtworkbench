@@ -1,79 +1,88 @@
+use std::intrinsics::likely;
+
 pub struct Decoder {
-    data: *const u8,
-    remaining_len: usize
+    pub data: *const u8,
+    end: *const u8,
 }
 
 impl Decoder {
     #[inline]
     pub fn new(data: &[u8]) -> Decoder {
-        Decoder { remaining_len: data.len(), data: data.as_ptr() }
+        Decoder { end: unsafe { data.as_ptr().add(data.len()) }, data: data.as_ptr() }
     }
 
-    #[inline]
-    pub fn assert_len(&mut self, remaining_len: usize) {
-        if self.remaining_len < remaining_len {
-            panic!()
+    #[inline(always)]
+    pub fn assert_len(&mut self, remaining_len: usize) -> Option<()> {
+        if unsafe { likely((self.data.add(remaining_len) as usize) < self.end as usize) } {
+            Some(())
         } else {
-            self.remaining_len -= remaining_len;
+            None
         }
+    }
+
+    #[inline(always)]
+    pub unsafe fn read_bytes<const N: usize>(&mut self) -> Option<[u8; N]> {
+        let array = self.data.cast::<[u8; N]>().read();
+        self.data = self.data.add(N);
+        Some(array)
     }
 
     #[inline]
     pub unsafe fn u8(&mut self) -> u8 {
-        let val = *self.data;
+        let val = self.data.read();
         self.data = self.data.add(1);
         val
     }
 
     #[inline]
     pub unsafe fn u16(&mut self) -> u16 {
-        let val = (self.data as *const u16).read_unaligned();
+        let val = self.data.cast::<u16>().read_unaligned().to_be();
         self.data = self.data.add(2);
         val
     }
 
     #[inline]
     pub unsafe fn u32(&mut self) -> u32 {
-        let val = (self.data as *const u32).read_unaligned();
+        let val = self.data.cast::<u32>().read_unaligned().to_be();
         self.data = self.data.add(4);
         val
     }
 
     #[inline]
     pub unsafe fn u64(&mut self) -> u64 {
-        let val = (self.data as *const u64).read_unaligned();
-        self.data = self.data.add(4);
+        let val = self.data.cast::<u64>().read_unaligned().to_be();
+        self.data = self.data.add(8);
         val
     }
 
     #[inline]
     pub unsafe fn i8(&mut self) -> i8 {
-        *(&self.u8() as *const u8 as *const i8)
+        core::mem::transmute(self.u8())
     }
 
     #[inline]
     pub unsafe fn i16(&mut self) -> i16 {
-        *(&self.u16() as *const u16 as *const i16)
+        core::mem::transmute(self.u16())
     }
 
     #[inline]
     pub unsafe fn i32(&mut self) -> i32 {
-        *(&self.u32() as *const u32 as *const i32)
+        core::mem::transmute(self.u32())
     }
 
     #[inline]
     pub unsafe fn i64(&mut self) -> i64 {
-        *(&self.u64() as *const u64 as *const i64)
+        core::mem::transmute(self.u64())
     }
 
     #[inline]
     pub unsafe fn f32(&mut self) -> f32 {
-        *(&self.u32() as *const u32 as *const f32)
+        core::mem::transmute(self.u32())
     }
 
     #[inline]
     pub unsafe fn f64(&mut self) -> f64 {
-        *(&self.u64() as *const u64 as *const f64)
+        core::mem::transmute(self.u64())
     }
 
     #[inline]
@@ -82,36 +91,14 @@ impl Decoder {
     }
 
     #[inline]
-    pub unsafe fn string(&mut self) -> String {
-        let utflen = self.u16() as usize;
-        self.assert_len(utflen);
+    pub unsafe fn string(&mut self) -> Option<Box<str>> {
+        let len = self.u16() as usize;
+        self.assert_len(len)?;
 
-        let mut builder = String::with_capacity(utflen);
-
-        let mut i = 0;
-        while i < utflen {
-            let char = self.u8();
-            match char >> 4 {
-                0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 => builder.push(char as char),
-                12 | 13 => {
-                    let char2 = self.u8();
-                    builder.push(char::from_u32(((char as u32 & 0x1f) << 6) | (char2 as u32 & 0x3f)).unwrap()); // dont unwrap unchecked
-                    i += 1;
-                },
-                14 => {
-                    let char2 = self.u8();
-                    let char3 = self.u8();
-                    builder.push(char::from_u32(((char as u32 & 0x0f) << 12) | ((char2 as u32 & 0x3f) << 6) | (char3 as u32 & 0x3f)).unwrap()); // dont unwrap unchecked
-                    i += 2;
-                }
-                _ => {
-                    panic!();
-                }
-            }
-
-            i += 1;
-        }
-
-        builder
+        let mut str = String::with_capacity(len);
+        str.as_mut_ptr().cast::<u8>().copy_from_nonoverlapping(self.data, len);
+        str.as_mut_vec().set_len(len);
+        self.data = self.data.add(len);
+        Some(str.into_boxed_str())
     }
 }

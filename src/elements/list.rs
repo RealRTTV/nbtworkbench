@@ -1,36 +1,90 @@
+use std::fmt::{Display, Formatter, Write};
+use std::intrinsics::likely;
+
+use crate::{DeleteFn, DropFn, RenderContext, StealFn, ToggleFn, TrySelectTextFn, VertexBufferBuilder};
 use crate::assets::LIST_UV;
 use crate::decoder::Decoder;
-
 use crate::elements::element_type::NbtElement;
-use crate::encoder::{write_u32, write_u8};
-use crate::{DeleteFn, DropFn, LeftClickFn, VertexBufferBuilder};
 
+#[derive(Clone)]
 pub struct NbtList {
     elements: Vec<NbtElement>,
     element: u8,
     open: bool,
-    height: u32
+    height: usize,
+    true_height: usize,
 }
 
 impl NbtList {
-    #[inline]
-    pub fn from_bytes(decoder: &mut Decoder) -> Self {
-        unsafe {
-            decoder.assert_len(5);
-            let element = decoder.u8();
-            let length = decoder.u32() as usize;
-            let mut elements = Vec::with_capacity(length);
-            for _ in 0..length {
-                elements.push(NbtElement::from_bytes(element, decoder));
+    pub const ID: u8 = 9;
+
+    pub(in crate::elements) fn from_str0(mut s: &str) -> Option<(&str, Self)> {
+        s = s.strip_prefix('[')?.trim_start();
+        let mut elements = vec![];
+        let mut height = 1;
+        let mut true_height = 1;
+        let mut id = 0;
+        'a: {
+            if let Some(s2) = s.strip_prefix(']') {
+                s = s2;
+                break 'a
             }
-            NbtList::new(elements, element)
+            'b: loop {
+                let (s2, element) = NbtElement::from_str0(s)?;
+                if id == 0 {
+                    id = element.id();
+                } else if id != element.id() {
+                    return None // this vec ain't big enough for the two of us
+                }
+                height += element.height();
+                true_height += element.true_height();
+                elements.push(element);
+                s = s2.trim_start();
+                match s.strip_prefix(',') {
+                    Some(s2) => match s2.strip_prefix(']') {
+                        Some(s2) => {
+                            s = s2;
+                            break 'b
+                        },
+                        None => s = s2.trim_start(),
+                    },
+                    None => match s.strip_prefix(']') {
+                        Some(s2) => {
+                            s = s2;
+                            break 'b
+                        }
+                        None => {
+                            return None // no comma, and no ], wtf
+                        }
+                    }
+                }
+            }
+        }
+        Some((s, Self {
+            elements,
+            element: id,
+            open: false,
+            height,
+            true_height,
+        }))
+    }
+
+    pub fn from_bytes(decoder: &mut Decoder) -> Option<Self> {
+        unsafe {
+            decoder.assert_len(5)?;
+            let element = decoder.u8();
+            let len = decoder.u32() as usize;
+            let mut elements = Vec::with_capacity(len);
+            for _ in 0..len {
+                elements.push(NbtElement::from_bytes(element, decoder)?);
+            }
+            Some(NbtList::new(elements, element))
         }
     }
 
-    #[inline]
-    pub fn to_bytes(&self, writer: &mut Vec<u8>) {
-        write_u8(writer, self.element);
-        write_u32(writer, self.elements.len() as u32);
+    pub fn to_bytes<W: std::io::Write>(&self, writer: &mut W) {
+        let _ = writer.write(&[self.element]);
+        let _ = writer.write(&(self.len() as u32).to_be_bytes());
         for element in &self.elements {
             NbtElement::to_bytes(element, writer)
         }
@@ -40,21 +94,23 @@ impl NbtList {
 impl NbtList {
     #[inline]
     pub fn new(elements: Vec<NbtElement>, element: u8) -> Self {
-        NbtList { height: elements.iter().map(|x| x.height()).sum::<u32>() + 1, elements, element, open: false }
+        NbtList { height: elements.iter().map(NbtElement::height).sum::<usize>() + 1, true_height: elements.iter().map(NbtElement::true_height).sum::<usize>() + 1, elements, element, open: false }
     }
 
     #[inline]
-    pub fn increment(&mut self, amount: u32) {
+    pub fn increment(&mut self, amount: usize, true_amount: usize) {
         self.height += amount;
+        self.true_height += true_amount;
     }
 
     #[inline]
-    pub fn decrement(&mut self, amount: u32) {
+    pub fn decrement(&mut self, amount: usize, true_amount: usize) {
         self.height -= amount;
+        self.true_height -= true_amount;
     }
 
     #[inline]
-    pub fn height(&self) -> u32 {
+    pub fn height(&self) -> usize {
         if self.open {
             self.height
         } else {
@@ -63,21 +119,26 @@ impl NbtList {
     }
 
     #[inline]
+    pub fn true_height(&self) -> usize {
+        self.true_height
+    }
+
+    #[inline]
     pub fn id(&self) -> u8 {
         self.element
     }
 
     #[inline]
-    pub fn toggle(&mut self) -> bool {
+    pub fn toggle(&mut self) -> Option<()> {
         self.open = !self.open && !self.elements.is_empty();
-        true
+        Some(())
     }
 
     #[inline]
     pub fn open(&self) -> bool {
         self.open
     }
-    
+
     #[inline]
     pub fn len(&self) -> usize {
         self.elements.len()
@@ -87,219 +148,390 @@ impl NbtList {
     pub fn is_empty(&self) -> bool {
         self.elements.is_empty()
     }
+
+    #[inline]
+    pub fn insert(&mut self, idx: usize, value: NbtElement) -> Option<NbtElement> {
+        if self.element == value.id() || self.elements.is_empty() {
+            self.element = value.id();
+            self.increment(value.height(), value.true_height());
+            self.elements.insert(idx, value);
+            None
+        } else {
+            Some(value)
+        }
+    }
+
+    #[inline]
+    pub fn remove(&mut self, idx: usize) -> NbtElement {
+        let e = self.elements.remove(idx);
+        unsafe { std::intrinsics::assume(e.id() == self.element) }
+        e
+    }
+
+    #[inline]
+    pub fn get(&self, idx: usize) -> Option<&NbtElement> {
+        let e = self.elements.get(idx);
+        unsafe { std::intrinsics::assume(e.is_none() || e.as_ref().is_some_and(|x| x.id() == self.element)) }
+        e
+    }
+
+    #[inline]
+    pub fn get_mut(&mut self, idx: usize) -> Option<&mut NbtElement> {
+        let e = self.elements.get_mut(idx);
+        unsafe { std::intrinsics::assume(e.is_none() || e.as_ref().is_some_and(|x| x.id() == self.element)) }
+        e
+    }
 }
 
-impl ToString for NbtList {
-    fn to_string(&self) -> String {
-        let mut builder = String::with_capacity(self.elements.len() * 8); // i hope, i really hope
-        builder.push('[');
-        for i in 0..self.elements.len() {
-            builder.push_str(&self.elements[i].to_string());
-            if i < self.elements.len() - 1 {
-                builder.push_str(", ");
+impl Display for NbtList {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "[")?;
+        for (idx, element) in self.elements.iter().enumerate() {
+            write!(f, "{element}")?;
+            if likely(idx < self.len() - 1) {
+                write!(f, ",")?;
             }
         }
-        builder.push(']');
-        builder
+        write!(f, "]")
     }
 }
 
 impl NbtList {
     #[inline]
-    pub fn render(&self, builder: &mut VertexBufferBuilder, x_offset: &mut u32, y_offset: &mut u32, name: Option<&str>, remaining_scroll: &mut u32, tail: bool, forbidden_y: Option<u32>) {
-        let x_before = *x_offset - 16;
-        if *remaining_scroll >= 16 {
-            *remaining_scroll -= 16
-        } else {
+    pub fn render(&self, builder: &mut VertexBufferBuilder, x_offset: &mut usize, y_offset: &mut usize, name: Option<&str>, remaining_scroll: &mut usize, tail: bool, line_number: &mut usize, ctx: &RenderContext) {
+        let mut y_before = *y_offset;
+
+        'head: {
+            if *remaining_scroll > 0 {
+                *remaining_scroll -= 1;
+                *line_number += 1;
+                break 'head
+            }
+
+            ctx.line_number(*y_offset, line_number, builder);
             render_icon(*x_offset, *y_offset, builder);
-            if !self.elements.is_empty() {
-                builder.draw_texture((*x_offset - 16, *y_offset), (96 + if self.open { 0 } else { 16 }, 16), (16, 16));
+            ctx.highlight((*x_offset, *y_offset), builder);
+            if !self.is_empty() { builder.draw_texture((*x_offset - 16, *y_offset), (96 + self.open as usize * 16, 16), (16, 16)); }
+            if ctx.forbid(*y_offset) {
+                builder.settings(*x_offset + 20, *y_offset, true);
+                let _ = match name {
+                    Some(x) => write!(builder, "{x}: {n} {suffix}", n = self.len(), suffix = { if self.len() == 1 { "entry" } else { "entries" } }),
+                    None => write!(builder, "{n} {suffix}", n = self.len(), suffix = { if self.len() == 1 { "entry" } else { "entries" } }),
+                };
             }
-            if Some(*y_offset) != forbidden_y {
-                builder.draw_text(*x_offset + 20, *y_offset, &format!("{}{} entr{}", name.map(|x| format!("{}: ", x)).unwrap_or_else(|| "".to_owned()), self.elements.len(), if self.elements.len() == 1 { "y" } else { "ies" }), true);
+
+            if ctx.ghost(*x_offset + 16, *y_offset + 16, builder, |x, y| x == *x_offset + 16 && y == *y_offset + 8) {
+                builder.draw_texture((*x_offset, *y_offset + 16), (80, 16), (16, (self.height() != 1) as usize * 7 + 9));
+                if !tail { builder.draw_texture((*x_offset - 16, *y_offset + 16), (80, 16), (8, 16)); }
+                *y_offset += 16;
+            } else if self.height() == 1 && ctx.ghost(*x_offset + 16, *y_offset + 16, builder, |x, y| x == *x_offset + 16 && y == *y_offset + 16) {
+                builder.draw_texture((*x_offset, *y_offset + 16), (80, 16), (16, 9));
+                if !tail { builder.draw_texture((*x_offset - 16, *y_offset + 16), (80, 16), (8, 16)); }
+                *y_offset += 16;
             }
-            *y_offset += 16
+
+            *y_offset += 16;
+            y_before += 16;
         }
-        *x_offset += 16;
+
+        let x_before = *x_offset - 16;
+
         if self.open {
-            for (index, element) in self.elements.iter().enumerate() {
-                if *y_offset > builder.window_height() {
-                    break
+            *x_offset += 16;
+
+            for (idx, element) in self.elements.iter().enumerate() {
+                if *y_offset > builder.window_height() { break }
+
+                let height = element.height();
+                if *remaining_scroll >= height {
+                    *remaining_scroll -= height;
+                    *line_number += element.true_height();
+                    continue;
+                }
+
+                if ctx.ghost(*x_offset, *y_offset, builder, |x, y| *x_offset == x && *y_offset == y) {
+                    builder.draw_texture((*x_offset - 16, *y_offset), (80, 16), (16, 16));
+                    *y_offset += 16;
+                }
+
+                let ghost_tail_mod = if let Some((_, x, y)) = ctx.ghost && x == *x_offset && y == *y_offset + height * 16 - *remaining_scroll * 16 - 8 {
+                    false
                 } else {
-                    if *remaining_scroll >= element.height() * 16 {
-                        *remaining_scroll -= element.height() * 16;
-                        continue;
-                    }
+                    true
+                };
 
-                    if *remaining_scroll < 16 {
-                        builder.draw_texture((*x_offset - 16, *y_offset), (80, 16), (16, if index != self.elements.len() - 1 { 16 } else { 9 }));
-                    }
+                if *remaining_scroll == 0 { builder.draw_texture((*x_offset - 16, *y_offset), (80, 16), (16, (!(idx == self.len() - 1 && ghost_tail_mod)) as usize * 7 + 9)); }
+                element.render(x_offset, y_offset, remaining_scroll, builder, None, tail && idx == self.len() - 1 && ghost_tail_mod, line_number, ctx);
 
-                    if element.height() == 1 && *remaining_scroll >= 16 {
-                        *remaining_scroll -= 16;
-                    } else {
-                        let y_before = *y_offset;
-                        element.render(x_offset, y_offset, remaining_scroll, builder, None, tail && index == self.elements.len() - 1, forbidden_y);
-                        let difference = *y_offset - y_before;
-                        if !tail {
-                            for i in 0..difference / 16 {
-                                let y = y_before + i * 16;
-                                builder.draw_texture((x_before, y), (80, 16), (8, 16));
-                            }
-                        }
-                    }
+                if ctx.ghost(*x_offset, *y_offset, builder, |x, y| *x_offset == x && *y_offset - 8 == y) {
+                    builder.draw_texture((*x_offset - 16, *y_offset), (80, 16), (16, (idx != self.len() - 1) as usize * 7 + 9));
+                    *y_offset += 16;
                 }
             }
-        }
-        *x_offset -= 16;
-    }
 
-    pub fn stack<F: FnMut(&mut NbtElement, u32), G: FnOnce(&mut NbtElement, u32, u32)>(wrapped: &mut NbtElement, y: &mut u32, depth: &mut u32, index: u32, parent: &mut F, mut tail: G) -> Option<G> {
-        if *y == 0 {
-            tail(wrapped, *depth, index);
-            None
+            let difference = *y_offset - y_before;
+            if !tail {
+                for i in 0..difference / 16 {
+                    builder.draw_texture((x_before, y_before + i * 16), (80, 16), (8, 16));
+                }
+            }
+
+            *x_offset -= 16;
         } else {
-            *y -= 1;
-            let list = if let NbtElement::List(list) = wrapped { list } else { panic!() };
-            if list.open {
-                *depth += 1;
-                for (index, element) in list.elements.iter_mut().enumerate() {
-                    let x = element.stack(y, depth, index as u32, parent, tail);
-                    if let Some(x) = x {
-                        tail = x;
-                    } else {
-                        parent(wrapped, *y);
-                        return None;
-                    }
-                }
-                *depth -= 1;
-            }
-            Some(tail)
+            *line_number += self.true_height - 1;
         }
     }
 
     #[inline]
-    pub fn delete_index(&mut self, index: u32) -> Option<NbtElement> {
-        Some(self.elements.remove(index as usize))
+    pub fn child_height(&self, idx: usize) -> usize {
+        self.elements.get(idx).map(NbtElement::height).unwrap_or(0)
     }
 
-    #[inline]
-    pub fn child_height(&self, index: u32) -> u32 {
-        self.elements.get(index as usize).map(|x| x.height()).unwrap_or(0)
-    }
+    pub fn drop(&mut self, mut key: Option<Box<str>>, mut element: NbtElement, y: &mut usize, depth: usize, target_depth: usize, indices: &mut Vec<usize>) -> DropFn {
+        if *y < 16 && *y >= 8 && depth == target_depth {
+            let open_before = self.open;
+            let before = (self.height(), self.true_height());
+            indices.push(0);
+            if let Some(element) = self.insert(0, element) {
+                return DropFn::InvalidType(key, element)
+            }
+            self.open = true;
+            return DropFn::Dropped(self.height - before.0, self.true_height - before.1, !open_before)
+        } else if self.height() == 1 && *y < 24 && *y >= 16 && depth == target_depth {
+            let open_before = self.open;
+            let before = self.true_height();
+            indices.push(self.len());
+            if let Some(element) = self.insert(self.len(), element) {
+                // indices are never used
+                return DropFn::InvalidType(key, element)
+            }
+            self.open = true;
+            return DropFn::Dropped(self.height - 1, self.true_height - before, !open_before)
+        }
 
-    #[inline]
-    pub fn drop(&mut self, element: NbtElement, y: &mut u32, parent_y: u32) -> DropFn {
         if *y < 16 {
-            *y = 0;
-            Ok(element)
+            return DropFn::Missed(key, element)
         } else {
             *y -= 16;
-            let mut child_y = parent_y + 1;
-            for (index, value) in self.elements.iter_mut().enumerate() {
-                if *y < value.height() * 16 + if (value.open() || value.len().filter(|&x| x == 0).is_some()) && value.can_accept(element.id()) { 16 } else { 0 } {
-                    let height = element.height();
-                    return Err(match value.drop(element, y, child_y) {
-                        Ok(element) => {
-                            self.drop_index(index as u32, element);
-                            (height, Some((index as u32, parent_y)))
-                        },
-                        Err((increment, index)) => {
-                            self.increment(increment);
-                            (increment, index)
-                        }
-                    })
-                } else {
-                    *y -= value.height() * 16;
-                    child_y += value.height();
+        }
+
+        if self.open && !self.is_empty() {
+            indices.push(0);
+            let ptr = unsafe { &mut *indices.as_mut_ptr().add(indices.len() - 1) };
+            for (idx, value) in self.elements.iter_mut().enumerate() {
+                *ptr = idx;
+                let heights = (element.height(), element.true_height());
+                if *y < 8 && depth == target_depth {
+                    if let Some(element) = self.insert(idx, element) {
+                        return DropFn::InvalidType(key, element)
+                    }
+                    return DropFn::Dropped(heights.0, heights.1, false)
+                } else if *y >= value.height() * 16 - 8 && *y < value.height() * 16 && depth == target_depth {
+                    *ptr = idx + 1;
+                    if let Some(element) = self.insert(idx + 1, element) {
+                        return DropFn::InvalidType(key, element)
+                    }
+                    return DropFn::Dropped(heights.0, heights.1, false)
+                }
+
+                match value.drop(key, element, y, depth + 1, target_depth, indices) {
+                    x @ DropFn::InvalidType(_, _) => return x,
+                    DropFn::Missed(k, e) => {
+                        key = k;
+                        element = e;
+                    },
+                    DropFn::Dropped(increment, true_increment, opened) => {
+                        self.increment(increment, true_increment);
+                        return DropFn::Dropped(increment, true_increment, opened)
+                    }
                 }
             }
-            if *y < 8 {
-                let height = element.height();
-                self.drop_index(self.len() as u32, element);
-                Err((height, Some((self.len() as u32 - 1, parent_y))))
+            indices.pop();
+        }
+        DropFn::Missed(key, element)
+    }
+
+    pub unsafe fn duplicate(&mut self, y: &mut usize, indices: &mut Vec<usize>) {
+        *y -= 1;
+        indices.push(0);
+        let ptr = unsafe { &mut *indices.as_mut_ptr().add(indices.len() - 1) };
+        for (idx, element) in self.elements.iter_mut().enumerate() {
+            *ptr = idx;
+            let heights = (element.height(), element.true_height());
+            if *y == 0 {
+                let element = element.clone();
+                self.elements.insert(idx + 1, element);
+                self.increment(heights.0, heights.1);
+                return
+            } else if *y < heights.0 {
+                element.duplicate(y, indices);
+                let heights2 = (element.height(), element.true_height());
+                self.increment(heights2.0 - heights.0, heights2.1 - heights.1);
+                return
             } else {
-                Err((0, None))
+                *y -= heights.0;
             }
         }
+        core::hint::unreachable_unchecked()
     }
 
-    #[inline]
-    pub fn delete(&mut self, y: &mut u32, depth: u32) -> DeleteFn {
+    pub unsafe fn drop_simple(&mut self, y: &mut usize, key: Option<Box<str>>, element: NbtElement, idx: usize, indices: &mut Vec<usize>) -> usize {
+        let heights = (element.height(), element.true_height());
         if *y == 0 {
-            Some(None)
-        } else {
-            let y_before = *y;
+            indices.push(idx);
+            self.increment(heights.0, heights.1);
+            self.insert(idx, element);
+            return self.open as usize * heights.0;
+        }
+        *y -= 1;
+        indices.push(0);
+        let ptr = unsafe { &mut *indices.as_mut_ptr().add(indices.len() - 1) };
+        for (jdx, value) in self.elements.iter_mut().enumerate() {
+            *ptr = jdx;
+            let vh = value.height();
+            if *y < vh {
+                let res = value.drop_simple(y, key, element, idx, indices);
+                self.increment(res, heights.1);
+                return self.open as usize * res
+            } else {
+                *y -= vh;
+            }
+        }
+        core::hint::unreachable_unchecked()
+    }
+
+    // no need for open checks
+    pub fn copy(&self, y: &mut usize, parent: Option<String>) {
+        if *y == 0 {
+            let _ = cli_clipboard::set_contents(format!("{}{self}", parent.map(|x| x + ":").unwrap_or(String::new())));
+        } else if *y < self.height() {
             *y -= 1;
-            if self.open {
-                for (index, element) in self.elements.iter_mut().enumerate() {
-                    match element.delete(y, depth + 1) {
-                        None => {} // found nothing, not here, go to next element
-                        Some(None) => { // found something, i am the parent
-                            let height = element.height();
-                            self.decrement(height);
-                            return Some(self.delete_index(index as u32).map(|x| (x, y_before, None, index as u32, depth + 1)))
-                        }
-                        x => { // found something deeper, throw to caller fn
-                            unsafe { self.decrement(x.as_ref().unwrap_unchecked().as_ref().unwrap_unchecked().0.height()); }
-                            return x;
-                        }
-                    }
+            for element in &self.elements {
+                let height = element.height();
+                if *y < height {
+                    element.copy(y, None);
+                    break
+                } else {
+                    *y -= height;
                 }
             }
-            None
         }
     }
 
-    #[inline]
-    pub fn drop_index(&mut self, index: u32, other: NbtElement) -> bool {
-        if self.element == other.id() || self.elements.is_empty() {
-            self.element = other.id();
-            self.elements.insert(index as usize, other);
-            self.increment(1);
-            true
-        } else {
-            false
-        }
-    }
-
-    #[inline]
-    pub fn left_click(&mut self, y: &mut u32, depth: u32, mouse_x: u32, index: u32, other_value: Option<String>) -> LeftClickFn {
+    pub fn toggle_fn(&mut self, y: &mut usize, target_depth: usize, depth: usize, indices: &mut Vec<usize>) -> ToggleFn {
         if *y == 0 {
-            if mouse_x / 16 == depth { // toggle button
-                let before = self.height();
+            if depth == target_depth {
                 self.toggle();
-                let change = self.height() as i32 - before as i32;
-                Some(Ok(change))
-            } else if mouse_x / 16 >= depth + 1 { // ooh probably a text selection
-                Some(Err((depth * 16 + 40, *y, index, None, mouse_x, other_value)))
-            } else { // too small to do anything
-                None
+                Ok((self.height - 1).wrapping_mul((self.open as usize * 2).wrapping_sub(1)))
+            } else {
+                Err(())
             }
-        } else {
+        } else if self.open {
             *y -= 1;
-            if self.open {
-                for (index, element) in self.elements.iter_mut().enumerate() {
-                    match element.left_click(y, depth + 1, mouse_x, index as u32, None) {
-                        None => {}, // next element
-                        Some(Ok(change)) => {
-                            if change < 0 {
-                                self.decrement(-change as u32);
-                            } else {
-                                self.increment(change as u32);
-                            }
-                            return Some(Ok(change))
-                        },
-                        x => return x
+            let depth = depth + 1;
+            indices.push(0);
+            let ptr = unsafe { &mut *indices.as_mut_ptr().add(indices.len() - 1) };
+            for (idx, value) in self.elements.iter_mut().enumerate() {
+                *ptr = idx;
+
+                let height = value.height();
+                if *y >= height {
+                    *y -= height;
+                    continue
+                } else if depth <= target_depth {
+                    return match value.toggle_fn(y, target_depth, depth, indices) {
+                        Ok(change) => {
+                            self.height = self.height.wrapping_add(change);
+                            Ok(change)
+                        }
+                        Err(()) => Err(()),
                     }
+                } else {
+                    return Err(())
                 }
             }
-            None
+            Err(())
+        } else {
+            Err(())
         }
+    }
+
+    pub unsafe fn delete(&mut self, y: &mut usize, indices: &mut Vec<usize>) -> DeleteFn {
+        *y -= 1;
+        indices.push(0);
+        let ptr = unsafe { &mut *indices.as_mut_ptr().add(indices.len() - 1) };
+        for (idx, value) in self.elements.iter_mut().enumerate() {
+            *ptr = idx;
+            let heights = (value.height(), value.true_height());
+            if *y >= heights.0 {
+                *y -= heights.0;
+                continue
+            } else if *y == 0 {
+                self.decrement(heights.0, heights.1);
+                return (None, self.elements.remove(idx), (heights.0 * self.open as usize, heights.1 * self.open as usize))
+            } else {
+                let mut res = value.delete(y, indices);
+                self.decrement(res.2.0, res.2.1);
+                res.2 = (res.2.0 * self.open as usize, res.2.1 * self.open as usize);
+                return res
+            }
+        }
+        core::hint::unreachable_unchecked()
+    }
+
+    pub fn steal(&mut self, y: &mut usize, depth: usize, target_depth: usize, indices: &mut Vec<usize>) -> StealFn {
+        *y -= 1;
+        if self.open {
+            indices.push(0);
+            let ptr = unsafe { &mut *indices.as_mut_ptr().add(indices.len() - 1) };
+            for (idx, value) in self.elements.iter_mut().enumerate() {
+                *ptr = idx;
+
+                let heights = (value.height(), value.true_height());
+                if *y >= heights.0 {
+                    *y -= heights.0;
+                    continue
+                } else if *y == 0 {
+                    if depth + 1 == target_depth {
+                        self.decrement(heights.0, heights.1);
+                        return Ok((None, self.elements.remove(idx), heights))
+                    } else {
+                        return Err(())
+                    }
+                } else if let Ok((key, element, (decrement, true_decrement))) = value.steal(y, depth + 1, target_depth, indices) {
+                    self.decrement(decrement, true_decrement);
+                    return Ok((key, element, (decrement, true_decrement)))
+                } else {
+                    break
+                }
+            }
+            indices.pop();
+        }
+        Err(())
+    }
+
+    pub unsafe fn try_select_text(&self, y: &mut usize, indices: &mut Vec<usize>) -> TrySelectTextFn {
+        *y -= 1;
+        indices.push(0);
+        let ptr = unsafe { &mut *indices.as_mut_ptr().add(indices.len() - 1) };
+        for (idx, value) in self.elements.iter().enumerate() {
+            *ptr = idx;
+
+            let height = value.height();
+            if *y >= height {
+                *y -= height;
+                continue
+            } else if *y == 0 {
+                return (None, Some(value.value()))
+            } else {
+                return value.try_select_text(y, indices)
+            }
+        }
+        core::hint::unreachable_unchecked()
     }
 }
 
 #[inline]
-pub fn render_icon(x: u32, y: u32, builder: &mut VertexBufferBuilder) {
+pub fn render_icon(x: usize, y: usize, builder: &mut VertexBufferBuilder) {
     builder.draw_texture((x, y), LIST_UV, (16, 16));
 }

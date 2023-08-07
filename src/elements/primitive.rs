@@ -1,45 +1,67 @@
-use std::fmt::Display;
-use std::io::Write;
-use std::str::FromStr;
-use crate::VertexBufferBuilder;
-
-#[repr(transparent)]
-pub struct NbtPrimitive<T: FromStr + ToString + Display, const U: u32, const V: u32> {
-    pub value: T
-}
-
-impl<T: FromStr + ToString + Display, const U: u32, const V: u32> NbtPrimitive<T, U, V> {
-    #[inline]
-    pub fn to_bytes(&self, writer: &mut Vec<u8>) where [(); std::mem::size_of::<T>()]: {
-        unsafe {
-            drop(writer.write(&*(&self.value as *const T as *const [u8; std::mem::size_of::<T>()])));
+#[macro_export]
+macro_rules! primitive {
+    (($u:literal $v:literal), $s:expr, $name:ident, $t:ty, $id:literal) => {
+        #[derive(Clone, Default)]
+        #[repr(transparent)]
+        pub struct $name {
+            pub value: $t
         }
-    }
 
-    #[inline]
-    pub fn set(&mut self, option: Option<T>) {
-        if let Some(t) = option {
-            self.value = t
+        impl $name {
+            pub const ID: u8 = $id;
+
+            #[inline]
+            pub fn to_bytes<W: std::io::Write>(&self, writer: &mut W) {
+                let _ = std::io::Write::write(writer, self.value.to_be_bytes().as_ref());
+            }
+
+            #[inline]
+            pub fn from_bytes(decoder: &mut Decoder) -> Option<Self> {
+                unsafe {
+                    decoder.assert_len(core::mem::size_of::<$t>())?;
+                    Some(Self {
+                        value: <$t>::from_be_bytes(decoder.read_bytes::<{ core::mem::size_of::<$t>() }>()?)
+                    })
+                }
+            }
+
+            #[inline]
+            pub fn set(&mut self, option: Option<$t>) {
+                if let Some(t) = option {
+                    self.value = t;
+                }
+            }
+
+            #[inline]
+            pub fn render(&self, builder: &mut VertexBufferBuilder, x_offset: &mut usize, y_offset: &mut usize, name: Option<&str>, line_number: &mut usize, ctx: &RenderContext) {
+                ctx.line_number(*y_offset, line_number, builder);
+                Self::render_icon(*x_offset, *y_offset, builder);
+                ctx.highlight((*x_offset, *y_offset), builder);
+                if ctx.forbid(*y_offset) {
+                    builder.settings(*x_offset + 20, *y_offset, true);
+                    let _ = match name {
+                        Some(x) => write!(builder, "{x}: {}", self.value),
+                        None => write!(builder, "{}", self.value),
+                    };
+                }
+
+                *y_offset += 16;
+            }
+
+            #[inline]
+            pub fn render_icon(x: usize, y: usize, builder: &mut VertexBufferBuilder) {
+                builder.draw_texture((x, y), ($u, $v), (16, 16));
+            }
         }
-    }
 
-    #[inline]
-    pub fn render(&self, builder: &mut VertexBufferBuilder, x_offset: &mut u32, y_offset: &mut u32, name: Option<&str>, forbidden_y: Option<u32>) {
-        Self::render_icon(*x_offset, *y_offset, builder);
-        if Some(*y_offset) != forbidden_y {
-            builder.draw_text(*x_offset + 20, *y_offset, &name.map(|x| format!("{}: {}", x, self.value)).unwrap_or_else(|| self.value.to_string()), true);
+        impl Display for $name {
+            fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+                write!(f, "{}", self.value)?;
+                if let Some(s) = $s {
+                    write!(f, "{s}")?;
+                }
+                Ok(())
+            }
         }
-        *y_offset += 16;
-    }
-
-    #[inline]
-    pub fn render_icon(x: u32, y: u32, builder: &mut VertexBufferBuilder) {
-        builder.draw_texture((x, y), (U, V), (16, 16));
-    }
-}
-
-impl<T: FromStr + ToString + Display, const U: u32, const V: u32> ToString for NbtPrimitive<T, U, V> {
-    fn to_string(&self) -> String {
-        self.value.to_string()
-    }
+    };
 }

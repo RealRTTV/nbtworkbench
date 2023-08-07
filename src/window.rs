@@ -1,4 +1,4 @@
-use std::num::{NonZeroU32, NonZeroU64};
+use std::num::NonZeroU64;
 
 use wgpu::*;
 use wgpu::util::{BufferInitDescriptor, DeviceExt};
@@ -11,26 +11,32 @@ use winit::window::{Icon, Window, WindowBuilder};
 use crate::{assets, NbtWorkbench};
 use crate::vertex_buffer_builder::VertexBufferBuilder;
 
+pub const WINDOW_HEIGHT: usize = 420;
+
 pub async fn run() {
     let event_loop = EventLoop::new();
     let window = WindowBuilder::new()
-                         .with_title("NBT Workbench")
-                         .with_transparent(false)
-                         .with_inner_size(PhysicalSize::new(620, 420))
-                         .with_window_icon(Some(Icon::from_rgba(assets::icon(), assets::ICON_WIDTH, assets::ICON_HEIGHT).expect("valid format")))
-                         .with_drag_and_drop(true)
-                         .build(&event_loop)
-                         .unwrap();
+        .with_title("NBT Workbench")
+        .with_transparent(false)
+        .with_inner_size(PhysicalSize::new(620, WINDOW_HEIGHT as u32))
+        .with_window_icon(Some(Icon::from_rgba(assets::icon(), assets::ICON_WIDTH as u32, assets::ICON_HEIGHT as u32).expect("valid format")))
+        .with_drag_and_drop(true)
+        .build(&event_loop)
+        .unwrap();
     let mut state = State::new(&window).await;
     let mut workbench = NbtWorkbench::new();
 
     event_loop.run(move |event, _, control_flow| match event {
         Event::RedrawRequested(window_id) if window_id == window.id() => {
-            match state.render(&mut workbench) {
-                Ok(_) => {},
+            match state.render(&workbench) {
+                Ok(()) => {},
                 Err(SurfaceError::Lost) => state.surface.configure(&state.device, &state.config),
                 Err(SurfaceError::OutOfMemory) => *control_flow = ControlFlow::ExitWithCode(1),
-                Err(e) => eprintln!("{:?}", e)
+                Err(SurfaceError::Timeout) => eprintln!("Frame took too long to process"),
+                Err(SurfaceError::Outdated) => {
+                    eprintln!("Surface changed unexpectedly");
+                    *control_flow = ControlFlow::ExitWithCode(1)
+                },
             }
         },
         Event::WindowEvent { ref event, window_id, } if window_id == window.id() => {
@@ -64,36 +70,40 @@ struct State {
 impl State {
     async fn new(window: &Window) -> Self {
         let size = window.inner_size();
-        let instance = Instance::new(Backends::all());
-        let surface = unsafe { instance.create_surface(window) };
+        let instance = Instance::new(InstanceDescriptor {
+            backends: Backends::all(),
+            dx12_shader_compiler: Default::default(),
+        });
+        let surface = unsafe { instance.create_surface(window).unwrap() };
         let adapter = instance.request_adapter(&RequestAdapterOptions {
             power_preference: PowerPreference::LowPower,
             force_fallback_adapter: false,
             compatible_surface: Some(&surface)
         }).await.unwrap();
         let (device, queue) = adapter.request_device(&DeviceDescriptor {
-                features: Features::empty(),
-                limits: if cfg!(target_arch = "wasm32") {
-                    Limits::downlevel_webgl2_defaults()
-                } else {
-                    Limits::default()
-                },
-                label: None
+            features: adapter.features(),
+            limits: if cfg!(target_arch = "wasm32") {
+                Limits::downlevel_webgl2_defaults()
+            } else {
+                Limits::default()
             },
-            None
+            label: None
+        },
+                                                     None
         ).await.unwrap();
         let config = SurfaceConfiguration {
             usage: TextureUsages::RENDER_ATTACHMENT,
-            format: surface.get_supported_formats(&adapter)[0],
+            format: surface.get_capabilities(&adapter).formats[0],
             width: size.width,
             height: size.height,
-            present_mode: PresentMode::Immediate,
-            alpha_mode: CompositeAlphaMode::Auto
+            present_mode: PresentMode::AutoVsync,
+            alpha_mode: CompositeAlphaMode::Auto,
+            view_formats: vec![],
         };
         surface.configure(&device, &config);
         let texture_size = Extent3d {
-            width: assets::ATLAS_WIDTH,
-            height: assets::ATLAS_HEIGHT,
+            width: assets::ATLAS_WIDTH as u32,
+            height: assets::ATLAS_HEIGHT as u32,
             depth_or_array_layers: 1,
         };
         let diffuse_texture = device.create_texture(
@@ -105,6 +115,7 @@ impl State {
                 format: TextureFormat::Rgba8UnormSrgb,
                 usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
                 label: Some("Diffuse Texture"),
+                view_formats: &[],
             }
         );
         queue.write_texture(
@@ -117,8 +128,8 @@ impl State {
             assets::ATLAS,
             ImageDataLayout {
                 offset: 0,
-                bytes_per_row: NonZeroU32::new(4 * assets::ATLAS_WIDTH),
-                rows_per_image: NonZeroU32::new(assets::ATLAS_HEIGHT)
+                bytes_per_row: Some(4 * assets::ATLAS_WIDTH as u32),
+                rows_per_image: Some(assets::ATLAS_HEIGHT as u32),
             },
             texture_size
         );
@@ -310,17 +321,24 @@ impl State {
             self.config.width = new_size.width;
             self.config.height = new_size.height;
             self.surface.configure(&self.device, &self.config);
-            workbench.window_height(new_size.height);
+            workbench.window_height(new_size.height as usize);
         }
     }
 
     fn input(&mut self, event: &WindowEvent, workbench: &mut NbtWorkbench) -> bool {
         match event {
-            WindowEvent::Resized(_) => false,
+            WindowEvent::Resized(size) => {
+                workbench.window_height = size.height as usize;
+                for entry in workbench.tabs.iter_mut() {
+                    entry.window_height = workbench.window_height;
+                    entry.scroll = entry.scroll();
+                }
+                false
+            },
             WindowEvent::Moved(_) => false,
             WindowEvent::CloseRequested => false,
             WindowEvent::Destroyed => false,
-            WindowEvent::DroppedFile(file) => workbench.on_open_file(file),
+            WindowEvent::DroppedFile(file) => workbench.on_open_file(file).is_some(),
             WindowEvent::HoveredFile(_) => false,
             WindowEvent::HoveredFileCancelled => false,
             WindowEvent::ReceivedCharacter(_) => false,
@@ -338,11 +356,14 @@ impl State {
             WindowEvent::ScaleFactorChanged { .. } => false,
             WindowEvent::ThemeChanged(_) => false,
             WindowEvent::Ime(_) => false,
-            WindowEvent::Occluded(_) => false
+            WindowEvent::Occluded(_) => false,
+            WindowEvent::TouchpadMagnify { .. } => false,
+            WindowEvent::SmartMagnify { .. } => false,
+            WindowEvent::TouchpadRotate { .. } => false,
         }
     }
 
-    fn render(&mut self, workbench: &mut NbtWorkbench) -> Result<(), SurfaceError> {
+    fn render(&mut self, workbench: &NbtWorkbench) -> Result<(), SurfaceError> {
         let output = self.surface.get_current_texture()?;
         let view = output.texture.create_view(&TextureViewDescriptor::default());
         let mut encoder = self.device.create_command_encoder(&CommandEncoderDescriptor {
