@@ -15,6 +15,7 @@ use crate::vertex_buffer_builder::VertexBufferBuilder;
 use crate::{assets, NbtWorkbench};
 
 pub const WINDOW_HEIGHT: usize = 420;
+pub const WINDOW_WIDTH: usize = 620;
 
 pub async fn run() -> ! {
 	let event_loop = EventLoop::new();
@@ -22,7 +23,7 @@ pub async fn run() -> ! {
 		.with_title("NBT Workbench")
 		.with_transparent(std::env::args().any(|x| x.eq("--transparent")))
 		.with_inner_size(PhysicalSize::new(300, WINDOW_HEIGHT as u32))
-		.with_min_inner_size(PhysicalSize::new(620, (HEADER_SIZE + 16) as u32))
+		.with_min_inner_size(PhysicalSize::new(WINDOW_WIDTH as u32, (HEADER_SIZE + 16) as u32))
 		.with_window_icon(Some(Icon::from_rgba(assets::icon(), assets::ICON_WIDTH as u32, assets::ICON_HEIGHT as u32).expect("valid format")))
 		.with_drag_and_drop(true)
 		.build(&event_loop)
@@ -328,6 +329,7 @@ impl State {
 			self.config.height = new_size.height;
 			self.surface.configure(&self.device, &self.config);
 			workbench.window_height(new_size.height as usize);
+			workbench.window_width(new_size.width as usize);
 		}
 	}
 

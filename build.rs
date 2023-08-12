@@ -5,7 +5,7 @@ use std::fs::write;
 use std::mem::MaybeUninit;
 
 const UNICODE: &[u8] = include_bytes!("src/assets/unicode.hex");
-const ATLAS: &[u8] = include_bytes!(r"src\assets\atlas.png");
+const ATLAS: &[u8] = include_bytes!(r"src/assets/atlas.png");
 
 #[allow(unused_variables)] // intellij being freaky
 fn main() {
@@ -40,5 +40,7 @@ fn main() {
 		{
 			panic!("{e}");
 		}
+
+		println!("cargo:rustc-link-arg=/STACK:10485760")
 	}
 }
