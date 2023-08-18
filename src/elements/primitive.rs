@@ -1,6 +1,6 @@
 #[macro_export]
 macro_rules! primitive {
-	(($u:literal $v:literal), $s:expr, $name:ident, $t:ty, $id:literal) => {
+	($uv:ident, $s:expr, $name:ident, $t:ty, $id:literal) => {
 		#[derive(Clone, Default)]
 		#[repr(transparent)]
 		pub struct $name {
@@ -55,7 +55,7 @@ macro_rules! primitive {
 
 			#[inline]
 			pub fn render_icon(x: usize, y: usize, builder: &mut VertexBufferBuilder) {
-				builder.draw_texture((x, y), ($u, $v), (16, 16));
+				builder.draw_texture((x, y), $uv, (16, 16));
 			}
 		}
 

@@ -1,3 +1,4 @@
+use std::ops::BitAnd;
 use winit::dpi::PhysicalSize;
 
 use crate::assets;
@@ -17,7 +18,7 @@ pub struct VertexBufferBuilder {
 	pub horizontal_scroll: usize,
 	pub text_coords: (usize, usize),
 	dropshadow: bool,
-	pub color: usize,
+	pub color: u32,
 	two_over_width: f32,
 	negative_two_over_height: f32,
 }
@@ -27,14 +28,14 @@ impl core::fmt::Write for VertexBufferBuilder {
 		let (mut x, y) = self.text_coords;
 		x += text
 			.chars()
-			.fold(0, |offset, char| offset + if (char as u32) < 56832 { self.draw_char(char as u16, x + offset, y, 0.0) } else { 0 });
+			.fold(0, |offset, char| offset + if (char as u32) < 56832 { self.draw_char(char as u16, x + offset, y, 0) } else { 0 });
 		self.text_coords = (x, y);
 		Ok(())
 	}
 
 	fn write_char(&mut self, c: char) -> std::fmt::Result {
 		if (c as u32) < 56832 {
-			self.text_coords.0 += self.draw_char(c as u16, self.text_coords.0, self.text_coords.1, 0.0);
+			self.text_coords.0 += self.draw_char(c as u16, self.text_coords.0, self.text_coords.1, 0);
 		}
 		Ok(())
 	}
@@ -59,7 +60,7 @@ impl VertexBufferBuilder {
 			horizontal_scroll: 0,
 			text_coords: (0, 0),
 			dropshadow: false,
-			color: 0xFF,
+			color: 0xFFFFFF,
 			two_over_width: 2.0 / size.width as f32,
 			negative_two_over_height: -2.0 / size.height as f32,
 		}
@@ -93,21 +94,25 @@ impl VertexBufferBuilder {
 	}
 
 	#[inline]
-	fn draw_char(&mut self, c: u16, x: usize, y: usize, z: f32) -> usize {
+	fn draw_char(&mut self, c: u16, x: usize, y: usize, z: u8) -> usize {
 		if self.dropshadow {
-			self.draw_unicode_z_color(x + 1, y + 1, z, c, (self.color * 21 / 85) as u8);
+			self.draw_unicode_z_color(x + 1, y + 1, z, c, {
+				self.color.wrapping_shr(16).bitand(0xFF).wrapping_mul(21).wrapping_div(85).wrapping_shl(16)
+					| self.color.wrapping_shr(8).bitand(0xFF).wrapping_mul(21).wrapping_div(85).wrapping_shl(8)
+					| self.color.wrapping_shr(0).bitand(0xFF).wrapping_mul(21).wrapping_div(85).wrapping_shl(0)
+			});
 		}
-		self.draw_unicode_z_color(x, y, z, c, self.color as u8);
+		self.draw_unicode_z_color(x, y, z, c, self.color & 0xFFFFFF);
 		Self::CHAR_WIDTH[c as usize] as usize
 	}
 
 	#[inline]
-	pub fn draw_unicode_z_color(&mut self, x: usize, y: usize, z: f32, char: u16, color: u8) {
+	pub fn draw_unicode_z_color(&mut self, x: usize, y: usize, z: u8, char: u16, color: u32) {
 		unsafe {
 			let x = (x as isize - self.horizontal_scroll as isize) as f32;
 			let y = y as f32;
-			let z = z;
-			let char = *(&((char as u32) | ((color as u32) << 24)) as *const u32).cast::<f32>();
+			let z_and_color = f32::from_bits(z as u32 | (color << 8));
+			let char = f32::from_bits(char as u32);
 
 			let x0 = x.mul_add(self.two_over_width, -1.0);
 			let x1 = self.two_over_width.mul_add(16.0, x0);
@@ -122,22 +127,22 @@ impl VertexBufferBuilder {
 			// top left, 0 -> 1.0, 0.0
 			*ptr = x1;
 			*(ptr.add(1)) = y1;
-			*(ptr.add(2)) = z;
+			*(ptr.add(2)) = z_and_color;
 			*(ptr.add(3)) = char;
 			// top right, 1 -> 0.0, 0.0
 			*(ptr.add(4)) = x0;
 			*(ptr.add(5)) = y1;
-			*(ptr.add(6)) = z;
+			*(ptr.add(6)) = z_and_color;
 			*(ptr.add(7)) = char;
 			// bottom left, 2 -> 0.0, 1.0
 			*(ptr.add(8)) = x0;
 			*(ptr.add(9)) = y0;
-			*(ptr.add(10)) = z;
+			*(ptr.add(10)) = z_and_color;
 			*(ptr.add(11)) = char;
 			// bottom right, 3 -> 1.0, 1.0
 			*(ptr.add(12)) = x1;
 			*(ptr.add(13)) = y0;
-			*(ptr.add(14)) = z;
+			*(ptr.add(14)) = z_and_color;
 			*(ptr.add(15)) = char;
 
 			vec.set_len(vertices_len + 16);
@@ -205,19 +210,24 @@ impl VertexBufferBuilder {
 	}
 
 	#[inline]
-	pub fn draw_texture(&mut self, pos: (usize, usize), uv: (usize, usize), dims: (usize, usize)) {
+	pub fn draw_texture(&mut self, pos: impl Into<(usize, usize)>, uv: impl Into<(usize, usize)>, dims: impl Into<(usize, usize)>) {
 		self.draw_texture_z(pos, 0.0, uv, dims);
 	}
 
 	#[inline]
-	pub fn draw_texture_z(&mut self, pos: (usize, usize), z: f32, uv: (usize, usize), dims: (usize, usize)) {
+	pub fn draw_texture_z(&mut self, pos: impl Into<(usize, usize)>, z: f32, uv: impl Into<(usize, usize)>, dims: impl Into<(usize, usize)>) {
+		let dims = dims.into();
 		self.draw_texture_region_z(pos, z, uv, dims, dims);
 	}
 
 	#[inline]
 	#[allow(clippy::many_single_char_names)]
-	pub fn draw_texture_region_z(&mut self, pos: (usize, usize), z: f32, uv: (usize, usize), dims: (usize, usize), uv_dims: (usize, usize)) {
+	pub fn draw_texture_region_z(&mut self, pos: impl Into<(usize, usize)>, z: f32, uv: impl Into<(usize, usize)>, dims: impl Into<(usize, usize)>, uv_dims: impl Into<(usize, usize)>) {
 		unsafe {
+			let pos = pos.into();
+			let uv = uv.into();
+			let dims = dims.into();
+			let uv_dims = uv_dims.into();
 			let x = (pos.0 as isize - self.horizontal_scroll as isize) as f32;
 			let y = pos.1 as f32;
 			let u = uv.0 as f32;
@@ -288,6 +298,58 @@ impl VertexBufferBuilder {
 			self.indices.set_len(indices_len + 6);
 
 			self.vertices_len += 4;
+		}
+	}
+}
+
+#[derive(Copy, Clone)]
+pub struct Vec2u {
+	x: usize,
+	y: usize,
+}
+
+impl Vec2u {
+	pub const fn new(x: usize, y: usize) -> Self {
+		Self {
+			x,
+			y,
+		}
+	}
+
+	pub fn wrapping_sub(self, rhs: Self) -> Self {
+		Self {
+			x: self.x.wrapping_sub(rhs.x),
+			y: self.y.wrapping_sub(rhs.y),
+		}
+	}
+
+	pub fn saturating_sub(self, rhs: Self) -> Self {
+		Self {
+			x: self.x.saturating_sub(rhs.x),
+			y: self.y.saturating_sub(rhs.y),
+		}
+	}
+}
+
+impl From<(usize, usize)> for Vec2u {
+	fn from(value: (usize, usize)) -> Self {
+		Self::new(value.0, value.1)
+	}
+}
+
+impl Into<(usize, usize)> for Vec2u {
+	fn into(self) -> (usize, usize) {
+		(self.x, self.y)
+	}
+}
+
+impl std::ops::Add<Self> for Vec2u {
+	type Output = Self;
+
+	fn add(self, rhs: Self) -> Self::Output {
+		Self {
+			x: self.x + rhs.x,
+			y: self.y + rhs.y,
 		}
 	}
 }

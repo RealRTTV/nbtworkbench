@@ -2,10 +2,10 @@ use std::fmt::{Debug, Display, Formatter, Write};
 use std::intrinsics::likely;
 use std::slice::{Iter, IterMut};
 
-use crate::assets::LIST_UV;
+use crate::assets::{CONNECTION_UV, LIST_UV};
 use crate::decoder::Decoder;
 use crate::elements::element_type::NbtElement;
-use crate::{DropFn, RenderContext, StrExt, VertexBufferBuilder};
+use crate::{DropFn, OptionExt, RenderContext, StrExt, VertexBufferBuilder};
 
 #[derive(Clone)]
 #[allow(clippy::module_name_repetitions)]
@@ -108,7 +108,7 @@ impl NbtList {
 
 	#[inline]
 	pub fn toggle(&mut self) -> Option<()> {
-		self.open = !self.open && !self.elements.is_empty();
+		self.open = !self.open && !self.is_empty();
 		if !self.open {
 			self.shut();
 		}
@@ -149,6 +149,7 @@ impl NbtList {
 	}
 
 	#[inline]
+	#[must_use]
 	pub fn remove(&mut self, idx: usize) -> NbtElement {
 		self.elements.remove(idx)
 	}
@@ -207,7 +208,7 @@ impl NbtList {
 			Self::render_icon(*x_offset, *y_offset, builder);
 			ctx.highlight((*x_offset, *y_offset), name.map_or(0, StrExt::width), builder);
 			if !self.is_empty() {
-				builder.draw_texture((*x_offset - 16, *y_offset), (96 + self.open as usize * 16, 16), (16, 16));
+				ctx.draw_toggle((*x_offset - 16, *y_offset), self.open, builder);
 			}
 			if ctx.forbid(*x_offset, *y_offset, builder) {
 				builder.settings(*x_offset + 20, *y_offset, false);
@@ -218,18 +219,18 @@ impl NbtList {
 			}
 
 			if ctx.ghost.is_some_and(|(id, _, _)| id == self.element || self.is_empty()) && ctx.ghost(*x_offset + 16, *y_offset + 16, builder, |x, y| x == *x_offset + 16 && y == *y_offset + 8) {
-				builder.draw_texture((*x_offset, *y_offset + 16), (80, 16), (16, (self.height() != 1) as usize * 7 + 9));
+				builder.draw_texture((*x_offset, *y_offset + 16), CONNECTION_UV, (16, (self.height() != 1) as usize * 7 + 9));
 				if !tail {
-					builder.draw_texture((*x_offset - 16, *y_offset + 16), (80, 16), (8, 16));
+					builder.draw_texture((*x_offset - 16, *y_offset + 16), CONNECTION_UV, (8, 16));
 				}
 				*y_offset += 16;
 			} else if self.height() == 1
 				&& ctx.ghost.is_some_and(|(id, _, _)| id == self.element || self.is_empty())
 				&& ctx.ghost(*x_offset + 16, *y_offset + 16, builder, |x, y| x == *x_offset + 16 && y == *y_offset + 16)
 			{
-				builder.draw_texture((*x_offset, *y_offset + 16), (80, 16), (16, 9));
+				builder.draw_texture((*x_offset, *y_offset + 16), CONNECTION_UV, (16, 9));
 				if !tail {
-					builder.draw_texture((*x_offset - 16, *y_offset + 16), (80, 16), (8, 16));
+					builder.draw_texture((*x_offset - 16, *y_offset + 16), CONNECTION_UV, (8, 16));
 				}
 				*y_offset += 16;
 			}
@@ -256,7 +257,7 @@ impl NbtList {
 				}
 
 				if ctx.ghost.is_some_and(|(id, _, _)| id == self.element || self.is_empty()) && ctx.ghost(*x_offset, *y_offset, builder, |x, y| *x_offset == x && *y_offset == y) {
-					builder.draw_texture((*x_offset - 16, *y_offset), (80, 16), (16, 16));
+					builder.draw_texture((*x_offset - 16, *y_offset), CONNECTION_UV, (16, 16));
 					*y_offset += 16;
 				}
 
@@ -267,13 +268,13 @@ impl NbtList {
 				};
 
 				if *remaining_scroll == 0 {
-					builder.draw_texture((*x_offset - 16, *y_offset), (80, 16), (16, (!(idx == self.len() - 1 && ghost_tail_mod)) as usize * 7 + 9));
+					builder.draw_texture((*x_offset - 16, *y_offset), CONNECTION_UV, (16, (!(idx == self.len() - 1 && ghost_tail_mod)) as usize * 7 + 9));
 				}
-				ctx.check_key(|_| false);
+				ctx.check_key(|_, _| false, false);
 				element.render(x_offset, y_offset, remaining_scroll, builder, None, tail && idx == self.len() - 1 && ghost_tail_mod, ctx);
 
 				if ctx.ghost.is_some_and(|(id, _, _)| id == self.element || self.is_empty()) && ctx.ghost(*x_offset, *y_offset, builder, |x, y| *x_offset == x && *y_offset - 8 == y) {
-					builder.draw_texture((*x_offset - 16, *y_offset), (80, 16), (16, (idx != self.len() - 1) as usize * 7 + 9));
+					builder.draw_texture((*x_offset - 16, *y_offset), CONNECTION_UV, (16, (idx != self.len() - 1) as usize * 7 + 9));
 					*y_offset += 16;
 				}
 			}
@@ -281,7 +282,7 @@ impl NbtList {
 			let difference = *y_offset - y_before;
 			if !tail {
 				for i in 0..difference / 16 {
-					builder.draw_texture((x_before, y_before + i * 16), (80, 16), (8, 16));
+					builder.draw_texture((x_before, y_before + i * 16), CONNECTION_UV, (8, 16));
 				}
 			}
 
@@ -292,13 +293,13 @@ impl NbtList {
 	}
 
 	#[inline]
-	pub fn children(&self) -> Iter<'_, NbtElement> {
-		self.elements.iter()
+	pub fn children(&self) -> ValueIterator {
+		ValueIterator::Generic(self.elements.iter())
 	}
 
 	#[inline]
-	pub fn children_mut(&mut self) -> IterMut<'_, NbtElement> {
-		self.elements.iter_mut()
+	pub fn children_mut(&mut self) -> ValueMutIterator {
+		ValueMutIterator::Generic(self.elements.iter_mut())
 	}
 
 	pub fn drop(&mut self, mut key: Option<Box<str>>, mut element: NbtElement, y: &mut usize, depth: usize, target_depth: usize, indices: &mut Vec<usize>) -> DropFn {
@@ -374,5 +375,111 @@ impl NbtList {
 	#[inline]
 	pub fn render_icon(x: usize, y: usize, builder: &mut VertexBufferBuilder) {
 		builder.draw_texture((x, y), LIST_UV, (16, 16));
+	}
+}
+
+pub enum ValueIterator<'a> {
+	Generic(Iter<'a, NbtElement>),
+	Region(&'a [Option<NbtElement>; 32 * 32], Iter<'a, u16>),
+}
+
+impl<'a> Iterator for ValueIterator<'a> {
+	type Item = &'a NbtElement;
+
+	fn next(&mut self) -> Option<Self::Item> {
+		match self {
+			Self::Generic(iter) => iter.next(),
+			Self::Region(array, iter) => unsafe {
+				iter.next().map(|&x| {
+					array
+						.get(x as usize)
+						.map(Option::as_ref)
+						.panic_unchecked("Map index out of bounds")
+						.panic_unchecked("Map index contained empty chunk")
+				})
+			},
+		}
+	}
+}
+
+impl<'a> ExactSizeIterator for ValueIterator<'a> {
+	fn len(&self) -> usize {
+		match self {
+			Self::Generic(generic) => generic.len(),
+			Self::Region(_, iter) => iter.len(),
+		}
+	}
+}
+
+impl<'a> DoubleEndedIterator for ValueIterator<'a> {
+	fn next_back(&mut self) -> Option<Self::Item> {
+		match self {
+			Self::Generic(iter) => iter.next_back(),
+			Self::Region(array, iter) => unsafe {
+				iter.next_back().map(|&x| {
+					array
+						.get(x as usize)
+						.map(Option::as_ref)
+						.panic_unchecked("Map index out of bounds")
+						.panic_unchecked("Map index contained empty chunk")
+				})
+			},
+		}
+	}
+}
+
+pub enum ValueMutIterator<'a> {
+	Generic(IterMut<'a, NbtElement>),
+	Region(&'a mut [Option<NbtElement>; 32 * 32], Iter<'a, u16>),
+}
+
+impl<'a> Iterator for ValueMutIterator<'a> {
+	type Item = &'a mut NbtElement;
+
+	fn next(&mut self) -> Option<Self::Item> {
+		match self {
+			Self::Generic(iter) => iter.next(),
+			// SAFETY: the only problem here is aliasing, which is assumed to not occur due to `map` indices not being identical, if they are identical it's UB, so all we need is to check if we have two pointers to the same data, which doesn't occur in mutation
+			Self::Region(array, iter) => unsafe {
+				let chunk = iter.next().map(|&x| {
+					array
+						.get_mut(x as usize)
+						.map(Option::as_mut)
+						.panic_unchecked("Map index out of bounds")
+						.panic_unchecked("Map index contained empty chunk")
+				});
+				let ptr = core::mem::transmute::<_, *mut NbtElement>(chunk);
+				core::mem::transmute::<_, Option<&mut NbtElement>>(ptr)
+			},
+		}
+	}
+}
+
+impl<'a> ExactSizeIterator for ValueMutIterator<'a> {
+	fn len(&self) -> usize {
+		match self {
+			Self::Generic(generic) => generic.len(),
+			Self::Region(_, iter) => iter.len(),
+		}
+	}
+}
+
+impl<'a> DoubleEndedIterator for ValueMutIterator<'a> {
+	fn next_back(&mut self) -> Option<Self::Item> {
+		match self {
+			Self::Generic(iter) => iter.next_back(),
+			// SAFETY: the only problem here is aliasing, which is assumed to not occur due to `map` indices not being identical, if they are identical it's UB, so all we need is to check if we have two pointers to the same data, which doesn't occur in mutation
+			Self::Region(array, iter) => unsafe {
+				let chunk = iter.next_back().map(|&x| {
+					array
+						.get_mut(x as usize)
+						.map(Option::as_mut)
+						.panic_unchecked("Map index out of bounds")
+						.panic_unchecked("Map index contained empty chunk")
+				});
+				let ptr = core::mem::transmute::<_, *mut NbtElement>(chunk);
+				core::mem::transmute::<_, Option<&mut NbtElement>>(ptr)
+			},
+		}
 	}
 }

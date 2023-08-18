@@ -1,32 +1,32 @@
 #![warn(
-clippy::pedantic,
-clippy::nursery,
-clippy::perf,
-clippy::correctness,
-clippy::cargo,
-clippy::style,
-clippy::complexity,
-clippy::unused_unit,
-clippy::unused_async,
-clippy::unused_peekable,
-clippy::unused_self,
-clippy::unused_format_specs,
-clippy::unused_io_amount,
-clippy::unused_rounding,
-clippy::extra_unused_lifetimes,
-clippy::extra_unused_type_parameters
+	clippy::pedantic,
+	clippy::nursery,
+	clippy::perf,
+	clippy::correctness,
+	clippy::cargo,
+	clippy::style,
+	clippy::complexity,
+	clippy::unused_unit,
+	clippy::unused_async,
+	clippy::unused_peekable,
+	clippy::unused_self,
+	clippy::unused_format_specs,
+	clippy::unused_io_amount,
+	clippy::unused_rounding,
+	clippy::extra_unused_lifetimes,
+	clippy::extra_unused_type_parameters
 )]
 #![allow(
-clippy::unreadable_literal,
-clippy::cast_precision_loss,
-clippy::cast_lossless,
-clippy::cast_sign_loss,
-clippy::cast_possible_truncation,
-clippy::collapsible_if,
-clippy::collapsible_else_if,
-clippy::redundant_else,
-clippy::cast_possible_wrap,
-clippy::multiple_crate_versions
+	clippy::unreadable_literal,
+	clippy::cast_precision_loss,
+	clippy::cast_lossless,
+	clippy::cast_sign_loss,
+	clippy::cast_possible_truncation,
+	clippy::collapsible_if,
+	clippy::collapsible_else_if,
+	clippy::redundant_else,
+	clippy::cast_possible_wrap,
+	clippy::multiple_crate_versions
 )]
 #![feature(unchecked_math)]
 #![feature(let_chains)]
@@ -38,9 +38,13 @@ clippy::multiple_crate_versions
 #![feature(new_uninit)]
 #![feature(stdsimd)]
 #![feature(box_patterns)]
+#![feature(split_array)]
+#![feature(array_chunks)]
+#![feature(maybe_uninit_array_assume_init)]
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 use std::convert::identity;
+use std::ffi::OsStr;
 use std::fmt::Write;
 use std::fs::read;
 use std::path::PathBuf;
@@ -49,7 +53,6 @@ use std::string::String;
 use std::time::SystemTime;
 
 use fxhash::{FxBuildHasher, FxHashSet};
-use pollster::FutureExt;
 use winit::dpi::PhysicalPosition;
 use winit::event::{ElementState, KeyboardInput, MouseButton, MouseScrollDelta, VirtualKeyCode};
 use zune_inflate::DeflateDecoder;
@@ -57,26 +60,28 @@ use zune_inflate::DeflateDecoder;
 use elements::element_type::NbtElement;
 use vertex_buffer_builder::VertexBufferBuilder;
 
-use crate::assets::HEADER_SIZE;
+use crate::assets::{BYTE_ARRAY_GHOST_UV, BYTE_ARRAY_UV, BYTE_GHOST_UV, BYTE_UV, CHUNK_GHOST_UV, COMPOUND_GHOST_UV, COMPOUND_UV, DOUBLE_GHOST_UV, DOUBLE_UV, EDITED_UV, END_LINE_NUMBER_SEPARATOR_UV, FLOAT_GHOST_UV, FLOAT_UV, HEADER_SIZE, HORIZONTAL_SEPARATOR_UV, INT_ARRAY_GHOST_UV, INT_ARRAY_UV, INT_GHOST_UV, INT_UV, LINE_NUMBER_SEPARATOR_UV, LIST_GHOST_UV, LIST_UV, LONG_ARRAY_GHOST_UV, LONG_ARRAY_UV, LONG_GHOST_UV, LONG_UV, REGION_GHOST_UV, SELECTED_TOGGLE_OFF_UV, SELECTED_TOGGLE_ON_UV, SELECTED_WIDGET_UV, SELECTION_UV, SHORT_GHOST_UV, SHORT_UV, STRING_GHOST_UV, STRING_UV, TEXT_UNDERLINE_UV, UNEDITED_UV, UNKNOWN_NBT_GHOST_UV, UNKNOWN_NBT_UV, UNSELECTED_TOGGLE_OFF_UV, UNSELECTED_TOGGLE_ON_UV, UNSELECTED_WIDGET_UV};
+use crate::elements::chunk::{NbtChunk, NbtRegion};
 use crate::elements::compound::NbtCompound;
 use crate::elements::element_type::{NbtByte, NbtByteArray, NbtDouble, NbtFloat, NbtInt, NbtIntArray, NbtLong, NbtLongArray, NbtShort};
-use crate::elements::list::NbtList;
+use crate::elements::list::{NbtList, ValueIterator};
 use crate::elements::string::NbtString;
 use crate::selected_text::{KeyResult, SelectedText};
 use crate::tab::{FileFormat, Tab};
 use crate::tree_travel::{Navigate, Traverse, TraverseParents};
+use crate::vertex_buffer_builder::Vec2u;
 use crate::window::{WINDOW_HEIGHT, WINDOW_WIDTH};
 use crate::workbench_action::WorkbenchAction;
 
 mod assets;
 mod decoder;
 mod encoder;
+mod selected_text;
+mod tab;
 mod tree_travel;
 mod vertex_buffer_builder;
 mod window;
 mod workbench_action;
-mod selected_text;
-mod tab;
 
 #[macro_export]
 macro_rules! flags {
@@ -109,7 +114,7 @@ macro_rules! flags {
 #[macro_export]
 macro_rules! tab_mut_unchecked {
 	($this:expr) => {
-		unsafe { $this.tabs.get_mut($this.tab).panic_unchecked("") }
+		unsafe { $this.tabs.get_mut($this.tab).panic_unchecked("Tab should've existed") }
 	};
 }
 
@@ -136,23 +141,30 @@ pub type TrySelectTextFn = (Option<(Box<str>, bool)>, Option<(Box<str>, bool)>);
 
 fn main() -> ! {
 	{
+		// REFACTOR
+
+		// LONG TERM GOALS
 		// todo, web assembly ver
 		// todo, smart screen
-		// todo, 24x24 for toolbar icons
-		// todo, horizontal scrolling maximum value
-		// todo, usable scrollbar
+		// todo, wiki page for docs on minecraft's format of stuff
+		// todo, chunk section rendering
+
+		// MINOR FEATURES
 		// todo, ctrl + h, open a playground nbt file to help with user interaction
-		// todo, ctrl + r, reload current page
+		// todo, shift + alt + right arrow to open fully (or shift + left click/right click)
 		// todo, bookmarking line numbers
-		// todo, mca
-		// todo, if RenderContext::invalid_key, highlight the other entry that you're duplicating the name of
-		// todo, keyboard-based element dropping (press nums before to specify count for move operations, right shift to enable)
-		// todo, icons for each workbench action, and a 5 most recent actions for undo and redo respectively
-		// todo, editing a key in a compound to one that already exists makes a red underline for that other value
+		// todo, ability to open a nbt array of some kind in a hex editor to then be listened on it's temp file for updates, then to remake the list live, allowing integration with other programs
+		// todo, [art] icons for each workbench action, and a 5 most recent actions for undo and redo respectively
+
+		// MAJOR FEATURES
 		// todo, macros
+		// todo, horizontal scrolling maximum value
+		// todo, ctrl + r, reload current page
+		// todo, keyboard-based element dropping (press numbers before to specify count for move operations, right shift to enable mode)
+		// todo, region file to_bytes
 	}
 
-	window::run().block_on();
+	window::run();
 }
 
 pub struct NbtWorkbench {
@@ -233,7 +245,7 @@ pub fn sum_indices<I: Iterator<Item = usize>>(indices: I, mut root: &NbtElement)
 					unsafe { list.get(idx).panic_unchecked("index oob") }
 				}
 			}
-			NbtElement::Compound(compound) => {
+			NbtElement::Compound(compound) | NbtElement::Chunk(NbtChunk { inner: compound, .. }) => {
 				if idx >= compound.len() {
 					unsafe { panic_unchecked("compound oob") }
 				} else {
@@ -262,6 +274,19 @@ pub fn sum_indices<I: Iterator<Item = usize>>(indices: I, mut root: &NbtElement)
 					break;
 				}
 			}
+			NbtElement::Region(region) => {
+				if idx >= region.len() {
+					unsafe { panic_unchecked("region oob") }
+				} else {
+					total += 1;
+					for jdx in 0..idx {
+						// SAFETY: n < len (is valid bounds) implies n - m (where m is a positive integer <= n) < len (is valid bounds)
+						total += unsafe { region.get(jdx).panic_unchecked("index oob") }.height();
+					}
+					// SAFETY: asserted beforehand
+					unsafe { region.get(idx).panic_unchecked("index oob") }
+				}
+			}
 			x => {
 				total += x.height();
 				if indices.peek().is_some() {
@@ -279,6 +304,12 @@ pub fn sum_indices<I: Iterator<Item = usize>>(indices: I, mut root: &NbtElement)
 #[must_use]
 pub const fn is_utf8_char_boundary(x: u8) -> bool {
 	(x as i8) >= -0x40
+}
+
+#[inline]
+#[must_use]
+pub const fn is_jump_char_boundary(x: u8) -> bool {
+	x.is_ascii_whitespace() || x.is_ascii_punctuation()
 }
 
 impl Default for NbtWorkbench {
@@ -318,6 +349,8 @@ impl Default for NbtWorkbench {
 				scroll: 0,
 				horizontal_scroll: 0,
 				window_height: WINDOW_HEIGHT,
+				window_width: WINDOW_WIDTH,
+				depth: 32,
 			});
 		}
 		workbench
@@ -336,24 +369,26 @@ impl NbtWorkbench {
 	pub fn on_open_file(&mut self, path: &PathBuf) -> Option<()> {
 		if let Ok(f) = read(path) {
 			let (nbt, compressed) = {
-				if let Some(0x1F8B) = f.first_chunk::<2>().copied().map(u16::from_be_bytes) {
+				if path.extension().and_then(OsStr::to_str) == Some("mca") {
+					(NbtElement::from_mca(f.as_slice())?, FileFormat::Mca)
+				} else if let Some(0x1F8B) = f.first_chunk::<2>().copied().map(u16::from_be_bytes) {
 					(NbtElement::from_file(&DeflateDecoder::new(f.as_slice()).decode_gzip().ok()?)?, FileFormat::Gzip)
 				} else if let Some(0x7801 | 0x789C | 0x78DA) = f.first_chunk::<2>().copied().map(u16::from_be_bytes) {
-					(NbtElement::from_file(&DeflateDecoder::new(f.as_slice()).decode_zlib().ok()?)?, FileFormat::Gzip)
-				} else if let Some(str) = core::str::from_utf8(&f).ok().and_then(NbtElement::from_str) {
-					(
-						match str {
-							Ok((_, x)) | Err(x) => x,
-						},
-						FileFormat::Snbt,
-					)
+					(NbtElement::from_file(&DeflateDecoder::new(f.as_slice()).decode_zlib().ok()?)?, FileFormat::Zlib)
+				} else if let Some(nbt) = NbtElement::from_file(f.as_slice()) {
+					(nbt, FileFormat::Nbt)
 				} else {
-					(NbtElement::from_file(&f)?, FileFormat::Nbt)
+					match core::str::from_utf8(&f).ok().and_then(NbtElement::from_str)? {
+						Ok((_, nbt)) | Err(nbt) => (nbt, FileFormat::Snbt),
+					}
 				}
 			};
-			match Tab::new(nbt, path, compressed, self.window_height) {
+			match Tab::new(nbt, path, compressed, self.window_height, self.window_width) {
 				None => None,
 				Some(entry) => {
+					if !self.close_selected_text(false) {
+						self.selected_text = None
+					};
 					self.tabs.push(entry);
 					self.tab = self.tabs.len() - 1;
 					Some(())
@@ -369,17 +404,22 @@ impl NbtWorkbench {
 		match scroll {
 			MouseScrollDelta::LineDelta(h, v) => {
 				let shift = self.held_keys.contains(&VirtualKeyCode::LShift) | self.held_keys.contains(&VirtualKeyCode::RShift);
-                if self.mouse_y < 21 {
-	                let scroll = if shift { -v } else { -h };
-					self.tab_scroll = ((self.tab_scroll as isize + (scroll * 48.0) as isize).max(0) as usize).min({
-						let mut tabs_width = 3_usize;
-						for tab in &self.tabs {
-							tabs_width += tab.name.width() + 32 + 6 + 6;
+				if self.mouse_y < 21 {
+					let scroll = if shift { -v } else { -h };
+					self.tab_scroll = ((self.tab_scroll as isize + (scroll * 48.0) as isize).max(0) as usize).min(
+						{
+							let mut tabs_width = 3_usize;
+							for tab in &self.tabs {
+								tabs_width += tab.name.width() + 32 + 6 + 6;
+							}
+							tabs_width
 						}
-						tabs_width
-					}.saturating_sub(self.window_width));
+						.saturating_sub(self.window_width),
+					);
 				} else {
-					let Some(tab) = self.tabs.get_mut(self.tab) else { return false; };
+					let Some(tab) = self.tabs.get_mut(self.tab) else {
+						return false;
+					};
 					if shift {
 						tab.set_horizontal_scroll(-v);
 						tab.set_scroll(-h);
@@ -438,12 +478,12 @@ impl NbtWorkbench {
 				}
 			}
 		} else {
-			if !self.close_selected_text() {
+			if !self.close_selected_text(false) {
 				self.selected_text = None;
 			}
 			self.held_mouse_keys.insert(button);
 			'a: {
-				if self.held_entry.is_empty() && (23..39).contains(&y) {
+				if self.held_entry.is_empty() && (24..46).contains(&y) {
 					self.hold_entry(button);
 					break 'a;
 				}
@@ -474,31 +514,37 @@ impl NbtWorkbench {
 		let horizontal_scroll = self.horizontal_scroll();
 		let y = (self.mouse_y - HEADER_SIZE) / 16 + self.scroll() / 16;
 		let target_depth = (self.mouse_x + horizontal_scroll - left_margin - 16) / 16;
-		let Some(tab) = self.tabs.get_mut(self.tab) else { return false; };
+		let Some(tab) = self.tabs.get_mut(self.tab) else {
+			return false;
+		};
 		if y < tab.value.height() && y > 0 {
 			let (depth, height, true_height) = {
 				let (depth, (_, _, element)) = Traverse::new(y, &mut tab.value).enumerate().last();
 				(depth, element.height(), element.true_height())
 			};
-			if depth != target_depth { return false }
+			if depth != target_depth {
+				return false;
+			}
 
 			let mut indices = vec![];
 			let mut iter = TraverseParents::new(y, &mut tab.value);
-			let value = 'w: {
-				while let Some( (position, idx, _, element) ) = iter.next() {
-					indices.push(idx);
-					element.decrement(height, true_height);
-					match position {
-						Position::Only | Position::Last => {
-							break 'w (unsafe { element.remove(idx).panic_unchecked("we asserted above that this indeed does capture the final element") })
+			let value =
+				'w: {
+					while let Some((position, idx, _, element)) = iter.next() {
+						indices.push(idx);
+						element.decrement(height, true_height);
+						match position {
+							Position::Only | Position::Last => break 'w (unsafe { element.remove(idx).panic_unchecked("we asserted above that this indeed does capture the final element") }),
+							Position::First | Position::Middle => {}
 						}
-						Position::First | Position::Middle => {}
 					}
-				}
-				unsafe { panic_unchecked("so you're telling me, we had a node, that was **not** root, as confirmed by the let chain for `NbtWorkbench::tab_mut()` yet somehow no parent's even existed, seriously wtf") }
-			};
+					unsafe {
+						panic_unchecked("so you're telling me, we had a node, that was **not** root, as confirmed by the let chain for `NbtWorkbench::tab_mut()` yet somehow no parent's even existed, seriously wtf")
+					}
+				};
 
 			self.held_entry = HeldEntry::FromKnown(value, indices.into_boxed_slice());
+			tab.recache_depth();
 			true
 		} else {
 			false
@@ -507,9 +553,11 @@ impl NbtWorkbench {
 
 	#[inline]
 	fn rename(&mut self, offset: usize) -> bool {
-		let Some(tab) = self.tabs.get_mut(self.tab) else { return false; };
+		let Some(tab) = self.tabs.get_mut(self.tab) else {
+			return false;
+		};
 		let name = tab.path.as_ref().and_then(|x| x.to_str()).map_or_else(|| tab.name.clone(), Into::into);
-		self.selected_text = SelectedText::new(36 + self.left_margin(), offset, HEADER_SIZE, Some((name, true)), None, vec![]);
+		self.selected_text = SelectedText::new(36 + self.left_margin(), offset, HEADER_SIZE, Some((name, true)), None, false, vec![]);
 		self.selected_text.is_some()
 	}
 
@@ -520,31 +568,44 @@ impl NbtWorkbench {
 		}
 
 		let y = (self.mouse_y - HEADER_SIZE) / 16 + self.scroll() / 16;
-		let Some(tab) = self.tabs.get_mut(self.tab) else { return false; };
+		let Some(tab) = self.tabs.get_mut(self.tab) else {
+			return false;
+		};
 		if y < tab.value.height() && y > 0 {
-			let (height, true_height) = unsafe { Traverse::new(y, &mut tab.value).last().map(|(_, _, element)| (element.height(), element.true_height())).panic_unchecked("we've asserted that y > 0") };
+			let (height, true_height) = unsafe {
+				Traverse::new(y, &mut tab.value)
+					.last()
+					.map(|(_, _, element)| (element.height(), element.true_height()))
+					.panic_unchecked("we've asserted that y > 0")
+			};
 
 			let mut indices = vec![];
 			let mut iter = TraverseParents::new(y, &mut tab.value);
-			while let Some( (position, idx, key, element) ) = iter.next() {
+			while let Some((position, idx, key, element)) = iter.next() {
 				match position {
 					Position::First | Position::Middle => {
 						element.increment(height, true_height);
 						indices.push(idx);
-					},
+					}
 					Position::Only | Position::Last => {
 						indices.push(idx + 1);
 						let duplicate = unsafe { element.get(idx).panic_unchecked("it exists mate, let's stop playing around") }.clone();
 						match element {
-							NbtElement::Compound(compound) => compound.insert_full(idx + 1, unsafe { key.panic_unchecked("it's a compound, it **has** a key for every value") }.into_string(), duplicate),
+							NbtElement::Compound(compound) => {
+								compound.insert_full(idx + 1, unsafe { key.panic_unchecked("it's a compound, it **has** a key for every value") }.into_string(), duplicate)
+							}
 							// this is the same thing, literally the same thing, i refuse to believe that it can't be added
-							element => { let _ =  element.insert(idx + 1, duplicate); }
+							element => {
+								let _ = element.insert(idx + 1, duplicate);
+							}
 						}
 					}
 				}
 			}
 			tab.undos.push(WorkbenchAction::Add { indices: indices.into_boxed_slice() });
 			tab.history_changed = true;
+			// not required since the max depth won't change on a duplication
+			// tab.recache_depth();
 			true
 		} else {
 			false
@@ -552,15 +613,21 @@ impl NbtWorkbench {
 	}
 
 	#[inline]
-	fn copy(&mut self) -> bool {
+	fn copy(&mut self, debug: bool) -> bool {
 		if self.mouse_y < HEADER_SIZE {
 			return false;
 		}
 		let y = (self.mouse_y - HEADER_SIZE) / 16 + self.scroll() / 16;
-		let Some(tab) = self.tabs.get_mut(self.tab) else { return false; };
+		let Some(tab) = self.tabs.get_mut(self.tab) else {
+			return false;
+		};
 		if y < tab.value.height() {
 			let (_, key, element) = unsafe { Traverse::new(y, &mut tab.value).last().panic_unchecked("There is always at least one element - Master Oogway") };
-			cli_clipboard::set_contents(format!("{}{}{element}", key.unwrap_or(""), if key.is_some() { ":" } else { "" })).is_ok()
+			if debug {
+				cli_clipboard::set_contents(format!("{}{}{element:#?}", key.as_ref().map(Box::as_ref).unwrap_or(""), if key.is_some() { ": " } else { "" })).is_ok()
+			} else {
+				cli_clipboard::set_contents(format!("{}{}{element}", key.as_ref().map(Box::as_ref).unwrap_or(""), if key.is_some() { ":" } else { "" })).is_ok()
+			}
 		} else {
 			false
 		}
@@ -573,12 +640,14 @@ impl NbtWorkbench {
 		};
 
 		let y = (self.mouse_y - HEADER_SIZE) / 16 + self.scroll() / 16;
-		let Some(tab) = self.tabs.get_mut(self.tab) else { return false; };
+		let Some(tab) = self.tabs.get_mut(self.tab) else {
+			return false;
+		};
 		if y < tab.value.height() && y > 0 {
 			let mut indices = vec![];
 			let (height, true_height) = if let Some((_, key, element)) = Traverse::new(y, &mut tab.value).last() {
 				if clipboard {
-					let _ = cli_clipboard::set_contents(format!("{}{}{element}", key.unwrap_or(""), if key.is_some() { ":" } else { "" }));
+					let _ = cli_clipboard::set_contents(format!("{}{}{element}", key.as_ref().map(Box::as_ref).unwrap_or(""), if key.is_some() { ":" } else { "" }));
 				}
 				(element.height(), element.true_height())
 			} else {
@@ -586,11 +655,11 @@ impl NbtWorkbench {
 			};
 			let mut iter = TraverseParents::new(y, &mut tab.value);
 			let element = 'w: {
-				while let Some( (position, idx, _, element) ) = iter.next() {
+				while let Some((position, idx, _, element)) = iter.next() {
 					indices.push(idx);
 					element.decrement(height, true_height);
 					match position {
-						Position::First | Position::Middle => {},
+						Position::First | Position::Middle => {}
 						Position::Last | Position::Only => break 'w (unsafe { element.remove(idx).panic_unchecked("da hell mate") }),
 					}
 				}
@@ -600,6 +669,7 @@ impl NbtWorkbench {
 				element,
 				indices: indices.into_boxed_slice(),
 			});
+			tab.recache_depth();
 			true
 		} else {
 			false
@@ -610,15 +680,20 @@ impl NbtWorkbench {
 	fn drop(&mut self, element: Result<(Box<str>, NbtElement), NbtElement>, from_indices: Option<Box<[usize]>>) -> bool {
 		let left_margin = self.left_margin();
 		let horizontal_scroll = self.horizontal_scroll();
-		if self.mouse_y <= HEADER_SIZE { return false; }
-		if self.mouse_x + horizontal_scroll < left_margin { return false; }
+		if self.mouse_y <= HEADER_SIZE {
+			return false;
+		}
+		if self.mouse_x + horizontal_scroll < left_margin {
+			return false;
+		}
 		let y = self.mouse_y - HEADER_SIZE + self.scroll();
 		let x = (self.mouse_x + horizontal_scroll - left_margin) / 16;
-		let Some(tab) = self.tabs.get_mut(self.tab) else { return false; };
+		let Some(tab) = self.tabs.get_mut(self.tab) else {
+			return false;
+		};
 
 		let mut indices = vec![];
 		let (key, element) = element.map_or_else(|element| (None, element), |(x, y)| (Some(x), y));
-		let (value, value_selectable) = element.value();
 
 		match NbtElement::drop(tab.value.as_mut(), key.clone(), element, &mut y.clone(), 2, x, &mut indices) {
 			DropFn::InvalidType(key, element) | DropFn::Missed(key, element) => {
@@ -630,12 +705,13 @@ impl NbtWorkbench {
 							None => Err(element),
 						},
 					});
+					tab.recache_depth();
+					tab.history_changed = true;
 				}
 
-				tab.history_changed = true;
 				self.selected_text = None;
 			}
-			DropFn::Dropped(_, _, new_key) => {
+			DropFn::Dropped(_, _, _) => {
 				if let Some(from_indices) = from_indices {
 					tab.undos.push(WorkbenchAction::Move {
 						from: from_indices,
@@ -647,43 +723,8 @@ impl NbtWorkbench {
 						indices: indices.clone().into_boxed_slice(),
 					});
 				}
-
-				let value = if let Some(new_key) = new_key.clone() {
-					Some((
-						None,
-						String::new(),
-						new_key.into_string(),
-						if value_selectable { ": ".to_owned() } else { format!(": {value}") },
-						if value_selectable { Some(value.into_string()) } else { None },
-					))
-				} else if value_selectable {
-					Some((new_key.clone().map(str::into_string), new_key.map_or(String::new(), |_| ": ".to_owned()), value.into_string(), String::new(), None))
-				} else {
-					None
-				};
-
+				tab.recache_depth();
 				tab.history_changed = true;
-				if let Some((keyfix, prefix, value, suffix, valuefix)) = value {
-					self.selected_text = Some(
-						SelectedText {
-							y: sum_indices(indices.iter().copied(), &tab.value) * 16 + HEADER_SIZE,
-							indices: indices.into_boxed_slice(),
-							cursor: 0,
-							selection: Some(value.len()),
-							value,
-							keyfix,
-							prefix,
-							suffix,
-							valuefix,
-							editable: true,
-							last_interaction: SystemTime::now(),
-							undos: LinkedQueue::new(),
-							redos: LinkedQueue::new(),
-						}.post_process(),
-					);
-				} else {
-					self.selected_text = None;
-				}
 			}
 		}
 		true
@@ -753,27 +794,39 @@ impl NbtWorkbench {
 
 	#[inline]
 	fn left_margin(&self) -> usize {
-		self.tab().map_or(0, |tab| (tab.value.true_height().ilog10() as usize + 1) * 8 + 4) + 8
+		self.tab().map_or(8, Tab::left_margin)
 	}
 
 	#[inline]
 	fn toggle(&mut self, ignore_depth: bool) -> bool {
 		let left_margin = self.left_margin();
 		let horizontal_scroll = self.horizontal_scroll();
-		if self.mouse_x + horizontal_scroll < left_margin { return false; }
-		if self.mouse_y < HEADER_SIZE { return false; }
+		if self.mouse_x + horizontal_scroll < left_margin {
+			return false;
+		}
+		if self.mouse_y < HEADER_SIZE {
+			return false;
+		}
 		let x = (self.mouse_x + horizontal_scroll - left_margin) / 16;
 		let y = (self.mouse_y - HEADER_SIZE) / 16 + self.scroll() / 16;
-		let Some(tab) = self.tabs.get_mut(self.tab) else { return false; };
-		if y >= tab.value.height() { return false }
+		let Some(tab) = self.tabs.get_mut(self.tab) else {
+			return false;
+		};
+		if y >= tab.value.height() {
+			return false;
+		}
 
 		let (depth, (_, _, element)) = Traverse::new(y, &mut tab.value).enumerate().last();
 
-		if depth != x && !ignore_depth { return false; }
+		if depth != x && !ignore_depth {
+			return false;
+		}
 		let before = element.height();
 		let _ = element.toggle();
 		let increment = element.height().wrapping_sub(before);
-		if increment == 0 { return true; }
+		if increment == 0 {
+			return true;
+		}
 
 		let mut iter = TraverseParents::new(y, &mut tab.value);
 		while let Some((_, _, _, element)) = iter.next() {
@@ -781,6 +834,7 @@ impl NbtWorkbench {
 		}
 
 		tab.scroll = tab.scroll();
+		tab.recache_depth();
 		true
 	}
 
@@ -788,11 +842,19 @@ impl NbtWorkbench {
 	fn try_select_text(&mut self) -> bool {
 		let left_margin = self.left_margin();
 		let horizontal_scroll = self.horizontal_scroll();
-		if self.mouse_x + horizontal_scroll < left_margin { return false; }
-		if self.mouse_y < HEADER_SIZE + 16 { return false; }
+		if self.mouse_x + horizontal_scroll < left_margin {
+			return false;
+		}
+		if self.mouse_y < HEADER_SIZE + 16 {
+			return false;
+		}
 		let y = (self.mouse_y - HEADER_SIZE) / 16 + self.scroll() / 16;
-		let Some(tab) = self.tabs.get_mut(self.tab) else { return false; };
-		if y >= tab.value.height() { return false; }
+		let Some(tab) = self.tabs.get_mut(self.tab) else {
+			return false;
+		};
+		if y >= tab.value.height() {
+			return false;
+		}
 
 		let mut indices = vec![];
 		let mut iter = Traverse::new(y, &mut tab.value);
@@ -804,8 +866,16 @@ impl NbtWorkbench {
 				}
 				Position::Last => {
 					indices.push(idx);
-					self.selected_text = SelectedText::new(indices.len() * 16 + 32 + 4 + left_margin, self.mouse_x + horizontal_scroll, y * 16 + HEADER_SIZE, key.map(|x| (x.to_owned().into_boxed_str(), true)), Some(value.value()), indices);
-					return self.selected_text.is_some()
+					self.selected_text = SelectedText::new(
+						indices.len() * 16 + 32 + 4 + left_margin,
+						self.mouse_x + horizontal_scroll,
+						y * 16 + HEADER_SIZE,
+						key.map(|x| (x, true)),
+						Some(value.value()),
+						matches!(value, NbtElement::Chunk(_)),
+						indices,
+					);
+					return self.selected_text.is_some();
 				}
 			}
 		}
@@ -815,9 +885,8 @@ impl NbtWorkbench {
 	#[inline]
 	pub fn keyfix(&mut self) {
 		if let Some(SelectedText { y, indices, cursor, value, selection, keyfix, prefix, suffix, valuefix, editable: true, last_interaction: _, undos: _, redos: _ }) = self.selected_text.clone() && let Some(keyfix) = keyfix && valuefix.is_none() && suffix.is_empty() && cursor == 0 {
-			if !self.close_selected_text() { return; } // we'll still render the new one, even if its invalid text. cool right?
+			if !self.close_selected_text(true) { return; }
 			self.selected_text = Some(SelectedText {
-				// x,
 				y,
 				indices,
 				cursor: keyfix.len(),
@@ -839,7 +908,7 @@ impl NbtWorkbench {
 	pub fn valuefix(&mut self) {
 		if let Some(SelectedText {y, indices, cursor, value, selection, keyfix, prefix, suffix, valuefix, editable: true, last_interaction: _, undos: _, redos: _ }) = self.selected_text.clone() && let Some(valuefix) = valuefix && keyfix.is_none() && prefix.is_empty() && cursor == value.len() {
 			// normally won't occur, but im future proofing
-			if !self.close_selected_text() { return; } // we'll still render the new one, even if its invalid text. cool right?
+			if !self.close_selected_text(true) { return; }
 			self.selected_text = Some(SelectedText {
 				y,
 				indices,
@@ -867,7 +936,7 @@ impl NbtWorkbench {
 			let tab = tab_mut_unchecked!(self);
 			let child_idx = unsafe { indices.last().copied().panic_unchecked("Indices list is never empty") };
 			let parent = Navigate::new(indices.iter().copied().take(indices.len() - 1), &mut tab.value).last().2;
-			if child_idx == 0 || parent.len() == Some(0) {
+			if child_idx == 0 || parent.len().is_none_or(|x| x == 0) {
 				return;
 			}
 			let original_key = match parent {
@@ -892,9 +961,10 @@ impl NbtWorkbench {
 	#[inline]
 	pub fn shift_selected_text_down(&mut self) {
 		if let Some(SelectedText { y, indices, .. }) = &mut self.selected_text {
+			// well it could be empty
 			if indices.is_empty() {
 				return;
-			} // well it could be empty
+			}
 			let tab = tab_mut_unchecked!(self);
 			let child_idx = unsafe { indices.last().copied().panic_unchecked("Indices list is never empty") };
 			let parent = Navigate::new(indices.iter().copied().take(indices.len() - 1), &mut tab.value).last().2;
@@ -925,12 +995,26 @@ impl NbtWorkbench {
 	#[inline]
 	pub unsafe fn selected_text_up(&mut self, ctrl: bool) {
 		let left_margin = self.left_margin();
-		if let Some(SelectedText { y, indices, cursor, keyfix, prefix, value: str_value, .. }) = self.selected_text.clone()
+		if let Some(SelectedText {
+			y,
+			indices,
+			cursor,
+			keyfix,
+			prefix,
+			value: str_value,
+			..
+		}) = self.selected_text.clone()
 		{
-			let Some(&last_index) = indices.last() else { return; };
-			if !self.close_selected_text() { return; }
+			let Some(&last_index) = indices.last() else {
+				return;
+			};
+			if !self.close_selected_text(false) {
+				self.selected_text = None;
+			}
 			let cache_cursor_x = self.cache_cursor_x;
-			let Some(tab) = self.tabs.get_mut(self.tab) else { return; };
+			let Some(tab) = self.tabs.get_mut(self.tab) else {
+				return;
+			};
 			let original_indices_len = indices.len();
 			let mouse_x = cache_cursor_x.unwrap_or(original_indices_len * 16 + 32 + 4 + left_margin + keyfix.as_ref().map_or(0, StrExt::width) + prefix.width() + str_value.split_at(cursor).0.width());
 
@@ -944,11 +1028,21 @@ impl NbtWorkbench {
 				let mut indices = indices.into_vec();
 				let tail = Navigate::new(indices.iter().copied().take(original_indices_len - 1), &mut tab.value).last().2;
 				*indices.last_mut().panic_unchecked("indices cannot be empty, we're in it") = 0;
-				let children = tail.children().panic_unchecked("we are a child, some must exist");
-				let (k, v) = match children {
-					Ok(mut children) => (None, Some(children.next().panic_unchecked("we are a child, some must exist").value())),
-					Err(mut children) => children.next().map(|(k, v)| (Some((k.clone(), true)), Some(v.value()))).panic_unchecked("we are a child, some parent must exist"),
-				};
+				let (k, v) = tail
+					.children()
+					.panic_unchecked("we are a child, some must exist")
+					.map_or_else(|mut iter| {
+						let (k, v) = iter.next().panic_unchecked("we are a child, some must exist");
+						(Some((k.clone(), true)), Some(v.value()))
+					}, |mut iter| match iter {
+						iter @ ValueIterator::Generic(_) => {
+							(None, Some(iter.enumerate().next().panic_unchecked("we're the child, it can't be empty").1.value()))
+						},
+						iter @ ValueIterator::Region(_, _) => {
+							let chunk = unsafe { iter.enumerate().next().panic_unchecked("we're the child, it can't be empty").1.as_chunk_unchecked() };
+							(Some((chunk.x.to_string().into_boxed_str(), true)), Some((chunk.z.to_string().into_boxed_str(), true)))
+						}
+					});
 				let new_y = sum_indices(indices.iter().copied(), &tab.value) * 16;
 				(k, v, indices, new_y)
 			} else {
@@ -961,7 +1055,7 @@ impl NbtWorkbench {
 					while let Some((position, idx, key, value)) = iter.next() {
 						indices.push(idx);
 						if position == Position::Last {
-							break 'w (key.map(|k| (k.to_owned().into_boxed_str(), true)), Some(value.value()));
+							break 'w (key.map(|k| (k, true)), Some(value.value()));
 						}
 					}
 					panic_unchecked("Iterator was empty, somehow")
@@ -976,7 +1070,7 @@ impl NbtWorkbench {
 				+ (k.as_ref().is_some_and(|(_, display)| *display) && v.as_ref().is_some_and(|(_, display)| *display)) as usize * (": ".width())
 				+ v.as_ref().map_or(0, |(x, display)| (*display as usize) * x.width());
 			self.cache_cursor_x = self.cache_cursor_x.or(Some(mouse_x));
-			self.selected_text = SelectedText::new(low, mouse_x.clamp(low, high), new_y + HEADER_SIZE, k, v, indices);
+			self.selected_text = SelectedText::new(low, mouse_x.clamp(low, high), new_y + HEADER_SIZE, k, v, indices.len() == 1 && matches!(tab.value, box NbtElement::Region(_)), indices);
 		}
 	}
 
@@ -984,25 +1078,33 @@ impl NbtWorkbench {
 	pub unsafe fn selected_text_down(&mut self, ctrl: bool) {
 		let left_margin = self.left_margin();
 		if let Some(SelectedText {
-			            y,
-			            indices,
-			            cursor,
-			            keyfix,
-			            prefix,
-			            value: str_value,
-			            ..
-		            }) = self.selected_text.clone()
+			y,
+			indices,
+			cursor,
+			keyfix,
+			prefix,
+			value: str_value,
+			..
+		}) = self.selected_text.clone()
 		{
 			let total = if let Some(tab) = self.tab() {
 				let mut total = sum_indices(indices.iter().copied(), &tab.value);
 				total += 1; // move down
-				// down needs a check that it doesn't surpass the en
-				if total >= tab.value.height() { return; }
+			// down needs a check that it doesn't surpass the end
+				if total >= tab.value.height() {
+					return;
+				}
 				total
-			} else { return; };
-			if !self.close_selected_text() { return; }
+			} else {
+				return;
+			};
+			if !self.close_selected_text(false) {
+				self.selected_text = None;
+			}
 			let cache_cursor_x = self.cache_cursor_x;
-			let Some(tab) = self.tabs.get_mut(self.tab) else { return; };
+			let Some(tab) = self.tabs.get_mut(self.tab) else {
+				return;
+			};
 			let original_indices_len = indices.len();
 			let mouse_x = cache_cursor_x.unwrap_or(original_indices_len * 16 + 32 + 4 + left_margin + keyfix.as_ref().map_or(0, StrExt::width) + prefix.width() + str_value.split_at(cursor).0.width());
 			let (k, v, end_idx) = if ctrl && indices.len() > 0 {
@@ -1011,12 +1113,21 @@ impl NbtWorkbench {
 					.2
 					.children()
 					.panic_unchecked("we're the child")
-					.map_or_else(|iter| {
+					.map_or_else(
+						|iter| {
 							let tuple = iter.enumerate().last().panic_unchecked("we're the child, it can't be empty");
-							(Some((tuple.1.0.clone(), true)), Some(tuple.1.1.value()), tuple.0)
-						}, |iter| {
-							let tuple = iter.enumerate().last().panic_unchecked("we're the child, it can't be empty");
-							(None, Some(tuple.1.value()), tuple.0)
+							(Some((tuple.1 .0.clone(), true)), Some(tuple.1 .1.value()), tuple.0)
+						},
+						|iter| match iter {
+							iter @ ValueIterator::Generic(_) => {
+								let tuple = iter.enumerate().last().panic_unchecked("we're the child, it can't be empty");
+								(None, Some(tuple.1.value()), tuple.0)
+							}
+							iter @ ValueIterator::Region(_, _) => {
+								let (idx, chunk) = iter.enumerate().last().panic_unchecked("we're the child, it can't be empty");
+								let chunk = unsafe { chunk.as_chunk_unchecked() };
+								(Some((chunk.x.to_string().into_boxed_str(), true)), Some((chunk.z.to_string().into_boxed_str(), true)), idx)
+							}
 						},
 					)
 			} else {
@@ -1034,7 +1145,12 @@ impl NbtWorkbench {
 					while let Some((position, idx, key, value)) = iter.next() {
 						indices.push(idx);
 						if let Position::Last | Position::Only = position {
-							break 'w (key.map(|k| (k, true)), Some(value.value()), indices, y + 16 - HEADER_SIZE);
+							break 'w (
+								key.map(|k| (k, true)),
+								Some(value.get(idx).map(NbtElement::value).panic_unchecked("We are literally given an `idx`")),
+								indices,
+								y + 16 - HEADER_SIZE,
+							);
 						}
 					}
 					panic_unchecked("Iterator was empty, somehow")
@@ -1050,7 +1166,7 @@ impl NbtWorkbench {
 				tab.scroll = tab.scroll();
 			}
 			self.cache_cursor_x = self.cache_cursor_x.or(Some(mouse_x));
-			self.selected_text = SelectedText::new(low, mouse_x.clamp(low, high), new_y + HEADER_SIZE, k, v, indices);
+			self.selected_text = SelectedText::new(low, mouse_x.clamp(low, high), new_y + HEADER_SIZE, k, v, indices.len() == 1 && matches!(tab.value, box NbtElement::Region(_)), indices);
 		}
 	}
 
@@ -1058,7 +1174,9 @@ impl NbtWorkbench {
 	pub fn force_close(&mut self) {
 		if let Some(SelectedText { indices, .. }) = self.selected_text.as_ref() {
 			let indices = indices.clone();
-			let Some(tab) = self.tabs.get_mut(self.tab) else { return; };
+			let Some(tab) = self.tabs.get_mut(self.tab) else {
+				return;
+			};
 			let element = Navigate::new(indices.iter().copied(), &mut tab.value).last().2;
 			let decrement = element.height() - 1;
 			if element.open() && element.toggle().is_some() {
@@ -1069,6 +1187,7 @@ impl NbtWorkbench {
 					}
 				}
 			}
+			tab.recache_depth();
 		}
 	}
 
@@ -1076,7 +1195,9 @@ impl NbtWorkbench {
 	pub fn force_open(&mut self) {
 		if let Some(SelectedText { indices, .. }) = self.selected_text.as_ref() {
 			let indices = indices.clone();
-			let Some(tab) = self.tabs.get_mut(self.tab) else { return; };
+			let Some(tab) = self.tabs.get_mut(self.tab) else {
+				return;
+			};
 			let element = Navigate::new(indices.iter().copied(), &mut tab.value).last().2;
 			if !element.open() && element.toggle().is_some() {
 				let increment = element.height() - 1;
@@ -1087,25 +1208,30 @@ impl NbtWorkbench {
 					}
 				}
 			}
+			tab.recache_depth();
 		}
 	}
 
 	#[inline]
 	#[must_use]
-	pub fn close_selected_text(&mut self) -> bool {
+	pub fn close_selected_text(&mut self, ignore_already_present_key: bool) -> bool {
 		if let Some(SelectedText {
-			            indices,
-			            value,
-			            prefix,
-			            suffix,
-			            editable: true,
-			            ..
-		            }) = self.selected_text.clone()
+			indices,
+			value,
+			prefix,
+			suffix,
+			keyfix,
+			valuefix,
+			editable: true,
+			..
+		}) = self.selected_text.clone()
 		{
-			let Some(tab) = self.tabs.get_mut(self.tab) else { return false; };
+			let Some(tab) = self.tabs.get_mut(self.tab) else {
+				return false;
+			};
 			if indices.is_empty() {
 				let buf = PathBuf::from(value);
-				if let Some(name) = buf.file_name().and_then(std::ffi::OsStr::to_str) {
+				if let Some(name) = buf.file_name().and_then(OsStr::to_str) {
 					tab.name = name.into();
 					tab.path = Some(buf);
 				}
@@ -1116,24 +1242,66 @@ impl NbtWorkbench {
 				let previous = {
 					let element = Navigate::new(rem.iter().copied(), &mut tab.value).last().2;
 					if key {
-						if let NbtElement::Compound(compound) = element {
-							unsafe {
-								if compound.get(last).panic_unchecked("this will exist").0 == value.as_ref() || compound.entries.contains_key(value.as_ref()) {
-									return false;
-								}
+						if let NbtElement::Compound(compound) | NbtElement::Chunk(NbtChunk { inner: compound, .. }) = element {
+							if compound.entries.contains_key(value.as_ref()) {
+								return ignore_already_present_key;
 							}
 							compound.update_key(last, value.clone()).unwrap_or(value)
+						} else if let NbtElement::Region(region) = element {
+							let (x, z) = match (value.parse::<u8>(), unsafe { valuefix.panic_unchecked("A chunk has a key and value") }.parse::<u8>()) {
+								(Ok(x @ 0..=31), Ok(z @ 0..=31)) => (x, z),
+								_ => return ignore_already_present_key,
+							};
+							let (old_x, old_z) = {
+								let chunk = unsafe { region.get_mut(last).panic_unchecked("Index was invalid").as_chunk_unchecked_mut() };
+								(core::mem::replace(&mut chunk.x, x), core::mem::replace(&mut chunk.z, z))
+							};
+							let new_idx = ((x as usize) << 5) | (z as usize);
+							if region.chunks[new_idx].is_some() {
+								unsafe {
+									let chunk = region.get_mut(last).panic_unchecked("Index was invalid").as_chunk_unchecked_mut();
+									chunk.x = old_x;
+									chunk.z = old_z;
+									return ignore_already_present_key;
+								}
+							}
+							let from = core::mem::replace(&mut region.map[last], new_idx as u16) as usize;
+							region.chunks.swap(from, new_idx);
+							old_x.to_string().into_boxed_str()
 						} else {
 							unsafe { panic_unchecked("Expected key-value indices chain tail to be of type compound") }
 						}
 					} else {
-						// no drops dw, well except for the value, but that's a simple thing dw
-						unsafe {
-							element
-								.get_mut(last)
-								.panic_unchecked("Last index was valid")
-								.set_value(value)
-								.panic_unchecked("Type of indices tail can accept value writes")
+						if let NbtElement::Region(region) = element {
+							let (x, z) = match (unsafe { keyfix.panic_unchecked("A chunk always has a key and value") }.parse::<u8>(), value.parse::<u8>()) {
+								(Ok(x @ 0..=31), Ok(z @ 0..=31)) => (x, z),
+								_ => return ignore_already_present_key,
+							};
+							let (old_x, old_z) = {
+								let chunk = unsafe { region.get_mut(last).panic_unchecked("Last index was valid").as_chunk_unchecked_mut() };
+								(core::mem::replace(&mut chunk.x, x), core::mem::replace(&mut chunk.z, z))
+							};
+							let new_idx = ((x as usize) << 5) | (z as usize);
+							if region.chunks[new_idx].is_some() {
+								unsafe {
+									let chunk = region.get_mut(last).panic_unchecked("Last index was valid").as_chunk_unchecked_mut();
+									chunk.x = old_x;
+									chunk.z = old_z;
+									return ignore_already_present_key;
+								}
+							};
+							let from = core::mem::replace(&mut region.map[last], new_idx as u16) as usize;
+							region.chunks.swap(from, new_idx);
+							old_z.to_string().into_boxed_str()
+						} else {
+							// no drops dw, well except for the value, but that's a simple thing dw
+							unsafe {
+								element
+									.get_mut(last)
+									.panic_unchecked("Last index was valid")
+									.set_value(value)
+									.panic_unchecked("Type of indices tail can accept value writes")
+							}
 						}
 					}
 				};
@@ -1146,7 +1314,7 @@ impl NbtWorkbench {
 		true
 	}
 
-	#[cfg_attr(not(debug_assertions), inline)]
+	#[cfg_attr(windows_subsystem = "console", inline)]
 	#[allow(clippy::collapsible_if, clippy::too_many_lines)]
 	pub fn on_key_input(&mut self, key: KeyboardInput) -> bool {
 		if key.state == ElementState::Pressed {
@@ -1171,7 +1339,7 @@ impl NbtWorkbench {
 						KeyResult::Finish => {
 							self.cache_cursor_x = None;
 							// we just won't let you leave if you didn't fix it ;)
-							let _ = self.close_selected_text();
+							let _ = self.close_selected_text(false);
 							return true;
 						}
 						KeyResult::Keyfix => {
@@ -1185,11 +1353,15 @@ impl NbtWorkbench {
 							return true;
 						}
 						KeyResult::Up(ctrl) => {
-							unsafe { self.selected_text_up(ctrl); }
+							unsafe {
+								self.selected_text_up(ctrl);
+							}
 							return true;
 						}
 						KeyResult::Down(ctrl) => {
-							unsafe { self.selected_text_down(ctrl); }
+							unsafe {
+								self.selected_text_down(ctrl);
+							}
 							return true;
 						}
 						KeyResult::ForceClose => {
@@ -1268,7 +1440,9 @@ impl NbtWorkbench {
 						history_changed: false,
 						scroll: 0,
 						horizontal_scroll: 0,
-						window_height: WINDOW_HEIGHT,
+						window_height: self.window_height,
+						window_width: self.window_width,
+						depth: 32,
 					});
 					self.tab = self.tabs.len() - 1;
 					self.selected_text = None;
@@ -1296,6 +1470,7 @@ impl NbtWorkbench {
 					if let Some(tab) = self.tab_mut() {
 						if let Some(action) = tab.undos.pop() {
 							tab.redos.push(action.undo(&mut tab.value));
+							tab.recache_depth();
 							self.selected_text = None;
 							return true;
 						}
@@ -1305,6 +1480,7 @@ impl NbtWorkbench {
 					if let Some(tab) = self.tab_mut() {
 						if let Some(action) = tab.redos.pop() {
 							tab.undos.push(action.undo(&mut tab.value));
+							tab.recache_depth();
 							self.selected_text = None;
 							return true;
 						}
@@ -1323,7 +1499,13 @@ impl NbtWorkbench {
 					}
 				}
 				if key == VirtualKeyCode::C && flags == flags!(Ctrl) {
-					if self.copy() {
+					if self.copy(false) {
+						self.selected_text = None;
+						return true;
+					}
+				}
+				if key == VirtualKeyCode::C && flags == flags!(Ctrl + Shift) {
+					if self.copy(true) {
 						self.selected_text = None;
 						return true;
 					}
@@ -1344,7 +1526,7 @@ impl NbtWorkbench {
 	}
 
 	#[inline]
-	pub fn on_cursor_move(&mut self, pos: PhysicalPosition<f64>) -> bool {
+	pub fn on_mouse_move(&mut self, pos: PhysicalPosition<f64>) -> bool {
 		self.mouse_x = pos.x as usize;
 		self.mouse_y = pos.y as usize;
 		let mouse_y = self.mouse_y;
@@ -1365,11 +1547,17 @@ impl NbtWorkbench {
 	#[inline]
 	pub fn window_height(&mut self, window_height: usize) {
 		self.window_height = window_height;
+		for tab in &mut self.tabs {
+			tab.window_height = window_height;
+		}
 	}
 
 	#[inline]
 	pub fn window_width(&mut self, window_width: usize) {
 		self.window_width = window_width;
+		for tab in &mut self.tabs {
+			tab.window_width = window_width;
+		}
 	}
 
 	#[inline]
@@ -1381,7 +1569,7 @@ impl NbtWorkbench {
 	#[inline]
 	#[must_use]
 	pub fn horizontal_scroll(&self) -> usize {
-		self.tab().map_or(0, |tab| tab.horizontal_scroll) & !0b1111
+		self.tab().map_or(0, Tab::horizontal_scroll)
 	}
 
 	#[inline]
@@ -1398,7 +1586,9 @@ impl NbtWorkbench {
 	pub fn render(&self, builder: &mut VertexBufferBuilder) {
 		self.render_tabs(builder);
 		self.render_icons(builder);
-		let Some(tab) = self.tabs.get(self.tab) else { return; };
+		let Some(tab) = self.tabs.get(self.tab) else {
+			return;
+		};
 		let left_margin = self.left_margin();
 		let horizontal_scroll = tab.horizontal_scroll;
 		let mut highlight = if self.mouse_y < HEADER_SIZE || self.mouse_x + horizontal_scroll < left_margin {
@@ -1426,17 +1616,24 @@ impl NbtWorkbench {
 		let forbidden = (
 			self.selected_text.as_ref().map(|x| x.y).and_then(|x| x.checked_sub(builder.scroll())).unwrap_or(0),
 			self.selected_text.as_ref().and_then(|text| {
-				if text.keyfix.is_none() && text.valuefix.is_some() {
-					Some(text.value.clone().into_boxed_str())
+				if text.keyfix.is_none() && (text.valuefix.is_some() || !text.suffix.is_empty()) {
+					Some((text.value.clone().into_boxed_str(), text.valuefix.clone().unwrap_or_else(|| text.suffix.clone()).into_boxed_str()))
 				} else if let Some(keyfix) = text.keyfix.as_ref() && text.valuefix.is_none() {
-					Some(keyfix.clone().into_boxed_str())
+					Some((keyfix.clone().into_boxed_str(), text.value.clone().into_boxed_str()))
 				} else {
 					None
 				}
 			}),
 		);
-		let mut ctx = RenderContext::new(forbidden, highlight, ghost, left_margin, (tab.value.height() - 1) * 16 + HEADER_SIZE - tab.scroll);
-		tab.render(builder, &mut ctx);
+		let mut ctx = RenderContext::new(
+			forbidden,
+			highlight,
+			ghost,
+			left_margin,
+			(tab.value.height() - 1) * 16 + HEADER_SIZE - tab.scroll,
+			(self.mouse_x, self.mouse_y),
+		);
+		tab.render(builder, &mut ctx, self.scrollbar_offset.is_some());
 		if let Some(selected_text) = &self.selected_text {
 			builder.horizontal_scroll = horizontal_scroll;
 			selected_text.render(builder, left_margin);
@@ -1454,23 +1651,20 @@ impl NbtWorkbench {
 
 	#[inline]
 	fn render_icons(&self, builder: &mut VertexBufferBuilder) {
-		NbtByte::render_icon(0, 26, builder);
-		NbtShort::render_icon(16, 26, builder);
-		NbtInt::render_icon(32, 26, builder);
-		NbtLong::render_icon(48, 26, builder);
-		NbtFloat::render_icon(64, 26, builder);
-		NbtDouble::render_icon(80, 26, builder);
-		NbtByteArray::render_icon(96, 26, builder);
-		NbtIntArray::render_icon(112, 26, builder);
-		NbtLongArray::render_icon(128, 26, builder);
-		NbtString::render_icon(144, 26, builder);
-		NbtList::render_icon(160, 26, builder);
-		NbtCompound::render_icon(176, 26, builder);
-		builder.draw_texture((192, 26), (0, 48), (16, 16));
-
-		if self.mouse_x < 208 && self.mouse_y >= 23 && self.mouse_y < 39 {
-			builder.draw_texture((self.mouse_x & !0b1111, 26), (0, 32), (16, 16));
-		}
+		let mx = if (24..46).contains(&self.mouse_y) { self.mouse_x & !0b1111 } else { usize::MAX };
+		builder.draw_texture((0, 26), if mx == 0 { BYTE_UV } else { BYTE_GHOST_UV }, (16, 16));
+		builder.draw_texture((16, 26), if mx == 16 { SHORT_UV } else { SHORT_GHOST_UV }, (16, 16));
+		builder.draw_texture((32, 26), if mx == 32 { INT_UV } else { INT_GHOST_UV }, (16, 16));
+		builder.draw_texture((48, 26), if mx == 48 { LONG_UV } else { LONG_GHOST_UV }, (16, 16));
+		builder.draw_texture((64, 26), if mx == 64 { FLOAT_UV } else { FLOAT_GHOST_UV }, (16, 16));
+		builder.draw_texture((80, 26), if mx == 80 { DOUBLE_UV } else { DOUBLE_GHOST_UV }, (16, 16));
+		builder.draw_texture((96, 26), if mx == 96 { BYTE_ARRAY_UV } else { BYTE_ARRAY_GHOST_UV }, (16, 16));
+		builder.draw_texture((112, 26), if mx == 112 { INT_ARRAY_UV } else { INT_ARRAY_GHOST_UV }, (16, 16));
+		builder.draw_texture((128, 26), if mx == 128 { LONG_ARRAY_UV } else { LONG_ARRAY_GHOST_UV }, (16, 16));
+		builder.draw_texture((144, 26), if mx == 144 { STRING_UV } else { STRING_GHOST_UV }, (16, 16));
+		builder.draw_texture((160, 26), if mx == 160 { LIST_UV } else { LIST_GHOST_UV }, (16, 16));
+		builder.draw_texture((176, 26), if mx == 176 { COMPOUND_UV } else { COMPOUND_GHOST_UV }, (16, 16));
+		builder.draw_texture((192, 26), if mx == 192 { UNKNOWN_NBT_UV } else { UNKNOWN_NBT_GHOST_UV }, (16, 16));
 	}
 
 	#[inline]
@@ -1478,22 +1672,22 @@ impl NbtWorkbench {
 		let mut offset = 3;
 		builder.horizontal_scroll = self.tab_scroll;
 		for (idx, tab) in self.tabs.iter().enumerate() {
-			let u = (idx == self.tab) as usize * 16 + 16;
-			builder.draw_texture((offset, 3), (u, 32), (3, 16));
+			let uv = if idx == self.tab { SELECTED_WIDGET_UV } else { UNSELECTED_WIDGET_UV };
+			builder.draw_texture((offset, 3), uv, (3, 16));
 			offset += 3;
 			builder.settings(offset, 3, false);
 			let _ = write!(builder, "{}", tab.name);
 			let remaining_width = tab.name.width() + 32 + 3;
-			builder.draw_texture_region_z((offset, 3), 0.0, (u + 3, 32), (remaining_width, 16), (10, 16));
+			builder.draw_texture_region_z((offset, 3), 0.0, uv + Vec2u::new(3, 0), (remaining_width, 16), (10, 16));
 			offset += remaining_width;
-			builder.draw_texture((offset, 3), (u + 13, 32), (3, 16));
-			builder.draw_texture((offset - 32, 3), (96 - tab.history_changed as usize * 16, 32), (16, 16));
-			builder.draw_texture((offset - 16, 3), (16 + tab.compression as usize * 16, 48), (16, 16));
+			builder.draw_texture((offset, 3), uv + Vec2u::new(13, 0), (3, 16));
+			builder.draw_texture((offset - 32, 3), if tab.history_changed { EDITED_UV } else { UNEDITED_UV }, (16, 16));
+			builder.draw_texture((offset - 16, 3), tab.compression.uv(), (16, 16));
 			offset += 6;
 		}
 		builder.horizontal_scroll = 0;
-		builder.draw_texture_region_z((0, 21), 0.0, (48, 32), (builder.window_width(), 2), (16, 2));
-		builder.draw_texture_region_z((0, 45), 0.0, (48, 32), (builder.window_width(), 2), (16, 2));
+		builder.draw_texture_region_z((0, 21), 0.0, HORIZONTAL_SEPARATOR_UV, (builder.window_width(), 2), (16, 2));
+		builder.draw_texture_region_z((0, 45), 0.0, HORIZONTAL_SEPARATOR_UV, (builder.window_width(), 2), (16, 2));
 	}
 
 	#[inline]
@@ -1863,55 +2057,73 @@ impl NbtWorkbench {
 
 pub struct RenderContext {
 	forbidden_y: usize,
-	forbidden_key: Option<Box<str>>,
+	forbidden_key: Option<(Box<str>, Box<str>)>,
+	extend_forbid_for_value: bool,
 	key_invalid: bool,
 	highlight: (usize, usize),
 	ghost: Option<(u8, usize, usize)>,
 	left_margin: usize,
 	end_y: usize,
+	mouse_x: usize,
+	mouse_y: usize,
 	pub line_number: usize,
+	red_line_numbers: [usize; 2],
 }
 
 impl RenderContext {
 	#[must_use]
-	pub fn new(forbidden: (usize, Option<Box<str>>), highlight: (usize, usize), ghost: Option<(u8, usize, usize)>, left_margin: usize, end_y: usize) -> Self {
+	pub fn new(forbidden: (usize, Option<(Box<str>, Box<str>)>), highlight: (usize, usize), ghost: Option<(u8, usize, usize)>, left_margin: usize, end_y: usize, mouse: (usize, usize)) -> Self {
 		Self {
 			forbidden_y: forbidden.0,
 			forbidden_key: forbidden.1,
+			extend_forbid_for_value: false,
 			key_invalid: false,
 			highlight,
 			ghost,
 			left_margin,
 			end_y,
+			mouse_x: mouse.0,
+			mouse_y: mouse.1,
 			line_number: 1,
+			red_line_numbers: [0, 0],
 		}
 	}
 
 	pub fn highlight(&self, pos: (usize, usize), text_width: usize, builder: &mut VertexBufferBuilder) {
 		if pos.1 == self.highlight.1 && self.highlight.0 <= pos.0 + if text_width > 0 { text_width + 4 } else { text_width } + 16 && self.highlight.0 >= pos.0 {
-			builder.draw_texture(pos, (0, 32), (16, 16));
+			builder.draw_texture(pos, SELECTION_UV, (16, 16));
 		}
 	}
 
-	pub fn check_key<F: FnOnce(&str) -> bool>(&mut self, f: F) {
-		if let Some(forbidden_key) = self.forbidden_key.as_ref() {
-			self.key_invalid = f(forbidden_key);
+	pub fn check_key<F: FnOnce(&str, &str) -> bool>(&mut self, f: F, extend: bool) {
+		if let Some((forbidden_key, forbidden_value)) = self.forbidden_key.as_ref() {
+			self.key_invalid = f(forbidden_key, forbidden_value);
+			self.extend_forbid_for_value = extend;
 		}
+	}
+
+	pub fn draw_toggle(&self, pos: (usize, usize), open: bool, builder: &mut VertexBufferBuilder) {
+		let x = (pos.0 - self.left_margin) / 16;
+		let y = (pos.1 - HEADER_SIZE) / 16;
+		let hovered = if (self.mouse_x >= self.left_margin) & (self.mouse_y >= HEADER_SIZE) {
+			(x == (self.mouse_x - self.left_margin) / 16) & (y == (self.mouse_y - HEADER_SIZE) / 16)
+		} else {
+			false
+		};
+		let uv = match (open, hovered) {
+			(false, false) => UNSELECTED_TOGGLE_OFF_UV,
+			(false, true) => SELECTED_TOGGLE_OFF_UV,
+			(true, false) => UNSELECTED_TOGGLE_ON_UV,
+			(true, true) => SELECTED_TOGGLE_ON_UV,
+		};
+		builder.draw_texture(Vec2u::from(pos) + Vec2u::new(3, 5), uv, (8, 8));
 	}
 
 	#[must_use]
 	pub fn forbid(&self, x: usize, y: usize, builder: &mut VertexBufferBuilder) -> bool {
 		if y == self.forbidden_y {
-			if let Some(forbidden_key) = self.forbidden_key.as_ref() && self.key_invalid {
-				let mut width = forbidden_key.width();
-				let mut offset = 20;
-				// texture varies across x axis so we can't stretch this
-				loop {
-					builder.draw_texture((x + offset, y + 14), (64, 46), (width.min(16), 2));
-					offset += width.min(16);
-					if width == 0 { break }
-					width = width.saturating_sub(16);
-				}
+			if self.key_invalid {
+				self.draw_forbid_underline(x, y, builder);
 			}
 			false
 		} else {
@@ -1919,31 +2131,49 @@ impl RenderContext {
 		}
 	}
 
+	pub fn draw_forbid_underline_width(&self, x: usize, y: usize, overridden_width: usize, builder: &mut VertexBufferBuilder) {
+		if self.forbidden_key.is_some() {
+			// buck hates this and sees no ideal solution
+			builder.draw_texture_region_z((x + 20, y + 14), 0.0, TEXT_UNDERLINE_UV, (overridden_width, 2), (16, 2));
+		}
+	}
+
+	pub fn draw_forbid_underline(&self, x: usize, y: usize, builder: &mut VertexBufferBuilder) {
+		if let Some((forbidden_key, forbidden_value)) = self.forbidden_key.as_ref() {
+			// buck hates this and sees no ideal solution
+			builder.draw_texture_region_z((x + 20, y + 14), 0.0, TEXT_UNDERLINE_UV, (forbidden_key.width() + (": ".width() + forbidden_value.width()) * self.extend_forbid_for_value as usize, 2), (16, 2));
+		}
+	}
+
 	pub fn line_number(&mut self, y: usize, builder: &mut VertexBufferBuilder) {
 		let line_number = self.line_number;
-		let color = core::mem::replace(&mut builder.color, 0xAA);
-		builder.settings(self.left_margin - 9 - (line_number.ilog10() as usize + 1) * 8, y, false);
+		let color = if (self.red_line_numbers[0] == y) | (self.red_line_numbers[1] == y) { 0xFF5555 } else { 0xAAAAAA };
+		let color = core::mem::replace(&mut builder.color, color);
+		builder.settings(self.left_margin - line_number.ilog10() as usize * 8 - 16, y, false);
 		let _ = write!(builder, "{line_number}");
 		builder.color = color;
-		builder.draw_texture_z((builder.text_coords.0 + 4, y), 0.5, (124 + (y >= self.end_y) as usize * 2, 32), (2, 16));
+		let uv = if y >= self.end_y { END_LINE_NUMBER_SEPARATOR_UV } else { LINE_NUMBER_SEPARATOR_UV };
+		builder.draw_texture_z((builder.text_coords.0 + 4, y), 0.5, uv, (2, 16));
 		self.line_number += 1;
 	}
 
 	pub fn ghost<F: FnOnce(usize, usize) -> bool>(&self, x_offset: usize, y_offset: usize, builder: &mut VertexBufferBuilder, f: F) -> bool {
 		if let Some((id, x, y)) = self.ghost && f(x, y) {
 			builder.draw_texture((x_offset, y_offset), match id {
-				1 => (0, 64),
-				2 => (16, 64),
-				3 => (32, 64),
-				4 => (48, 64),
-				5 => (64, 64),
-				6 => (80, 64),
-				7 => (96, 64),
-				8 => (16, 80),
-				9 => (32, 80),
-				10 => (48, 80),
-				11 => (112, 64),
-				12 => (0, 80),
+				NbtByte::ID => BYTE_GHOST_UV,
+				NbtShort::ID => SHORT_GHOST_UV,
+				NbtInt::ID => INT_GHOST_UV,
+				NbtLong::ID => LONG_GHOST_UV,
+				NbtFloat::ID => FLOAT_GHOST_UV,
+				NbtDouble::ID => DOUBLE_GHOST_UV,
+				NbtByteArray::ID => BYTE_ARRAY_GHOST_UV,
+				NbtString::ID => STRING_GHOST_UV,
+				NbtList::ID => LIST_GHOST_UV,
+				NbtCompound::ID => COMPOUND_GHOST_UV,
+				NbtIntArray::ID => INT_ARRAY_GHOST_UV,
+				NbtLongArray::ID => LONG_ARRAY_GHOST_UV,
+				NbtChunk::ID => CHUNK_GHOST_UV,
+				NbtRegion::ID => REGION_GHOST_UV,
 				_ => unsafe { panic_unchecked("Invalid element id") },
 			}, (16, 16));
 			true
@@ -2000,6 +2230,11 @@ impl<T> LinkedQueue<T> {
 	#[must_use]
 	pub fn get(&self) -> Option<&T> {
 		self.tail.as_ref().map(|x| &x.value)
+	}
+
+	#[must_use]
+	pub fn get_mut(&mut self) -> Option<&mut T> {
+		self.tail.as_mut().map(|x| &mut x.value)
 	}
 
 	#[must_use]
@@ -2163,10 +2398,10 @@ unsafe fn panic_unchecked(msg: &str) -> ! {
 
 pub mod elements {
 	pub mod array;
+	pub mod chunk;
 	pub mod compound;
 	pub mod element_type;
 	pub mod list;
 	pub mod primitive;
 	pub mod string;
 }
-

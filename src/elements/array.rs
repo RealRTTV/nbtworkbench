@@ -1,6 +1,6 @@
 #[macro_export]
 macro_rules! array {
-	($element:ident, $element_inner:ident, $name:ident, $t:ty, $my_id:literal, $id:literal, $char:literal, ($u:literal $v:literal), ($u2:literal $v2:literal)) => {
+	($element:ident, $element_inner:ident, $name:ident, $t:ty, $my_id:literal, $id:literal, $char:literal, $uv:ident, $element_uv:ident) => {
 		#[derive(Clone, Default)]
 		pub struct $name {
 			values: Vec<NbtElement>,
@@ -160,7 +160,7 @@ macro_rules! array {
 					Self::render_icon(*x_offset, *y_offset, builder);
 					ctx.highlight((*x_offset, *y_offset), key.map(StrExt::width).unwrap_or(0), builder);
 					if !self.is_empty() {
-						builder.draw_texture((*x_offset - 16, *y_offset), (96 + self.open as usize * 16, 16), (16, 16));
+						ctx.draw_toggle((*x_offset - 16, *y_offset), self.open, builder);
 					}
 					if ctx.forbid(*x_offset, *y_offset, builder) {
 						builder.settings(*x_offset + 20, *y_offset, false);
@@ -172,15 +172,15 @@ macro_rules! array {
 
 					if ctx.ghost.is_some_and(|(id, _, _)| id == $id) {
 						if ctx.ghost(*x_offset + 16, *y_offset + 16, builder, |x, y| x == *x_offset + 16 && y == *y_offset + 8) {
-							builder.draw_texture((*x_offset, *y_offset + 16), (80, 16), (16, (self.height() != 1) as usize * 7 + 9));
+							builder.draw_texture((*x_offset, *y_offset + 16), CONNECTION_UV, (16, (self.height() != 1) as usize * 7 + 9));
 							if !tail {
-								builder.draw_texture((*x_offset - 16, *y_offset + 16), (80, 16), (8, 16));
+								builder.draw_texture((*x_offset - 16, *y_offset + 16), CONNECTION_UV, (8, 16));
 							}
 							*y_offset += 16;
 						} else if self.height() == 1 && ctx.ghost(*x_offset + 16, *y_offset + 16, builder, |x, y| x == *x_offset + 16 && y == *y_offset + 16) {
-							builder.draw_texture((*x_offset, *y_offset + 16), (80, 16), (16, 9));
+							builder.draw_texture((*x_offset, *y_offset + 16), CONNECTION_UV, (16, 9));
 							if !tail {
-								builder.draw_texture((*x_offset - 16, *y_offset + 16), (80, 16), (8, 16));
+								builder.draw_texture((*x_offset - 16, *y_offset + 16), CONNECTION_UV, (8, 16));
 							}
 							*y_offset += 16;
 						}
@@ -192,7 +192,7 @@ macro_rules! array {
 				if self.open {
 					*x_offset += 16;
 
-					ctx.check_key(|_| false);
+					ctx.check_key(|_, _| false, false);
 					for (idx, element) in self.children().enumerate() {
 						if *y_offset > builder.window_height() {
 							break;
@@ -205,22 +205,22 @@ macro_rules! array {
 						}
 
 						if ctx.ghost.is_some_and(|(id, _, _)| id == $id) && ctx.ghost(*x_offset, *y_offset, builder, |x, y| *x_offset == x && *y_offset == y) {
-							builder.draw_texture((*x_offset - 16, *y_offset), (80, 16), (16, 16));
+							builder.draw_texture((*x_offset - 16, *y_offset), CONNECTION_UV, (16, 16));
 							if !tail {
-								builder.draw_texture((*x_offset - 32, *y_offset), (80, 16), (8, 16));
+								builder.draw_texture((*x_offset - 32, *y_offset), CONNECTION_UV, (8, 16));
 							}
 							*y_offset += 16;
 						}
 
 						let ghost_tail_mod = if let Some((id, x, y)) = ctx.ghost && x == *x_offset && y == *y_offset + 16 - *remaining_scroll * 16 - 8 && id == $id {
-																			false
-																		} else {
-																			true
-																		};
+																							false
+																						} else {
+																							true
+																						};
 
-						builder.draw_texture((*x_offset - 16, *y_offset), (80, 16), (16, (!(idx == self.len() - 1 && ghost_tail_mod)) as usize * 7 + 9));
+						builder.draw_texture((*x_offset - 16, *y_offset), CONNECTION_UV, (16, (!(idx == self.len() - 1 && ghost_tail_mod)) as usize * 7 + 9));
 						if !tail {
-							builder.draw_texture((*x_offset - 32, *y_offset), (80, 16), (8, 16));
+							builder.draw_texture((*x_offset - 32, *y_offset), CONNECTION_UV, (8, 16));
 						}
 
 						ctx.line_number(*y_offset, builder);
@@ -235,9 +235,9 @@ macro_rules! array {
 						*y_offset += 16;
 
 						if ctx.ghost.is_some_and(|(id, _, _)| id == $id) && ctx.ghost(*x_offset, *y_offset, builder, |x, y| *x_offset == x && *y_offset - 8 == y) {
-							builder.draw_texture((*x_offset - 16, *y_offset), (80, 16), (16, (idx != self.len() - 1) as usize * 7 + 9));
+							builder.draw_texture((*x_offset - 16, *y_offset), CONNECTION_UV, (16, (idx != self.len() - 1) as usize * 7 + 9));
 							if !tail {
-								builder.draw_texture((*x_offset - 32, *y_offset), (80, 16), (8, 16));
+								builder.draw_texture((*x_offset - 32, *y_offset), CONNECTION_UV, (8, 16));
 							}
 							*y_offset += 16;
 						}
@@ -268,13 +268,13 @@ macro_rules! array {
 			}
 
 			#[inline] // ret type is #[must_use]
-			pub fn children(&self) -> Iter<'_, NbtElement> {
-				self.values.iter()
+			pub fn children(&self) -> ValueIterator {
+				ValueIterator::Generic(self.values.iter())
 			}
 
 			#[inline] // ret type is #[must_use]
-			pub fn children_mut(&mut self) -> IterMut<'_, NbtElement> {
-				self.values.iter_mut()
+			pub fn children_mut(&mut self) -> ValueMutIterator {
+				ValueMutIterator::Generic(self.values.iter_mut())
 			}
 
 			pub fn drop(&mut self, key: Option<Box<str>>, element: NbtElement, y: &mut usize, depth: usize, target_depth: usize, indices: &mut Vec<usize>) -> DropFn {
@@ -340,12 +340,12 @@ macro_rules! array {
 
 			#[inline]
 			pub fn render_icon(x: usize, y: usize, builder: &mut VertexBufferBuilder) {
-				builder.draw_texture((x, y), ($u, $v), (16, 16));
+				builder.draw_texture((x, y), $uv, (16, 16));
 			}
 
 			#[inline]
 			pub fn render_element_icon(x: usize, y: usize, builder: &mut VertexBufferBuilder) {
-				builder.draw_texture((x, y), ($u2, $v2), (16, 16));
+				builder.draw_texture((x, y), $element_uv, (16, 16));
 			}
 		}
 

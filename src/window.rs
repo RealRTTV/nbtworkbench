@@ -1,3 +1,4 @@
+use pollster::FutureExt;
 use std::num::NonZeroU64;
 
 use wgpu::util::{BufferInitDescriptor, DeviceExt};
@@ -17,23 +18,23 @@ use crate::{assets, NbtWorkbench};
 pub const WINDOW_HEIGHT: usize = 420;
 pub const WINDOW_WIDTH: usize = 620;
 
-pub async fn run() -> ! {
+pub fn run() -> ! {
 	let event_loop = EventLoop::new();
 	let window = WindowBuilder::new()
 		.with_title("NBT Workbench")
 		.with_transparent(std::env::args().any(|x| x.eq("--transparent")))
-		.with_inner_size(PhysicalSize::new(300, WINDOW_HEIGHT as u32))
+		.with_inner_size(PhysicalSize::new(250, WINDOW_HEIGHT as u32))
 		.with_min_inner_size(PhysicalSize::new(WINDOW_WIDTH as u32, (HEADER_SIZE + 16) as u32))
 		.with_window_icon(Some(Icon::from_rgba(assets::icon(), assets::ICON_WIDTH as u32, assets::ICON_HEIGHT as u32).expect("valid format")))
 		.with_drag_and_drop(true)
 		.build(&event_loop)
 		.unwrap();
-	let mut state = State::new(&window).await;
+	let mut state = State::new(&window);
 	let mut workbench = NbtWorkbench::new();
 
 	event_loop.run(move |event, _, control_flow| match event {
 		Event::RedrawRequested(window_id) if window_id == window.id() => match state.render(&workbench) {
-			Ok(()) => {},
+			Ok(()) => {}
 			Err(SurfaceError::Lost) => state.surface.configure(&state.device, &state.config),
 			Err(SurfaceError::OutOfMemory) => *control_flow = ControlFlow::ExitWithCode(1),
 			Err(SurfaceError::Timeout) => eprintln!("Frame took too long to process"),
@@ -73,7 +74,7 @@ struct State {
 
 impl State {
 	#[allow(clippy::too_many_lines)] // yeah but.... what am I supposed to do?
-	async fn new(window: &Window) -> Self {
+	fn new(window: &Window) -> Self {
 		let size = window.inner_size();
 		let instance = Instance::new(InstanceDescriptor {
 			backends: Backends::all(),
@@ -86,7 +87,7 @@ impl State {
 				force_fallback_adapter: false,
 				compatible_surface: Some(&surface),
 			})
-			.await
+			.block_on()
 			.unwrap();
 		let (device, queue) = adapter
 			.request_device(
@@ -97,7 +98,7 @@ impl State {
 				},
 				None,
 			)
-			.await
+			.block_on()
 			.unwrap();
 		let config = SurfaceConfiguration {
 			usage: TextureUsages::RENDER_ATTACHMENT,
@@ -274,7 +275,7 @@ impl State {
 				buffers: &[VertexBufferLayout {
 					array_stride: 16,
 					step_mode: VertexStepMode::Vertex,
-					attributes: &vertex_attr_array![0 => Float32x3, 1 => Uint32],
+					attributes: &vertex_attr_array![0 => Float32x2, 1 => Uint32, 2 => Uint32],
 				}],
 			},
 			fragment: Some(FragmentState {
@@ -354,7 +355,7 @@ impl State {
 			WindowEvent::Focused(_) => false,
 			WindowEvent::KeyboardInput { input, .. } => workbench.on_key_input(*input),
 			WindowEvent::ModifiersChanged(_) => false,
-			WindowEvent::CursorMoved { position, .. } => workbench.on_cursor_move(*position),
+			WindowEvent::CursorMoved { position, .. } => workbench.on_mouse_move(*position),
 			WindowEvent::CursorEntered { .. } => false,
 			WindowEvent::CursorLeft { .. } => false,
 			WindowEvent::MouseWheel { delta, .. } => workbench.on_scroll(*delta),

@@ -1,12 +1,12 @@
+use crate::assets::{HEADER_SIZE, SELECTION_UV};
+use crate::selected_text::KeyResult::*;
+use crate::vertex_buffer_builder::{Vec2u, VertexBufferBuilder};
+use crate::{flags, is_jump_char_boundary, is_utf8_char_boundary, LinkedQueue, OptionExt, StrExt};
 use std::convert::identity;
+use std::fmt::Write;
 use std::intrinsics::{likely, unlikely};
 use std::time::SystemTime;
 use winit::event::VirtualKeyCode;
-use crate::{flags, is_utf8_char_boundary, LinkedQueue, OptionExt, StrExt};
-use crate::assets::HEADER_SIZE;
-use crate::selected_text::KeyResult::*;
-use crate::vertex_buffer_builder::VertexBufferBuilder;
-use std::fmt::Write;
 
 #[derive(Clone, Debug)]
 pub struct SelectedTextCache {
@@ -18,6 +18,10 @@ pub struct SelectedTextCache {
 }
 
 impl SelectedTextCache {
+	pub fn eq(&self, text: &SelectedText) -> bool {
+		(self.value.as_ref() == text.value.as_str()) & (self.keyfix.as_ref().map(Box::as_ref) == text.keyfix.as_deref()) & (self.valuefix.as_ref().map(Box::as_ref) == text.valuefix.as_deref())
+	}
+
 	pub fn ne(&self, text: &SelectedText) -> bool {
 		(self.value.as_ref() != text.value.as_str()) | (self.keyfix.as_ref().map(Box::as_ref) != text.keyfix.as_deref()) | (self.valuefix.as_ref().map(Box::as_ref) != text.valuefix.as_deref())
 	}
@@ -60,16 +64,16 @@ impl SelectedText {
 	#[inline]
 	#[must_use]
 	#[allow(clippy::too_many_lines)]
-	pub fn new(target_x: usize, mouse_x: usize, y: usize, key: Option<(Box<str>, bool)>, value: Option<(Box<str>, bool)>, indices: Vec<usize>) -> Option<Self> {
+	pub fn new(target_x: usize, mouse_x: usize, y: usize, key: Option<(Box<str>, bool)>, value: Option<(Box<str>, bool)>, chunk: bool, indices: Vec<usize>) -> Option<Self> {
 		let key_width = if let Some((key, true)) = key.clone() {
 			let key_width = key.width();
 
 			if mouse_x + 4 >= target_x {
 				let (suffix, valuefix) = if let Some((v, b)) = &value {
 					if *b {
-						(": ".to_owned(), Some(v.clone().into_string()))
+						(if chunk { ", " } else { ": " }.to_owned(), Some(v.clone().into_string()))
 					} else {
-						(format!(": {v}"), None)
+						(format!("{} {v}", if chunk { ',' } else { ':' }), None)
 					}
 				} else {
 					(String::new(), None)
@@ -92,11 +96,13 @@ impl SelectedText {
 							undos: LinkedQueue::new(),
 							redos: LinkedQueue::new(),
 						}
-							.post_process(),
+						.post_process(),
 					);
 				}
 
-				if target_x + key_width < mouse_x + key.chars().last().and_then(|char| VertexBufferBuilder::CHAR_WIDTH.get(char as usize)).copied().unwrap_or(0) as usize && mouse_x < target_x + key_width + 7 {
+				if target_x + key_width < mouse_x + key.chars().last().and_then(|char| VertexBufferBuilder::CHAR_WIDTH.get(char as usize)).copied().unwrap_or(0) as usize
+					&& mouse_x < target_x + key_width + 7
+				{
 					return Some(
 						Self {
 							y,
@@ -112,7 +118,8 @@ impl SelectedText {
 							last_interaction: SystemTime::now(),
 							undos: LinkedQueue::new(),
 							redos: LinkedQueue::new(),
-						}.post_process(),
+						}
+						.post_process(),
 					);
 				}
 
@@ -143,7 +150,7 @@ impl SelectedText {
 								undos: LinkedQueue::new(),
 								redos: LinkedQueue::new(),
 							}
-								.post_process(),
+							.post_process(),
 						);
 					}
 				}
@@ -158,9 +165,9 @@ impl SelectedText {
 			if mouse_x + 4 >= value_x {
 				let (keyfix, prefix) = if let Some((k, b)) = key.as_ref() {
 					if *b {
-						(Some(k.as_ref().to_owned()), ": ".to_owned())
+						(Some(k.as_ref().to_owned()), if chunk { ", " } else { ": " }.to_owned())
 					} else {
-						(None, format!(": {k}"))
+						(None, format!("{} {k}", if chunk { ',' } else { ':' }))
 					}
 				} else {
 					(None, String::new())
@@ -183,13 +190,22 @@ impl SelectedText {
 							undos: LinkedQueue::new(),
 							redos: LinkedQueue::new(),
 						}
-							.post_process(),
+						.post_process(),
 					);
 				}
 
 				let value_width = value.width();
 
-				if value_x + value_width < mouse_x + key.as_ref().and_then(|(x, _)| x.chars().last()).and_then(|char| VertexBufferBuilder::CHAR_WIDTH.get(char as usize)).copied().unwrap_or(0) as usize && mouse_x < value_x + value_width + 5 {
+				if value_x + value_width
+					< mouse_x
+						+ key
+							.as_ref()
+							.and_then(|(x, _)| x.chars().last())
+							.and_then(|char| VertexBufferBuilder::CHAR_WIDTH.get(char as usize))
+							.copied()
+							.unwrap_or(0) as usize
+					&& mouse_x < value_x + value_width + 5
+				{
 					return Some(
 						Self {
 							y,
@@ -205,7 +221,8 @@ impl SelectedText {
 							last_interaction: SystemTime::now(),
 							undos: LinkedQueue::new(),
 							redos: LinkedQueue::new(),
-						}.post_process(),
+						}
+						.post_process(),
 					);
 				}
 
@@ -236,7 +253,7 @@ impl SelectedText {
 								undos: LinkedQueue::new(),
 								redos: LinkedQueue::new(),
 							}
-								.post_process(),
+							.post_process(),
 						);
 					}
 				}
@@ -249,7 +266,7 @@ impl SelectedText {
 					y,
 					indices: indices.into_boxed_slice(),
 					cursor: 0,
-					value: if key.is_some() { ": ".to_owned() } else { String::new() },
+					value: if key.is_some() { if chunk { ", " } else { ": " }.to_owned() } else { String::new() },
 					selection: None,
 					keyfix: key.map(|(x, _)| x.into_string()),
 					prefix: String::new(),
@@ -260,7 +277,7 @@ impl SelectedText {
 					undos: LinkedQueue::new(),
 					redos: LinkedQueue::new(),
 				}
-					.post_process(),
+				.post_process(),
 			)
 		} else {
 			None
@@ -295,6 +312,11 @@ impl SelectedText {
 			}
 
 			self.save_state_in_history();
+		}
+
+		if self.undos.get().is_some_and(|x| x.eq(self)) && let Some(undo) = self.undos.get_mut() {
+			undo.cursor = self.cursor;
+			undo.selection = self.selection;
 		}
 	}
 
@@ -371,7 +393,7 @@ impl SelectedText {
 			return NothingSpecial;
 		}
 
-		if let Some(selection) = self.selection {
+		if let Some(selection) = self.selection && flags == flags!() {
 			if let VirtualKeyCode::Back | VirtualKeyCode::Delete = key && self.editable {
 				let (low_selection, high_selection) = if self.cursor < selection { (self.cursor, selection) } else { (selection, self.cursor) };
 				let (left, right) = self.value.split_at(low_selection);
@@ -435,8 +457,31 @@ impl SelectedText {
 
 		if key == VirtualKeyCode::Back && flags < 2 && self.editable {
 			if flags & flags!(Ctrl) > 0 {
-				self.value = self.value.split_off(self.cursor);
-				self.cursor = 0;
+				let (left, right) = self.value.split_at(self.cursor);
+				if !left.is_empty() {
+					let mut end = left.len() - 1;
+					while end > 0 {
+						if left.as_bytes()[end].is_ascii_whitespace() {
+							end -= 1;
+						} else {
+							break;
+						}
+					}
+					let last_byte = left.as_bytes()[end];
+					let last_jump_char_boundary = is_jump_char_boundary(last_byte);
+					while end > 0 {
+						let byte = left.as_bytes()[end];
+						if is_utf8_char_boundary(byte) && (!last_jump_char_boundary && is_jump_char_boundary(byte) || last_jump_char_boundary && byte != last_byte) {
+							// this is to fix "string   |" [CTRL + BACKSPACE] => "strin" instead of "string"
+							end += 1;
+							break;
+						}
+						end -= 1;
+					}
+					let (left, _) = left.split_at(end);
+					self.value = format!("{left}{right}");
+					self.cursor = end;
+				}
 			} else {
 				let (left, right) = self.value.split_at(self.cursor);
 
@@ -459,8 +504,30 @@ impl SelectedText {
 
 		if key == VirtualKeyCode::Delete && self.editable {
 			if flags & flags!(Ctrl) > 0 {
-				self.value.truncate(self.cursor);
-				self.cursor = self.value.len();
+				let (left, right) = self.value.split_at(self.cursor);
+				if !right.is_empty() {
+					let mut start = 1;
+					while start < right.len() {
+						if right.as_bytes()[start].is_ascii_whitespace() {
+							start += 1;
+						} else {
+							break;
+						}
+					}
+					let first_byte = right.as_bytes()[start];
+					let first_jump_char_boundary = is_jump_char_boundary(first_byte);
+					while start < right.len() {
+						let byte = right.as_bytes()[start];
+						if is_utf8_char_boundary(byte) && (!first_jump_char_boundary && is_jump_char_boundary(byte) || first_jump_char_boundary && byte != first_byte) {
+							start -= 1;
+							break;
+						}
+						start += 1;
+					}
+					let (_, right) = right.split_at(start);
+					self.cursor = left.len();
+					self.value = format!("{left}{right}");
+				}
 			} else {
 				let (left, right) = self.value.split_at(self.cursor);
 
@@ -507,10 +574,32 @@ impl SelectedText {
 				}
 
 				if flags & flags!(Ctrl) > 0 {
+					let mut new = if let Some(selection) = self.selection && flags & flags!(Shift) > 0 { selection } else { self.cursor };
+					if new > 0 {
+						new -= 1;
+						while new > 0 {
+							if self.value.as_bytes()[new].is_ascii_whitespace() {
+								new -= 1;
+							} else {
+								break;
+							}
+						}
+						let last_byte = self.value.as_bytes()[new];
+						let last_jump_char_boundary = is_jump_char_boundary(last_byte);
+						while new > 0 {
+							let byte = self.value.as_bytes()[new];
+							if is_utf8_char_boundary(byte) && (!last_jump_char_boundary && is_jump_char_boundary(byte) || last_jump_char_boundary && byte != last_byte) {
+								// this is to fix "string   |" [CTRL + BACKSPACE] => "strin" instead of "string"
+								new += 1;
+								break;
+							}
+							new -= 1;
+						}
+					}
 					if flags & flags!(Shift) > 0 {
-						self.selection = Some(0);
+						self.selection = Some(new);
 					} else {
-						self.cursor = 0;
+						self.cursor = new;
 						self.selection = None;
 					}
 				} else {
@@ -554,10 +643,33 @@ impl SelectedText {
 				}
 
 				if flags & flags!(Ctrl) > 0 {
+					let mut new = self.cursor;
+					if new < self.value.len() {
+						new += 1;
+						if new < self.value.len() {
+							while new < self.value.len() {
+								if self.value.as_bytes()[new].is_ascii_whitespace() {
+									new += 1;
+								} else {
+									break;
+								}
+							}
+							let first_byte = self.value.as_bytes()[new];
+							let first_jump_char_boundary = is_jump_char_boundary(first_byte);
+							while new < self.value.len() {
+								let byte = self.value.as_bytes()[new];
+								if is_utf8_char_boundary(byte) && (!first_jump_char_boundary && is_jump_char_boundary(byte) || first_jump_char_boundary && byte != first_byte) {
+									break;
+								}
+								new += 1;
+							}
+						}
+					}
+
 					if flags & flags!(Shift) > 0 {
-						self.selection = Some(self.value.len());
+						self.selection = Some(new);
 					} else {
-						self.cursor = self.value.len();
+						self.cursor = new;
 						self.selection = None;
 					}
 				} else {
@@ -630,10 +742,10 @@ impl SelectedText {
 		let prefix_width = self.prefix.width() + self.keyfix.as_ref().map_or(0, StrExt::width);
 
 		if self.editable {
-			builder.draw_texture((x + self.value.split_at(self.cursor).0.width() + prefix_width, y), (0, 32), (2, 16));
+			builder.draw_texture((x + self.value.split_at(self.cursor).0.width() + prefix_width, y), SELECTION_UV, (2, 16));
 		}
 
-		builder.draw_texture((x - 4 - 16, y), (0, 32), (16, 16));
+		builder.draw_texture((x - 4 - 16, y), SELECTION_UV, (16, 16));
 
 		builder.settings(x, y, false);
 		let _ = write!(
@@ -652,7 +764,7 @@ impl SelectedText {
 			let end_x = x + self.value.split_at(end).0.width();
 			let mut remaining_width = end_x - start_x;
 			while remaining_width > 0 {
-				builder.draw_texture_z((start_x + prefix_width, y), 0.5, (1, 32), (remaining_width.min(14), 16));
+				builder.draw_texture_z((start_x + prefix_width, y), 0.5, Vec2u::new(1, 0) + SELECTION_UV, (remaining_width.min(14), 16));
 				remaining_width = if remaining_width <= 14 { 0 } else { remaining_width - 14 };
 				start_x += 14;
 			}

@@ -10,7 +10,7 @@ use crate::{RenderContext, StrExt, VertexBufferBuilder};
 #[repr(transparent)]
 #[allow(clippy::module_name_repetitions)]
 pub struct NbtString {
-	str: Box<str>,
+	pub str: Box<str>,
 }
 
 impl NbtString {

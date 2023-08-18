@@ -1,7 +1,9 @@
 use crate::Position;
 
 use crate::elements::element_type::NbtElement;
+use crate::vertex_buffer_builder::VertexBufferBuilder;
 use crate::{panic_unchecked, Navigate, OptionExt};
+use crate::assets::{ADD_UV, MOVE_UV, REMOVE_UV, RENAME_UV};
 
 pub enum WorkbenchAction {
 	Remove {
@@ -144,5 +146,14 @@ impl WorkbenchAction {
 				}
 			}
 		})
+	}
+
+	pub fn render(&self, x: usize, y: usize, builder: &mut VertexBufferBuilder) {
+		match self {
+			WorkbenchAction::Remove { .. } => builder.draw_texture((x, y), REMOVE_UV, (16, 16)),
+			WorkbenchAction::Add { .. } => builder.draw_texture((x, y), ADD_UV, (16, 16)),
+			WorkbenchAction::Rename { .. } => builder.draw_texture((x, y), RENAME_UV, (16, 16)),
+			WorkbenchAction::Move { .. } => builder.draw_texture((x, y), MOVE_UV, (16, 16)),
+		}
 	}
 }

@@ -6,7 +6,7 @@ use fxhash::FxBuildHasher;
 use indexmap::map::{Iter, IterMut};
 use indexmap::IndexMap;
 
-use crate::assets::{COMPOUND_UV, HEADER_SIZE};
+use crate::assets::{COMPOUND_ROOT_UV, COMPOUND_UV, CONNECTION_UV, HEADER_SIZE, LINE_NUMBER_SEPARATOR_UV};
 use crate::decoder::Decoder;
 use crate::elements::element_type::NbtElement;
 use crate::encoder::write_string;
@@ -219,12 +219,15 @@ impl NbtCompound {
 			}
 
 			ctx.line_number(y_offset, builder);
-			builder.draw_texture_z((builder.text_coords.0 + 4, y_offset - 2), 1.0, (115, 32), (2, 2)); // fun hack for connection
-			builder.draw_texture((x_offset, y_offset), (64, 16), (16, 16));
+			// fun hack for connection
+			// doesn't work on most platforms in the same way, but it adds a little detail nonetheless.
+			// the intended behaviour is to connect without any new pixel changes except making the darker toned one tucked in the corner to be slightly lighter
+			builder.draw_texture_z((builder.text_coords.0 + 4, y_offset - 2), 0.5, LINE_NUMBER_SEPARATOR_UV, (2, 2));
+			builder.draw_texture((x_offset, y_offset), COMPOUND_ROOT_UV, (16, 16));
 			ctx.highlight((x_offset, y_offset), str.width(), builder);
-			builder.draw_texture((x_offset - 16, y_offset), (80, 16), (16, 9));
+			builder.draw_texture((x_offset - 16, y_offset), CONNECTION_UV, (16, 9));
 			if !self.is_empty() {
-				builder.draw_texture((x_offset - 16, y_offset), (96 + self.open as usize * 16, 16), (16, 16));
+				ctx.draw_toggle((x_offset - 16, y_offset), self.open, builder);
 			}
 			if ctx.forbid(x_offset, y_offset, builder) {
 				builder.settings(x_offset + 20, y_offset, false);
@@ -232,12 +235,12 @@ impl NbtCompound {
 			}
 
 			if ctx.ghost(x_offset + 16, y_offset + 16, builder, |x, y| x == x_offset + 16 && y == y_offset + 8) {
-				builder.draw_texture((x_offset, y_offset + 16), (80, 16), (16, (self.height() != 1) as usize * 7 + 9));
+				builder.draw_texture((x_offset, y_offset + 16), CONNECTION_UV, (16, (self.height() != 1) as usize * 7 + 9));
 				y_offset += 16;
 			}
 
 			if self.height() == 1 && ctx.ghost(x_offset + 16, y_offset + 16, builder, |x, y| x == x_offset + 16 && y == y_offset + 16) {
-				builder.draw_texture((x_offset, y_offset + 16), (80, 16), (16, 9));
+				builder.draw_texture((x_offset, y_offset + 16), CONNECTION_UV, (16, 9));
 				y_offset += 16;
 			}
 
@@ -247,6 +250,32 @@ impl NbtCompound {
 		x_offset += 16;
 
 		if self.open {
+			{
+				let children_contains_forbidden = 'f: {
+					let mut y = y_offset;
+					for (_, value) in self.entries.iter() {
+						if y.saturating_sub(remaining_scroll * 16) == ctx.forbidden_y && ctx.forbidden_y >= HEADER_SIZE {
+							break 'f true;
+						}
+						y += value.height() * 16;
+					}
+					false
+				};
+				if children_contains_forbidden {
+					let mut y = y_offset;
+					for (name, value) in self.entries.iter() {
+						ctx.check_key(|text, _| text == name.as_ref(), false);
+						// first check required so this don't render when it's the only selected
+						if y.saturating_sub(remaining_scroll * 16) != ctx.forbidden_y && y.saturating_sub(remaining_scroll * 16) >= HEADER_SIZE && ctx.key_invalid {
+							ctx.red_line_numbers[1] = y.saturating_sub(remaining_scroll * 16);
+							ctx.draw_forbid_underline(x_offset, y.saturating_sub(remaining_scroll * 16), builder);
+							break;
+						}
+						y += value.height() * 16;
+					}
+				}
+			}
+
 			for (idx, (name, value)) in self.entries.iter().enumerate() {
 				if y_offset > builder.window_height() {
 					break;
@@ -260,7 +289,7 @@ impl NbtCompound {
 				}
 
 				if ctx.ghost(x_offset, y_offset, builder, |x, y| x_offset == x && y_offset == y) {
-					builder.draw_texture((x_offset - 16, y_offset), (80, 16), (16, 16));
+					builder.draw_texture((x_offset - 16, y_offset), CONNECTION_UV, (16, 16));
 					y_offset += 16;
 				}
 
@@ -271,9 +300,12 @@ impl NbtCompound {
 				};
 
 				if remaining_scroll == 0 {
-					builder.draw_texture((x_offset - 16, y_offset), (80, 16), (16, (idx != self.len() - 1 || !ghost_tail_mod) as usize * 7 + 9));
+					builder.draw_texture((x_offset - 16, y_offset), CONNECTION_UV, (16, (idx != self.len() - 1 || !ghost_tail_mod) as usize * 7 + 9));
 				}
-				ctx.check_key(|f| self.entries.contains_key(f) && name.as_ref() != f);
+				ctx.check_key(|text, _| self.entries.contains_key(text) && name.as_ref() != text, false);
+				if ctx.key_invalid && y_offset == ctx.forbidden_y {
+					ctx.red_line_numbers[0] = y_offset;
+				}
 				value.render(
 					&mut x_offset,
 					&mut y_offset,
@@ -285,15 +317,13 @@ impl NbtCompound {
 				);
 
 				if ctx.ghost(x_offset, y_offset, builder, |x, y| x_offset == x && y_offset - 8 == y) {
-					builder.draw_texture((x_offset - 16, y_offset), (80, 16), (16, (idx != self.len() - 1) as usize * 7 + 9));
+					builder.draw_texture((x_offset - 16, y_offset), CONNECTION_UV, (16, (idx != self.len() - 1) as usize * 7 + 9));
 					y_offset += 16;
 				}
 			}
 		} else {
-			// unrequired tbh
 			// line_number += self.true_height - 1;
 		}
-		// unrequired tbh
 		// x_offset -= 16;
 	}
 }
@@ -318,12 +348,16 @@ impl Display for NbtCompound {
 
 impl Debug for NbtCompound {
 	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-		let mut debug = f.debug_struct("");
-		for (key, element) in self.children() {
-			let key = if key.needs_escape() { Cow::Owned(format!("{key:?}")) } else { Cow::Borrowed(key.as_ref()) };
-			debug.field(key.as_ref(), element);
+		if self.is_empty() {
+			write!(f, "{{}}")
+		} else {
+			let mut debug = f.debug_struct("");
+			for (key, element) in self.children() {
+				let key = if key.needs_escape() { Cow::Owned(format!("{key:?}")) } else { Cow::Borrowed(key.as_ref()) };
+				debug.field(key.as_ref(), element);
+			}
+			debug.finish()
 		}
-		debug.finish()
 	}
 }
 
@@ -343,7 +377,7 @@ impl NbtCompound {
 			Self::render_icon(*x_offset, *y_offset, builder);
 			ctx.highlight((*x_offset, *y_offset), name.map_or(0, StrExt::width), builder);
 			if !self.is_empty() {
-				builder.draw_texture((*x_offset - 16, *y_offset), (96 + self.open as usize * 16, 16), (16, 16));
+				ctx.draw_toggle((*x_offset - 16, *y_offset), self.open, builder);
 			}
 			if ctx.forbid(*x_offset, *y_offset, builder) {
 				builder.settings(*x_offset + 20, *y_offset, false);
@@ -354,15 +388,15 @@ impl NbtCompound {
 			}
 
 			if ctx.ghost(*x_offset + 16, *y_offset + 16, builder, |x, y| x == *x_offset + 16 && y == *y_offset + 8) {
-				builder.draw_texture((*x_offset, *y_offset + 16), (80, 16), (16, (self.height() != 1) as usize * 7 + 9));
+				builder.draw_texture((*x_offset, *y_offset + 16), CONNECTION_UV, (16, (self.height() != 1) as usize * 7 + 9));
 				if !tail {
-					builder.draw_texture((*x_offset - 16, *y_offset + 16), (80, 16), (8, 16));
+					builder.draw_texture((*x_offset - 16, *y_offset + 16), CONNECTION_UV, (8, 16));
 				}
 				*y_offset += 16;
 			} else if self.height() == 1 && ctx.ghost(*x_offset + 16, *y_offset + 16, builder, |x, y| x == *x_offset + 16 && y == *y_offset + 16) {
-				builder.draw_texture((*x_offset, *y_offset + 16), (80, 16), (16, 9));
+				builder.draw_texture((*x_offset, *y_offset + 16), CONNECTION_UV, (16, 9));
 				if !tail {
-					builder.draw_texture((*x_offset - 16, *y_offset + 16), (80, 16), (8, 16));
+					builder.draw_texture((*x_offset - 16, *y_offset + 16), CONNECTION_UV, (8, 16));
 				}
 				*y_offset += 16;
 			}
@@ -375,6 +409,32 @@ impl NbtCompound {
 
 		if self.open {
 			*x_offset += 16;
+
+			{
+				let children_contains_forbidden = 'f: {
+					let mut y = *y_offset;
+					for (_, value) in self.entries.iter() {
+						if y.saturating_sub(*remaining_scroll * 16) == ctx.forbidden_y && ctx.forbidden_y >= HEADER_SIZE {
+							break 'f true;
+						}
+						y += value.height() * 16;
+					}
+					false
+				};
+				if children_contains_forbidden {
+					let mut y = *y_offset;
+					for (name, value) in self.entries.iter() {
+						ctx.check_key(|text, _| text == name.as_ref(), false);
+						// first check required so this don't render when it's the only selected
+						if y.saturating_sub(*remaining_scroll * 16) != ctx.forbidden_y && y.saturating_sub(*remaining_scroll * 16) >= HEADER_SIZE && ctx.key_invalid {
+							ctx.red_line_numbers[1] = y.saturating_sub(*remaining_scroll * 16);
+							ctx.draw_forbid_underline(*x_offset, y.saturating_sub(*remaining_scroll * 16), builder);
+							break;
+						}
+						y += value.height() * 16;
+					}
+				}
+			}
 
 			for (idx, (key, entry)) in self.entries.iter().enumerate() {
 				if *y_offset > builder.window_height() {
@@ -389,7 +449,7 @@ impl NbtCompound {
 				}
 
 				if ctx.ghost(*x_offset, *y_offset, builder, |x, y| *x_offset == x && *y_offset == y) {
-					builder.draw_texture((*x_offset - 16, *y_offset), (80, 16), (16, 16));
+					builder.draw_texture((*x_offset - 16, *y_offset), CONNECTION_UV, (16, 16));
 					*y_offset += 16;
 				}
 
@@ -400,13 +460,16 @@ impl NbtCompound {
 				};
 
 				if *remaining_scroll == 0 {
-					builder.draw_texture((*x_offset - 16, *y_offset), (80, 16), (16, (idx != self.len() - 1 || !ghost_tail_mod) as usize * 7 + 9));
+					builder.draw_texture((*x_offset - 16, *y_offset), CONNECTION_UV, (16, (idx != self.len() - 1 || !ghost_tail_mod) as usize * 7 + 9));
 				}
-				ctx.check_key(|f| self.entries.contains_key(f) && key.as_ref() != f);
+				ctx.check_key(|text, _| self.entries.contains_key(text) && key.as_ref() != text, false);
+				if ctx.key_invalid && *y_offset == ctx.forbidden_y {
+					ctx.red_line_numbers[0] = *y_offset;
+				}
 				entry.render(x_offset, y_offset, remaining_scroll, builder, Some(key.as_ref()), tail && idx == self.len() - 1 && ghost_tail_mod, ctx);
 
 				if ctx.ghost(*x_offset, *y_offset, builder, |x, y| *x_offset == x && *y_offset - 8 == y) {
-					builder.draw_texture((*x_offset - 16, *y_offset), (80, 16), (16, (idx != self.len() - 1) as usize * 7 + 9));
+					builder.draw_texture((*x_offset - 16, *y_offset), CONNECTION_UV, (16, (idx != self.len() - 1) as usize * 7 + 9));
 					*y_offset += 16;
 				}
 			}
@@ -414,7 +477,7 @@ impl NbtCompound {
 			if !tail {
 				let len = (*y_offset - y_before) / 16;
 				for i in 0..len {
-					builder.draw_texture((x_before, y_before + i * 16), (80, 16), (8, 16));
+					builder.draw_texture((x_before, y_before + i * 16), CONNECTION_UV, (8, 16));
 				}
 			}
 
