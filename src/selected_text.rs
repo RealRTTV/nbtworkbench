@@ -1,6 +1,6 @@
 use crate::assets::{HEADER_SIZE, SELECTION_UV};
-use crate::selected_text::KeyResult::*;
-use crate::vertex_buffer_builder::{Vec2u, VertexBufferBuilder};
+use crate::selected_text::KeyResult::{Down, Failed, Finish, ForceClose, ForceOpen, Keyfix, NothingSpecial, Revert, ShiftDown, ShiftUp, Up, Valuefix};
+use crate::vertex_buffer_builder::VertexBufferBuilder;
 use crate::{flags, is_jump_char_boundary, is_utf8_char_boundary, LinkedQueue, OptionExt, StrExt};
 use std::convert::identity;
 use std::fmt::Write;
@@ -9,6 +9,7 @@ use std::time::SystemTime;
 use winit::event::VirtualKeyCode;
 
 #[derive(Clone, Debug)]
+#[allow(clippy::module_name_repetitions)] // yeah no it's better like this
 pub struct SelectedTextCache {
 	keyfix: Option<Box<str>>,
 	value: Box<str>,
@@ -128,7 +129,7 @@ impl SelectedText {
 				let key_width = key_width as isize;
 
 				for char in key.chars() {
-					let width = VertexBufferBuilder::furthest_pixel(char as u16) as isize;
+					let width = VertexBufferBuilder::CHAR_WIDTH[char as usize] as isize;
 					if x * 2 >= width {
 						// algebra, to understand, divide both sides by two
 						cursor += char.len_utf8();
@@ -196,14 +197,7 @@ impl SelectedText {
 
 				let value_width = value.width();
 
-				if value_x + value_width
-					< mouse_x
-						+ key
-							.as_ref()
-							.and_then(|(x, _)| x.chars().last())
-							.and_then(|char| VertexBufferBuilder::CHAR_WIDTH.get(char as usize))
-							.copied()
-							.unwrap_or(0) as usize
+				if mouse_x + value.as_ref().chars().last().and_then(|char| VertexBufferBuilder::CHAR_WIDTH.get(char as usize)).copied().unwrap_or(0) as usize > value_x + value_width
 					&& mouse_x < value_x + value_width + 5
 				{
 					return Some(
@@ -231,7 +225,7 @@ impl SelectedText {
 				let mut cursor = 0;
 
 				for char in value.chars() {
-					let width = VertexBufferBuilder::furthest_pixel(char as u16) as isize;
+					let width = VertexBufferBuilder::CHAR_WIDTH[char as usize] as isize;
 					if x * 2 >= width {
 						// algebra, to understand, divide both sides by two
 						cursor += char.len_utf8();
@@ -260,7 +254,8 @@ impl SelectedText {
 			}
 		}
 
-		if key.as_ref().is_none_or(|(_, display)| !*display) && value.as_ref().is_none_or(|(_, display)| !*display) {
+		let full_width = key.as_ref().map_or(0, |(x, _)| x.width()) + value.as_ref().map_or(0, |(x, _)| x.width()) + if key.is_some() && value.is_some() { ": ".width() } else { 0 };
+		if key.as_ref().is_none_or(|(_, display)| !*display) && value.as_ref().is_none_or(|(_, display)| !*display) && mouse_x <= target_x + full_width && mouse_x + 16 >= target_x {
 			Some(
 				Self {
 					y,
@@ -304,7 +299,7 @@ impl SelectedText {
 		let should_cache = core::mem::replace(&mut self.last_interaction, SystemTime::now())
 			.elapsed()
 			.map_err(|e| e.duration())
-			.map_or_else(identity, identity)
+			.unwrap_or_else(identity)
 			.as_millis() >= 1_500;
 		if should_cache && self.editable && self.undos.get().is_none_or(|x| x.ne(self)) {
 			if self.redos.pop().is_none_or(|x| x.ne(self)) {
@@ -456,8 +451,8 @@ impl SelectedText {
 		}
 
 		if key == VirtualKeyCode::Back && flags < 2 && self.editable {
+			let (left, right) = self.value.split_at(self.cursor);
 			if flags & flags!(Ctrl) > 0 {
-				let (left, right) = self.value.split_at(self.cursor);
 				if !left.is_empty() {
 					let mut end = left.len() - 1;
 					while end > 0 {
@@ -483,8 +478,6 @@ impl SelectedText {
 					self.cursor = end;
 				}
 			} else {
-				let (left, right) = self.value.split_at(self.cursor);
-
 				if !left.is_empty() {
 					let mut end = left.len() - 1;
 					while end > 0 {
@@ -503,8 +496,8 @@ impl SelectedText {
 		}
 
 		if key == VirtualKeyCode::Delete && self.editable {
+			let (left, right) = self.value.split_at(self.cursor);
 			if flags & flags!(Ctrl) > 0 {
-				let (left, right) = self.value.split_at(self.cursor);
 				if !right.is_empty() {
 					let mut start = 1;
 					while start < right.len() {
@@ -529,8 +522,6 @@ impl SelectedText {
 					self.value = format!("{left}{right}");
 				}
 			} else {
-				let (left, right) = self.value.split_at(self.cursor);
-
 				if !right.is_empty() {
 					let mut start = 1;
 					while start < right.len() {
@@ -564,7 +555,7 @@ impl SelectedText {
 		}
 
 		if key == VirtualKeyCode::Left {
-			if flags == flags!(Alt) {
+			if flags == flags!(Alt) || flags == flags!(Shift + Alt) {
 				return ForceClose;
 			}
 
@@ -573,8 +564,8 @@ impl SelectedText {
 					return Keyfix;
 				}
 
+				let mut new = if let Some(selection) = self.selection && flags & flags!(Shift) > 0 { selection } else { self.cursor };
 				if flags & flags!(Ctrl) > 0 {
-					let mut new = if let Some(selection) = self.selection && flags & flags!(Shift) > 0 { selection } else { self.cursor };
 					if new > 0 {
 						new -= 1;
 						while new > 0 {
@@ -603,7 +594,6 @@ impl SelectedText {
 						self.selection = None;
 					}
 				} else {
-					let mut new = if let Some(selection) = self.selection && flags & flags!(Shift) > 0 { selection } else { self.cursor };
 					if new > 0 {
 						new -= 1;
 						while new > 0 {
@@ -628,12 +618,11 @@ impl SelectedText {
 					self.selection = None;
 				}
 			}
-
 			return NothingSpecial;
 		}
 
 		if key == VirtualKeyCode::Right {
-			if flags == flags!(Alt) {
+			if flags == flags!(Alt) || flags == flags!(Shift + Alt) {
 				return ForceOpen;
 			}
 
@@ -698,7 +687,6 @@ impl SelectedText {
 					self.selection = None;
 				}
 			}
-
 			return NothingSpecial;
 		}
 
@@ -739,15 +727,9 @@ impl SelectedText {
 			return;
 		}
 
-		let prefix_width = self.prefix.width() + self.keyfix.as_ref().map_or(0, StrExt::width);
-
-		if self.editable {
-			builder.draw_texture((x + self.value.split_at(self.cursor).0.width() + prefix_width, y), SELECTION_UV, (2, 16));
-		}
-
-		builder.draw_texture((x - 4 - 16, y), SELECTION_UV, (16, 16));
-
-		builder.settings(x, y, false);
+		let prefix_width = self.prefix.as_str().width() + self.keyfix.as_deref().map_or(0, StrExt::width);
+		builder.draw_texture_z((x - 4 - 16, y), 0.5, SELECTION_UV, (16, 16));
+		builder.settings((x, y), false, 1);
 		let _ = write!(
 			builder,
 			"{}{}{}{}{}",
@@ -758,15 +740,16 @@ impl SelectedText {
 			self.valuefix.as_ref().map_or("", String::as_str),
 		);
 
-		if let Some(selection) = self.selection && self.editable {
-			let (start, end) = if self.cursor > selection { (selection, self.cursor) } else { (self.cursor, selection) };
-			let mut start_x = x + self.value.split_at(start).0.width();
-			let end_x = x + self.value.split_at(end).0.width();
-			let mut remaining_width = end_x - start_x;
-			while remaining_width > 0 {
-				builder.draw_texture_z((start_x + prefix_width, y), 0.5, Vec2u::new(1, 0) + SELECTION_UV, (remaining_width.min(14), 16));
-				remaining_width = if remaining_width <= 14 { 0 } else { remaining_width - 14 };
-				start_x += 14;
+
+		if self.editable {
+			if let Some(selection) = self.selection && self.editable {
+				let (start, end) = if self.cursor > selection { (selection, self.cursor) } else { (self.cursor, selection) };
+				let start = self.value.split_at(start).0.width();
+				let end = self.value.split_at(end).0.width();
+				builder.draw_texture_region_z((prefix_width + start + x, y), 0.5, SELECTION_UV + (1, 0), (end - start - 1, 16), (14, 16));
+				builder.draw_texture_z((prefix_width + end + x - 1, y), 0.5, SELECTION_UV + (1, 0), (1, 16));
+			} else {
+				builder.draw_texture((x + self.value.split_at(self.cursor).0.width() + prefix_width, y), SELECTION_UV, (2, 16));
 			}
 		}
 	}

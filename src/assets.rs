@@ -1,16 +1,13 @@
-#[cfg(target_feature = "avx")]
-use core::arch::x86_64::*;
+use crate::vertex_buffer_builder::Vec2u;
 use std::mem::ManuallyDrop;
 use std::time::SystemTime;
-use crate::vertex_buffer_builder::Vec2u;
 
 pub const HEADER_SIZE: usize = 48;
 
 pub const ATLAS: &[u8] = include_bytes!("assets/atlas.hex");
 pub const ATLAS_WIDTH: usize = 128;
 pub const ATLAS_HEIGHT: usize = 128;
-
-pub const UNICODE: &[u8] = include_bytes!("assets/unicode.hex");
+pub const UNICODE_LEN: usize = 1_818_624;
 
 pub const ICON_WIDTH: usize = 64;
 pub const ICON_HEIGHT: usize = 64;
@@ -47,10 +44,18 @@ pub const REMOVE_UV: Vec2u = Vec2u::new(0, 96);
 pub const ADD_UV: Vec2u = Vec2u::new(16, 96);
 pub const RENAME_UV: Vec2u = Vec2u::new(32, 96);
 pub const MOVE_UV: Vec2u = Vec2u::new(48, 96);
+pub const REMOVE_TAIL_UV: Vec2u = Vec2u::new(0, 112);
+pub const ADD_TAIL_UV: Vec2u = Vec2u::new(16, 112);
+pub const RENAME_TAIL_UV: Vec2u = Vec2u::new(32, 112);
+pub const MOVE_TAIL_UV: Vec2u = Vec2u::new(48, 112);
+pub const UNDO_UV: Vec2u = Vec2u::new(64, 96);
+pub const REDO_UV: Vec2u = Vec2u::new(64, 112);
 pub const LINE_NUMBER_SEPARATOR_UV: Vec2u = Vec2u::new(60, 64);
 pub const END_LINE_NUMBER_SEPARATOR_UV: Vec2u = Vec2u::new(62, 64);
-pub const HORIZONTAL_SEPARATOR_UV: Vec2u = Vec2u::new(16, 80);
+pub const HORIZONTAL_SEPARATOR_UV: Vec2u = Vec2u::new(17, 80); // (14 by 2)
 pub const TEXT_UNDERLINE_UV: Vec2u = Vec2u::new(16, 82);
+pub const TOOLTIP_UV: Vec2u = Vec2u::new(112, 112);
+pub const BOOKMARK_UV: Vec2u = Vec2u::new(112, 96);
 
 pub const BYTE_UV: Vec2u = Vec2u::new(0, 0);
 pub const SHORT_UV: Vec2u = Vec2u::new(16, 0);
@@ -85,6 +90,8 @@ pub const CHUNK_GHOST_UV: Vec2u = Vec2u::new(64, 48);
 
 #[allow(clippy::cast_ptr_alignment)]
 pub fn icon() -> Vec<u8> {
+	#[cfg(debug_assertions)]
+	let start = unsafe { core::arch::x86_64::_rdtsc() };
 	let original = match (SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_micros() & 7) as u8 {
 		// its a good random only because its used once
 		0 => OTHERSIDE_MUSIC_DISC_ICON,
@@ -98,32 +105,22 @@ pub fn icon() -> Vec<u8> {
 		_ => unsafe { core::hint::unreachable_unchecked() },
 	};
 	let mut scaled = Box::<[i32]>::new_uninit_slice(4096);
-	#[cfg(target_feature = "avx")]
-	for y in 0..16 {
-		for x in 0..16 {
-			unsafe {
-				let register = _mm_set1_epi32(original.as_ptr().cast::<i32>().add(y * 16 + x).read_unaligned());
-				let offset = y * 256 + x * 4;
-				_mm_storeu_epi32(scaled.as_mut_ptr().add(offset + 64 * 0), register);
-				_mm_storeu_epi32(scaled.as_mut_ptr().add(offset + 64 * 1), register);
-				_mm_storeu_epi32(scaled.as_mut_ptr().add(offset + 64 * 2), register);
-				_mm_storeu_epi32(scaled.as_mut_ptr().add(offset + 64 * 3), register);
-			}
-		}
-	}
-	#[cfg(not(target_feature = "avx"))]
 	for y in 0..16 {
 		for x in 0..16 {
 			unsafe {
 				let value = original.as_ptr().cast::<i32>().add(y * 16 + x).read_unaligned();
 				let offset = y * 256 + x * 4;
 				scaled.as_mut_ptr().add(offset).cast::<(i32, i32, i32, i32)>().write((value, value, value, value));
-				scaled.as_mut_ptr().add(offset + 64).copy_from_nonoverlapping(scaled.as_ptr().add(offset), 4);
-				scaled.as_mut_ptr().add(offset + 128).copy_from_nonoverlapping(scaled.as_ptr().add(offset), 4);
-				scaled.as_mut_ptr().add(offset + 192).copy_from_nonoverlapping(scaled.as_ptr().add(offset), 4);
 			}
 		}
+		unsafe {
+			let ptr = scaled.as_ptr().cast::<[i32; 64]>().add(y * 4);
+			scaled.as_mut_ptr().cast::<[i32; 64]>().add(y * 4 + 1).cast::<u8>().copy_from_nonoverlapping(ptr.cast(), 256);
+			scaled.as_mut_ptr().cast::<[i32; 64]>().add(y * 4 + 2).cast::<u8>().copy_from_nonoverlapping(ptr.cast(), 512);
+		}
 	}
-	let mut scaled = ManuallyDrop::new(scaled);
+	let mut scaled = ManuallyDrop::new(core::hint::black_box(scaled));
+	#[cfg(debug_assertions)]
+	println!("took {} cycles", unsafe { core::arch::x86_64::_rdtsc() } - start);
 	unsafe { Vec::from_raw_parts(scaled.as_mut_ptr().cast::<u8>(), 16384, 16384) }
 }

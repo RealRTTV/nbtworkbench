@@ -1,5 +1,5 @@
-use pollster::FutureExt;
 use std::num::NonZeroU64;
+use pollster::FutureExt;
 
 use wgpu::util::{BufferInitDescriptor, DeviceExt};
 #[allow(clippy::wildcard_imports)]
@@ -7,13 +7,14 @@ use wgpu::*;
 use winit::dpi::PhysicalSize;
 #[allow(clippy::wildcard_imports)]
 use winit::event::*;
-use winit::event_loop::{ControlFlow, EventLoop};
+use winit::event_loop::EventLoop;
 use winit::platform::windows::WindowBuilderExtWindows;
 use winit::window::{Icon, Window, WindowBuilder};
+use zune_inflate::DeflateOptions;
 
 use crate::assets::HEADER_SIZE;
 use crate::vertex_buffer_builder::VertexBufferBuilder;
-use crate::{assets, NbtWorkbench};
+use crate::{assets, Workbench};
 
 pub const WINDOW_HEIGHT: usize = 420;
 pub const WINDOW_WIDTH: usize = 620;
@@ -30,30 +31,35 @@ pub fn run() -> ! {
 		.build(&event_loop)
 		.unwrap();
 	let mut state = State::new(&window);
-	let mut workbench = NbtWorkbench::new();
+	let mut workbench = Workbench::new(&window);
 
-	event_loop.run(move |event, _, control_flow| match event {
-		Event::RedrawRequested(window_id) if window_id == window.id() => match state.render(&workbench) {
+	event_loop.run(move |event, _, _| match event {
+		Event::RedrawRequested(window_id) if window_id == window.id() => match state.render(&workbench, &window) {
 			Ok(()) => {}
 			Err(SurfaceError::Lost) => state.surface.configure(&state.device, &state.config),
-			Err(SurfaceError::OutOfMemory) => *control_flow = ControlFlow::ExitWithCode(1),
+			Err(SurfaceError::OutOfMemory) => {
+				std::process::exit(1);
+			},
 			Err(SurfaceError::Timeout) => eprintln!("Frame took too long to process"),
 			Err(SurfaceError::Outdated) => {
 				eprintln!("Surface changed unexpectedly");
-				*control_flow = ControlFlow::ExitWithCode(1);
+				std::process::exit(1);
 			}
 		},
 		Event::WindowEvent { event, window_id } if window_id == window.id() => {
-			if State::input(&event, &mut workbench) {
-				window.request_redraw();
-			} else {
+			if !State::input(&event, &mut workbench, &window) {
 				match event {
-					WindowEvent::CloseRequested => *control_flow = ControlFlow::Exit,
+					WindowEvent::CloseRequested => {
+						std::process::exit(0);
+					},
 					WindowEvent::Resized(new_size) => state.resize(&mut workbench, new_size),
 					WindowEvent::ScaleFactorChanged { new_inner_size: new_size, .. } => state.resize(&mut workbench, *new_size),
 					_ => {}
 				}
 			}
+		}
+		Event::MainEventsCleared => {
+			window.request_redraw();
 		}
 		_ => {}
 	})
@@ -102,10 +108,10 @@ impl State {
 			.unwrap();
 		let config = SurfaceConfiguration {
 			usage: TextureUsages::RENDER_ATTACHMENT,
-			format: surface.get_capabilities(&adapter).formats[0],
+			format: surface.get_capabilities(&adapter).formats.into_iter().find(TextureFormat::is_srgb).unwrap(),
 			width: size.width,
 			height: size.height,
-			present_mode: PresentMode::AutoVsync,
+			present_mode: PresentMode::Fifo,
 			alpha_mode: CompositeAlphaMode::Auto,
 			view_formats: vec![],
 		};
@@ -222,7 +228,13 @@ impl State {
 				unclipped_depth: false,
 				conservative: false,
 			},
-			depth_stencil: None,
+			depth_stencil: Some(DepthStencilState {
+				format: TextureFormat::Depth32Float,
+				depth_write_enabled: true,
+				depth_compare: CompareFunction::LessEqual,
+				stencil: StencilState::default(),
+				bias: DepthBiasState::default(),
+			}),
 			multisample: MultisampleState {
 				count: 1,
 				mask: !0,
@@ -232,7 +244,15 @@ impl State {
 		});
 		let unicode_buffer = device.create_buffer_init(&BufferInitDescriptor {
 			label: Some("Unicode Buffer"),
-			contents: assets::UNICODE,
+			contents: &{
+				// ~5ms with --release
+				#[cfg(debug_assertions)]
+				let start = std::time::Instant::now();
+				let vec = zune_inflate::DeflateDecoder::new_with_options(include_bytes!("assets/unicode.hex.zib"), DeflateOptions::default().set_confirm_checksum(false)).decode_zlib().unwrap();
+				#[cfg(debug_assertions)]
+				println!("took {}ms to read compressed unicode", start.elapsed().as_nanos() as f64 / 1_000_000.0);
+				vec
+			},
 			usage: BufferUsages::STORAGE,
 		});
 		let unicode_bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
@@ -243,7 +263,7 @@ impl State {
 				ty: BindingType::Buffer {
 					ty: BufferBindingType::Storage { read_only: true },
 					has_dynamic_offset: false,
-					min_binding_size: NonZeroU64::new(assets::UNICODE.len() as u64),
+					min_binding_size: NonZeroU64::new(assets::UNICODE_LEN as u64),
 				},
 				count: None,
 			}],
@@ -296,7 +316,13 @@ impl State {
 				unclipped_depth: false,
 				conservative: false,
 			},
-			depth_stencil: None,
+			depth_stencil: Some(DepthStencilState {
+				format: TextureFormat::Depth32Float,
+				depth_write_enabled: true,
+				depth_compare: CompareFunction::LessEqual,
+				stencil: StencilState::default(),
+				bias: DepthBiasState::default(),
+			}),
 			multisample: MultisampleState {
 				count: 1,
 				mask: !0,
@@ -304,6 +330,11 @@ impl State {
 			},
 			multiview: None,
 		});
+		let load_op = if std::env::args().any(|x| x.eq("--transparent")) {
+			LoadOp::Load
+		} else {
+			LoadOp::Clear(Color { r: 0.013, g: 0.013, b: 0.013, a: 1.0 })
+		};
 
 		Self {
 			surface,
@@ -315,15 +346,11 @@ impl State {
 			diffuse_bind_group,
 			text_render_pipeline,
 			unicode_bind_group,
-			load_op: if std::env::args().any(|x| x.eq("--transparent")) {
-				LoadOp::Load
-			} else {
-				LoadOp::Clear(Color { r: 0.013, g: 0.013, b: 0.013, a: 1.0 })
-			},
+			load_op,
 		}
 	}
 
-	fn resize(&mut self, workbench: &mut NbtWorkbench, new_size: PhysicalSize<u32>) {
+	fn resize(&mut self, workbench: &mut Workbench, new_size: PhysicalSize<u32>) {
 		if new_size.width > 0 && new_size.height > 0 {
 			self.size = new_size;
 			self.config.width = new_size.width;
@@ -335,7 +362,7 @@ impl State {
 	}
 
 	#[allow(clippy::match_same_arms)] // it's cool to be reminded more often how many things I can have events for to make nbt workbench more reactive
-	fn input(event: &WindowEvent, workbench: &mut NbtWorkbench) -> bool {
+	fn input(event: &WindowEvent, workbench: &mut Workbench, window: &Window) -> bool {
 		match event {
 			WindowEvent::Resized(size) => {
 				workbench.window_height = size.height as usize;
@@ -348,18 +375,18 @@ impl State {
 			WindowEvent::Moved(_) => false,
 			WindowEvent::CloseRequested => false,
 			WindowEvent::Destroyed => false,
-			WindowEvent::DroppedFile(file) => workbench.on_open_file(file).is_some(),
+			WindowEvent::DroppedFile(file) => workbench.on_open_file(file, window).is_some(),
 			WindowEvent::HoveredFile(_) => false,
 			WindowEvent::HoveredFileCancelled => false,
 			WindowEvent::ReceivedCharacter(_) => false,
 			WindowEvent::Focused(_) => false,
-			WindowEvent::KeyboardInput { input, .. } => workbench.on_key_input(*input),
+			WindowEvent::KeyboardInput { input, .. } => workbench.on_key_input(*input, window),
 			WindowEvent::ModifiersChanged(_) => false,
 			WindowEvent::CursorMoved { position, .. } => workbench.on_mouse_move(*position),
 			WindowEvent::CursorEntered { .. } => false,
 			WindowEvent::CursorLeft { .. } => false,
 			WindowEvent::MouseWheel { delta, .. } => workbench.on_scroll(*delta),
-			WindowEvent::MouseInput { state, button, .. } => workbench.on_mouse_input(*state, *button),
+			WindowEvent::MouseInput { state, button, .. } => workbench.on_mouse_input(*state, *button, window),
 			WindowEvent::TouchpadPressure { .. } => false,
 			WindowEvent::AxisMotion { .. } => false,
 			WindowEvent::Touch(_) => false,
@@ -373,73 +400,97 @@ impl State {
 		}
 	}
 
-	fn render(&mut self, workbench: &NbtWorkbench) -> Result<(), SurfaceError> {
+	fn render(&mut self, workbench: &Workbench, window: &Window) -> Result<(), SurfaceError> {
 		let output = self.surface.get_current_texture()?;
 		let view = output.texture.create_view(&TextureViewDescriptor::default());
-		let mut encoder = self.device.create_command_encoder(&CommandEncoderDescriptor { label: Some("Render Encoder") });
+		let mut encoder = self.device.create_command_encoder(&CommandEncoderDescriptor { label: Some("Command Encoder") });
+		let depth_texture = self.device.create_texture(&TextureDescriptor {
+			label: Some("Depth Texture"),
+			size: Extent3d {
+				width: self.config.width,
+				height: self.config.height,
+				depth_or_array_layers: 1,
+			},
+			mip_level_count: 1,
+			sample_count: 1,
+			dimension: TextureDimension::D2,
+			format: TextureFormat::Depth32Float,
+			usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
+			view_formats: &[],
+		});
+		let depth_texture_view = depth_texture.create_view(&TextureViewDescriptor::default());
 
 		{
 			let vertex_buffer;
 			let index_buffer;
 			let text_vertex_buffer;
 			let text_index_buffer;
+			let mut render_pass = encoder.begin_render_pass(&RenderPassDescriptor {
+				label: Some("Render Pass"),
+				color_attachments: &[Some(RenderPassColorAttachment {
+					view: &view,
+					resolve_target: None,
+					ops: Operations { load: self.load_op, store: true },
+				})],
+				depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
+					view: &depth_texture_view,
+					depth_ops: Some(Operations { load: LoadOp::Clear(f32::MAX), store: true }),
+					stencil_ops: None,
+				}),
+			});
+
+			let mut builder = VertexBufferBuilder::new(self.size, assets::ATLAS_WIDTH, assets::ATLAS_HEIGHT, workbench.scroll());
+			workbench.render(&mut builder);
+
+			// todo, cache in the workbench
+			if builder.drew_tooltip() {
+				window.set_cursor_visible(false);
+			} else {
+				window.set_cursor_visible(true);
+			}
+
 			{
-				let mut render_pass = encoder.begin_render_pass(&RenderPassDescriptor {
-					label: Some("Render Pass"),
-					color_attachments: &[Some(RenderPassColorAttachment {
-						view: &view,
-						resolve_target: None,
-						ops: Operations { load: self.load_op, store: true },
-					})],
-					depth_stencil_attachment: None,
+				render_pass.set_pipeline(&self.text_render_pipeline);
+				render_pass.set_bind_group(0, &self.unicode_bind_group, &[]);
+
+				text_vertex_buffer = self.device.create_buffer_init(&BufferInitDescriptor {
+					label: Some("Text Vertex Buffer"),
+					contents: builder.text_vertices(),
+					usage: BufferUsages::VERTEX,
 				});
 
-				let mut builder = VertexBufferBuilder::new(self.size, assets::ATLAS_WIDTH, assets::ATLAS_HEIGHT, workbench.scroll());
-				workbench.render(&mut builder);
+				text_index_buffer = self.device.create_buffer_init(&BufferInitDescriptor {
+					label: Some("Text Index Buffer"),
+					contents: builder.text_indices(),
+					usage: BufferUsages::INDEX,
+				});
 
-				{
-					render_pass.set_pipeline(&self.render_pipeline);
-					render_pass.set_bind_group(0, &self.diffuse_bind_group, &[]);
+				render_pass.set_vertex_buffer(0, text_vertex_buffer.slice(..));
+				render_pass.set_index_buffer(text_index_buffer.slice(..), IndexFormat::Uint32);
 
-					vertex_buffer = self.device.create_buffer_init(&BufferInitDescriptor {
-						label: Some("Vertex Buffer"),
-						contents: builder.vertices(),
-						usage: BufferUsages::VERTEX,
-					});
+				render_pass.draw_indexed(0..builder.text_indices_len(), 0, 0..1);
+			}
 
-					index_buffer = self.device.create_buffer_init(&BufferInitDescriptor {
-						label: Some("Index Buffer"),
-						contents: builder.indices(),
-						usage: BufferUsages::INDEX,
-					});
+			{
+				render_pass.set_pipeline(&self.render_pipeline);
+				render_pass.set_bind_group(0, &self.diffuse_bind_group, &[]);
 
-					render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
-					render_pass.set_index_buffer(index_buffer.slice(..), IndexFormat::Uint16);
+				vertex_buffer = self.device.create_buffer_init(&BufferInitDescriptor {
+					label: Some("Vertex Buffer"),
+					contents: builder.vertices(),
+					usage: BufferUsages::VERTEX,
+				});
 
-					render_pass.draw_indexed(0..builder.indices_len(), 0, 0..1);
-				}
+				index_buffer = self.device.create_buffer_init(&BufferInitDescriptor {
+					label: Some("Index Buffer"),
+					contents: builder.indices(),
+					usage: BufferUsages::INDEX,
+				});
 
-				{
-					render_pass.set_pipeline(&self.text_render_pipeline);
-					render_pass.set_bind_group(0, &self.unicode_bind_group, &[]);
+				render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
+				render_pass.set_index_buffer(index_buffer.slice(..), IndexFormat::Uint16);
 
-					text_vertex_buffer = self.device.create_buffer_init(&BufferInitDescriptor {
-						label: Some("Text Vertex Buffer"),
-						contents: builder.text_vertices(),
-						usage: BufferUsages::VERTEX,
-					});
-
-					text_index_buffer = self.device.create_buffer_init(&BufferInitDescriptor {
-						label: Some("Text Index Buffer"),
-						contents: builder.text_indices(),
-						usage: BufferUsages::INDEX,
-					});
-
-					render_pass.set_vertex_buffer(0, text_vertex_buffer.slice(..));
-					render_pass.set_index_buffer(text_index_buffer.slice(..), IndexFormat::Uint16);
-
-					render_pass.draw_indexed(0..builder.text_indices_len(), 0, 0..1);
-				}
+				render_pass.draw_indexed(0..builder.indices_len(), 0, 0..1);
 			}
 		}
 

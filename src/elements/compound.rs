@@ -1,29 +1,52 @@
+use std::alloc::{alloc, Layout};
 use std::borrow::Cow;
+use std::cmp::Ordering;
 use std::fmt::{Debug, Display, Formatter, Write};
+use std::hash::Hasher;
 use std::intrinsics::likely;
+use std::ops::Deref;
+use std::thread::Scope;
 
-use fxhash::FxBuildHasher;
-use indexmap::map::{Iter, IterMut};
-use indexmap::IndexMap;
+use fxhash::FxHasher;
+use hashbrown::raw::RawTable;
 
+use crate::{DropFn, OptionExt, RenderContext, StrExt, VertexBufferBuilder};
 use crate::assets::{COMPOUND_ROOT_UV, COMPOUND_UV, CONNECTION_UV, HEADER_SIZE, LINE_NUMBER_SEPARATOR_UV};
 use crate::decoder::Decoder;
+use crate::elements::chunk::NbtChunk;
 use crate::elements::element_type::NbtElement;
-use crate::encoder::write_string;
-use crate::{DropFn, OptionExt, RenderContext, StrExt, VertexBufferBuilder};
+use crate::encoder::UncheckedBufWriter;
 
-#[derive(Clone)]
 #[allow(clippy::module_name_repetitions)]
+#[repr(C)]
 pub struct NbtCompound {
-	pub entries: Box<IndexMap<Box<str>, NbtElement, FxBuildHasher>>,
+	pub entries: Box<CompoundMap>,
+	height: u32,
+	true_height: u32,
+	max_depth: u32,
 	open: bool,
-	height: usize,
-	true_height: usize,
+}
+
+impl Clone for NbtCompound {
+	#[allow(clippy::cast_ptr_alignment)]
+	fn clone(&self) -> Self {
+		unsafe {
+			let boxx = alloc(Layout::new::<CompoundMap>()).cast::<CompoundMap>();
+			boxx.write(self.entries.deref().clone());
+			Self {
+				entries: Box::from_raw(boxx),
+				height: self.height,
+				true_height: self.true_height,
+				max_depth: self.max_depth,
+				open: self.open,
+			}
+		}
+	}
 }
 
 impl NbtCompound {
 	pub const ID: u8 = 10;
-
+	#[optimize(speed)]
 	pub(in crate::elements) fn from_str0(mut s: &str) -> Option<(&str, Self)> {
 		s = s.strip_prefix('{')?.trim_start();
 		let mut compound = Self::new();
@@ -31,7 +54,7 @@ impl NbtCompound {
 			let (key, s2) = s.snbt_string_read()?;
 			s = s2.trim_start().strip_prefix(':')?.trim_start();
 			let (s2, value) = NbtElement::from_str0(s)?;
-			compound.put(key.into_boxed_str(), value);
+			compound.insert_replacing(key, value);
 			s = s2.trim_start();
 			if let Some(s2) = s.strip_prefix(',') {
 				s = s2.trim_start();
@@ -40,10 +63,11 @@ impl NbtCompound {
 			}
 		}
 		let s = s.strip_prefix('}')?;
-		compound.entries.shrink_to_fit();
 		Some((s, compound))
 	}
 
+	#[inline]
+	#[cfg_attr(not(debug_assertions), no_panic::no_panic)]
 	pub fn from_bytes(decoder: &mut Decoder) -> Option<Self> {
 		let mut compound = Self::new();
 		unsafe {
@@ -53,7 +77,7 @@ impl NbtCompound {
 				decoder.assert_len(2)?;
 				let key = decoder.string()?;
 				let value = NbtElement::from_bytes(current_element, decoder)?;
-				compound.put(key, value);
+				compound.insert_replacing(key, value);
 				match decoder.assert_len(1) {
 					Some(()) => {}
 					None => break, // wow mojang, saving one byte, so cool of you
@@ -63,14 +87,13 @@ impl NbtCompound {
 			Some(compound)
 		}
 	}
-
-	pub fn to_bytes<W: std::io::Write>(&self, writer: &mut W) {
+	pub fn to_bytes(&self, writer: &mut UncheckedBufWriter) {
 		for (key, value) in self.children() {
-			let _ = writer.write(&[value.id()]);
-			write_string(writer, key);
-			NbtElement::to_bytes(value, writer);
+			writer.write(&[value.id()]);
+			writer.write_str(key);
+			value.to_bytes(writer);
 		}
-		let _ = writer.write(&[0x00]);
+		writer.write(&[0x00]);
 	}
 }
 
@@ -79,9 +102,10 @@ impl Default for NbtCompound {
 	fn default() -> Self {
 		Self {
 			height: 1,
-			entries: Box::new(IndexMap::with_hasher(FxBuildHasher::default())),
+			entries: Box::<CompoundMap>::default(),
 			open: false,
 			true_height: 1,
+			max_depth: 0,
 		}
 	}
 }
@@ -94,52 +118,51 @@ impl NbtCompound {
 	}
 
 	#[inline]
-	pub fn insert_full(&mut self, idx: usize, mut str: String, value: NbtElement) {
+	pub fn insert(&mut self, idx: usize, mut str: String, value: NbtElement) {
 		loop {
-			if self.entries.contains_key(str.as_str()) {
+			if self.entries.has(&str) {
 				str += " - Copy";
 			} else {
-				self.height += value.height();
-				self.true_height += value.true_height();
-				let (new_idx, _) = self.entries.insert_full(str.into_boxed_str(), value);
-				self.entries.move_index(new_idx, idx);
+				self.height += value.height() as u32;
+				self.true_height += value.true_height() as u32;
+				self.entries.insert_at(str.into_boxed_str(), value, idx);
 				return;
 			}
 		}
 	}
 
-	#[inline] // must only use for files, unless im stupid
-	pub fn put(&mut self, str: Box<str>, element: NbtElement) {
-		self.height += element.height();
-		self.true_height += element.true_height();
+	#[inline] // has some unchecked stuff
+	pub fn insert_replacing(&mut self, str: Box<str>, element: NbtElement) {
+		self.true_height += element.true_height() as u32;
 		if let Some(element) = self.entries.insert(str, element) {
-			self.height -= element.height();
-			self.true_height -= element.true_height();
+			self.true_height -= element.true_height() as u32;
+		} else {
+			self.height += 1;
 		}
 	}
 
 	#[inline]
 	pub fn remove_idx(&mut self, idx: usize) -> Option<(Box<str>, NbtElement)> {
-		self.entries.shift_remove_index(idx)
+		self.entries.shift_remove_idx(idx)
 	}
 
 	#[inline]
 	pub fn increment(&mut self, amount: usize, true_amount: usize) {
-		self.height = self.height.wrapping_add(amount);
-		self.true_height = self.true_height.wrapping_add(true_amount);
+		self.height = self.height.wrapping_add(amount as u32);
+		self.true_height = self.true_height.wrapping_add(true_amount as u32);
 	}
 
 	#[inline]
 	pub fn decrement(&mut self, amount: usize, true_amount: usize) {
-		self.height = self.height.wrapping_sub(amount);
-		self.true_height = self.true_height.wrapping_sub(true_amount);
+		self.height = self.height.wrapping_sub(amount as u32);
+		self.true_height = self.true_height.wrapping_sub(true_amount as u32);
 	}
 
 	#[inline]
 	#[must_use]
 	pub const fn height(&self) -> usize {
 		if self.open {
-			self.height
+			self.height as usize
 		} else {
 			1
 		}
@@ -148,7 +171,7 @@ impl NbtCompound {
 	#[inline]
 	#[must_use]
 	pub const fn true_height(&self) -> usize {
-		self.true_height
+		self.true_height as usize
 	}
 
 	#[inline]
@@ -167,12 +190,10 @@ impl NbtCompound {
 	}
 
 	pub fn update_key(&mut self, idx: usize, key: Box<str>) -> Option<Box<str>> {
-		if !self.entries.contains_key(key.as_ref()) && let Some((old_key, value)) = self.entries.swap_remove_index(idx) {
-			let (end_idx, _) = self.entries.insert_full(key, value);
-			self.entries.swap_indices(end_idx, idx);
-			Some(old_key)
-		} else {
+		if self.entries.has(key.as_ref()) {
 			None
+		} else {
+			Some(unsafe { self.entries.update_key_idx_unchecked(idx, key) })
 		}
 	}
 
@@ -191,13 +212,13 @@ impl NbtCompound {
 	#[inline]
 	#[must_use]
 	pub fn get(&self, idx: usize) -> Option<(&str, &NbtElement)> {
-		self.entries.get_index(idx).map(|(k, v)| (k.as_ref(), v))
+		self.entries.get_idx(idx)
 	}
 
 	#[inline]
 	#[must_use]
 	pub fn get_mut(&mut self, idx: usize) -> Option<(&str, &mut NbtElement)> {
-		self.entries.get_index_mut(idx).map(|(k, v)| (k.as_ref(), v))
+		self.entries.get_idx_mut(idx)
 	}
 
 	#[inline]
@@ -207,53 +228,54 @@ impl NbtCompound {
 	}
 
 	#[inline]
+	#[allow(clippy::too_many_lines)]
 	pub fn render_root(&self, builder: &mut VertexBufferBuilder, str: &str, ctx: &mut RenderContext) {
-		let mut x_offset = 16 + ctx.left_margin;
-		let mut y_offset = HEADER_SIZE;
 		let mut remaining_scroll = builder.scroll() / 16;
 		'head: {
 			if remaining_scroll > 0 {
 				remaining_scroll -= 1;
-				ctx.line_number += 1;
+				ctx.skip_line_numbers(1);
 				break 'head;
 			}
 
-			ctx.line_number(y_offset, builder);
+			ctx.line_number();
 			// fun hack for connection
 			// doesn't work on most platforms in the same way, but it adds a little detail nonetheless.
 			// the intended behaviour is to connect without any new pixel changes except making the darker toned one tucked in the corner to be slightly lighter
-			builder.draw_texture_z((builder.text_coords.0 + 4, y_offset - 2), 0.5, LINE_NUMBER_SEPARATOR_UV, (2, 2));
-			builder.draw_texture((x_offset, y_offset), COMPOUND_ROOT_UV, (16, 16));
-			ctx.highlight((x_offset, y_offset), str.width(), builder);
-			builder.draw_texture((x_offset - 16, y_offset), CONNECTION_UV, (16, 9));
+			builder.draw_texture_z(ctx.pos() - (20, 2), 0.5, LINE_NUMBER_SEPARATOR_UV, (2, 2));
+			builder.draw_texture(ctx.pos(), COMPOUND_ROOT_UV, (16, 16));
+			ctx.highlight(ctx.pos(), str.width(), builder);
+			builder.draw_texture(ctx.pos() - (16, 0), CONNECTION_UV, (16, 9));
 			if !self.is_empty() {
-				ctx.draw_toggle((x_offset - 16, y_offset), self.open, builder);
+				ctx.draw_toggle(ctx.pos() - (16, 0), self.open, builder);
 			}
-			if ctx.forbid(x_offset, y_offset, builder) {
-				builder.settings(x_offset + 20, y_offset, false);
+			if ctx.forbid(ctx.pos(), builder) {
+				builder.settings(ctx.pos() + (20, 0), false, 1);
 				let _ = write!(builder, "{} [{}]", str, self.value());
 			}
 
-			if ctx.ghost(x_offset + 16, y_offset + 16, builder, |x, y| x == x_offset + 16 && y == y_offset + 8) {
-				builder.draw_texture((x_offset, y_offset + 16), CONNECTION_UV, (16, (self.height() != 1) as usize * 7 + 9));
-				y_offset += 16;
+			let (gx, gy): (usize, usize) = (ctx.pos() + (16, 8)).into();
+			if ctx.ghost(ctx.pos() + (16, 16), builder, |x, y| x == gx && y == gy, |id| id != NbtChunk::ID) {
+				builder.draw_texture(ctx.pos() + (0, 16), CONNECTION_UV, (16, (self.height() != 1) as usize * 7 + 9));
+				ctx.y_offset += 16;
 			}
 
-			if self.height() == 1 && ctx.ghost(x_offset + 16, y_offset + 16, builder, |x, y| x == x_offset + 16 && y == y_offset + 16) {
-				builder.draw_texture((x_offset, y_offset + 16), CONNECTION_UV, (16, 9));
-				y_offset += 16;
+			let (gx, gy): (usize, usize) = (ctx.pos() + (16, 16)).into();
+			if self.height() == 1 && ctx.ghost(ctx.pos() + (16, 16), builder, |x, y| x == gx && y == gy, |id| id != NbtChunk::ID) {
+				builder.draw_texture(ctx.pos() + (0, 16), CONNECTION_UV, (16, 9));
+				ctx.y_offset += 16;
 			}
 
-			y_offset += 16;
+			ctx.y_offset += 16;
 		}
 
-		x_offset += 16;
+		ctx.x_offset += 16;
 
 		if self.open {
 			{
 				let children_contains_forbidden = 'f: {
-					let mut y = y_offset;
-					for (_, value) in self.entries.iter() {
+					let mut y = ctx.y_offset;
+					for (_, value) in self.children() {
 						if y.saturating_sub(remaining_scroll * 16) == ctx.forbidden_y && ctx.forbidden_y >= HEADER_SIZE {
 							break 'f true;
 						}
@@ -262,13 +284,13 @@ impl NbtCompound {
 					false
 				};
 				if children_contains_forbidden {
-					let mut y = y_offset;
-					for (name, value) in self.entries.iter() {
-						ctx.check_key(|text, _| text == name.as_ref(), false);
+					let mut y = ctx.y_offset;
+					for (name, value) in self.children() {
+						ctx.check_key(|text, _| text == name, false);
 						// first check required so this don't render when it's the only selected
 						if y.saturating_sub(remaining_scroll * 16) != ctx.forbidden_y && y.saturating_sub(remaining_scroll * 16) >= HEADER_SIZE && ctx.key_invalid {
 							ctx.red_line_numbers[1] = y.saturating_sub(remaining_scroll * 16);
-							ctx.draw_forbid_underline(x_offset, y.saturating_sub(remaining_scroll * 16), builder);
+							ctx.draw_forbid_underline(ctx.x_offset, y.saturating_sub(remaining_scroll * 16), builder);
 							break;
 						}
 						y += value.height() * 16;
@@ -276,62 +298,77 @@ impl NbtCompound {
 				}
 			}
 
-			for (idx, (name, value)) in self.entries.iter().enumerate() {
-				if y_offset > builder.window_height() {
+			for (idx, (name, value)) in self.children().enumerate() {
+				if ctx.y_offset > builder.window_height() {
 					break;
 				}
 
 				let height = value.height();
 				if remaining_scroll >= height {
 					remaining_scroll -= height;
-					ctx.line_number += value.true_height();
+					ctx.skip_line_numbers(value.true_height());
 					continue;
 				}
 
-				if ctx.ghost(x_offset, y_offset, builder, |x, y| x_offset == x && y_offset == y) {
-					builder.draw_texture((x_offset - 16, y_offset), CONNECTION_UV, (16, 16));
-					y_offset += 16;
+				let (gx, gy): (usize, usize) = ctx.pos().into();
+				if ctx.ghost(ctx.pos(), builder, |x, y| x == gx && y == gy, |id| id != NbtChunk::ID) {
+					builder.draw_texture(ctx.pos() - (16, 0), CONNECTION_UV, (16, 16));
+					ctx.y_offset += 16;
 				}
 
-				let ghost_tail_mod = if let Some((_, x, y)) = ctx.ghost && x == x_offset && y == y_offset + height * 16 - remaining_scroll * 16 - 8 {
+				let ghost_tail_mod = if let Some((_, x, y, _)) = ctx.ghost && ctx.pos() + (0, height * 16 - remaining_scroll * 16 - 8) == (x, y) {
 					false
 				} else {
 					true
 				};
 
 				if remaining_scroll == 0 {
-					builder.draw_texture((x_offset - 16, y_offset), CONNECTION_UV, (16, (idx != self.len() - 1 || !ghost_tail_mod) as usize * 7 + 9));
+					builder.draw_texture(ctx.pos() - (16, 0), CONNECTION_UV, (16, (idx != self.len() - 1 || !ghost_tail_mod) as usize * 7 + 9));
 				}
-				ctx.check_key(|text, _| self.entries.contains_key(text) && name.as_ref() != text, false);
-				if ctx.key_invalid && y_offset == ctx.forbidden_y {
-					ctx.red_line_numbers[0] = y_offset;
+				ctx.check_key(|text, _| self.entries.has(text) && name != text, false);
+				if ctx.key_invalid && ctx.y_offset == ctx.forbidden_y {
+					ctx.red_line_numbers[0] = ctx.y_offset;
 				}
 				value.render(
-					&mut x_offset,
-					&mut y_offset,
 					&mut remaining_scroll,
 					builder,
-					Some(name.as_ref()),
+					Some(name),
 					idx == self.len() - 1 && ghost_tail_mod,
 					ctx,
 				);
 
-				if ctx.ghost(x_offset, y_offset, builder, |x, y| x_offset == x && y_offset - 8 == y) {
-					builder.draw_texture((x_offset - 16, y_offset), CONNECTION_UV, (16, (idx != self.len() - 1) as usize * 7 + 9));
-					y_offset += 16;
+				let pos = ctx.pos();
+				if ctx.ghost(ctx.pos(), builder, |x, y| pos == (x, y + 8), |id| id != NbtChunk::ID) {
+					builder.draw_texture(ctx.pos() - (16, 0), CONNECTION_UV, (16, (idx != self.len() - 1) as usize * 7 + 9));
+					ctx.y_offset += 16;
 				}
 			}
-		} else {
-			// line_number += self.true_height - 1;
 		}
-		// x_offset -= 16;
+	}
+
+	#[inline]
+	pub fn recache_depth(&mut self) {
+		let mut max_depth = 0;
+		if self.open() {
+			for (key, child) in self.children() {
+				max_depth = usize::max(max_depth, 16 + 4 + key.width() + ": ".width() + child.value().0.width());
+				max_depth = usize::max(max_depth, 16 + child.max_depth());
+			}
+		}
+		self.max_depth = max_depth as u32;
+	}
+
+	#[inline]
+	#[must_use]
+	pub const fn max_depth(&self) -> usize {
+		self.max_depth as usize
 	}
 }
 
 impl Display for NbtCompound {
 	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
 		write!(f, "{{")?;
-		for (idx, (key, value)) in self.entries.iter().enumerate() {
+		for (idx, (key, value)) in self.children().enumerate() {
 			if key.needs_escape() {
 				write!(f, "{key:?}")?;
 			} else {
@@ -353,7 +390,7 @@ impl Debug for NbtCompound {
 		} else {
 			let mut debug = f.debug_struct("");
 			for (key, element) in self.children() {
-				let key = if key.needs_escape() { Cow::Owned(format!("{key:?}")) } else { Cow::Borrowed(key.as_ref()) };
+				let key = if key.needs_escape() { Cow::Owned(format!("{key:?}")) } else { Cow::Borrowed(key) };
 				debug.field(key.as_ref(), element);
 			}
 			debug.finish()
@@ -363,57 +400,59 @@ impl Debug for NbtCompound {
 
 impl NbtCompound {
 	#[inline]
-	pub fn render(&self, builder: &mut VertexBufferBuilder, x_offset: &mut usize, y_offset: &mut usize, name: Option<&str>, remaining_scroll: &mut usize, tail: bool, ctx: &mut RenderContext) {
-		let mut y_before = *y_offset;
+	#[allow(clippy::too_many_lines)]
+	pub fn render(&self, builder: &mut VertexBufferBuilder, name: Option<&str>, remaining_scroll: &mut usize, tail: bool, ctx: &mut RenderContext) {
+		let mut y_before = ctx.y_offset;
 
 		'head: {
 			if *remaining_scroll > 0 {
 				*remaining_scroll -= 1;
-				ctx.line_number += 1;
+				ctx.skip_line_numbers(1);
 				break 'head;
 			}
 
-			ctx.line_number(*y_offset, builder);
-			Self::render_icon(*x_offset, *y_offset, builder);
-			ctx.highlight((*x_offset, *y_offset), name.map_or(0, StrExt::width), builder);
+			ctx.line_number();
+			Self::render_icon(ctx.pos(), 0.0, builder);
+			ctx.highlight(ctx.pos(), name.map(StrExt::width).map_or(0, |x| x + ": ".width()) + self.value().width(), builder);
 			if !self.is_empty() {
-				ctx.draw_toggle((*x_offset - 16, *y_offset), self.open, builder);
+				ctx.draw_toggle(ctx.pos() - (16, 0), self.open, builder);
 			}
-			if ctx.forbid(*x_offset, *y_offset, builder) {
-				builder.settings(*x_offset + 20, *y_offset, false);
+			if ctx.forbid(ctx.pos(), builder) {
+				builder.settings(ctx.pos() + (20, 0), false, 1);
 				let _ = match name {
 					Some(x) => write!(builder, "{x}: {}", self.value()),
 					None => write!(builder, "{}", self.value()),
 				};
 			}
 
-			if ctx.ghost(*x_offset + 16, *y_offset + 16, builder, |x, y| x == *x_offset + 16 && y == *y_offset + 8) {
-				builder.draw_texture((*x_offset, *y_offset + 16), CONNECTION_UV, (16, (self.height() != 1) as usize * 7 + 9));
+			let pos = ctx.pos();
+			if ctx.ghost(ctx.pos() + (16, 16), builder, |x, y| pos == (x, y), |id| id != NbtChunk::ID) {
+				builder.draw_texture(ctx.pos() + (0, 16), CONNECTION_UV, (16, (self.height() != 1) as usize * 7 + 9));
 				if !tail {
-					builder.draw_texture((*x_offset - 16, *y_offset + 16), CONNECTION_UV, (8, 16));
+					builder.draw_texture(ctx.pos() - (16, 0) + (0, 16), CONNECTION_UV, (8, 16));
 				}
-				*y_offset += 16;
-			} else if self.height() == 1 && ctx.ghost(*x_offset + 16, *y_offset + 16, builder, |x, y| x == *x_offset + 16 && y == *y_offset + 16) {
-				builder.draw_texture((*x_offset, *y_offset + 16), CONNECTION_UV, (16, 9));
+				ctx.y_offset += 16;
+			} else if self.height() == 1 && ctx.ghost(ctx.pos() + (16, 16), builder, |x, y| pos + (16, 16) == (x, y), |id| id != NbtChunk::ID) {
+				builder.draw_texture(ctx.pos() + (0, 16), CONNECTION_UV, (16, 9));
 				if !tail {
-					builder.draw_texture((*x_offset - 16, *y_offset + 16), CONNECTION_UV, (8, 16));
+					builder.draw_texture(ctx.pos() - (16, 0) + (0, 16), CONNECTION_UV, (8, 16));
 				}
-				*y_offset += 16;
+				ctx.y_offset += 16;
 			}
 
-			*y_offset += 16;
+			ctx.y_offset += 16;
 			y_before += 16;
 		}
 
-		let x_before = *x_offset - 16;
+		let x_before = ctx.x_offset - 16;
 
 		if self.open {
-			*x_offset += 16;
+			ctx.x_offset += 16;
 
 			{
 				let children_contains_forbidden = 'f: {
-					let mut y = *y_offset;
-					for (_, value) in self.entries.iter() {
+					let mut y = ctx.y_offset;
+					for (_, value) in self.children() {
 						if y.saturating_sub(*remaining_scroll * 16) == ctx.forbidden_y && ctx.forbidden_y >= HEADER_SIZE {
 							break 'f true;
 						}
@@ -422,13 +461,13 @@ impl NbtCompound {
 					false
 				};
 				if children_contains_forbidden {
-					let mut y = *y_offset;
-					for (name, value) in self.entries.iter() {
-						ctx.check_key(|text, _| text == name.as_ref(), false);
+					let mut y = ctx.y_offset;
+					for (name, value) in self.children() {
+						ctx.check_key(|text, _| text == name, false);
 						// first check required so this don't render when it's the only selected
 						if y.saturating_sub(*remaining_scroll * 16) != ctx.forbidden_y && y.saturating_sub(*remaining_scroll * 16) >= HEADER_SIZE && ctx.key_invalid {
 							ctx.red_line_numbers[1] = y.saturating_sub(*remaining_scroll * 16);
-							ctx.draw_forbid_underline(*x_offset, y.saturating_sub(*remaining_scroll * 16), builder);
+							ctx.draw_forbid_underline(ctx.x_offset, y.saturating_sub(*remaining_scroll * 16), builder);
 							break;
 						}
 						y += value.height() * 16;
@@ -436,89 +475,91 @@ impl NbtCompound {
 				}
 			}
 
-			for (idx, (key, entry)) in self.entries.iter().enumerate() {
-				if *y_offset > builder.window_height() {
+			for (idx, (key, entry)) in self.children().enumerate() {
+				if ctx.y_offset > builder.window_height() {
 					break;
 				}
 
 				let height = entry.height();
 				if *remaining_scroll >= height {
 					*remaining_scroll -= height;
-					ctx.line_number += entry.true_height();
+					ctx.skip_line_numbers(entry.true_height());
 					continue;
 				}
 
-				if ctx.ghost(*x_offset, *y_offset, builder, |x, y| *x_offset == x && *y_offset == y) {
-					builder.draw_texture((*x_offset - 16, *y_offset), CONNECTION_UV, (16, 16));
-					*y_offset += 16;
+				let pos = ctx.pos();
+				if ctx.ghost(ctx.pos(), builder, |x, y| pos == (x, y), |id| id != NbtChunk::ID) {
+					builder.draw_texture(ctx.pos() - (16, 0), CONNECTION_UV, (16, 16));
+					ctx.y_offset += 16;
 				}
 
-				let ghost_tail_mod = if let Some((_, x, y)) = ctx.ghost && x == *x_offset && y == *y_offset + height * 16 - *remaining_scroll * 16 - 8 {
+				let ghost_tail_mod = if let Some((_, x, y, _)) = ctx.ghost && ctx.pos() + (0, height * 16 - *remaining_scroll * 16 - 8) == (x, y) {
 					false
 				} else {
 					true
 				};
 
 				if *remaining_scroll == 0 {
-					builder.draw_texture((*x_offset - 16, *y_offset), CONNECTION_UV, (16, (idx != self.len() - 1 || !ghost_tail_mod) as usize * 7 + 9));
+					builder.draw_texture(ctx.pos() - (16, 0), CONNECTION_UV, (16, (idx != self.len() - 1 || !ghost_tail_mod) as usize * 7 + 9));
 				}
-				ctx.check_key(|text, _| self.entries.contains_key(text) && key.as_ref() != text, false);
-				if ctx.key_invalid && *y_offset == ctx.forbidden_y {
-					ctx.red_line_numbers[0] = *y_offset;
+				ctx.check_key(|text, _| self.entries.has(text) && key != text, false);
+				if ctx.key_invalid && ctx.y_offset == ctx.forbidden_y {
+					ctx.red_line_numbers[0] = ctx.y_offset;
 				}
-				entry.render(x_offset, y_offset, remaining_scroll, builder, Some(key.as_ref()), tail && idx == self.len() - 1 && ghost_tail_mod, ctx);
+				entry.render(remaining_scroll, builder, Some(key), tail && idx == self.len() - 1 && ghost_tail_mod, ctx);
 
-				if ctx.ghost(*x_offset, *y_offset, builder, |x, y| *x_offset == x && *y_offset - 8 == y) {
-					builder.draw_texture((*x_offset - 16, *y_offset), CONNECTION_UV, (16, (idx != self.len() - 1) as usize * 7 + 9));
-					*y_offset += 16;
+				let pos = ctx.pos();
+				if ctx.ghost(ctx.pos(), builder, |x, y| pos == (x, y + 8), |id| id != NbtChunk::ID) {
+					builder.draw_texture(ctx.pos() - (16, 0), CONNECTION_UV, (16, (idx != self.len() - 1) as usize * 7 + 9));
+					ctx.y_offset += 16;
 				}
 			}
 
 			if !tail {
-				let len = (*y_offset - y_before) / 16;
+				let len = (ctx.y_offset - y_before) / 16;
 				for i in 0..len {
 					builder.draw_texture((x_before, y_before + i * 16), CONNECTION_UV, (8, 16));
 				}
 			}
 
-			*x_offset -= 16;
+			ctx.x_offset -= 16;
 		} else {
-			ctx.line_number += self.true_height - 1;
+			ctx.skip_line_numbers(self.true_height() - 1);
 		}
 	}
 
 	#[inline]
 	#[must_use]
-	pub fn children(&self) -> Iter<'_, Box<str>, NbtElement> {
+	pub fn children(&self) -> CompoundMapIter<'_> {
 		self.entries.iter()
 	}
 
 	#[inline]
 	#[must_use]
-	pub fn children_mut(&mut self) -> IterMut<'_, Box<str>, NbtElement> {
+	pub fn children_mut(&mut self) -> CompoundMapIterMut<'_> {
 		self.entries.iter_mut()
 	}
 
 	#[inline]
-	pub fn drop(&mut self, mut key: Option<Box<str>>, mut element: NbtElement, y: &mut usize, depth: usize, target_depth: usize, indices: &mut Vec<usize>) -> DropFn {
+	pub fn drop(&mut self, mut key: Option<Box<str>>, mut element: NbtElement, y: &mut usize, depth: usize, target_depth: usize, mut line_number: usize, indices: &mut Vec<usize>) -> DropFn {
 		if *y < 16 && *y >= 8 && depth == target_depth {
 			let before = (self.height(), self.true_height());
 			self.open = true;
-			self.insert_full(0, key.map_or_else(|| "_".to_owned(), str::into_string), element);
+			self.insert(0, key.map_or_else(|| "_".to_owned(), str::into_string), element);
 			indices.push(0);
-			return DropFn::Dropped(self.height - before.0, self.true_height - before.1, unsafe {
+			return DropFn::Dropped(self.height as usize - before.0, self.true_height as usize - before.1, unsafe {
 				Some(self.get(0).panic_unchecked("We just added it").0.to_string().into_boxed_str())
-			});
+			}, line_number + 1);
 		}
 
 		if self.height() == 1 && *y < 24 && *y >= 16 && depth == target_depth {
 			let before = self.true_height();
 			self.open = true;
 			indices.push(self.len());
-			self.insert_full(self.len(), key.map_or_else(|| "_".to_owned(), str::into_string), element);
-			return DropFn::Dropped(self.height - 1, self.true_height - before, unsafe {
+			self.insert(self.len(), key.map_or_else(|| "_".to_owned(), str::into_string), element);
+			return DropFn::Dropped(self.height as usize - 1, self.true_height as usize - before, unsafe {
 				Some(self.get(self.len() - 1).panic_unchecked("We just added it").0.to_string().into_boxed_str())
-			});
+			}, line_number + before + 1);
 		}
 
 		if *y < 16 {
@@ -530,49 +571,349 @@ impl NbtCompound {
 		if self.open && !self.is_empty() {
 			indices.push(0);
 			let ptr = unsafe { &mut *indices.as_mut_ptr().add(indices.len() - 1) };
-			for (idx, (_, value)) in self.entries.iter_mut().enumerate() {
+			for (idx, (_, value)) in self.children_mut().enumerate() {
 				*ptr = idx;
 				let heights = (element.height(), element.true_height());
 				if *y < 8 && depth == target_depth {
 					*y = 0;
-					self.insert_full(idx, key.map_or_else(|| "_".to_owned(), str::into_string), element);
-					return DropFn::Dropped(heights.0, heights.1, unsafe { Some(self.get(idx).panic_unchecked("We just added it").0.to_string().into_boxed_str()) });
+					self.insert(idx, key.map_or_else(|| "_".to_owned(), str::into_string), element);
+					return DropFn::Dropped(heights.0, heights.1, unsafe { Some(self.get(idx).panic_unchecked("We just added it").0.to_string().into_boxed_str()) }, line_number + 1);
 				} else if *y >= value.height() * 16 - 8 && *y < value.height() * 16 && depth == target_depth {
 					*y = 0;
 					*ptr = idx + 1;
-					self.insert_full(idx + 1, key.map_or_else(|| "_".to_owned(), str::into_string), element);
+					line_number += value.true_height();
+					self.insert(idx + 1, key.map_or_else(|| "_".to_owned(), str::into_string), element);
 					return DropFn::Dropped(heights.0, heights.1, unsafe {
 						Some(self.get(idx + 1).panic_unchecked("We just added it").0.to_string().into_boxed_str())
-					});
+					}, line_number + 1);
 				}
 
-				match value.drop(key, element, y, depth + 1, target_depth, indices) {
+				match value.drop(key, element, y, depth + 1, target_depth, line_number + 1, indices) {
 					x @ DropFn::InvalidType(_, _) => return x,
 					DropFn::Missed(k, e) => {
 						key = k;
 						element = e;
 					}
-					DropFn::Dropped(increment, true_increment, key) => {
+					DropFn::Dropped(increment, true_increment, key, line_number) => {
 						self.increment(increment, true_increment);
-						return DropFn::Dropped(increment, true_increment, key);
+						return DropFn::Dropped(increment, true_increment, key, line_number);
 					}
 				}
+
+				line_number += value.true_height();
 			}
 			indices.pop();
 		}
 		DropFn::Missed(key, element)
 	}
 
+	#[inline]
 	pub fn shut(&mut self) {
 		for (_, element) in self.children_mut() {
 			element.shut();
 		}
 		self.open = false;
-		self.height = self.len() + 1;
+		self.height = self.len() as u32 + 1;
 	}
 
 	#[inline]
-	pub fn render_icon(x: usize, y: usize, builder: &mut VertexBufferBuilder) {
-		builder.draw_texture((x, y), COMPOUND_UV, (16, 16));
+	pub fn expand<'a, 'b>(&'b mut self, scope: &'a Scope<'a, 'b>) {
+		self.open = !self.is_empty();
+		self.height = self.true_height;
+		for (_, element) in self.children_mut() {
+			element.expand(scope);
+		}
+	}
+
+	#[inline]
+	pub fn render_icon(pos: impl Into<(usize, usize)>, z: f32, builder: &mut VertexBufferBuilder) {
+		builder.draw_texture_z(pos, z, COMPOUND_UV, (16, 16));
+	}
+}
+
+// Based on indexmap, but they didn't let me clone with unchecked mem stuff
+#[allow(clippy::module_name_repetitions)]
+pub struct CompoundMap {
+	indices: RawTable<usize>,
+	entries: Vec<Entry>,
+}
+
+impl Clone for CompoundMap {
+	#[allow(clippy::cast_ptr_alignment)]
+	fn clone(&self) -> Self {
+		pub unsafe fn clone_entries(entries: &[Entry]) -> Vec<Entry> {
+			let len = entries.len();
+			let ptr = alloc(Layout::array::<Entry>(len).unwrap_unchecked()).cast::<Entry>();
+			for n in 0..len {
+				ptr.write(entries.get_unchecked(n).clone());
+			}
+			Vec::from_raw_parts(ptr, len, len)
+		}
+
+		unsafe {
+			let mut table = RawTable::try_with_capacity(self.indices.len()).unwrap_unchecked();
+			for (idx, bucket) in self.indices.iter().enumerate() {
+				let hash = hash!(self.entries.get_unchecked(idx).key.as_ref());
+				let _ = table.insert_in_slot(hash, core::mem::transmute(idx), *bucket.as_ref());
+			}
+			Self {
+				indices: table,
+				entries: clone_entries(&self.entries),
+			}
+		}
+	}
+}
+
+pub struct Entry {
+	value: NbtElement,
+	hash: u64,
+	key: Box<str>,
+}
+
+impl Clone for Entry {
+	fn clone(&self) -> Self {
+		unsafe {
+			let len = self.key.len();
+			let ptr = alloc(Layout::array::<u8>(len).unwrap_unchecked());
+			ptr.copy_from_nonoverlapping(self.key.as_ptr(), len);
+			Self {
+				key: Box::from_raw(core::str::from_utf8_unchecked_mut(core::slice::from_raw_parts_mut(ptr, len))),
+				value: self.value.clone(),
+				hash: self.hash,
+			}
+		}
+	}
+}
+
+impl Default for CompoundMap {
+	fn default() -> Self {
+		Self {
+			indices: RawTable::new(),
+			entries: Vec::new(),
+		}
+	}
+}
+
+impl CompoundMap {
+	#[cfg(debug_assertions)]
+	fn dbg(&self) {
+		let mut indices = unsafe { self.indices.iter().map(|x| *x.as_ref()).collect::<Vec<_>>() };
+		indices.sort_unstable();
+		let width = indices.len().checked_ilog10().unwrap_or(0) as usize + 1;
+		println!();
+		for idx in indices {
+			println!("{idx: >width$} | {}", self.entries[idx].key.as_ref());
+		}
+	}
+
+	fn idx_of(&self, key: &str) -> Option<usize> {
+		self.indices.get(hash!(key), |&idx| unsafe { self.entries.get_unchecked(idx).key.as_ref() == key }).copied()
+	}
+
+	#[must_use] pub fn has(&self, key: &str) -> bool {
+		self.idx_of(key.as_ref()).is_some()
+	}
+
+	pub fn insert(&mut self, key: Box<str>, element: NbtElement) -> Option<NbtElement> {
+		self.insert_full(key, element).1
+	}
+
+	#[must_use] pub fn len(&self) -> usize {
+		self.entries.len()
+	}
+
+	#[must_use] pub fn is_empty(&self) -> bool {
+		self.entries.is_empty()
+	}
+
+	pub fn insert_full(&mut self, key: Box<str>, element: NbtElement) -> (usize, Option<NbtElement>) {
+		unsafe {
+			let hash = hash!(key.as_ref());
+			match self.indices.find_or_find_insert_slot(hash, |&idx| self.entries.get_unchecked(idx).key.as_ref() == key.as_ref(), |&idx| hash!(self.entries.get_unchecked(idx).key.as_ref())) {
+				Ok(bucket) => {
+					let idx = *bucket.as_ref();
+					(idx, Some(core::mem::replace(&mut self.entries.get_unchecked_mut(idx).value, element)))
+				},
+				Err(slot) => {
+					let len = self.entries.len();
+					self.entries.try_reserve_exact(1).unwrap_unchecked();
+					self.entries.as_mut_ptr().add(len).write(Entry { key, value: element, hash });
+					self.entries.set_len(len + 1);
+					self.indices.insert_in_slot(hash, slot, len);
+					(len, None)
+				}
+			}
+		}
+	}
+
+	pub fn insert_at(&mut self, key: Box<str>, element: NbtElement, idx: usize) -> Option<(Box<str>, NbtElement)> {
+		unsafe {
+			let hash = hash!(key.as_ref());
+			let (prev, end, bucket) = match self.indices.find_or_find_insert_slot(hash, |&idx| self.entries.get_unchecked(idx).key.as_ref() == key.as_ref(), |&idx| {
+				let mut hasher = FxHasher::default();
+				hasher.write(self.entries.get_unchecked(idx).key.as_ref().as_bytes());
+				hasher.finish()
+			}) {
+				Ok(bucket) => {
+					let before = core::mem::replace(bucket.as_mut(), idx);
+					let Entry { key: k, value: v, .. } = self.entries.remove(before);
+					self.entries.insert(idx, Entry { key, value: element, hash });
+					(Some((k, v)), before, bucket)
+				},
+				Err(slot) => {
+					let len = self.entries.len();
+					self.entries.try_reserve_exact(1).unwrap_unchecked();
+					let ptr = self.entries.as_mut_ptr().add(idx);
+					core::ptr::copy(ptr, ptr.add(1), len - idx);
+					self.entries.as_mut_ptr().add(idx).write(Entry { key, value: element, hash });
+					self.entries.set_len(len + 1);
+					let bucket = self.indices.insert_in_slot(hash, slot, idx);
+					(None, len, bucket)
+				}
+			};
+
+			match idx.cmp(&end) {
+				Ordering::Less => {
+					for index in self.indices.iter() {
+						let value = *index.as_ref();
+						if value >= idx && value <= end {
+							*index.as_mut() += 1;
+						}
+					}
+				}
+				Ordering::Equal => {}
+				Ordering::Greater => {
+					for index in self.indices.iter() {
+						let value = *index.as_ref();
+						if value <= idx && value >= end {
+							*index.as_mut() -= 1;
+						}
+					}
+				}
+			}
+
+			*bucket.as_mut() = idx;
+
+			#[cfg(debug_assertions)]
+			self.dbg();
+
+			prev
+		}
+	}
+
+	/// # Safety
+	///
+	/// * compound must not contain this key already somewhere else
+	///
+	/// * idx must be valid
+	pub unsafe fn update_key_idx_unchecked(&mut self, idx: usize, key: Box<str>) -> Box<str> {
+		let old_key = self.entries.get_unchecked(idx).key.as_ref();
+		let hash = hash!(old_key);
+		let _ = self.indices.remove_entry(hash, |&idx| self.entries.get_unchecked(idx).key.as_ref() == old_key).unwrap_unchecked();
+		let old_key = core::mem::replace(&mut self.entries.get_unchecked_mut(idx).key, key);
+		self.indices.insert(hash!(self.entries.get_unchecked(idx).key.as_ref()), idx, |&idx| hash!(self.entries.get_unchecked(idx).key.as_ref()));
+		old_key
+	}
+
+	pub fn shift_remove_idx(&mut self, idx: usize) -> Option<(Box<str>, NbtElement)> {
+		if idx > self.entries.len() { return None; }
+		unsafe {
+			let Entry { key, hash, .. } = &self.entries.get_unchecked(idx);
+			let _ = self.indices.remove_entry(*hash, |&idx| self.entries.get_unchecked(idx).key.as_ref() == key.as_ref());
+			for bucket in self.indices.iter() {
+				if *bucket.as_ref() > idx {
+					*bucket.as_mut() -= 1;
+				}
+			}
+		}
+		let Entry { key, value, .. } = self.entries.remove(idx);
+		self.entries.shrink_to_fit();
+		Some((key, value))
+	}
+
+	pub fn swap_remove_idx(&mut self, idx: usize) -> Option<(Box<str>, NbtElement)> {
+		if idx > self.entries.len() { return None; }
+		let Entry { key, value, hash } = self.entries.swap_remove(idx);
+		unsafe {
+			let tail = self.indices.remove_entry(hash, |&idx| idx + 1 == self.entries.len()).unwrap_unchecked();
+			*self.indices.get_mut(hash, |&idx| self.entries.get_unchecked(idx).key.as_ref() == key.as_ref()).unwrap_unchecked() = tail;
+		}
+		Some((key, value))
+	}
+
+	pub fn swap(&mut self, a: usize, b: usize) {
+		if a < self.entries.len() && b < self.entries.len() { return; }
+		unsafe {
+			let a_hash = self.entries.get_unchecked(a).hash;
+			let b_hash = self.entries.get_unchecked(b).hash;
+			let a = self.indices.get_mut(a_hash, |&idx| idx == a).unwrap_unchecked() as *mut usize;
+			let b = self.indices.get_mut(b_hash, |&idx| idx == b).unwrap_unchecked() as *mut usize;
+			core::ptr::swap(a, b);
+		}
+	}
+
+	#[must_use] pub fn get_idx(&self, idx: usize) -> Option<(&str, &NbtElement)> {
+		let Entry { key, value, .. } = self.entries.get(idx)?;
+		let key = key.as_ref();
+		Some((key, value))
+	}
+
+	#[must_use] pub fn get_idx_mut(&mut self, idx: usize) -> Option<(&str, &mut NbtElement)> {
+		let entry = self.entries.get_mut(idx)?;
+		Some((entry.key.as_ref(), &mut entry.value))
+	}
+
+	#[must_use] pub fn iter(&self) -> CompoundMapIter<'_> {
+		CompoundMapIter(self.entries.iter())
+	}
+
+	#[must_use] pub fn iter_mut(&mut self) -> CompoundMapIterMut<'_> {
+		CompoundMapIterMut(self.entries.iter_mut())
+	}
+}
+
+#[allow(clippy::module_name_repetitions)]
+pub struct CompoundMapIter<'a>(core::slice::Iter<'a, Entry>);
+
+impl<'a> Iterator for CompoundMapIter<'a> {
+	type Item = (&'a str, &'a NbtElement);
+
+	fn next(&mut self) -> Option<Self::Item> {
+		self.0.next().map(|Entry { key, value, .. }| (key.as_ref(), value))
+	}
+}
+
+impl<'a> DoubleEndedIterator for CompoundMapIter<'a> {
+	fn next_back(&mut self) -> Option<Self::Item> {
+		self.0.next_back().map(|Entry { key, value, .. }| (key.as_ref(), value))
+	}
+}
+
+impl<'a> ExactSizeIterator for CompoundMapIter<'a> {
+	fn len(&self) -> usize {
+		self.0.len()
+	}
+}
+
+#[allow(clippy::module_name_repetitions)]
+pub struct CompoundMapIterMut<'a>(core::slice::IterMut<'a, Entry>);
+
+impl<'a> Iterator for CompoundMapIterMut<'a> {
+	type Item = (&'a str, &'a mut NbtElement);
+
+	fn next(&mut self) -> Option<Self::Item> {
+		self.0.next().map(|entry| (entry.key.as_ref(), &mut entry.value))
+	}
+}
+
+impl<'a> DoubleEndedIterator for CompoundMapIterMut<'a> {
+	fn next_back(&mut self) -> Option<Self::Item> {
+		self.0.next_back().map(|entry| (entry.key.as_ref(), &mut entry.value))
+	}
+}
+
+impl<'a> ExactSizeIterator for CompoundMapIterMut<'a> {
+	fn len(&self) -> usize {
+		self.0.len()
 	}
 }

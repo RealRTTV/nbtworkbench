@@ -11,6 +11,14 @@ categories = ["nbt"] # idk
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
+# for no_panic tests
+[profile.nopanic]
+inherits = "release"
+panic = "unwind"
+
+[profile.nopanic.build-override]
+inherits = "release"
+
 [profile.release]
 opt-level = 3
 codegen-units = 1
@@ -41,6 +49,7 @@ debug = true
 [build-dependencies]
 zune-png = "0.2.1"
 winres = "0.1.12"
+flate2 = "1.0.27"
 
 [dependencies]
 zune-inflate = { version = "0.2.54", features = ["gzip", "zlib"] }
@@ -49,5 +58,7 @@ winit = "0.28.6"
 wgpu = "0.17.0"
 pollster = "0.3.0"
 cli-clipboard = "0.4.0"
-indexmap = "2.0.0"
 fxhash = "0.2.1"
+no-panic = "0.1.26"
+hashbrown = { version = "0.14.0", features = ["raw"] }
+fs2 = "0.4.3"

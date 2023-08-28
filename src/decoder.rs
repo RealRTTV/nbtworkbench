@@ -1,3 +1,4 @@
+use std::alloc::{alloc, Layout};
 use std::intrinsics::likely;
 
 pub struct Decoder {
@@ -5,8 +6,10 @@ pub struct Decoder {
 	end: *const u8,
 }
 
+#[allow(improper_ctypes_definitions)]
 impl Decoder {
 	#[inline]
+	#[optimize(speed)]
 	pub const fn new(data: &[u8]) -> Self {
 		Self {
 			end: unsafe { data.as_ptr().add(data.len()) },
@@ -15,6 +18,9 @@ impl Decoder {
 	}
 
 	#[inline]
+	#[optimize(speed)]
+	#[must_use]
+	#[cfg_attr(not(debug_assertions), no_panic::no_panic)]
 	pub fn assert_len(&mut self, remaining_len: usize) -> Option<()> {
 		if unsafe { likely((self.data.add(remaining_len) as usize) < self.end as usize) } {
 			Some(())
@@ -24,6 +30,8 @@ impl Decoder {
 	}
 
 	#[inline]
+	#[optimize(speed)]
+	#[cfg_attr(not(debug_assertions), no_panic::no_panic)]
 	pub unsafe fn read_bytes<const N: usize>(&mut self) -> [u8; N] {
 		let array = self.data.cast::<[u8; N]>().read();
 		self.data = self.data.add(N);
@@ -31,78 +39,95 @@ impl Decoder {
 	}
 
 	#[inline]
+	#[optimize(speed)]
+	#[cfg_attr(not(debug_assertions), no_panic::no_panic)]
 	pub unsafe fn u8(&mut self) -> u8 {
-		let val = self.data.read();
-		self.data = self.data.add(1);
-		val
+		u8::from_be_bytes(self.read_bytes())
 	}
 
 	#[inline]
+	#[optimize(speed)]
+	#[cfg_attr(not(debug_assertions), no_panic::no_panic)]
 	pub unsafe fn u16(&mut self) -> u16 {
-		let val = self.data.cast::<u16>().read_unaligned().to_be();
-		self.data = self.data.add(2);
-		val
+		u16::from_be_bytes(self.read_bytes())
 	}
 
 	#[inline]
+	#[optimize(speed)]
+	#[cfg_attr(not(debug_assertions), no_panic::no_panic)]
 	pub unsafe fn u32(&mut self) -> u32 {
-		let val = self.data.cast::<u32>().read_unaligned().to_be();
-		self.data = self.data.add(4);
-		val
+		u32::from_be_bytes(self.read_bytes())
 	}
 
 	#[inline]
+	#[optimize(speed)]
+	#[cfg_attr(not(debug_assertions), no_panic::no_panic)]
 	pub unsafe fn u64(&mut self) -> u64 {
-		let val = self.data.cast::<u64>().read_unaligned().to_be();
-		self.data = self.data.add(8);
-		val
+		u64::from_be_bytes(self.read_bytes())
 	}
 
 	#[inline]
+	#[optimize(speed)]
+	#[cfg_attr(not(debug_assertions), no_panic::no_panic)]
 	pub unsafe fn i8(&mut self) -> i8 {
-		core::mem::transmute(self.u8())
+		i8::from_be_bytes(self.read_bytes())
 	}
 
 	#[inline]
+	#[optimize(speed)]
+	#[cfg_attr(not(debug_assertions), no_panic::no_panic)]
 	pub unsafe fn i16(&mut self) -> i16 {
-		core::mem::transmute(self.u16())
+		i16::from_be_bytes(self.read_bytes())
 	}
 
 	#[inline]
+	#[optimize(speed)]
+	#[cfg_attr(not(debug_assertions), no_panic::no_panic)]
+
 	pub unsafe fn i32(&mut self) -> i32 {
-		core::mem::transmute(self.u32())
+		i32::from_be_bytes(self.read_bytes())
 	}
 
 	#[inline]
+	#[optimize(speed)]
+	#[cfg_attr(not(debug_assertions), no_panic::no_panic)]
+
 	pub unsafe fn i64(&mut self) -> i64 {
-		core::mem::transmute(self.u64())
+		i64::from_be_bytes(self.read_bytes())
 	}
 
 	#[inline]
+	#[optimize(speed)]
+	#[cfg_attr(not(debug_assertions), no_panic::no_panic)]
+
 	pub unsafe fn f32(&mut self) -> f32 {
-		f32::from_bits(self.u32())
+		f32::from_be_bytes(self.read_bytes())
 	}
 
 	#[inline]
+	#[optimize(speed)]
+	#[cfg_attr(not(debug_assertions), no_panic::no_panic)]
 	pub unsafe fn f64(&mut self) -> f64 {
-		f64::from_bits(self.u64())
+		f64::from_be_bytes(self.read_bytes())
 	}
 
 	#[inline]
+	#[optimize(speed)]
+	#[cfg_attr(not(debug_assertions), no_panic::no_panic)]
 	pub unsafe fn skip(&mut self, amount: usize) {
 		self.data = self.data.add(amount);
 	}
 
 	#[inline]
+	#[optimize(speed)]
+	#[cfg_attr(not(debug_assertions), no_panic::no_panic)]
 	pub unsafe fn string(&mut self) -> Option<Box<str>> {
 		let len = self.u16() as usize;
 		self.assert_len(len)?;
 
-		let mut str = String::with_capacity(len);
-		let vec = str.as_mut_vec();
-		vec.as_mut_ptr().copy_from_nonoverlapping(self.data, len);
-		vec.set_len(len);
+		let ptr = alloc(Layout::array::<u8>(len).unwrap_unchecked());
+		ptr.copy_from_nonoverlapping(self.data, len);
 		self.data = self.data.add(len);
-		Some(str.into_boxed_str())
+		Some(Box::from_raw(core::str::from_utf8_unchecked_mut(core::slice::from_raw_parts_mut(ptr, len))))
 	}
 }

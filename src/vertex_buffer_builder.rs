@@ -1,13 +1,12 @@
 use std::ops::BitAnd;
 use winit::dpi::PhysicalSize;
-
-use crate::assets;
+use crate::assets::TOOLTIP_UV;
 
 pub struct VertexBufferBuilder {
 	vertices: Vec<f32>,
 	indices: Vec<u16>,
 	text_vertices: Vec<f32>,
-	text_indices: Vec<u16>,
+	text_indices: Vec<u32>,
 	vertices_len: u32,
 	text_vertices_len: u32,
 	window_width: f32,
@@ -18,9 +17,11 @@ pub struct VertexBufferBuilder {
 	pub horizontal_scroll: usize,
 	pub text_coords: (usize, usize),
 	dropshadow: bool,
+	text_z: u8,
 	pub color: u32,
 	two_over_width: f32,
 	negative_two_over_height: f32,
+	drew_tooltip: bool,
 }
 
 impl core::fmt::Write for VertexBufferBuilder {
@@ -28,14 +29,14 @@ impl core::fmt::Write for VertexBufferBuilder {
 		let (mut x, y) = self.text_coords;
 		x += text
 			.chars()
-			.fold(0, |offset, char| offset + if (char as u32) < 56832 { self.draw_char(char as u16, x + offset, y, 0) } else { 0 });
+			.fold(0, |offset, char| offset + if (char as u32) < 56832 { self.draw_char(char as u16, x + offset, y, self.text_z) } else { 0 });
 		self.text_coords = (x, y);
 		Ok(())
 	}
 
 	fn write_char(&mut self, c: char) -> std::fmt::Result {
 		if (c as u32) < 56832 {
-			self.text_coords.0 += self.draw_char(c as u16, self.text_coords.0, self.text_coords.1, 0);
+			self.text_coords.0 += self.draw_char(c as u16, self.text_coords.0, self.text_coords.1, self.text_z);
 		}
 		Ok(())
 	}
@@ -60,9 +61,11 @@ impl VertexBufferBuilder {
 			horizontal_scroll: 0,
 			text_coords: (0, 0),
 			dropshadow: false,
+			text_z: 1,
 			color: 0xFFFFFF,
 			two_over_width: 2.0 / size.width as f32,
 			negative_two_over_height: -2.0 / size.height as f32,
+			drew_tooltip: false,
 		}
 	}
 
@@ -70,27 +73,15 @@ impl VertexBufferBuilder {
 	pub const fn scroll(&self) -> usize {
 		self.scroll
 	}
+	
+	#[inline]
+	pub const fn drew_tooltip(&self) -> bool { self.drew_tooltip }
 
 	#[inline]
-	pub const fn furthest_pixel(char: u16) -> usize {
-		let mut x_pixel = 15;
-		while x_pixel > 0 {
-			let mut y_pixel = 15;
-			while y_pixel > 0 {
-				if ((assets::UNICODE[char as usize * 32 + y_pixel * 2 + x_pixel / 8] >> (7 - x_pixel % 8)) & 1) == 1 {
-					return x_pixel + 2;
-				}
-				y_pixel -= 1;
-			}
-			x_pixel -= 1;
-		}
-		5 // space
-	}
-
-	#[inline]
-	pub fn settings(&mut self, x: usize, y: usize, dropshadow: bool) {
-		self.text_coords = (x, y);
+	pub fn settings(&mut self, pos: impl Into<(usize, usize)>, dropshadow: bool, z: u8) {
+		self.text_coords = pos.into();
 		self.dropshadow = dropshadow;
+		self.text_z = z;
 	}
 
 	#[inline]
@@ -107,11 +98,49 @@ impl VertexBufferBuilder {
 	}
 
 	#[inline]
+	pub fn draw_tooltip(&mut self, text: &[&str], x: usize, y: usize) {
+		use core::fmt::Write;
+
+		let old_text_z = core::mem::replace(&mut self.text_z, 192);
+		let old_text_coords = core::mem::replace(&mut self.text_coords, (x + 3, y + 3));
+		self.draw_texture_z((x, y), 0.6, TOOLTIP_UV, (3, 3));
+		let mut max = x + 3;
+		for &line in text {
+			let _ = write!(self, "{line}");
+			max = max.max(self.text_coords.0);
+			self.text_coords.0 = x + 3;
+			self.text_coords.1 += 16;
+		}
+		let width = max - 3 - x;
+		let height = self.text_coords.1 - 3 - y;
+		self.draw_texture_region_z((x + 3, y), 0.6, TOOLTIP_UV + (3, 0), (width, 3), (10, 3));
+		self.draw_texture_z((x + width + 3, y), 0.6, TOOLTIP_UV + (13, 0), (3, 3));
+
+		self.draw_texture_z((x, y + height + 3), 0.6, TOOLTIP_UV + (0, 13), (3, 3));
+		self.draw_texture_region_z((x + 3, y + height + 3), 0.6, TOOLTIP_UV + (3, 13), (width, 3), (10, 3));
+		self.draw_texture_z((x + width + 3, y + height + 3), 0.6, TOOLTIP_UV + (13, 13), (3, 3));
+
+		self.draw_texture_region_z((x, y + 3), 0.6, TOOLTIP_UV + (0, 3), (3, height), (3, 10));
+		self.draw_texture_region_z((x + width + 3, y + 3), 0.6, TOOLTIP_UV + (13, 3), (3, height), (3, 10));
+
+		self.draw_texture_region_z((x + 3, y + 3), 0.6, TOOLTIP_UV + (3, 3), (width, height), (10, 10));
+
+		self.text_z = old_text_z;
+		self.text_coords = old_text_coords;
+		self.drew_tooltip = true;
+	}
+
+	// todo, handwritten simd
+	#[inline]
 	pub fn draw_unicode_z_color(&mut self, x: usize, y: usize, z: u8, char: u16, color: u32) {
 		unsafe {
+			if self.text_vertices.capacity() - self.text_vertices.len() < 16 {
+				self.text_vertices.reserve_exact(98304);
+				self.text_indices.reserve_exact(36864);
+			}
 			let x = (x as isize - self.horizontal_scroll as isize) as f32;
 			let y = y as f32;
-			let z_and_color = f32::from_bits(z as u32 | (color << 8));
+			let z_and_color = f32::from_bits(((255 - z) as u32) | (color << 8));
 			let char = f32::from_bits(char as u32);
 
 			let x0 = x.mul_add(self.two_over_width, -1.0);
@@ -148,20 +177,14 @@ impl VertexBufferBuilder {
 			vec.set_len(vertices_len + 16);
 
 			let indices_len = self.text_indices.len();
-			let ptr = self.text_indices.as_mut_ptr().add(indices_len).cast::<u8>();
+			let ptr = self.text_indices.as_mut_ptr().add(indices_len);
 
-			*ptr = len as u8;
-			*(ptr.add(1)) = (len >> 8) as u8;
-			*(ptr.add(2)) = (len + 1) as u8;
-			*(ptr.add(3)) = ((len + 1) >> 8) as u8;
-			*(ptr.add(4)) = (len + 2) as u8;
-			*(ptr.add(5)) = ((len + 2) >> 8) as u8;
-			*(ptr.add(6)) = *ptr;
-			*(ptr.add(7)) = *(ptr.add(1));
-			*(ptr.add(8)) = *(ptr.add(4));
-			*(ptr.add(9)) = *(ptr.add(5));
-			*(ptr.add(10)) = (len + 3) as u8;
-			*(ptr.add(11)) = ((len + 3) >> 8) as u8;
+			*ptr = len;
+			*(ptr.add(1)) = len + 1;
+			*(ptr.add(2)) = len + 2;
+			*(ptr.add(3)) = len;
+			*(ptr.add(4)) = len + 2;
+			*(ptr.add(5)) = len + 3;
 
 			self.text_indices.set_len(indices_len + 6);
 
@@ -220,6 +243,7 @@ impl VertexBufferBuilder {
 		self.draw_texture_region_z(pos, z, uv, dims, dims);
 	}
 
+	// todo, handwritten simd
 	#[inline]
 	#[allow(clippy::many_single_char_names)]
 	pub fn draw_texture_region_z(&mut self, pos: impl Into<(usize, usize)>, z: f32, uv: impl Into<(usize, usize)>, dims: impl Into<(usize, usize)>, uv_dims: impl Into<(usize, usize)>) {
@@ -230,6 +254,7 @@ impl VertexBufferBuilder {
 			let uv_dims = uv_dims.into();
 			let x = (pos.0 as isize - self.horizontal_scroll as isize) as f32;
 			let y = pos.1 as f32;
+			let z = 1.0 - z;
 			let u = uv.0 as f32;
 			let v = uv.1 as f32;
 			let width = dims.0 as f32;
@@ -245,7 +270,6 @@ impl VertexBufferBuilder {
 			let y0 = self.negative_two_over_height.mul_add(height, y1);
 			let u1 = self.recip_texture_width.mul_add(uv_width, u0);
 			let v1 = self.recip_texture_height.mul_add(uv_height, v0);
-			let z = z;
 
 			let len = self.vertices_len;
 			let vec = &mut self.vertices;
@@ -302,32 +326,36 @@ impl VertexBufferBuilder {
 	}
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq, Eq)]
 pub struct Vec2u {
-	x: usize,
-	y: usize,
+	pub x: usize,
+	pub y: usize,
 }
 
 impl Vec2u {
 	pub const fn new(x: usize, y: usize) -> Self {
-		Self {
-			x,
-			y,
-		}
+		Self { x, y }
 	}
 
-	pub fn wrapping_sub(self, rhs: Self) -> Self {
+	pub const fn wrapping_sub(self, rhs: Self) -> Self {
 		Self {
 			x: self.x.wrapping_sub(rhs.x),
 			y: self.y.wrapping_sub(rhs.y),
 		}
 	}
 
-	pub fn saturating_sub(self, rhs: Self) -> Self {
+	pub const fn saturating_sub(self, rhs: Self) -> Self {
 		Self {
 			x: self.x.saturating_sub(rhs.x),
 			y: self.y.saturating_sub(rhs.y),
 		}
+	}
+}
+
+impl PartialEq<(usize, usize)> for Vec2u {
+	fn eq(&self, other: &(usize, usize)) -> bool {
+		let other = *other;
+		(self.x == other.0) & (self.y == other.1)
 	}
 }
 
@@ -337,9 +365,9 @@ impl From<(usize, usize)> for Vec2u {
 	}
 }
 
-impl Into<(usize, usize)> for Vec2u {
-	fn into(self) -> (usize, usize) {
-		(self.x, self.y)
+impl From<Vec2u> for (usize, usize) {
+	fn from(val: Vec2u) -> Self {
+		(val.x, val.y)
 	}
 }
 
@@ -347,9 +375,44 @@ impl std::ops::Add<Self> for Vec2u {
 	type Output = Self;
 
 	fn add(self, rhs: Self) -> Self::Output {
-		Self {
-			x: self.x + rhs.x,
-			y: self.y + rhs.y,
-		}
+		Self { x: self.x + rhs.x, y: self.y + rhs.y }
+	}
+}
+
+impl std::ops::Add<(usize, usize)> for Vec2u {
+	type Output = Self;
+
+	fn add(self, rhs: (usize, usize)) -> Self::Output {
+		Self { x: self.x + rhs.0, y: self.y + rhs.1 }
+	}
+}
+
+impl std::ops::AddAssign<Self> for Vec2u {
+	fn add_assign(&mut self, rhs: Self) {
+		self.x += rhs.x;
+		self.y += rhs.y;
+	}
+}
+
+impl std::ops::Sub<Self> for Vec2u {
+	type Output = Self;
+
+	fn sub(self, rhs: Self) -> Self::Output {
+		Self { x: self.x - rhs.x, y: self.y - rhs.y }
+	}
+}
+
+impl std::ops::Sub<(usize, usize)> for Vec2u {
+	type Output = Self;
+
+	fn sub(self, rhs: (usize, usize)) -> Self::Output {
+		Self { x: self.x - rhs.0, y: self.y - rhs.1 }
+	}
+}
+
+impl std::ops::SubAssign<Self> for Vec2u {
+	fn sub_assign(&mut self, rhs: Self) {
+		self.x -= rhs.x;
+		self.y -= rhs.y;
 	}
 }

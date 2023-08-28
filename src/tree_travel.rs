@@ -1,5 +1,7 @@
-use crate::elements::chunk::NbtChunk;
-use crate::elements::element_type::NbtElement;
+use crate::elements::chunk::{NbtChunk, NbtRegion};
+use crate::elements::compound::NbtCompound;
+use crate::elements::element_type::{NbtByteArray, NbtElement, NbtIntArray, NbtLongArray};
+use crate::elements::list::NbtList;
 use crate::{panic_unchecked, OptionExt, Position};
 use std::iter::Peekable;
 
@@ -9,6 +11,7 @@ pub struct Navigate<'a, I: IntoIterator + ExactSizeIterator> {
 	iter: Peekable<I::IntoIter>,
 	at_head: bool,
 	node: Option<(usize, Option<&'a str>, &'a mut NbtElement)>,
+	line_number: usize,
 }
 
 impl<'a, I: Iterator<Item = usize> + ExactSizeIterator> Navigate<'a, I> {
@@ -17,6 +20,7 @@ impl<'a, I: Iterator<Item = usize> + ExactSizeIterator> Navigate<'a, I> {
 			iter: iter.into_iter().peekable(),
 			at_head: true,
 			node: Some((0, None, root)),
+			line_number: 1,
 		}
 	}
 
@@ -24,9 +28,21 @@ impl<'a, I: Iterator<Item = usize> + ExactSizeIterator> Navigate<'a, I> {
 		let (_, _, node) = self.node.take()?;
 		let idx = self.iter.next()?;
 		let (key, node) = unsafe {
-			match node {
-				NbtElement::Compound(compound) => compound.get_mut(idx).map(|(a, b)| (Some(a), b)),
-				element => element.get_mut(idx).map(|x| (None, x)),
+			match node.id() {
+				NbtCompound::ID => {
+					for (_, child) in node.data.compound.children().take(idx) {
+						self.line_number += child.true_height();
+					}
+					self.line_number += 1;
+					node.data.compound.get_mut(idx).map(|(a, b)| (Some(a), b))
+				},
+				_ => {
+					for child in node.children().unwrap_unchecked().unwrap_unchecked().take(idx) {
+						self.line_number += child.true_height();
+					}
+					self.line_number += 1;
+					node.get_mut(idx).map(|x| (None, x))
+				},
 			}
 			.panic_unchecked("Invalid index in indices iterator")
 		};
@@ -35,7 +51,7 @@ impl<'a, I: Iterator<Item = usize> + ExactSizeIterator> Navigate<'a, I> {
 	}
 
 	#[allow(clippy::should_implement_trait)] // no
-	pub fn next(&mut self) -> Option<(Position, usize, Option<&str>, &mut NbtElement)> {
+	pub fn next(&mut self) -> Option<(Position, usize, Option<&str>, &mut NbtElement, usize)> {
 		let head = core::mem::replace(&mut self.at_head, false);
 
 		if !head {
@@ -53,16 +69,16 @@ impl<'a, I: Iterator<Item = usize> + ExactSizeIterator> Navigate<'a, I> {
 
 		let (idx, key, element) = self.node.as_mut()?;
 
-		Some((position, *idx, *key, *element))
+		Some((position, *idx, *key, *element, self.line_number))
 	}
 
 	#[must_use]
-	pub fn last(mut self) -> (usize, Option<&'a str>, &'a mut NbtElement) {
+	pub fn last(mut self) -> (usize, Option<&'a str>, &'a mut NbtElement, usize) {
 		while self.iter.peek().is_some() {
 			self.step();
 		}
 
-		unsafe { self.node.panic_unchecked("List cannot be empty") }
+		unsafe { self.node.map(|(a, b, c)| (a, b, c, self.line_number)).panic_unchecked("List cannot be empty") }
 	}
 }
 
@@ -73,6 +89,7 @@ pub struct Traverse<'a> {
 	y: usize,
 	cut: bool,
 	head: bool,
+	line_number: usize,
 }
 
 impl<'a> Traverse<'a> {
@@ -82,77 +99,88 @@ impl<'a> Traverse<'a> {
 			node: Some((0, None, root)),
 			y,
 			head: true,
+			line_number: 1,
 		}
 	}
 
 	fn step(&mut self) -> Option<()> {
 		let (_, _, node) = self.node.take()?;
 
-		let (idx, key, new) = 'm: {
-			match node {
-				NbtElement::Region(region) => {
-					self.y -= 1;
-					for (idx, value) in region.children_mut().enumerate() {
-						let x = match value {
-							NbtElement::Chunk(chunk) => chunk.x,
-							_ => unsafe { panic_unchecked("Region child was not a chunk") },
-						};
-
-						let height = value.height();
-						if self.y >= height {
-							self.y -= height;
-							continue;
-						} else {
-							self.cut = self.y == 0;
-							break 'm (idx, Some(x.to_string().into_boxed_str()), value);
+		let (idx, key, new) = unsafe {
+			'm: {
+				match node.id() {
+					NbtRegion::ID => {
+						self.y -= 1;
+						for (idx, value) in node.data.region.children_mut().enumerate() {
+							let height = value.height();
+							if self.y >= height {
+								self.line_number += value.true_height();
+								self.y -= height;
+								continue;
+							} else {
+								self.cut = self.y == 0;
+								self.line_number += 1;
+								break 'm (idx, Some(value.data.chunk.z.to_string().into_boxed_str()), value);
+							}
 						}
+						panic_unchecked("Expected element to contain next element")
 					}
-					unsafe { panic_unchecked("Expected element to contain next element") }
-				}
-				NbtElement::ByteArray(array) => {
-					self.cut = true;
-					let idx = core::mem::replace(&mut self.y, 0) - 1;
-					(idx, None, unsafe { array.get_mut(idx).panic_unchecked("Expected element to contain next element") })
-				}
-				NbtElement::List(list) => {
-					self.y -= 1;
-					for (idx, value) in list.children_mut().enumerate() {
-						let height = value.height();
-						if self.y >= height {
-							self.y -= height;
-							continue;
-						} else {
-							self.cut = self.y == 0;
-							break 'm (idx, None, value);
+					NbtByteArray::ID | NbtIntArray::ID | NbtLongArray::ID => {
+						self.cut = true;
+						let idx = core::mem::replace(&mut self.y, 0) - 1;
+						self.line_number += idx + 1;
+						(idx, None, node.data.byte_array.get_mut(idx).panic_unchecked("Expected element to contain next element"))
+					}
+					NbtList::ID => {
+						self.y -= 1;
+						for (idx, value) in node.data.list.children_mut().enumerate() {
+							let height = value.height();
+							if self.y >= height {
+								self.line_number += value.true_height();
+								self.y -= height;
+								continue;
+							} else {
+								self.cut = self.y == 0;
+								self.line_number += 1;
+								break 'm (idx, None, value);
+							}
 						}
+						panic_unchecked("Expected element to contain next element")
 					}
-					unsafe { panic_unchecked("Expected element to contain next element") }
-				}
-				NbtElement::Compound(compound) | NbtElement::Chunk(NbtChunk { inner: compound, .. }) => {
-					self.y -= 1;
-					for (idx, (key, value)) in compound.children_mut().enumerate() {
-						let height = value.height();
-						if self.y >= height {
-							self.y -= height;
-							continue;
-						} else {
-							self.cut = self.y == 0;
-							break 'm (idx, Some(key.clone()), value);
+					NbtCompound::ID => {
+						self.y -= 1;
+						for (idx, (key, value)) in node.data.compound.children_mut().enumerate() {
+							let height = value.height();
+							if self.y >= height {
+								self.line_number += value.true_height();
+								self.y -= height;
+								continue;
+							} else {
+								self.cut = self.y == 0;
+								self.line_number += 1;
+								break 'm (idx, Some(key.to_owned().into_boxed_str()), value);
+							}
 						}
+						panic_unchecked("Expected element to contain next element")
 					}
-					unsafe { panic_unchecked("Expected element to contain next element") }
+					NbtChunk::ID => {
+						self.y -= 1;
+						for (idx, (key, value)) in node.data.chunk.inner.children_mut().enumerate() {
+							let height = value.height();
+							if self.y >= height {
+								self.line_number += value.true_height();
+								self.y -= height;
+								continue;
+							} else {
+								self.cut = self.y == 0;
+								self.line_number += 1;
+								break 'm (idx, Some(key.into()), value);
+							}
+						}
+						panic_unchecked("Expected element to contain next element")
+					}
+					_ => panic_unchecked("Invalid type for tree traversal"),
 				}
-				NbtElement::IntArray(array) => {
-					self.cut = true;
-					let idx = core::mem::replace(&mut self.y, 0) - 1;
-					(idx, None, unsafe { array.get_mut(idx).panic_unchecked("Expected element to contain next element") })
-				}
-				NbtElement::LongArray(array) => {
-					self.cut = true;
-					let idx = core::mem::replace(&mut self.y, 0) - 1;
-					(idx, None, unsafe { array.get_mut(idx).panic_unchecked("Expected element to contain next element") })
-				}
-				_ => unsafe { panic_unchecked("Invalid type for tree traversal") },
 			}
 		};
 
@@ -162,11 +190,11 @@ impl<'a> Traverse<'a> {
 	}
 
 	#[allow(clippy::should_implement_trait)] // no
-	pub fn next(&mut self) -> Option<(Position, usize, Option<Box<str>>, &mut NbtElement)> {
+	pub fn next(&mut self) -> Option<(Position, usize, Option<Box<str>>, &mut NbtElement, usize)> {
 		if self.cut {
 			if self.head {
 				self.head = false;
-				return self.node.as_mut().map(|(idx, key, value)| (Position::Only, *idx, key.clone(), &mut **value));
+				return self.node.as_mut().map(|(idx, key, value)| (Position::Only, *idx, key.clone(), &mut **value, self.line_number));
 			}
 			return None;
 		}
@@ -186,18 +214,18 @@ impl<'a> Traverse<'a> {
 		};
 
 		let (idx, key, element) = self.node.as_mut()?;
-		Some((position, *idx, key.clone(), *element))
+		Some((position, *idx, key.clone(), *element, self.line_number))
 	}
 
 	#[must_use]
-	pub fn last(mut self) -> Option<(usize, Option<Box<str>>, &'a mut NbtElement)> {
+	pub fn last(mut self) -> Option<(usize, Option<Box<str>>, &'a mut NbtElement, usize)> {
 		if self.cut && !self.head {
 			return None;
 		}
 		while self.y > 0 {
 			self.step();
 		}
-		self.node
+		self.node.map(|(a, b, c)| (a, b, c, self.line_number))
 	}
 
 	pub const fn enumerate(self) -> EnumeratedTraverse<'a> {
@@ -214,12 +242,12 @@ pub struct EnumeratedTraverse<'a> {
 impl<'a> EnumeratedTraverse<'a> {
 	#[must_use]
 	#[allow(clippy::type_complexity)] // literally can't otherwise the compiler crashes... yeah...
-	pub fn last(mut self) -> (usize, (usize, Option<Box<str>>, &'a mut NbtElement)) {
+	pub fn last(mut self) -> (usize, (usize, Option<Box<str>>, &'a mut NbtElement, usize)) {
 		while self.inner.y > 0 {
 			self.depth += 1;
 			self.inner.step();
 		}
-		unsafe { self.inner.node.map(|x| (self.depth, x)).panic_unchecked("head is always initialized") }
+		unsafe { self.inner.node.map(|(a, b, c)| (self.depth, (a, b, c, self.inner.line_number))).panic_unchecked("head is always initialized") }
 	}
 }
 
@@ -231,6 +259,7 @@ pub struct TraverseParents<'a> {
 	y: usize,
 	cut: bool,
 	head: bool,
+	line_number: usize,
 }
 
 impl<'a> TraverseParents<'a> {
@@ -240,55 +269,85 @@ impl<'a> TraverseParents<'a> {
 			node: Some(root),
 			y,
 			head: true,
+			line_number: 1,
 		}
 	}
 
 	fn step(&mut self) -> Option<()> {
-		self.node = Some('m: {
-			match self.node.take()? {
-				NbtElement::Region(region) => {
-					self.y -= 1;
-					for value in region.children_mut() {
-						let height = value.height();
-						if self.y >= height {
-							self.y -= height;
-							continue;
-						} else {
-							break 'm value;
+		self.node = Some(unsafe {
+			'm: {
+				let node = self.node.take()?;
+				match node.id() {
+					NbtRegion::ID => {
+						self.y -= 1;
+						for value in node.data.region.children_mut() {
+							let height = value.height();
+							if self.y >= height {
+								self.y -= height;
+								self.line_number += value.true_height();
+								continue;
+							} else {
+								self.line_number += 1;
+								break 'm value;
+							}
 						}
+						panic_unchecked("Expected element to contain next element")
 					}
-					unsafe { panic_unchecked("Expected element to contain next element") }
-				}
-				NbtElement::ByteArray(array) => unsafe { array.get_mut(core::mem::replace(&mut self.y, 0) - 1).panic_unchecked("Expected element to contain next element") },
-				NbtElement::List(list) => {
-					self.y -= 1;
-					for value in list.children_mut() {
-						let height = value.height();
-						if self.y >= height {
-							self.y -= height;
-							continue;
-						} else {
-							break 'm value;
+					NbtByteArray::ID | NbtIntArray::ID | NbtLongArray::ID => {
+						self.line_number += self.y;
+						node
+							.data
+							.byte_array
+							.get_mut(core::mem::replace(&mut self.y, 0) - 1)
+							.panic_unchecked("Expected element to contain next element")
+					},
+					NbtList::ID => {
+						self.y -= 1;
+						for value in node.data.list.children_mut() {
+							let height = value.height();
+							if self.y >= height {
+								self.y -= height;
+								self.line_number += value.true_height();
+								continue;
+							} else {
+								self.line_number += 1;
+								break 'm value;
+							}
 						}
+						panic_unchecked("Expected element to contain next element")
 					}
-					unsafe { panic_unchecked("Expected element to contain next element") }
-				}
-				NbtElement::Compound(compound) | NbtElement::Chunk(NbtChunk { inner: compound, .. }) => {
-					self.y -= 1;
-					for (_, value) in compound.children_mut() {
-						let height = value.height();
-						if self.y >= height {
-							self.y -= height;
-							continue;
-						} else {
-							break 'm value;
+					NbtCompound::ID => {
+						self.y -= 1;
+						for (_, value) in node.data.compound.children_mut() {
+							let height = value.height();
+							if self.y >= height {
+								self.y -= height;
+								self.line_number += value.true_height();
+								continue;
+							} else {
+								self.line_number += 1;
+								break 'm value;
+							}
 						}
+						panic_unchecked("Expected element to contain next element")
 					}
-					unsafe { panic_unchecked("Expected element to contain next element") }
+					NbtChunk::ID => {
+						self.y -= 1;
+						for (_, value) in node.data.chunk.inner.children_mut() {
+							let height = value.height();
+							if self.y >= height {
+								self.y -= height;
+								self.line_number += value.true_height();
+								continue;
+							} else {
+								self.line_number += 1;
+								break 'm value;
+							}
+						}
+						panic_unchecked("Expected element to contain next element")
+					}
+					_ => panic_unchecked("Invalid type for tree traversal"),
 				}
-				NbtElement::IntArray(array) => unsafe { array.get_mut(core::mem::replace(&mut self.y, 0) - 1).panic_unchecked("Expected element to contain next element") },
-				NbtElement::LongArray(array) => unsafe { array.get_mut(core::mem::replace(&mut self.y, 0) - 1).panic_unchecked("Expected element to contain next element") },
-				_ => unsafe { panic_unchecked("Invalid type for tree traversal") },
 			}
 		});
 
@@ -296,50 +355,65 @@ impl<'a> TraverseParents<'a> {
 	}
 
 	fn extras(&self) -> (usize, Option<Box<str>>, bool) {
-		match self.node.as_ref() {
-			Some(NbtElement::Region(region)) => {
-				let mut remaining_y = self.y - 1;
-				for (idx, element) in region.children().enumerate() {
-					if remaining_y >= element.height() {
-						remaining_y -= element.height();
-						continue;
-					} else {
-						return (idx, Some(unsafe { element.as_chunk_unchecked() }.x.to_string().into_boxed_str()), remaining_y == 0);
+		let node = unsafe { self.node.as_ref().panic_unchecked("Expected a value for parent element") };
+		unsafe {
+			match node.id() {
+				NbtRegion::ID => {
+					let mut remaining_y = self.y - 1;
+					for (idx, element) in node.data.region.children().enumerate() {
+						if remaining_y >= element.height() {
+							remaining_y -= element.height();
+							continue;
+						} else {
+							return (idx, Some(element.as_chunk_unchecked().x.to_string().into_boxed_str()), remaining_y == 0);
+						}
 					}
+					panic_unchecked("Expected parent element to contain next element")
 				}
-				unsafe { panic_unchecked("Expected parent element to contain next element") }
-			}
-			Some(NbtElement::ByteArray(_) | NbtElement::IntArray(_) | NbtElement::LongArray(_)) => (self.y - 1, None, true),
-			Some(NbtElement::Compound(compound)) | Some(NbtElement::Chunk(NbtChunk { inner: compound, .. })) => {
-				let mut remaining_y = self.y - 1;
-				for (idx, (key, element)) in compound.children().enumerate() {
-					if remaining_y >= element.height() {
-						remaining_y -= element.height();
-						continue;
-					} else {
-						return (idx, Some(key.clone()), remaining_y == 0);
+				NbtByteArray::ID | NbtIntArray::ID | NbtLongArray::ID => (self.y - 1, None, true),
+				NbtCompound::ID => {
+					let mut remaining_y = self.y - 1;
+					for (idx, (key, element)) in node.data.compound.children().enumerate() {
+						if remaining_y >= element.height() {
+							remaining_y -= element.height();
+							continue;
+						} else {
+							return (idx, Some(key.into()), remaining_y == 0);
+						}
 					}
+					panic_unchecked("Expected parent element to contain next element")
 				}
-				unsafe { panic_unchecked("Expected parent element to contain next element") }
-			}
-			Some(NbtElement::List(list)) => {
-				let mut remaining_y = self.y - 1;
-				for (idx, element) in list.children().enumerate() {
-					if remaining_y >= element.height() {
-						remaining_y -= element.height();
-						continue;
-					} else {
-						return (idx, None, remaining_y == 0);
+				NbtChunk::ID => {
+					let mut remaining_y = self.y - 1;
+					for (idx, (key, element)) in node.data.chunk.inner.children().enumerate() {
+						if remaining_y >= element.height() {
+							remaining_y -= element.height();
+							continue;
+						} else {
+							return (idx, Some(key.into()), remaining_y == 0);
+						}
 					}
+					panic_unchecked("Expected parent element to contain next element")
 				}
-				unsafe { panic_unchecked("Expected parent element to contain next element") }
+				NbtList::ID => {
+					let mut remaining_y = self.y - 1;
+					for (idx, element) in node.data.list.children().enumerate() {
+						if remaining_y >= element.height() {
+							remaining_y -= element.height();
+							continue;
+						} else {
+							return (idx, None, remaining_y == 0);
+						}
+					}
+					panic_unchecked("Expected parent element to contain next element")
+				}
+				_ => panic_unchecked("Expected parent element to be complex"),
 			}
-			_ => unsafe { panic_unchecked("Expected parent element to be complex") },
 		}
 	}
 
 	#[allow(clippy::should_implement_trait)] // no
-	pub fn next(&mut self) -> Option<(Position, usize, Option<Box<str>>, &mut NbtElement)> {
+	pub fn next(&mut self) -> Option<(Position, usize, Option<Box<str>>, &mut NbtElement, usize)> {
 		if self.cut {
 			return None;
 		}
@@ -359,6 +433,6 @@ impl<'a> TraverseParents<'a> {
 			(true, true) => Position::Only,
 		};
 
-		Some((position, idx, key, &mut **self.node.as_mut()?))
+		Some((position, idx, key, &mut **self.node.as_mut()?, self.line_number))
 	}
 }

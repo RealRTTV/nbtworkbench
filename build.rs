@@ -2,7 +2,9 @@
 #![feature(maybe_uninit_array_assume_init)]
 
 use std::fs::write;
+use std::io::Read;
 use std::mem::MaybeUninit;
+use flate2::Compression;
 
 const UNICODE: &[u8] = include_bytes!("src/assets/unicode.hex");
 const ATLAS: &[u8] = include_bytes!(r"src/assets/atlas.png");
@@ -40,7 +42,10 @@ fn main() {
 		{
 			panic!("{e}");
 		}
-
-		println!("cargo:rustc-link-arg=/STACK:10485760")
 	}
+
+	let mut buf = Vec::with_capacity(UNICODE.len());
+	let mut encoder = flate2::read::ZlibEncoder::new(UNICODE, Compression::best());
+	let _ = encoder.read_to_end(&mut buf);
+	write(r"src/assets/unicode.hex.zib", &buf).unwrap()
 }

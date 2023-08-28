@@ -11,11 +11,12 @@ macro_rules! primitive {
 			pub const ID: u8 = $id;
 
 			#[inline]
-			pub fn to_bytes<W: std::io::Write>(&self, writer: &mut W) {
-				let _ = std::io::Write::write(writer, self.value.to_be_bytes().as_ref());
+			pub fn to_bytes(&self, writer: &mut UncheckedBufWriter) {
+				writer.write(self.value.to_be_bytes().as_ref());
 			}
 
 			#[inline]
+			#[cfg_attr(not(debug_assertions), no_panic::no_panic)]
 			pub fn from_bytes(decoder: &mut Decoder) -> Option<Self> {
 				unsafe {
 					decoder.assert_len(core::mem::size_of::<$t>())?;
@@ -33,29 +34,29 @@ macro_rules! primitive {
 			}
 
 			#[inline]
-			pub fn render(&self, builder: &mut VertexBufferBuilder, x_offset: &mut usize, y_offset: &mut usize, name: Option<&str>, ctx: &mut RenderContext) {
-				ctx.line_number(*y_offset, builder);
-				Self::render_icon(*x_offset, *y_offset, builder);
+			pub fn render(&self, builder: &mut VertexBufferBuilder, name: Option<&str>, ctx: &mut RenderContext) {
+				ctx.line_number();
+				Self::render_icon(ctx.pos(), 0.0, builder);
 				let str = self.value.to_string();
 				ctx.highlight(
-					(*x_offset, *y_offset),
+					ctx.pos(),
 					name.map(StrExt::width).unwrap_or(0) + name.is_some() as usize * ": ".width() + str.width(),
 					builder,
 				);
-				if ctx.forbid(*x_offset, *y_offset, builder) {
-					builder.settings(*x_offset + 20, *y_offset, false);
+				if ctx.forbid(ctx.pos(), builder) {
+					builder.settings(ctx.pos() + (20, 0), false, 1);
 					let _ = match name {
 						Some(x) => write!(builder, "{x}: {str}"),
 						None => write!(builder, "{str}"),
 					};
 				}
 
-				*y_offset += 16;
+				ctx.y_offset += 16;
 			}
 
 			#[inline]
-			pub fn render_icon(x: usize, y: usize, builder: &mut VertexBufferBuilder) {
-				builder.draw_texture((x, y), $uv, (16, 16));
+			pub fn render_icon(pos: impl Into<(usize, usize)>, z: f32, builder: &mut VertexBufferBuilder) {
+				builder.draw_texture_z(pos, z, $uv, (16, 16));
 			}
 		}
 
