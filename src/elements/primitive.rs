@@ -1,7 +1,7 @@
 #[macro_export]
 macro_rules! primitive {
 	($uv:ident, $s:expr, $name:ident, $t:ty, $id:literal) => {
-		#[derive(Clone, Default)]
+		#[derive(Copy, Clone, Default)]
 		#[repr(transparent)]
 		pub struct $name {
 			pub value: $t,
@@ -16,7 +16,6 @@ macro_rules! primitive {
 			}
 
 			#[inline]
-			#[cfg_attr(not(debug_assertions), no_panic::no_panic)]
 			pub fn from_bytes(decoder: &mut Decoder) -> Option<Self> {
 				unsafe {
 					decoder.assert_len(core::mem::size_of::<$t>())?;
@@ -36,13 +35,8 @@ macro_rules! primitive {
 			#[inline]
 			pub fn render(&self, builder: &mut VertexBufferBuilder, name: Option<&str>, ctx: &mut RenderContext) {
 				ctx.line_number();
-				Self::render_icon(ctx.pos(), 0.0, builder);
-				let str = self.value.to_string();
-				ctx.highlight(
-					ctx.pos(),
-					name.map(StrExt::width).unwrap_or(0) + name.is_some() as usize * ": ".width() + str.width(),
-					builder,
-				);
+				Self::render_icon(ctx.pos(), BASE_Z, builder);
+				let str = self.value.to_compact_string();
 				if ctx.forbid(ctx.pos(), builder) {
 					builder.settings(ctx.pos() + (20, 0), false, 1);
 					let _ = match name {
@@ -55,7 +49,7 @@ macro_rules! primitive {
 			}
 
 			#[inline]
-			pub fn render_icon(pos: impl Into<(usize, usize)>, z: f32, builder: &mut VertexBufferBuilder) {
+			pub fn render_icon(pos: impl Into<(usize, usize)>, z: u8, builder: &mut VertexBufferBuilder) {
 				builder.draw_texture_z(pos, z, $uv, (16, 16));
 			}
 		}

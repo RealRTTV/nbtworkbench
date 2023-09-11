@@ -1,6 +1,7 @@
 use std::num::NonZeroU64;
-use pollster::FutureExt;
+use std::time::SystemTime;
 
+use pollster::FutureExt;
 use wgpu::util::{BufferInitDescriptor, DeviceExt};
 #[allow(clippy::wildcard_imports)]
 use wgpu::*;
@@ -12,9 +13,10 @@ use winit::platform::windows::WindowBuilderExtWindows;
 use winit::window::{Icon, Window, WindowBuilder};
 use zune_inflate::DeflateOptions;
 
-use crate::assets::HEADER_SIZE;
+use crate::assets::*;
 use crate::vertex_buffer_builder::VertexBufferBuilder;
-use crate::{assets, Workbench};
+use crate::workbench::Workbench;
+use crate::{assets, OptionExt};
 
 pub const WINDOW_HEIGHT: usize = 420;
 pub const WINDOW_WIDTH: usize = 620;
@@ -29,17 +31,17 @@ pub fn run() -> ! {
 		.with_window_icon(Some(Icon::from_rgba(assets::icon(), assets::ICON_WIDTH as u32, assets::ICON_HEIGHT as u32).expect("valid format")))
 		.with_drag_and_drop(true)
 		.build(&event_loop)
-		.unwrap();
+		.expect("Window was constructable");
 	let mut state = State::new(&window);
 	let mut workbench = Workbench::new(&window);
 
 	event_loop.run(move |event, _, _| match event {
-		Event::RedrawRequested(window_id) if window_id == window.id() => match state.render(&workbench, &window) {
+		Event::RedrawRequested(window_id) if window_id == window.id() => match state.render(&mut workbench, &window) {
 			Ok(()) => {}
 			Err(SurfaceError::Lost) => state.surface.configure(&state.device, &state.config),
 			Err(SurfaceError::OutOfMemory) => {
 				std::process::exit(1);
-			},
+			}
 			Err(SurfaceError::Timeout) => eprintln!("Frame took too long to process"),
 			Err(SurfaceError::Outdated) => {
 				eprintln!("Surface changed unexpectedly");
@@ -51,7 +53,7 @@ pub fn run() -> ! {
 				match event {
 					WindowEvent::CloseRequested => {
 						std::process::exit(0);
-					},
+					}
 					WindowEvent::Resized(new_size) => state.resize(&mut workbench, new_size),
 					WindowEvent::ScaleFactorChanged { new_inner_size: new_size, .. } => state.resize(&mut workbench, *new_size),
 					_ => {}
@@ -76,6 +78,7 @@ struct State {
 	text_render_pipeline: RenderPipeline,
 	unicode_bind_group: BindGroup,
 	load_op: LoadOp<Color>,
+	last_tick: SystemTime,
 }
 
 impl State {
@@ -86,15 +89,15 @@ impl State {
 			backends: Backends::all(),
 			dx12_shader_compiler: Dx12Compiler::default(),
 		});
-		let surface = unsafe { instance.create_surface(window).unwrap() };
+		let surface = unsafe { instance.create_surface(window).ok().panic_unchecked("all safety guarantees are assured") };
 		let adapter = instance
 			.request_adapter(&RequestAdapterOptions {
-				power_preference: PowerPreference::LowPower,
+				power_preference: PowerPreference::None,
 				force_fallback_adapter: false,
 				compatible_surface: Some(&surface),
 			})
 			.block_on()
-			.unwrap();
+			.expect("Could obtain adapter");
 		let (device, queue) = adapter
 			.request_device(
 				&DeviceDescriptor {
@@ -105,13 +108,13 @@ impl State {
 				None,
 			)
 			.block_on()
-			.unwrap();
+			.expect("Could obtain device");
 		let config = SurfaceConfiguration {
 			usage: TextureUsages::RENDER_ATTACHMENT,
-			format: surface.get_capabilities(&adapter).formats.into_iter().find(TextureFormat::is_srgb).unwrap(),
+			format: surface.get_capabilities(&adapter).formats.into_iter().find(TextureFormat::is_srgb).expect("An SRGB format exists"),
 			width: size.width,
 			height: size.height,
-			present_mode: PresentMode::Fifo,
+			present_mode: PresentMode::AutoVsync,
 			alpha_mode: CompositeAlphaMode::Auto,
 			view_formats: vec![],
 		};
@@ -152,7 +155,7 @@ impl State {
 			address_mode_u: AddressMode::Repeat,
 			address_mode_v: AddressMode::Repeat,
 			address_mode_w: AddressMode::Repeat,
-			mag_filter: FilterMode::Linear,
+			mag_filter: FilterMode::Nearest,
 			min_filter: FilterMode::Nearest,
 			mipmap_filter: FilterMode::Nearest,
 			..Default::default()
@@ -248,7 +251,12 @@ impl State {
 				// ~5ms with --release
 				#[cfg(debug_assertions)]
 				let start = std::time::Instant::now();
-				let vec = zune_inflate::DeflateDecoder::new_with_options(include_bytes!("assets/unicode.hex.zib"), DeflateOptions::default().set_confirm_checksum(false)).decode_zlib().unwrap();
+				let vec = unsafe {
+					zune_inflate::DeflateDecoder::new_with_options(include_bytes!("assets/unicode.hex.zib"), DeflateOptions::default().set_confirm_checksum(false))
+						.decode_zlib()
+						.ok()
+						.panic_unchecked("there is no way this fails, otherwise i deserve the ub that comes from this.")
+				};
 				#[cfg(debug_assertions)]
 				println!("took {}ms to read compressed unicode", start.elapsed().as_nanos() as f64 / 1_000_000.0);
 				vec
@@ -347,6 +355,7 @@ impl State {
 			text_render_pipeline,
 			unicode_bind_group,
 			load_op,
+			last_tick: SystemTime::UNIX_EPOCH,
 		}
 	}
 
@@ -358,6 +367,10 @@ impl State {
 			self.surface.configure(&self.device, &self.config);
 			workbench.window_height(new_size.height as usize);
 			workbench.window_width(new_size.width as usize);
+			for tab in &mut workbench.tabs {
+				tab.scroll = tab.scroll();
+				tab.horizontal_scroll = tab.horizontal_scroll(workbench.held_entry.element());
+			}
 		}
 	}
 
@@ -400,7 +413,12 @@ impl State {
 		}
 	}
 
-	fn render(&mut self, workbench: &Workbench, window: &Window) -> Result<(), SurfaceError> {
+	fn render(&mut self, workbench: &mut Workbench, window: &Window) -> Result<(), SurfaceError> {
+		if self.last_tick.elapsed().unwrap_or_else(|x| x.duration()).as_millis() >= 25 {
+			workbench.tick();
+			self.last_tick = SystemTime::now();
+		}
+		workbench.try_subscription();
 		let output = self.surface.get_current_texture()?;
 		let view = output.texture.create_view(&TextureViewDescriptor::default());
 		let mut encoder = self.device.create_command_encoder(&CommandEncoderDescriptor { label: Some("Command Encoder") });
@@ -434,7 +452,10 @@ impl State {
 				})],
 				depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
 					view: &depth_texture_view,
-					depth_ops: Some(Operations { load: LoadOp::Clear(f32::MAX), store: true }),
+					depth_ops: Some(Operations {
+						load: LoadOp::Clear(f32::MAX),
+						store: true,
+					}),
 					stencil_ops: None,
 				}),
 			});

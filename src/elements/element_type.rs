@@ -1,25 +1,27 @@
+use core::fmt::DebugList;
+use std::alloc::{alloc, dealloc, Layout};
 use std::fmt::{Debug, Display, Error, Formatter};
 use std::intrinsics::likely;
-
-use std::string::String;
-use std::{fmt, fmt::Write};
-
-use crate::assets::{BYTE_ARRAY_UV, BYTE_UV, CONNECTION_UV, DOUBLE_UV, FLOAT_UV, INT_ARRAY_UV, INT_UV, LONG_ARRAY_UV, LONG_UV, SHORT_UV};
-use crate::decoder::Decoder;
-use crate::elements::chunk::{NbtChunk, NbtRegion};
-use crate::elements::compound::{CompoundMapIter, NbtCompound};
-use crate::elements::list::{NbtList, ValueIterator, ValueMutIterator};
-use crate::elements::string::NbtString;
-use crate::tab::FileFormat;
-use crate::{array, primitive, DropFn, RenderContext, StrExt, VertexBufferBuilder};
-use crate::{panic_unchecked, OptionExt};
-use core::fmt::DebugList;
 use std::mem::{ManuallyDrop, MaybeUninit};
 use std::ops::Deref;
 use std::thread::Scope;
-use std::time::{Instant, SystemTime};
-use std::alloc::{alloc, Layout};
+use std::time::SystemTime;
+use std::{fmt, fmt::Write};
+
+use compact_str::{format_compact, CompactString, ToCompactString};
+use hashbrown::raw::RawTable;
+
+use crate::assets::*;
+use crate::decoder::Decoder;
+use crate::elements::chunk::{NbtChunk, NbtRegion};
+use crate::elements::compound::{CompoundMap, CompoundMapIter, Entry, NbtCompound};
+use crate::elements::element_action::ElementAction;
+use crate::elements::list::{NbtList, ValueIterator, ValueMutIterator};
+use crate::elements::string::NbtString;
 use crate::encoder::UncheckedBufWriter;
+use crate::panic_unchecked;
+use crate::tab::FileFormat;
+use crate::{array, primitive, DropFn, RenderContext, StrExt, VertexBufferBuilder};
 
 primitive!(BYTE_UV, { Some('b') }, NbtByte, i8, 1);
 primitive!(SHORT_UV, { Some('s') }, NbtShort, i16, 2);
@@ -74,22 +76,22 @@ impl Clone for NbtElement {
 					data: ManuallyDrop::new(NbtElementData { region: self.data.region.clone() }),
 				},
 				NbtByte::ID => Self {
-					data: ManuallyDrop::new(NbtElementData { byte: self.data.byte.clone() }),
+					data: ManuallyDrop::new(NbtElementData { byte: self.data.byte }),
 				},
 				NbtShort::ID => Self {
-					data: ManuallyDrop::new(NbtElementData { short: self.data.short.clone() }),
+					data: ManuallyDrop::new(NbtElementData { short: self.data.short }),
 				},
 				NbtInt::ID => Self {
-					data: ManuallyDrop::new(NbtElementData { int: self.data.int.clone() }),
+					data: ManuallyDrop::new(NbtElementData { int: self.data.int }),
 				},
 				NbtLong::ID => Self {
-					data: ManuallyDrop::new(NbtElementData { long: self.data.long.clone() }),
+					data: ManuallyDrop::new(NbtElementData { long: self.data.long }),
 				},
 				NbtFloat::ID => Self {
-					data: ManuallyDrop::new(NbtElementData { float: self.data.float.clone() }),
+					data: ManuallyDrop::new(NbtElementData { float: self.data.float }),
 				},
 				NbtDouble::ID => Self {
-					data: ManuallyDrop::new(NbtElementData { double: self.data.double.clone() }),
+					data: ManuallyDrop::new(NbtElementData { double: self.data.double }),
 				},
 				NbtByteArray::ID => Self {
 					data: ManuallyDrop::new(NbtElementData {
@@ -268,23 +270,23 @@ impl NbtElement {
 impl NbtElement {
 	#[must_use]
 	#[allow(clippy::should_implement_trait)] // i can't, sorry :(
-	pub fn from_str(mut s: &str) -> Option<(Option<Box<str>>, Self)> {
+	pub fn from_str(mut s: &str) -> Option<(Option<CompactString>, Self)> {
 		s = s.trim_start();
 
 		if s.is_empty() {
 			return None;
 		}
 
-		let prefix = s.snbt_string_read().and_then(|(prefix, s2)| {
-			s2.strip_prefix(':').map(|s2| {
-				s = s2;
-				prefix
-			})
-		});
-		let element = Self::from_str0(s).map(|(_, x)| x)?;
+		let prefix = s.snbt_string_read().and_then(|(prefix, s2)| s2.trim_start().strip_prefix(':').map(|s2| { s = s2.trim_start(); prefix }));
+		let (s, element) = Self::from_str0(s).map(|(s, x)| (s.trim_start(), x))?;
+		if !s.is_empty() {
+			return None;
+		}
 		Some((prefix, element))
 	}
-	pub(in crate::elements) fn from_str0(s: &str) -> Option<(&str, Self)> {
+
+	#[allow(clippy::too_many_lines)]
+	pub(in crate::elements) fn from_str0(mut s: &str) -> Option<(&str, Self)> {
 		if let Some(s2) = s.strip_prefix("false") {
 			return Some((s2, Self::Byte(NbtByte { value: 0 })));
 		}
@@ -310,7 +312,40 @@ impl NbtElement {
 			return NbtString::from_str0(s).map(|(s, x)| (s, Self::String(x)));
 		}
 
-		let digit_end_idx = {
+		if let Some(s2) = s.strip_prefix("NaN") {
+			s = s2.trim_start();
+			if let Some(s2) = s.strip_prefix('f') {
+				return Some((s2.trim_start(), Self::Float(NbtFloat { value: f32::NAN })));
+			} else if let Some(s2) = s.strip_prefix('d') {
+				return Some((s2.trim_start(), Self::Double(NbtDouble { value: f64::NAN })));
+			} else {
+				return Some((s2.trim_start(), Self::Double(NbtDouble { value: f64::NAN })));
+			}
+		}
+
+		if let Some(s2) = s.strip_prefix("Infinity").or_else(|| s.strip_prefix("inf")) {
+			s = s2.trim_start();
+			if let Some(s2) = s.strip_prefix('f') {
+				return Some((s2.trim_start(), Self::Float(NbtFloat { value: f32::INFINITY })));
+			} else if let Some(s2) = s.strip_prefix('d') {
+				return Some((s2.trim_start(), Self::Double(NbtDouble { value: f64::INFINITY })));
+			} else {
+				return Some((s2.trim_start(), Self::Double(NbtDouble { value: f64::INFINITY })));
+			}
+		}
+
+		if let Some(s2) = s.strip_prefix("-Infinity").or_else(|| s.strip_prefix("-inf")) {
+			s = s2.trim_start();
+			if let Some(s2) = s.strip_prefix('f') {
+				return Some((s2.trim_start(), Self::Float(NbtFloat { value: f32::NEG_INFINITY })));
+			} else if let Some(s2) = s.strip_prefix('d') {
+				return Some((s2.trim_start(), Self::Double(NbtDouble { value: f64::NEG_INFINITY })));
+			} else {
+				return Some((s2.trim_start(), Self::Double(NbtDouble { value: f64::NEG_INFINITY })));
+			}
+		}
+
+		let digit_end_idx = 'a: {
 			let mut s = s;
 			let mut digit_end_idx = 0;
 
@@ -323,7 +358,7 @@ impl NbtElement {
 			s = &s[int_part..];
 			digit_end_idx += int_part;
 			if int_part == 0 && !s.starts_with('.') {
-				return None;
+				break 'a 0;
 			}
 			if let Some(s2) = s.strip_prefix('.') {
 				digit_end_idx += 1;
@@ -335,7 +370,7 @@ impl NbtElement {
 			digit_end_idx
 		};
 		if digit_end_idx > 0 {
-			let suffix = (s[digit_end_idx..]).as_bytes().first().map(u8::to_ascii_lowercase);
+			let suffix = (s[digit_end_idx..]).trim_start().as_bytes().first().map(u8::to_ascii_lowercase);
 			return match suffix {
 				Some(b'b') => Some((
 					&s[(digit_end_idx + 1)..],
@@ -367,6 +402,24 @@ impl NbtElement {
 						value: (s[..digit_end_idx]).parse().ok()?,
 					}),
 				)),
+				Some(b'|') => Some({
+					let mut s = s;
+					let Ok(x @ 0..=31) = (s[..digit_end_idx]).parse::<u8>() else { return None };
+					s = s[digit_end_idx..].trim_start().split_at(1).1.trim_start();
+					let digit_end_idx = s.bytes().position(|x| !x.is_ascii_digit())?;
+					let Ok(z @ 0..=31) = s[..digit_end_idx].parse::<u8>() else { return None };
+					s = s[digit_end_idx..].trim_start();
+					let (s, inner) = NbtCompound::from_str0(s)?;
+					(
+						s,
+						Self::Chunk(NbtChunk::from_compound(
+							inner,
+							(x, z),
+							FileFormat::Zlib,
+							SystemTime::UNIX_EPOCH.elapsed().unwrap_or_else(|e| e.duration()).as_secs() as u32,
+						)),
+					)
+				}),
 				_ => Some((
 					&s[digit_end_idx..],
 					Self::Int(NbtInt {
@@ -376,10 +429,9 @@ impl NbtElement {
 			};
 		}
 
-		None
+		NbtString::from_str0(s).map(|(s, x)| (s, Self::String(x)))
 	}
 	#[inline(never)]
-	#[cfg_attr(not(debug_assertions), no_panic::no_panic)]
 	pub fn from_bytes(element: u8, decoder: &mut Decoder) -> Option<Self> {
 		Some(match element {
 			NbtByte::ID => Self::Byte(NbtByte::from_bytes(decoder)?),
@@ -444,7 +496,7 @@ impl NbtElement {
 			NbtFloat::ID => Self::Float(NbtFloat::default()),
 			NbtDouble::ID => Self::Double(NbtDouble::default()),
 			NbtByteArray::ID => Self::ByteArray(NbtByteArray::new()),
-			NbtString::ID => Self::String(NbtString::new(String::new().into_boxed_str())),
+			NbtString::ID => Self::String(NbtString::new(CompactString::new_inline(""))),
 			NbtList::ID => Self::List(NbtList::new(vec![], 0x00)),
 			NbtCompound::ID => Self::Compound(NbtCompound::new()),
 			NbtIntArray::ID => Self::IntArray(NbtIntArray::new()),
@@ -453,7 +505,7 @@ impl NbtElement {
 				NbtCompound::new(),
 				(0, 0),
 				FileFormat::Zlib,
-				unsafe { SystemTime::UNIX_EPOCH.elapsed().ok().panic_unchecked("Time can't go before the epoch") }.as_secs() as u32,
+				SystemTime::UNIX_EPOCH.elapsed().unwrap_or_else(|e| e.duration()).as_secs() as u32,
 			)),
 			_ => return None,
 		})
@@ -483,16 +535,16 @@ impl NbtElement {
 	#[must_use]
 	pub fn to_file(&self) -> Vec<u8> {
 		// #[cfg(debug_assertions)]
-		// let start = std::time::Instant::now();
+		let start = std::time::Instant::now();
 		let mut writer = UncheckedBufWriter::new();
 		if self.id() == NbtCompound::ID {
 			writer.write(&[0x0A, 0x00, 0x00]);
 		}
 		self.to_bytes(&mut writer);
-		let res = writer.finish();
+
 		// #[cfg(debug_assertions)]
-		// println!("{}ms for file write", start.elapsed().as_nanos() as f64 / 1_000_000.0);
-		res
+		println!("{}ms for file write", start.elapsed().as_nanos() as f64 / 1_000_000.0);
+		writer.finish()
 	}
 
 	#[inline]
@@ -500,10 +552,10 @@ impl NbtElement {
 	pub fn from_mca(bytes: &[u8]) -> Option<Self> {
 		// #[cfg(debug_assertions)]
 		// let start = std::time::Instant::now();
-		let res = NbtRegion::from_bytes(bytes).map(Self::Region);
+
 		// #[cfg(debug_assertions)]
 		// println!("{}ms for file read", start.elapsed().as_nanos() as f64 / 1_000_000.0);
-		res
+		NbtRegion::from_bytes(bytes).map(Self::Region)
 	}
 
 	#[inline]
@@ -552,7 +604,29 @@ impl NbtElement {
 	}
 
 	#[inline]
-	pub fn render_icon(id: u8, pos: impl Into<(usize, usize)>, z: f32, builder: &mut VertexBufferBuilder) {
+	#[must_use]
+	pub fn display_name(&self) -> &'static str {
+		match self.id() {
+			NbtByte::ID => "Byte",
+			NbtShort::ID => "Short",
+			NbtInt::ID => "Int",
+			NbtLong::ID => "Long",
+			NbtFloat::ID => "Float",
+			NbtDouble::ID => "Double",
+			NbtByteArray::ID => "Byte Array",
+			NbtString::ID => "String",
+			NbtList::ID => "List",
+			NbtCompound::ID => "Compound",
+			NbtIntArray::ID => "Int Array",
+			NbtLongArray::ID => "Long Array",
+			NbtChunk::ID => "Chunk",
+			NbtRegion::ID => "Region",
+			_ => unsafe { panic_unchecked("Invalid element id") },
+		}
+	}
+
+	#[inline]
+	pub fn render_icon(id: u8, pos: impl Into<(usize, usize)>, z: u8, builder: &mut VertexBufferBuilder) {
 		match id {
 			0 => {}
 			NbtByte::ID => NbtByte::render_icon(pos, z, builder),
@@ -617,40 +691,40 @@ impl NbtElement {
 	}
 
 	#[inline]
-	pub fn set_value(&mut self, value: Box<str>) -> Option<Box<str>> {
+	pub fn set_value(&mut self, value: CompactString) -> Option<CompactString> {
 		unsafe {
 			Some(match self.id() {
 				NbtByte::ID => {
-					let before = self.data.byte.value.to_string().into();
+					let before = self.data.byte.value.to_compact_string();
 					self.data.byte.set(value.parse().ok());
 					before
 				}
 				NbtShort::ID => {
-					let before = self.data.short.value.to_string().into();
+					let before = self.data.short.value.to_compact_string();
 					self.data.short.set(value.parse().ok());
 					before
 				}
 				NbtInt::ID => {
-					let before = self.data.int.value.to_string().into();
+					let before = self.data.int.value.to_compact_string();
 					self.data.int.set(value.parse().ok());
 					before
 				}
 				NbtLong::ID => {
-					let before = self.data.long.value.to_string().into();
+					let before = self.data.long.value.to_compact_string();
 					self.data.long.set(value.parse().ok());
 					before
 				}
 				NbtFloat::ID => {
-					let before = self.data.float.value.to_string().into();
+					let before = self.data.float.value.to_compact_string();
 					self.data.float.set(value.parse().ok());
 					before
 				}
 				NbtDouble::ID => {
-					let before = self.data.double.value.to_string().into();
+					let before = self.data.double.value.to_compact_string();
 					self.data.double.set(value.parse().ok());
 					before
 				}
-				NbtString::ID => core::mem::replace(&mut self.data.string.str, value),
+				NbtString::ID => core::mem::replace(self, Self::String(NbtString::new(value))).data.string.str.as_str().to_compact_string(),
 				_ => return None,
 			})
 		}
@@ -730,30 +804,30 @@ impl NbtElement {
 
 	#[inline]
 	#[must_use]
-	pub fn value(&self) -> (Box<str>, bool) {
+	pub fn value(&self) -> (CompactString, bool) {
 		unsafe {
 			match self.id() {
-				NbtByte::ID => (self.data.byte.value.to_string().into_boxed_str(), true),
-				NbtShort::ID => (self.data.short.value.to_string().into_boxed_str(), true),
-				NbtInt::ID => (self.data.int.value.to_string().into_boxed_str(), true),
-				NbtLong::ID => (self.data.long.value.to_string().into_boxed_str(), true),
-				NbtFloat::ID => (self.data.float.value.to_string().into_boxed_str(), true),
-				NbtDouble::ID => (self.data.double.value.to_string().into_boxed_str(), true),
-				NbtByteArray::ID => (self.data.byte_array.value().into_boxed_str(), false),
-				NbtString::ID => (self.data.string.unwrap().to_owned().into_boxed_str(), true),
-				NbtList::ID => (self.data.list.value().into_boxed_str(), false),
-				NbtCompound::ID => (self.data.compound.value().into_boxed_str(), false),
-				NbtIntArray::ID => (self.data.int_array.value().into_boxed_str(), false),
-				NbtLongArray::ID => (self.data.long_array.value().into_boxed_str(), false),
-				NbtChunk::ID => (self.data.chunk.z.to_string().into_boxed_str(), true),
-				NbtRegion::ID => (self.data.region.value().into_boxed_str(), false),
+				NbtByte::ID => (self.data.byte.value.to_compact_string(), true),
+				NbtShort::ID => (self.data.short.value.to_compact_string(), true),
+				NbtInt::ID => (self.data.int.value.to_compact_string(), true),
+				NbtLong::ID => (self.data.long.value.to_compact_string(), true),
+				NbtFloat::ID => (self.data.float.value.to_compact_string(), true),
+				NbtDouble::ID => (self.data.double.value.to_compact_string(), true),
+				NbtByteArray::ID => (self.data.byte_array.value(), false),
+				NbtString::ID => (self.data.string.str.as_str().to_compact_string(), true),
+				NbtList::ID => (self.data.list.value(), false),
+				NbtCompound::ID => (self.data.compound.value(), false),
+				NbtIntArray::ID => (self.data.int_array.value(), false),
+				NbtLongArray::ID => (self.data.long_array.value(), false),
+				NbtChunk::ID => (self.data.chunk.z.to_compact_string(), true),
+				NbtRegion::ID => (self.data.region.value(), false),
 				_ => core::hint::unreachable_unchecked(),
 			}
 		}
 	}
 
 	#[inline]
-	pub fn drop(&mut self, key: Option<Box<str>>, element: Self, y: &mut usize, depth: usize, target_depth: usize, line_number: usize, indices: &mut Vec<usize>) -> DropFn {
+	pub fn drop(&mut self, key: Option<CompactString>, element: Self, y: &mut usize, depth: usize, target_depth: usize, line_number: usize, indices: &mut Vec<usize>) -> DropFn {
 		unsafe {
 			let height = self.height() * 16;
 			match self.id() {
@@ -816,14 +890,14 @@ impl NbtElement {
 				NbtByteArray::ID => self.data.byte_array.insert(idx, value),
 				NbtList::ID => self.data.list.insert(idx, value),
 				NbtCompound::ID => {
-					self.data.compound.insert(idx, "_".to_owned(), value);
+					self.data.compound.insert(idx, CompactString::new_inline("_"), value);
 					Ok(())
 				}
 				NbtIntArray::ID => self.data.int_array.insert(idx, value),
 				NbtLongArray::ID => self.data.long_array.insert(idx, value),
 				NbtRegion::ID => self.data.region.insert(idx, value),
 				NbtChunk::ID => {
-					self.data.chunk.insert_full(idx, "_".to_owned(), value);
+					self.data.chunk.insert_full(idx, CompactString::new_inline("_"), value);
 					Ok(())
 				}
 				_ => Err(value),
@@ -832,7 +906,7 @@ impl NbtElement {
 	}
 
 	#[inline]
-	pub fn remove(&mut self, idx: usize) -> Option<(Option<Box<str>>, Self)> {
+	pub fn remove(&mut self, idx: usize) -> Option<(Option<CompactString>, Self)> {
 		unsafe {
 			Some(match self.id() {
 				NbtByteArray::ID | NbtIntArray::ID | NbtLongArray::ID => (None, self.data.byte_array.remove(idx)),
@@ -916,6 +990,31 @@ impl NbtElement {
 			}
 		}
 	}
+
+	#[inline]
+	#[must_use]
+	#[allow(clippy::match_same_arms)]
+	pub const fn actions(&self) -> &[ElementAction] {
+		unsafe {
+			match self.id() {
+				NbtByte::ID => &[ElementAction::CopyRaw, ElementAction::CopyFormatted, ElementAction::OpenInTxt],
+				NbtShort::ID => &[ElementAction::CopyRaw, ElementAction::CopyFormatted, ElementAction::OpenInTxt],
+				NbtInt::ID => &[ElementAction::CopyRaw, ElementAction::CopyFormatted, ElementAction::OpenInTxt],
+				NbtLong::ID => &[ElementAction::CopyRaw, ElementAction::CopyFormatted, ElementAction::OpenInTxt],
+				NbtFloat::ID => &[ElementAction::CopyRaw, ElementAction::CopyFormatted, ElementAction::OpenInTxt],
+				NbtDouble::ID => &[ElementAction::CopyRaw, ElementAction::CopyFormatted, ElementAction::OpenInTxt],
+				NbtByteArray::ID => &[ElementAction::CopyRaw, ElementAction::CopyFormatted, ElementAction::OpenInTxt, ElementAction::OpenArrayInHex],
+				NbtString::ID => &[ElementAction::CopyRaw, ElementAction::CopyFormatted, ElementAction::OpenInTxt],
+				NbtList::ID => &[ElementAction::CopyRaw, ElementAction::CopyFormatted, ElementAction::OpenInTxt],
+				NbtCompound::ID => &[ElementAction::CopyRaw, ElementAction::CopyFormatted, ElementAction::OpenInTxt],
+				NbtIntArray::ID => &[ElementAction::CopyRaw, ElementAction::CopyFormatted, ElementAction::OpenInTxt, ElementAction::OpenArrayInHex],
+				NbtLongArray::ID => &[ElementAction::CopyRaw, ElementAction::CopyFormatted, ElementAction::OpenInTxt, ElementAction::OpenArrayInHex],
+				NbtChunk::ID => &[ElementAction::CopyRaw, ElementAction::CopyFormatted, ElementAction::OpenInTxt],
+				NbtRegion::ID => &[ElementAction::CopyRaw, ElementAction::CopyFormatted, ElementAction::OpenInTxt],
+				_ => core::hint::unreachable_unchecked(),
+			}
+		}
+	}
 }
 
 impl Display for NbtElement {
@@ -934,7 +1033,7 @@ impl Display for NbtElement {
 				NbtCompound::ID => write!(f, "{}", &*self.data.compound),
 				NbtIntArray::ID => write!(f, "{}", &*self.data.int_array),
 				NbtLongArray::ID => write!(f, "{}", &*self.data.long_array),
-				NbtChunk::ID => write!(f, "{}", self.data.chunk.inner.as_ref()),
+				NbtChunk::ID => write!(f, "{}", &*self.data.chunk),
 				NbtRegion::ID => Err(Error),
 				_ => core::hint::unreachable_unchecked(),
 			}
@@ -967,34 +1066,89 @@ impl Debug for NbtElement {
 }
 
 impl Drop for NbtElement {
-	#[cfg_attr(not(debug_assertions), no_panic::no_panic)]
-	// todo, there shouldn't be a panicking branch
 	fn drop(&mut self) {
 		unsafe {
 			let id = self.id();
 			let mut data = core::ptr::addr_of_mut!(self.data).read();
 			match id {
-				NbtByteArray::ID => { core::ptr::addr_of_mut!(data.byte_array.values).drop_in_place(); },
-				NbtString::ID => { core::ptr::addr_of_mut!(data.string.str).drop_in_place(); },
-				NbtList::ID => { core::ptr::addr_of_mut!(data.list.elements).drop_in_place(); },
-				NbtCompound::ID => { core::ptr::addr_of_mut!(data.compound.entries).drop_in_place(); },
-				NbtIntArray::ID => { core::ptr::addr_of_mut!(data.int_array.values).drop_in_place(); },
-				NbtLongArray::ID => { core::ptr::addr_of_mut!(data.long_array.values).drop_in_place(); },
-				NbtChunk::ID => { core::ptr::addr_of_mut!(data.chunk.inner).drop_in_place(); },
-				NbtRegion::ID => std::thread::scope(move |s| {
+				NbtByteArray::ID | NbtIntArray::ID | NbtLongArray::ID => {
+					let vec = &mut *data.byte_array.values;
+					if !vec.is_empty() {
+						dealloc(vec.as_mut_ptr().cast(), Layout::array::<Self>(vec.capacity()).unwrap_unchecked());
+					}
+					dealloc((vec as *mut Vec<Self>).cast(), Layout::new::<Vec<Self>>());
+				}
+				NbtString::ID => {
+					core::ptr::addr_of_mut!(data.string.str).drop_in_place();
+				}
+				NbtList::ID => {
+					let element = data.list.element;
+					let list = &mut *data.list.elements;
+					if element > NbtDouble::ID {
+						for entry in &mut *list {
+							(entry as *mut Self).drop_in_place();
+						}
+					}
+					if !list.is_empty() {
+						dealloc(list.as_mut_ptr().cast(), Layout::array::<Self>(list.capacity()).unwrap_unchecked());
+					}
+					dealloc((list as *mut Vec<Self>).cast(), Layout::new::<Vec<Self>>());
+				}
+				NbtCompound::ID => {
+					let map = &mut *data.compound.entries;
+					let CompoundMap { indices, entries } = map;
+					(indices as *mut RawTable<usize>).drop_in_place();
+					for Entry { value, key, .. } in &mut *entries {
+						(value as *mut Self).drop_in_place();
+						if key.is_heap_allocated() {
+							dealloc(key.as_mut_ptr(), Layout::array::<u8>(key.len()).unwrap_unchecked());
+						}
+					}
+					if !entries.is_empty() {
+						dealloc(entries.as_mut_ptr().cast(), Layout::array::<Entry>(entries.capacity()).unwrap_unchecked());
+					}
+					dealloc((map as *mut CompoundMap).cast(), Layout::new::<CompoundMap>());
+				}
+				NbtChunk::ID => {
+					let map = &mut *data.chunk.inner.entries;
+					let CompoundMap { indices, entries } = map;
+					(indices as *mut RawTable<usize>).drop_in_place();
+					for Entry { value, key, .. } in &mut *entries {
+						(value as *mut Self).drop_in_place();
+						if key.is_heap_allocated() {
+							dealloc(key.as_mut_ptr(), Layout::array::<u8>(key.len()).unwrap_unchecked());
+						}
+					}
+					if !entries.is_empty() {
+						dealloc(entries.as_mut_ptr().cast(), Layout::array::<Entry>(entries.capacity()).unwrap_unchecked());
+					}
+					dealloc((map as *mut CompoundMap).cast(), Layout::new::<CompoundMap>());
+				}
+				// no real speedup from using threads, seems to be memory-bound, or dealloc-call-bound
+				NbtRegion::ID => {
 					let (map, chunks) = *core::ptr::addr_of_mut!(data.region.chunks).read();
 					drop(map);
-					for chunk in core::mem::transmute::<_, [ManuallyDrop<Self>; 1024]>(chunks) {
-						s.spawn(move || {
-							if !chunk.is_null() {
-								let start = Instant::now();
-								drop(ManuallyDrop::into_inner(core::mem::transmute::<_, NbtElementData>(chunk).chunk).inner);
-								println!("took {}ms", start.elapsed().as_nanos() as f64 / 1_000_000.0);
+					for mut chunk in core::mem::transmute::<_, [ManuallyDrop<Self>; 1024]>(chunks) {
+						if !chunk.is_null() {
+							let ptr = chunk.as_chunk_unchecked_mut().inner.as_mut();
+							let map = &mut *ptr.entries;
+							let CompoundMap { indices, entries } = map;
+							(indices as *mut RawTable<usize>).drop_in_place();
+							for Entry { value, key, .. } in &mut *entries {
+								(value as *mut Self).drop_in_place();
+								if key.is_heap_allocated() {
+									dealloc(key.as_mut_ptr(), Layout::array::<u8>(key.len()).unwrap_unchecked());
+								}
 							}
-						});
+							if !entries.is_empty() {
+								dealloc(entries.as_mut_ptr().cast(), Layout::array::<Entry>(entries.capacity()).unwrap_unchecked());
+							}
+							dealloc((map as *mut CompoundMap).cast(), Layout::new::<CompoundMap>());
+							dealloc((ptr as *mut NbtCompound).cast(), Layout::new::<NbtCompound>());
+						}
 					}
-				}),
-				_ => {},
+				}
+				_ => {}
 			}
 		}
 	}

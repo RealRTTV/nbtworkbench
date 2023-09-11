@@ -1,6 +1,6 @@
 [package]
 name = "nbtworkbench"
-version = "0.1.5"
+version = "0.1.6"
 edition = "2021"
 description = "A modern NBT Editor written in rust. Optimized beyond belief"
 license-file = "LICENSE"
@@ -10,14 +10,6 @@ keywords = ["nbt", "window", "unsafe"]
 categories = ["nbt"] # idk
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
-# for no_panic tests
-[profile.nopanic]
-inherits = "release"
-panic = "unwind"
-
-[profile.nopanic.build-override]
-inherits = "release"
 
 [profile.release]
 opt-level = 3
@@ -53,12 +45,13 @@ flate2 = "1.0.27"
 
 [dependencies]
 zune-inflate = { version = "0.2.54", features = ["gzip", "zlib"] }
-flate2 = "1.0.26"
+flate2 = "1.0.27"
 winit = "0.28.6"
 wgpu = "0.17.0"
 pollster = "0.3.0"
 cli-clipboard = "0.4.0"
 fxhash = "0.2.1"
-no-panic = "0.1.26"
 hashbrown = { version = "0.14.0", features = ["raw"] }
-fs2 = "0.4.3"
+notify = "6.0.1"
+uuid = { version = "1.4.1", features = ["v4"] }
+compact_str = "0.7.1"

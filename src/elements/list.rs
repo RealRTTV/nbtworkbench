@@ -1,15 +1,16 @@
+use compact_str::{format_compact, CompactString};
 use std::alloc::{alloc, Layout};
 use std::fmt::{Debug, Display, Formatter, Write};
 use std::intrinsics::likely;
 use std::slice::{Iter, IterMut};
 use std::thread::Scope;
 
-use crate::{DropFn, OptionExt, RenderContext, StrExt, VertexBufferBuilder};
-use crate::assets::{CONNECTION_UV, LIST_UV};
+use crate::assets::*;
 use crate::decoder::Decoder;
 use crate::elements::chunk::NbtChunk;
 use crate::elements::element_type::{id_to_string_name, NbtElement};
 use crate::encoder::UncheckedBufWriter;
+use crate::{DropFn, OptionExt, RenderContext, StrExt, VertexBufferBuilder};
 
 #[allow(clippy::module_name_repetitions)]
 #[repr(C)]
@@ -18,7 +19,7 @@ pub struct NbtList {
 	height: u32,
 	true_height: u32,
 	max_depth: u32,
-	element: u8,
+	pub element: u8,
 	open: bool,
 }
 
@@ -66,7 +67,6 @@ impl NbtList {
 		Some((s, list))
 	}
 	#[allow(clippy::cast_ptr_alignment)]
-	// #[cfg_attr(not(debug_assertions), no_panic::no_panic)]
 	#[inline]
 	pub fn from_bytes(decoder: &mut Decoder) -> Option<Self> {
 		unsafe {
@@ -183,7 +183,9 @@ impl NbtList {
 		if self.element == value.id() || self.elements.is_empty() {
 			self.element = value.id();
 			self.increment(value.height(), value.true_height());
-			unsafe { self.elements.try_reserve_exact(1).unwrap_unchecked(); }
+			unsafe {
+				self.elements.try_reserve_exact(1).unwrap_unchecked();
+			}
 			self.elements.insert(idx, value);
 			Ok(())
 		} else {
@@ -213,9 +215,9 @@ impl NbtList {
 
 	#[inline]
 	#[must_use]
-	pub fn value(&self) -> String {
+	pub fn value(&self) -> CompactString {
 		let (single, multiple) = id_to_string_name(self.element);
-		format!("{} {}", self.len(), if self.len() == 1 { single } else { multiple })
+		format_compact!("{} {}", self.len(), if self.len() == 1 { single } else { multiple })
 	}
 }
 
@@ -251,13 +253,12 @@ impl NbtList {
 			}
 
 			ctx.line_number();
-			Self::render_icon(ctx.pos(), 0.0, builder);
-			ctx.highlight(ctx.pos(), name.map(StrExt::width).map_or(0, |x| x + ": ".width()) + self.value().width(), builder);
+			Self::render_icon(ctx.pos(), BASE_Z, builder);
 			if !self.is_empty() {
 				ctx.draw_toggle(ctx.pos() - (16, 0), self.open, builder);
 			}
 			if ctx.forbid(ctx.pos(), builder) {
-				builder.settings(ctx.pos() + (20, 0), false, 1);
+				builder.settings(ctx.pos() + (20, 0), false, BASE_TEXT_Z);
 				let _ = match name {
 					Some(x) => write!(builder, "{x}: {}", self.value()),
 					None => write!(builder, "{}", self.value()),
@@ -265,13 +266,24 @@ impl NbtList {
 			}
 
 			let pos = ctx.pos();
-			if ctx.ghost(ctx.pos() + (16, 16), builder, |x, y| pos == (x - 16, y - 8), |id| (id != NbtChunk::ID) && (id == self.element || self.is_empty())) {
+			if ctx.ghost(
+				ctx.pos() + (16, 16),
+				builder,
+				|x, y| pos + (16, 8) == (x, y),
+				|id| (id != NbtChunk::ID) && (id == self.element || self.is_empty()),
+			) {
 				builder.draw_texture(ctx.pos() + (0, 16), CONNECTION_UV, (16, (self.height() != 1) as usize * 7 + 9));
 				if !tail {
 					builder.draw_texture(ctx.pos() - (16, 0) + (0, 16), CONNECTION_UV, (8, 16));
 				}
 				ctx.y_offset += 16;
-			} else if self.height() == 1 && ctx.ghost(ctx.pos() + (16, 16), builder, |x, y| pos == (x - 16, y - 16), |id| (id != NbtChunk::ID) && (id == self.element || self.is_empty())) {
+			} else if self.height() == 1
+				&& ctx.ghost(
+					ctx.pos() + (16, 16),
+					builder,
+					|x, y| pos + (16, 16) == (x, y),
+					|id| (id != NbtChunk::ID) && (id == self.element || self.is_empty()),
+				) {
 				builder.draw_texture(ctx.pos() + (0, 16), CONNECTION_UV, (16, 9));
 				if !tail {
 					builder.draw_texture(ctx.pos() - (16, 0) + (0, 16), CONNECTION_UV, (8, 16));
@@ -348,7 +360,7 @@ impl NbtList {
 		ValueMutIterator::Generic(self.elements.iter_mut())
 	}
 
-	pub fn drop(&mut self, mut key: Option<Box<str>>, mut element: NbtElement, y: &mut usize, depth: usize, target_depth: usize, mut line_number: usize, indices: &mut Vec<usize>) -> DropFn {
+	pub fn drop(&mut self, mut key: Option<CompactString>, mut element: NbtElement, y: &mut usize, depth: usize, target_depth: usize, mut line_number: usize, indices: &mut Vec<usize>) -> DropFn {
 		if *y < 16 && *y >= 8 && depth == target_depth {
 			let before = (self.height(), self.true_height());
 			indices.push(0);
@@ -432,7 +444,7 @@ impl NbtList {
 	}
 
 	#[inline]
-	pub fn render_icon(pos: impl Into<(usize, usize)>, z: f32, builder: &mut VertexBufferBuilder) {
+	pub fn render_icon(pos: impl Into<(usize, usize)>, z: u8, builder: &mut VertexBufferBuilder) {
 		builder.draw_texture_z(pos, z, LIST_UV, (16, 16));
 	}
 

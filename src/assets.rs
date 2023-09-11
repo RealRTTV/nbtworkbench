@@ -1,12 +1,13 @@
-use crate::vertex_buffer_builder::Vec2u;
 use std::mem::ManuallyDrop;
 use std::time::SystemTime;
+
+use crate::vertex_buffer_builder::Vec2u;
 
 pub const HEADER_SIZE: usize = 48;
 
 pub const ATLAS: &[u8] = include_bytes!("assets/atlas.hex");
-pub const ATLAS_WIDTH: usize = 128;
-pub const ATLAS_HEIGHT: usize = 128;
+pub const ATLAS_WIDTH: usize = 256;
+pub const ATLAS_HEIGHT: usize = 256;
 pub const UNICODE_LEN: usize = 1_818_624;
 
 pub const ICON_WIDTH: usize = 64;
@@ -27,6 +28,28 @@ pub const UNKNOWN_NBT_GHOST_UV: Vec2u = Vec2u::new(112, 48);
 pub const SELECTION_UV: Vec2u = Vec2u::new(0, 80);
 pub const UNSELECTED_WIDGET_UV: Vec2u = Vec2u::new(80, 64);
 pub const SELECTED_WIDGET_UV: Vec2u = Vec2u::new(96, 64);
+pub const HOVERED_WIDGET_UV: Vec2u = Vec2u::new(112, 64);
+pub const UNSELECTED_ACTION_WHEEL: [Vec2u; 8] = [
+	Vec2u::new(128, 0),
+	Vec2u::new(168, 0),
+	Vec2u::new(128, 20),
+	Vec2u::new(168, 19),
+	Vec2u::new(128, 40),
+	Vec2u::new(168, 38),
+	Vec2u::new(128, 60),
+	Vec2u::new(168, 57),
+];
+pub const SELECTED_ACTION_WHEEL: [Vec2u; 8] = [
+	Vec2u::new(148, 0),
+	Vec2u::new(187, 0),
+	Vec2u::new(148, 20),
+	Vec2u::new(187, 19),
+	Vec2u::new(148, 40),
+	Vec2u::new(187, 38),
+	Vec2u::new(148, 60),
+	Vec2u::new(187, 57),
+];
+pub const TRAY_UV: Vec2u = Vec2u::new(128, 80);
 pub const EDITED_UV: Vec2u = Vec2u::new(16, 64);
 pub const UNEDITED_UV: Vec2u = Vec2u::new(32, 64);
 pub const NBT_FILE_TYPE_UV: Vec2u = Vec2u::new(32, 80);
@@ -44,18 +67,31 @@ pub const REMOVE_UV: Vec2u = Vec2u::new(0, 96);
 pub const ADD_UV: Vec2u = Vec2u::new(16, 96);
 pub const RENAME_UV: Vec2u = Vec2u::new(32, 96);
 pub const MOVE_UV: Vec2u = Vec2u::new(48, 96);
+pub const REPLACE_UV: Vec2u = Vec2u::new(64, 96);
 pub const REMOVE_TAIL_UV: Vec2u = Vec2u::new(0, 112);
 pub const ADD_TAIL_UV: Vec2u = Vec2u::new(16, 112);
 pub const RENAME_TAIL_UV: Vec2u = Vec2u::new(32, 112);
 pub const MOVE_TAIL_UV: Vec2u = Vec2u::new(48, 112);
-pub const UNDO_UV: Vec2u = Vec2u::new(64, 96);
-pub const REDO_UV: Vec2u = Vec2u::new(64, 112);
+pub const REPLACE_TAIL_UV: Vec2u = Vec2u::new(64, 112);
+pub const UNDO_UV: Vec2u = Vec2u::new(80, 96);
+pub const REDO_UV: Vec2u = Vec2u::new(80, 112);
 pub const LINE_NUMBER_SEPARATOR_UV: Vec2u = Vec2u::new(60, 64);
 pub const END_LINE_NUMBER_SEPARATOR_UV: Vec2u = Vec2u::new(62, 64);
 pub const HORIZONTAL_SEPARATOR_UV: Vec2u = Vec2u::new(17, 80); // (14 by 2)
 pub const TEXT_UNDERLINE_UV: Vec2u = Vec2u::new(16, 82);
-pub const TOOLTIP_UV: Vec2u = Vec2u::new(112, 112);
+pub const TOOLTIP_UV: Vec2u = Vec2u::new(96, 144);
 pub const BOOKMARK_UV: Vec2u = Vec2u::new(112, 96);
+pub const HIDDEN_BOOKMARK_UV: Vec2u = Vec2u::new(96, 128);
+pub const LIGHT_STRIPE_UV: Vec2u = Vec2u::new(96, 96);
+pub const DARK_STRIPE_UV: Vec2u = Vec2u::new(96, 112);
+pub const HOVERED_STRIPE_UV: Vec2u = Vec2u::new(112, 128);
+pub const INVALID_STRIPE_UV: Vec2u = Vec2u::new(112, 112);
+pub const COPY_RAW_UV: Vec2u = Vec2u::new(3, 131);
+pub const COPY_FORMATTED_UV: Vec2u = Vec2u::new(19, 131);
+pub const OPEN_ARRAY_IN_HEX_UV: Vec2u = Vec2u::new(35, 131);
+pub const OPEN_IN_TXT: Vec2u = Vec2u::new(51, 131);
+pub const FREEHAND_MODE_UV: Vec2u = Vec2u::new(0, 144);
+pub const ENABLED_FREEHAND_MODE_UV: Vec2u = Vec2u::new(16, 144);
 
 pub const BYTE_UV: Vec2u = Vec2u::new(0, 0);
 pub const SHORT_UV: Vec2u = Vec2u::new(16, 0);
@@ -87,6 +123,20 @@ pub const INT_ARRAY_GHOST_UV: Vec2u = Vec2u::new(112, 16);
 pub const LONG_ARRAY_GHOST_UV: Vec2u = Vec2u::new(0, 48);
 pub const REGION_GHOST_UV: Vec2u = Vec2u::new(96, 48);
 pub const CHUNK_GHOST_UV: Vec2u = Vec2u::new(64, 48);
+
+pub const BASE_Z: u8 = 0;
+pub const BASE_TEXT_Z: u8 = 10;
+pub const JUST_OVERLAPPING_BASE_TEXT_Z: u8 = BASE_TEXT_Z + 1;
+pub const TOGGLE_Z: u8 = 20;
+pub const LINE_NUMBER_Z: u8 = 60;
+pub const LINE_NUMBER_CONNECTOR_Z: u8 = LINE_NUMBER_Z + 1;
+pub const BOOKMARK_Z: u8 = 80;
+pub const SELECTED_TEXT_Z: u8 = 130;
+pub const ELEMENT_HIGHLIGHT_Z: u8 = SELECTED_TEXT_Z;
+pub const ACTION_WHEEL_Z: u8 = 190;
+pub const SCROLLBAR_Z: u8 = 200;
+pub const HELD_ENTRY_Z: u8 = 210;
+pub const TOOLTIP_Z: u8 = 240;
 
 #[allow(clippy::cast_ptr_alignment)]
 pub fn icon() -> Vec<u8> {

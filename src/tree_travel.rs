@@ -1,9 +1,11 @@
+use compact_str::{CompactString, ToCompactString};
+use std::iter::Peekable;
+
 use crate::elements::chunk::{NbtChunk, NbtRegion};
 use crate::elements::compound::NbtCompound;
 use crate::elements::element_type::{NbtByteArray, NbtElement, NbtIntArray, NbtLongArray};
 use crate::elements::list::NbtList;
 use crate::{panic_unchecked, OptionExt, Position};
-use std::iter::Peekable;
 
 /// Navigates a tree from the given route of an indices list, will cause UB on invalid lists. Typically used for operations which are saved and not direct clicking interaction.
 #[must_use]
@@ -28,21 +30,18 @@ impl<'a, I: Iterator<Item = usize> + ExactSizeIterator> Navigate<'a, I> {
 		let (_, _, node) = self.node.take()?;
 		let idx = self.iter.next()?;
 		let (key, node) = unsafe {
-			match node.id() {
-				NbtCompound::ID => {
-					for (_, child) in node.data.compound.children().take(idx) {
-						self.line_number += child.true_height();
-					}
-					self.line_number += 1;
-					node.data.compound.get_mut(idx).map(|(a, b)| (Some(a), b))
-				},
-				_ => {
-					for child in node.children().unwrap_unchecked().unwrap_unchecked().take(idx) {
-						self.line_number += child.true_height();
-					}
-					self.line_number += 1;
-					node.get_mut(idx).map(|x| (None, x))
-				},
+			if node.id() == NbtCompound::ID {
+				for (_, child) in node.data.compound.children().take(idx) {
+					self.line_number += child.true_height();
+				}
+				self.line_number += 1;
+				node.data.compound.get_mut(idx).map(|(a, b)| (Some(a), b))
+			} else {
+				for child in node.children().unwrap_unchecked().unwrap_unchecked().take(idx) {
+					self.line_number += child.true_height();
+				}
+				self.line_number += 1;
+				node.get_mut(idx).map(|x| (None, x))
 			}
 			.panic_unchecked("Invalid index in indices iterator")
 		};
@@ -85,7 +84,7 @@ impl<'a, I: Iterator<Item = usize> + ExactSizeIterator> Navigate<'a, I> {
 /// Navigates through an [`NbtElement`] tree using a y value.
 #[must_use]
 pub struct Traverse<'a> {
-	node: Option<(usize, Option<Box<str>>, &'a mut NbtElement)>,
+	node: Option<(usize, Option<CompactString>, &'a mut NbtElement)>,
 	y: usize,
 	cut: bool,
 	head: bool,
@@ -120,7 +119,7 @@ impl<'a> Traverse<'a> {
 							} else {
 								self.cut = self.y == 0;
 								self.line_number += 1;
-								break 'm (idx, Some(value.data.chunk.z.to_string().into_boxed_str()), value);
+								break 'm (idx, Some(value.data.chunk.z.to_compact_string()), value);
 							}
 						}
 						panic_unchecked("Expected element to contain next element")
@@ -158,7 +157,7 @@ impl<'a> Traverse<'a> {
 							} else {
 								self.cut = self.y == 0;
 								self.line_number += 1;
-								break 'm (idx, Some(key.to_owned().into_boxed_str()), value);
+								break 'm (idx, Some(key.to_compact_string()), value);
 							}
 						}
 						panic_unchecked("Expected element to contain next element")
@@ -190,7 +189,7 @@ impl<'a> Traverse<'a> {
 	}
 
 	#[allow(clippy::should_implement_trait)] // no
-	pub fn next(&mut self) -> Option<(Position, usize, Option<Box<str>>, &mut NbtElement, usize)> {
+	pub fn next(&mut self) -> Option<(Position, usize, Option<CompactString>, &mut NbtElement, usize)> {
 		if self.cut {
 			if self.head {
 				self.head = false;
@@ -218,7 +217,7 @@ impl<'a> Traverse<'a> {
 	}
 
 	#[must_use]
-	pub fn last(mut self) -> Option<(usize, Option<Box<str>>, &'a mut NbtElement, usize)> {
+	pub fn last(mut self) -> Option<(usize, Option<CompactString>, &'a mut NbtElement, usize)> {
 		if self.cut && !self.head {
 			return None;
 		}
@@ -242,12 +241,17 @@ pub struct EnumeratedTraverse<'a> {
 impl<'a> EnumeratedTraverse<'a> {
 	#[must_use]
 	#[allow(clippy::type_complexity)] // literally can't otherwise the compiler crashes... yeah...
-	pub fn last(mut self) -> (usize, (usize, Option<Box<str>>, &'a mut NbtElement, usize)) {
+	pub fn last(mut self) -> (usize, (usize, Option<CompactString>, &'a mut NbtElement, usize)) {
 		while self.inner.y > 0 {
 			self.depth += 1;
 			self.inner.step();
 		}
-		unsafe { self.inner.node.map(|(a, b, c)| (self.depth, (a, b, c, self.inner.line_number))).panic_unchecked("head is always initialized") }
+		unsafe {
+			self.inner
+				.node
+				.map(|(a, b, c)| (self.depth, (a, b, c, self.inner.line_number)))
+				.panic_unchecked("head is always initialized")
+		}
 	}
 }
 
@@ -295,12 +299,11 @@ impl<'a> TraverseParents<'a> {
 					}
 					NbtByteArray::ID | NbtIntArray::ID | NbtLongArray::ID => {
 						self.line_number += self.y;
-						node
-							.data
+						node.data
 							.byte_array
 							.get_mut(core::mem::replace(&mut self.y, 0) - 1)
 							.panic_unchecked("Expected element to contain next element")
-					},
+					}
 					NbtList::ID => {
 						self.y -= 1;
 						for value in node.data.list.children_mut() {
@@ -354,7 +357,7 @@ impl<'a> TraverseParents<'a> {
 		Some(())
 	}
 
-	fn extras(&self) -> (usize, Option<Box<str>>, bool) {
+	fn extras(&self) -> (usize, Option<CompactString>, bool) {
 		let node = unsafe { self.node.as_ref().panic_unchecked("Expected a value for parent element") };
 		unsafe {
 			match node.id() {
@@ -365,7 +368,7 @@ impl<'a> TraverseParents<'a> {
 							remaining_y -= element.height();
 							continue;
 						} else {
-							return (idx, Some(element.as_chunk_unchecked().x.to_string().into_boxed_str()), remaining_y == 0);
+							return (idx, Some(element.as_chunk_unchecked().x.to_compact_string()), remaining_y == 0);
 						}
 					}
 					panic_unchecked("Expected parent element to contain next element")
@@ -413,7 +416,7 @@ impl<'a> TraverseParents<'a> {
 	}
 
 	#[allow(clippy::should_implement_trait)] // no
-	pub fn next(&mut self) -> Option<(Position, usize, Option<Box<str>>, &mut NbtElement, usize)> {
+	pub fn next(&mut self) -> Option<(Position, usize, Option<CompactString>, &mut NbtElement, usize)> {
 		if self.cut {
 			return None;
 		}

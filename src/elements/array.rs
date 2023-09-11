@@ -60,7 +60,6 @@ macro_rules! array {
 			}
 
 			#[inline]
-			#[cfg_attr(not(debug_assertions), no_panic::no_panic)]
 			pub fn from_bytes(decoder: &mut Decoder) -> Option<Self> {
 				unsafe {
 					decoder.assert_len(4)?;
@@ -70,7 +69,9 @@ macro_rules! array {
 					for idx in 0..len {
 						let mut element = NbtElement {
 							data: ManuallyDrop::new(NbtElementData {
-								$element_field: core::mem::transmute(<$t>::from_be_bytes(decoder.data.add(idx * core::mem::size_of::<$t>()).cast::<[u8; core::mem::size_of::<$t>()]>().read())),
+								$element_field: core::mem::transmute(<$t>::from_be_bytes(
+									decoder.data.add(idx * core::mem::size_of::<$t>()).cast::<[u8; core::mem::size_of::<$t>()]>().read(),
+								)),
 							}),
 						};
 						element.id.id = $id;
@@ -155,7 +156,9 @@ macro_rules! array {
 			pub fn insert(&mut self, idx: usize, value: NbtElement) -> Result<(), NbtElement> {
 				if value.id() == $id {
 					// the time complexity is fine here
-					unsafe { self.values.try_reserve_exact(1).unwrap_unchecked(); }
+					unsafe {
+						self.values.try_reserve_exact(1).unwrap_unchecked();
+					}
 					self.values.insert(idx, value);
 					self.increment(1, 1);
 					Ok(())
@@ -181,8 +184,7 @@ macro_rules! array {
 					}
 
 					ctx.line_number();
-					Self::render_icon(ctx.pos(), 0.0, builder);
-					ctx.highlight(ctx.pos(), key.map(StrExt::width).unwrap_or(0), builder);
+					Self::render_icon(ctx.pos(), BASE_Z, builder);
 					if !self.is_empty() {
 						ctx.draw_toggle(ctx.pos() - (16, 0), self.open, builder);
 					}
@@ -193,7 +195,6 @@ macro_rules! array {
 							None => write!(builder, "{}", self.value()),
 						};
 					}
-
 
 					let pos = ctx.pos();
 					if ctx.ghost(ctx.pos() + (16, 16), builder, |x, y| pos == (x - 16, y - 8), |id| id == $id) {
@@ -238,10 +239,10 @@ macro_rules! array {
 						}
 
 						let ghost_tail_mod = if let Some((id, x, y, _)) = ctx.ghost && ctx.pos() + (0, 16 - *remaining_scroll * 16 - 8) == (x, y) && id == $id {
-																									false
-																								} else {
-																									true
-																								};
+																											false
+																										} else {
+																											true
+																										};
 
 						builder.draw_texture(ctx.pos() - (16, 0), CONNECTION_UV, (16, (!(idx == self.len() - 1 && ghost_tail_mod)) as usize * 7 + 9));
 						if !tail {
@@ -250,8 +251,7 @@ macro_rules! array {
 
 						ctx.line_number();
 						Self::render_element_icon(ctx.pos(), builder);
-						let str = Self::transmute(element).to_string();
-						ctx.highlight(ctx.pos(), str.width(), builder);
+						let str = Self::transmute(element).to_compact_string();
 						if ctx.forbid(ctx.pos(), builder) {
 							builder.settings(ctx.pos() + (20, 0), false, 1);
 							let _ = write!(builder, "{str}");
@@ -289,9 +289,9 @@ macro_rules! array {
 
 			#[inline]
 			#[must_use]
-			pub fn value(&self) -> String {
+			pub fn value(&self) -> CompactString {
 				let (single, multiple) = id_to_string_name($id);
-				format!("{} {}", self.len(), if self.len() == 1 { single } else { multiple })
+				format_compact!("{} {}", self.len(), if self.len() == 1 { single } else { multiple })
 			}
 
 			#[inline] // ret type is #[must_use]
@@ -304,7 +304,7 @@ macro_rules! array {
 				ValueMutIterator::Generic(self.values.iter_mut())
 			}
 
-			pub fn drop(&mut self, key: Option<Box<str>>, element: NbtElement, y: &mut usize, depth: usize, target_depth: usize, line_number: usize, indices: &mut Vec<usize>) -> DropFn {
+			pub fn drop(&mut self, key: Option<CompactString>, element: NbtElement, y: &mut usize, depth: usize, target_depth: usize, line_number: usize, indices: &mut Vec<usize>) -> DropFn {
 				if 8 <= *y && *y < 16 && depth == target_depth {
 					indices.push(0);
 					if let Err(element) = self.insert(0, element) {
@@ -386,7 +386,7 @@ macro_rules! array {
 			}
 
 			#[inline]
-			pub fn render_icon(pos: impl Into<(usize, usize)>, z: f32, builder: &mut VertexBufferBuilder) {
+			pub fn render_icon(pos: impl Into<(usize, usize)>, z: u8, builder: &mut VertexBufferBuilder) {
 				builder.draw_texture_z(pos, z, $uv, (16, 16));
 			}
 

@@ -1,5 +1,4 @@
 use std::alloc::{alloc, Layout};
-use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::fmt::{Debug, Display, Formatter, Write};
 use std::hash::Hasher;
@@ -7,15 +6,16 @@ use std::intrinsics::likely;
 use std::ops::Deref;
 use std::thread::Scope;
 
+use compact_str::{format_compact, CompactString, ToCompactString};
 use fxhash::FxHasher;
 use hashbrown::raw::RawTable;
 
-use crate::{DropFn, OptionExt, RenderContext, StrExt, VertexBufferBuilder};
-use crate::assets::{COMPOUND_ROOT_UV, COMPOUND_UV, CONNECTION_UV, HEADER_SIZE, LINE_NUMBER_SEPARATOR_UV};
+use crate::assets::*;
 use crate::decoder::Decoder;
 use crate::elements::chunk::NbtChunk;
 use crate::elements::element_type::NbtElement;
 use crate::encoder::UncheckedBufWriter;
+use crate::{DropFn, OptionExt, RenderContext, StrExt, VertexBufferBuilder};
 
 #[allow(clippy::module_name_repetitions)]
 #[repr(C)]
@@ -67,7 +67,6 @@ impl NbtCompound {
 	}
 
 	#[inline]
-	#[cfg_attr(not(debug_assertions), no_panic::no_panic)]
 	pub fn from_bytes(decoder: &mut Decoder) -> Option<Self> {
 		let mut compound = Self::new();
 		unsafe {
@@ -118,21 +117,21 @@ impl NbtCompound {
 	}
 
 	#[inline]
-	pub fn insert(&mut self, idx: usize, mut str: String, value: NbtElement) {
+	pub fn insert(&mut self, idx: usize, mut str: CompactString, value: NbtElement) {
 		loop {
 			if self.entries.has(&str) {
 				str += " - Copy";
 			} else {
 				self.height += value.height() as u32;
 				self.true_height += value.true_height() as u32;
-				self.entries.insert_at(str.into_boxed_str(), value, idx);
+				self.entries.insert_at(str, value, idx);
 				return;
 			}
 		}
 	}
 
 	#[inline] // has some unchecked stuff
-	pub fn insert_replacing(&mut self, str: Box<str>, element: NbtElement) {
+	pub fn insert_replacing(&mut self, str: CompactString, element: NbtElement) {
 		self.true_height += element.true_height() as u32;
 		if let Some(element) = self.entries.insert(str, element) {
 			self.true_height -= element.true_height() as u32;
@@ -142,7 +141,7 @@ impl NbtCompound {
 	}
 
 	#[inline]
-	pub fn remove_idx(&mut self, idx: usize) -> Option<(Box<str>, NbtElement)> {
+	pub fn remove_idx(&mut self, idx: usize) -> Option<(CompactString, NbtElement)> {
 		self.entries.shift_remove_idx(idx)
 	}
 
@@ -189,7 +188,7 @@ impl NbtCompound {
 		self.open
 	}
 
-	pub fn update_key(&mut self, idx: usize, key: Box<str>) -> Option<Box<str>> {
+	pub fn update_key(&mut self, idx: usize, key: CompactString) -> Option<CompactString> {
 		if self.entries.has(key.as_ref()) {
 			None
 		} else {
@@ -223,8 +222,8 @@ impl NbtCompound {
 
 	#[inline]
 	#[must_use]
-	pub fn value(&self) -> String {
-		format!("{} {}", self.len(), if self.len() == 1 { "entry" } else { "entries" })
+	pub fn value(&self) -> CompactString {
+		format_compact!("{} {}", self.len(), if self.len() == 1 { "entry" } else { "entries" })
 	}
 
 	#[inline]
@@ -242,26 +241,24 @@ impl NbtCompound {
 			// fun hack for connection
 			// doesn't work on most platforms in the same way, but it adds a little detail nonetheless.
 			// the intended behaviour is to connect without any new pixel changes except making the darker toned one tucked in the corner to be slightly lighter
-			builder.draw_texture_z(ctx.pos() - (20, 2), 0.5, LINE_NUMBER_SEPARATOR_UV, (2, 2));
+			builder.draw_texture_z(ctx.pos() - (20, 2), LINE_NUMBER_CONNECTOR_Z, LINE_NUMBER_SEPARATOR_UV, (2, 2));
 			builder.draw_texture(ctx.pos(), COMPOUND_ROOT_UV, (16, 16));
-			ctx.highlight(ctx.pos(), str.width(), builder);
 			builder.draw_texture(ctx.pos() - (16, 0), CONNECTION_UV, (16, 9));
 			if !self.is_empty() {
 				ctx.draw_toggle(ctx.pos() - (16, 0), self.open, builder);
 			}
 			if ctx.forbid(ctx.pos(), builder) {
-				builder.settings(ctx.pos() + (20, 0), false, 1);
+				builder.settings(ctx.pos() + (20, 0), false, BASE_TEXT_Z);
 				let _ = write!(builder, "{} [{}]", str, self.value());
 			}
 
-			let (gx, gy): (usize, usize) = (ctx.pos() + (16, 8)).into();
-			if ctx.ghost(ctx.pos() + (16, 16), builder, |x, y| x == gx && y == gy, |id| id != NbtChunk::ID) {
+			let pos = ctx.pos();
+			if ctx.ghost(ctx.pos() + (16, 16), builder, |x, y| pos + (16, 8) == (x, y), |id| id != NbtChunk::ID) {
 				builder.draw_texture(ctx.pos() + (0, 16), CONNECTION_UV, (16, (self.height() != 1) as usize * 7 + 9));
 				ctx.y_offset += 16;
 			}
 
-			let (gx, gy): (usize, usize) = (ctx.pos() + (16, 16)).into();
-			if self.height() == 1 && ctx.ghost(ctx.pos() + (16, 16), builder, |x, y| x == gx && y == gy, |id| id != NbtChunk::ID) {
+			if self.height() == 1 && ctx.ghost(ctx.pos() + (16, 16), builder, |x, y| pos + (16, 16) == (x, y), |id| id != NbtChunk::ID) {
 				builder.draw_texture(ctx.pos() + (0, 16), CONNECTION_UV, (16, 9));
 				ctx.y_offset += 16;
 			}
@@ -329,13 +326,7 @@ impl NbtCompound {
 				if ctx.key_invalid && ctx.y_offset == ctx.forbidden_y {
 					ctx.red_line_numbers[0] = ctx.y_offset;
 				}
-				value.render(
-					&mut remaining_scroll,
-					builder,
-					Some(name),
-					idx == self.len() - 1 && ghost_tail_mod,
-					ctx,
-				);
+				value.render(&mut remaining_scroll, builder, Some(name), idx == self.len() - 1 && ghost_tail_mod, ctx);
 
 				let pos = ctx.pos();
 				if ctx.ghost(ctx.pos(), builder, |x, y| pos == (x, y + 8), |id| id != NbtChunk::ID) {
@@ -390,8 +381,11 @@ impl Debug for NbtCompound {
 		} else {
 			let mut debug = f.debug_struct("");
 			for (key, element) in self.children() {
-				let key = if key.needs_escape() { Cow::Owned(format!("{key:?}")) } else { Cow::Borrowed(key) };
-				debug.field(key.as_ref(), element);
+				if key.needs_escape() {
+					debug.field(&format!("{key:?}"), element);
+				} else {
+					debug.field(key, element);
+				}
 			}
 			debug.finish()
 		}
@@ -412,13 +406,12 @@ impl NbtCompound {
 			}
 
 			ctx.line_number();
-			Self::render_icon(ctx.pos(), 0.0, builder);
-			ctx.highlight(ctx.pos(), name.map(StrExt::width).map_or(0, |x| x + ": ".width()) + self.value().width(), builder);
+			Self::render_icon(ctx.pos(), BASE_Z, builder);
 			if !self.is_empty() {
 				ctx.draw_toggle(ctx.pos() - (16, 0), self.open, builder);
 			}
 			if ctx.forbid(ctx.pos(), builder) {
-				builder.settings(ctx.pos() + (20, 0), false, 1);
+				builder.settings(ctx.pos() + (20, 0), false, BASE_TEXT_Z);
 				let _ = match name {
 					Some(x) => write!(builder, "{x}: {}", self.value()),
 					None => write!(builder, "{}", self.value()),
@@ -426,7 +419,7 @@ impl NbtCompound {
 			}
 
 			let pos = ctx.pos();
-			if ctx.ghost(ctx.pos() + (16, 16), builder, |x, y| pos == (x, y), |id| id != NbtChunk::ID) {
+			if ctx.ghost(ctx.pos() + (16, 16), builder, |x, y| pos + (16, 8) == (x, y), |id| id != NbtChunk::ID) {
 				builder.draw_texture(ctx.pos() + (0, 16), CONNECTION_UV, (16, (self.height() != 1) as usize * 7 + 9));
 				if !tail {
 					builder.draw_texture(ctx.pos() - (16, 0) + (0, 16), CONNECTION_UV, (8, 16));
@@ -541,25 +534,31 @@ impl NbtCompound {
 	}
 
 	#[inline]
-	pub fn drop(&mut self, mut key: Option<Box<str>>, mut element: NbtElement, y: &mut usize, depth: usize, target_depth: usize, mut line_number: usize, indices: &mut Vec<usize>) -> DropFn {
+	pub fn drop(&mut self, mut key: Option<CompactString>, mut element: NbtElement, y: &mut usize, depth: usize, target_depth: usize, mut line_number: usize, indices: &mut Vec<usize>) -> DropFn {
 		if *y < 16 && *y >= 8 && depth == target_depth {
 			let before = (self.height(), self.true_height());
 			self.open = true;
-			self.insert(0, key.map_or_else(|| "_".to_owned(), str::into_string), element);
+			self.insert(0, key.unwrap_or(CompactString::new_inline("_")), element);
 			indices.push(0);
-			return DropFn::Dropped(self.height as usize - before.0, self.true_height as usize - before.1, unsafe {
-				Some(self.get(0).panic_unchecked("We just added it").0.to_string().into_boxed_str())
-			}, line_number + 1);
+			return DropFn::Dropped(
+				self.height as usize - before.0,
+				self.true_height as usize - before.1,
+				unsafe { Some(self.get(0).panic_unchecked("We just added it").0.to_compact_string()) },
+				line_number + 1,
+			);
 		}
 
 		if self.height() == 1 && *y < 24 && *y >= 16 && depth == target_depth {
 			let before = self.true_height();
 			self.open = true;
 			indices.push(self.len());
-			self.insert(self.len(), key.map_or_else(|| "_".to_owned(), str::into_string), element);
-			return DropFn::Dropped(self.height as usize - 1, self.true_height as usize - before, unsafe {
-				Some(self.get(self.len() - 1).panic_unchecked("We just added it").0.to_string().into_boxed_str())
-			}, line_number + before + 1);
+			self.insert(self.len(), key.unwrap_or(CompactString::new_inline("_")), element);
+			return DropFn::Dropped(
+				self.height as usize - 1,
+				self.true_height as usize - before,
+				unsafe { Some(self.get(self.len() - 1).panic_unchecked("We just added it").0.to_compact_string()) },
+				line_number + before + 1,
+			);
 		}
 
 		if *y < 16 {
@@ -576,16 +575,24 @@ impl NbtCompound {
 				let heights = (element.height(), element.true_height());
 				if *y < 8 && depth == target_depth {
 					*y = 0;
-					self.insert(idx, key.map_or_else(|| "_".to_owned(), str::into_string), element);
-					return DropFn::Dropped(heights.0, heights.1, unsafe { Some(self.get(idx).panic_unchecked("We just added it").0.to_string().into_boxed_str()) }, line_number + 1);
+					self.insert(idx, key.unwrap_or(CompactString::new_inline("_")), element);
+					return DropFn::Dropped(
+						heights.0,
+						heights.1,
+						unsafe { Some(self.get(idx).panic_unchecked("We just added it").0.to_compact_string()) },
+						line_number + 1,
+					);
 				} else if *y >= value.height() * 16 - 8 && *y < value.height() * 16 && depth == target_depth {
 					*y = 0;
 					*ptr = idx + 1;
 					line_number += value.true_height();
-					self.insert(idx + 1, key.map_or_else(|| "_".to_owned(), str::into_string), element);
-					return DropFn::Dropped(heights.0, heights.1, unsafe {
-						Some(self.get(idx + 1).panic_unchecked("We just added it").0.to_string().into_boxed_str())
-					}, line_number + 1);
+					self.insert(idx + 1, key.unwrap_or(CompactString::new_inline("_")), element);
+					return DropFn::Dropped(
+						heights.0,
+						heights.1,
+						unsafe { Some(self.get(idx + 1).panic_unchecked("We just added it").0.to_compact_string()) },
+						line_number + 1,
+					);
 				}
 
 				match value.drop(key, element, y, depth + 1, target_depth, line_number + 1, indices) {
@@ -626,7 +633,7 @@ impl NbtCompound {
 	}
 
 	#[inline]
-	pub fn render_icon(pos: impl Into<(usize, usize)>, z: f32, builder: &mut VertexBufferBuilder) {
+	pub fn render_icon(pos: impl Into<(usize, usize)>, z: u8, builder: &mut VertexBufferBuilder) {
 		builder.draw_texture_z(pos, z, COMPOUND_UV, (16, 16));
 	}
 }
@@ -634,8 +641,8 @@ impl NbtCompound {
 // Based on indexmap, but they didn't let me clone with unchecked mem stuff
 #[allow(clippy::module_name_repetitions)]
 pub struct CompoundMap {
-	indices: RawTable<usize>,
-	entries: Vec<Entry>,
+	pub indices: RawTable<usize>,
+	pub entries: Vec<Entry>,
 }
 
 impl Clone for CompoundMap {
@@ -653,7 +660,7 @@ impl Clone for CompoundMap {
 		unsafe {
 			let mut table = RawTable::try_with_capacity(self.indices.len()).unwrap_unchecked();
 			for (idx, bucket) in self.indices.iter().enumerate() {
-				let hash = hash!(self.entries.get_unchecked(idx).key.as_ref());
+				let hash = hash!(self.entries.get_unchecked(idx).key.as_str());
 				let _ = table.insert_in_slot(hash, core::mem::transmute(idx), *bucket.as_ref());
 			}
 			Self {
@@ -664,25 +671,11 @@ impl Clone for CompoundMap {
 	}
 }
 
+#[derive(Clone)]
 pub struct Entry {
-	value: NbtElement,
-	hash: u64,
-	key: Box<str>,
-}
-
-impl Clone for Entry {
-	fn clone(&self) -> Self {
-		unsafe {
-			let len = self.key.len();
-			let ptr = alloc(Layout::array::<u8>(len).unwrap_unchecked());
-			ptr.copy_from_nonoverlapping(self.key.as_ptr(), len);
-			Self {
-				key: Box::from_raw(core::str::from_utf8_unchecked_mut(core::slice::from_raw_parts_mut(ptr, len))),
-				value: self.value.clone(),
-				hash: self.hash,
-			}
-		}
-	}
+	pub value: NbtElement,
+	pub hash: u64,
+	pub key: CompactString,
 }
 
 impl Default for CompoundMap {
@@ -695,45 +688,42 @@ impl Default for CompoundMap {
 }
 
 impl CompoundMap {
-	#[cfg(debug_assertions)]
-	fn dbg(&self) {
-		let mut indices = unsafe { self.indices.iter().map(|x| *x.as_ref()).collect::<Vec<_>>() };
-		indices.sort_unstable();
-		let width = indices.len().checked_ilog10().unwrap_or(0) as usize + 1;
-		println!();
-		for idx in indices {
-			println!("{idx: >width$} | {}", self.entries[idx].key.as_ref());
-		}
+	#[must_use]
+	pub fn idx_of(&self, key: &str) -> Option<usize> {
+		self.indices.get(hash!(key), |&idx| unsafe { self.entries.get_unchecked(idx).key.as_str() == key }).copied()
 	}
 
-	fn idx_of(&self, key: &str) -> Option<usize> {
-		self.indices.get(hash!(key), |&idx| unsafe { self.entries.get_unchecked(idx).key.as_ref() == key }).copied()
-	}
-
-	#[must_use] pub fn has(&self, key: &str) -> bool {
+	#[must_use]
+	pub fn has(&self, key: &str) -> bool {
 		self.idx_of(key.as_ref()).is_some()
 	}
 
-	pub fn insert(&mut self, key: Box<str>, element: NbtElement) -> Option<NbtElement> {
+	pub fn insert(&mut self, key: CompactString, element: NbtElement) -> Option<NbtElement> {
 		self.insert_full(key, element).1
 	}
 
-	#[must_use] pub fn len(&self) -> usize {
+	#[must_use]
+	pub fn len(&self) -> usize {
 		self.entries.len()
 	}
 
-	#[must_use] pub fn is_empty(&self) -> bool {
+	#[must_use]
+	pub fn is_empty(&self) -> bool {
 		self.entries.is_empty()
 	}
 
-	pub fn insert_full(&mut self, key: Box<str>, element: NbtElement) -> (usize, Option<NbtElement>) {
+	pub fn insert_full(&mut self, key: CompactString, element: NbtElement) -> (usize, Option<NbtElement>) {
 		unsafe {
-			let hash = hash!(key.as_ref());
-			match self.indices.find_or_find_insert_slot(hash, |&idx| self.entries.get_unchecked(idx).key.as_ref() == key.as_ref(), |&idx| hash!(self.entries.get_unchecked(idx).key.as_ref())) {
+			let hash = hash!(key.as_str());
+			match self.indices.find_or_find_insert_slot(
+				hash,
+				|&idx| self.entries.get_unchecked(idx).key.as_str() == key.as_str(),
+				|&idx| hash!(self.entries.get_unchecked(idx).key.as_str()),
+			) {
 				Ok(bucket) => {
 					let idx = *bucket.as_ref();
 					(idx, Some(core::mem::replace(&mut self.entries.get_unchecked_mut(idx).value, element)))
-				},
+				}
 				Err(slot) => {
 					let len = self.entries.len();
 					self.entries.try_reserve_exact(1).unwrap_unchecked();
@@ -746,20 +736,24 @@ impl CompoundMap {
 		}
 	}
 
-	pub fn insert_at(&mut self, key: Box<str>, element: NbtElement, idx: usize) -> Option<(Box<str>, NbtElement)> {
+	pub fn insert_at(&mut self, key: CompactString, element: NbtElement, idx: usize) -> Option<(CompactString, NbtElement)> {
 		unsafe {
-			let hash = hash!(key.as_ref());
-			let (prev, end, bucket) = match self.indices.find_or_find_insert_slot(hash, |&idx| self.entries.get_unchecked(idx).key.as_ref() == key.as_ref(), |&idx| {
-				let mut hasher = FxHasher::default();
-				hasher.write(self.entries.get_unchecked(idx).key.as_ref().as_bytes());
-				hasher.finish()
-			}) {
+			let hash = hash!(key.as_str());
+			let (prev, end, bucket) = match self.indices.find_or_find_insert_slot(
+				hash,
+				|&idx| self.entries.get_unchecked(idx).key.as_str() == key.as_str(),
+				|&idx| {
+					let mut hasher = FxHasher::default();
+					hasher.write(self.entries.get_unchecked(idx).key.as_str().as_bytes());
+					hasher.finish()
+				},
+			) {
 				Ok(bucket) => {
 					let before = core::mem::replace(bucket.as_mut(), idx);
 					let Entry { key: k, value: v, .. } = self.entries.remove(before);
 					self.entries.insert(idx, Entry { key, value: element, hash });
 					(Some((k, v)), before, bucket)
-				},
+				}
 				Err(slot) => {
 					let len = self.entries.len();
 					self.entries.try_reserve_exact(1).unwrap_unchecked();
@@ -794,9 +788,6 @@ impl CompoundMap {
 
 			*bucket.as_mut() = idx;
 
-			#[cfg(debug_assertions)]
-			self.dbg();
-
 			prev
 		}
 	}
@@ -806,20 +797,23 @@ impl CompoundMap {
 	/// * compound must not contain this key already somewhere else
 	///
 	/// * idx must be valid
-	pub unsafe fn update_key_idx_unchecked(&mut self, idx: usize, key: Box<str>) -> Box<str> {
-		let old_key = self.entries.get_unchecked(idx).key.as_ref();
+	pub unsafe fn update_key_idx_unchecked(&mut self, idx: usize, key: CompactString) -> CompactString {
+		let old_key = self.entries.get_unchecked(idx).key.as_str();
 		let hash = hash!(old_key);
-		let _ = self.indices.remove_entry(hash, |&idx| self.entries.get_unchecked(idx).key.as_ref() == old_key).unwrap_unchecked();
+		let _ = self.indices.remove_entry(hash, |&idx| self.entries.get_unchecked(idx).key.as_str() == old_key).unwrap_unchecked();
 		let old_key = core::mem::replace(&mut self.entries.get_unchecked_mut(idx).key, key);
-		self.indices.insert(hash!(self.entries.get_unchecked(idx).key.as_ref()), idx, |&idx| hash!(self.entries.get_unchecked(idx).key.as_ref()));
+		self.indices
+			.insert(hash!(self.entries.get_unchecked(idx).key.as_str()), idx, |&idx| hash!(self.entries.get_unchecked(idx).key.as_str()));
 		old_key
 	}
 
-	pub fn shift_remove_idx(&mut self, idx: usize) -> Option<(Box<str>, NbtElement)> {
-		if idx > self.entries.len() { return None; }
+	pub fn shift_remove_idx(&mut self, idx: usize) -> Option<(CompactString, NbtElement)> {
+		if idx > self.entries.len() {
+			return None;
+		}
 		unsafe {
 			let Entry { key, hash, .. } = &self.entries.get_unchecked(idx);
-			let _ = self.indices.remove_entry(*hash, |&idx| self.entries.get_unchecked(idx).key.as_ref() == key.as_ref());
+			let _ = self.indices.remove_entry(*hash, |&idx| self.entries.get_unchecked(idx).key.as_str() == key.as_str());
 			for bucket in self.indices.iter() {
 				if *bucket.as_ref() > idx {
 					*bucket.as_mut() -= 1;
@@ -831,18 +825,22 @@ impl CompoundMap {
 		Some((key, value))
 	}
 
-	pub fn swap_remove_idx(&mut self, idx: usize) -> Option<(Box<str>, NbtElement)> {
-		if idx > self.entries.len() { return None; }
+	pub fn swap_remove_idx(&mut self, idx: usize) -> Option<(CompactString, NbtElement)> {
+		if idx > self.entries.len() {
+			return None;
+		}
 		let Entry { key, value, hash } = self.entries.swap_remove(idx);
 		unsafe {
 			let tail = self.indices.remove_entry(hash, |&idx| idx + 1 == self.entries.len()).unwrap_unchecked();
-			*self.indices.get_mut(hash, |&idx| self.entries.get_unchecked(idx).key.as_ref() == key.as_ref()).unwrap_unchecked() = tail;
+			*self.indices.get_mut(hash, |&idx| self.entries.get_unchecked(idx).key.as_str() == key.as_str()).unwrap_unchecked() = tail;
 		}
 		Some((key, value))
 	}
 
 	pub fn swap(&mut self, a: usize, b: usize) {
-		if a < self.entries.len() && b < self.entries.len() { return; }
+		if a < self.entries.len() && b < self.entries.len() {
+			return;
+		}
 		unsafe {
 			let a_hash = self.entries.get_unchecked(a).hash;
 			let b_hash = self.entries.get_unchecked(b).hash;
@@ -852,22 +850,26 @@ impl CompoundMap {
 		}
 	}
 
-	#[must_use] pub fn get_idx(&self, idx: usize) -> Option<(&str, &NbtElement)> {
+	#[must_use]
+	pub fn get_idx(&self, idx: usize) -> Option<(&str, &NbtElement)> {
 		let Entry { key, value, .. } = self.entries.get(idx)?;
 		let key = key.as_ref();
 		Some((key, value))
 	}
 
-	#[must_use] pub fn get_idx_mut(&mut self, idx: usize) -> Option<(&str, &mut NbtElement)> {
+	#[must_use]
+	pub fn get_idx_mut(&mut self, idx: usize) -> Option<(&str, &mut NbtElement)> {
 		let entry = self.entries.get_mut(idx)?;
 		Some((entry.key.as_ref(), &mut entry.value))
 	}
 
-	#[must_use] pub fn iter(&self) -> CompoundMapIter<'_> {
+	#[must_use]
+	pub fn iter(&self) -> CompoundMapIter<'_> {
 		CompoundMapIter(self.entries.iter())
 	}
 
-	#[must_use] pub fn iter_mut(&mut self) -> CompoundMapIterMut<'_> {
+	#[must_use]
+	pub fn iter_mut(&mut self) -> CompoundMapIterMut<'_> {
 		CompoundMapIterMut(self.entries.iter_mut())
 	}
 }
@@ -902,13 +904,13 @@ impl<'a> Iterator for CompoundMapIterMut<'a> {
 	type Item = (&'a str, &'a mut NbtElement);
 
 	fn next(&mut self) -> Option<Self::Item> {
-		self.0.next().map(|entry| (entry.key.as_ref(), &mut entry.value))
+		self.0.next().map(|entry| (entry.key.as_str(), &mut entry.value))
 	}
 }
 
 impl<'a> DoubleEndedIterator for CompoundMapIterMut<'a> {
 	fn next_back(&mut self) -> Option<Self::Item> {
-		self.0.next_back().map(|entry| (entry.key.as_ref(), &mut entry.value))
+		self.0.next_back().map(|entry| (entry.key.as_str(), &mut entry.value))
 	}
 }
 

@@ -1,12 +1,14 @@
-use crate::assets::{HEADER_SIZE, SELECTION_UV};
-use crate::selected_text::KeyResult::{Down, Failed, Finish, ForceClose, ForceOpen, Keyfix, NothingSpecial, Revert, ShiftDown, ShiftUp, Up, Valuefix};
-use crate::vertex_buffer_builder::VertexBufferBuilder;
-use crate::{flags, is_jump_char_boundary, is_utf8_char_boundary, LinkedQueue, OptionExt, StrExt};
 use std::convert::identity;
 use std::fmt::Write;
 use std::intrinsics::{likely, unlikely};
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime, SystemTimeError};
+
 use winit::event::VirtualKeyCode;
+
+use crate::assets::*;
+use crate::selected_text::KeyResult::{Down, Failed, Finish, ForceClose, ForceOpen, Keyfix, NothingSpecial, Revert, ShiftDown, ShiftUp, Up, Valuefix};
+use crate::vertex_buffer_builder::VertexBufferBuilder;
+use crate::{flags, is_jump_char_boundary, is_utf8_char_boundary, LinkedQueue, OptionExt, StrExt};
 
 #[derive(Clone, Debug)]
 #[allow(clippy::module_name_repetitions)] // yeah no it's better like this
@@ -440,12 +442,24 @@ impl SelectedText {
 			}
 		}
 
-		if key == VirtualKeyCode::Home && flags == flags!() && self.editable {
+		if key == VirtualKeyCode::Home && flags & !flags!(Shift) == 0 && self.editable {
+			if flags == flags!(Shift) {
+				let new = self.selection.map_or(self.cursor, |x| x.min(self.cursor));
+				self.selection = if new == 0 { None } else { Some(new) };
+			} else {
+				self.selection = None;
+			}
 			self.cursor = 0;
 			return NothingSpecial;
 		}
 
-		if key == VirtualKeyCode::End && flags == flags!() && self.editable {
+		if key == VirtualKeyCode::End && flags & !flags!(Shift) == 0 && self.editable {
+			if flags == flags!(Shift) {
+				let new = self.selection.map_or(self.cursor, |x| x.max(self.cursor));
+				self.selection = if new == self.value.len() { None } else { Some(new) };
+			} else {
+				self.selection = None;
+			}
 			self.cursor = self.value.len();
 			return NothingSpecial;
 		}
@@ -564,7 +578,12 @@ impl SelectedText {
 					return Keyfix;
 				}
 
-				let mut new = if let Some(selection) = self.selection && flags & flags!(Shift) > 0 { selection } else { self.cursor };
+				if flags & flags!(Shift) == 0 && let Some(selection) = self.selection.take() {
+					self.cursor = selection.min(self.cursor);
+					return NothingSpecial;
+				}
+
+				let mut new = self.cursor;
 				if flags & flags!(Ctrl) > 0 {
 					if new > 0 {
 						new -= 1;
@@ -587,12 +606,6 @@ impl SelectedText {
 							new -= 1;
 						}
 					}
-					if flags & flags!(Shift) > 0 {
-						self.selection = Some(new);
-					} else {
-						self.cursor = new;
-						self.selection = None;
-					}
 				} else {
 					if new > 0 {
 						new -= 1;
@@ -604,15 +617,17 @@ impl SelectedText {
 							new -= 1;
 						}
 					}
-
-					if flags & flags!(Shift) > 0 {
-						self.selection = Some(new);
-					} else if let Some(selection) = self.selection.take() {
-						self.cursor = self.cursor.min(selection);
-					} else {
-						self.cursor = new;
-					}
 				}
+
+				if flags & flags!(Shift) > 0 {
+					if self.selection.is_none() {
+						self.selection = Some(self.cursor);
+					}
+				} else {
+					self.selection = None;
+				}
+
+				self.cursor = new;
 
 				if self.selection.is_some_and(|x| x == self.cursor) {
 					self.selection = None;
@@ -631,8 +646,13 @@ impl SelectedText {
 					return Valuefix;
 				}
 
+				if flags & flags!(Shift) == 0 && let Some(selection) = self.selection.take() {
+					self.cursor = selection.max(self.cursor);
+					return NothingSpecial;
+				}
+
+				let mut new = self.cursor;
 				if flags & flags!(Ctrl) > 0 {
-					let mut new = self.cursor;
 					if new < self.value.len() {
 						new += 1;
 						if new < self.value.len() {
@@ -654,15 +674,7 @@ impl SelectedText {
 							}
 						}
 					}
-
-					if flags & flags!(Shift) > 0 {
-						self.selection = Some(new);
-					} else {
-						self.cursor = new;
-						self.selection = None;
-					}
 				} else {
-					let mut new = if let Some(selection) = self.selection && flags == flags!(Shift) { selection } else { self.cursor };
 					if new < self.value.len() {
 						new += 1;
 						while new < self.value.len() {
@@ -673,15 +685,16 @@ impl SelectedText {
 							new += 1;
 						}
 					}
-
-					if flags & flags!(Shift) > 0 {
-						self.selection = Some(new);
-					} else if let Some(selection) = self.selection.take() {
-						self.cursor = self.cursor.max(selection);
-					} else {
-						self.cursor = new;
-					}
 				}
+
+				if flags & flags!(Shift) > 0 {
+					if self.selection.is_none() {
+						self.selection = Some(self.cursor);
+					}
+				} else {
+					self.selection = None;
+				}
+				self.cursor = new;
 
 				if self.selection.is_some_and(|x| x == self.cursor) {
 					self.selection = None;
@@ -728,8 +741,8 @@ impl SelectedText {
 		}
 
 		let prefix_width = self.prefix.as_str().width() + self.keyfix.as_deref().map_or(0, StrExt::width);
-		builder.draw_texture_z((x - 4 - 16, y), 0.5, SELECTION_UV, (16, 16));
-		builder.settings((x, y), false, 1);
+		builder.draw_texture_z((x - 4 - 16, y), ELEMENT_HIGHLIGHT_Z, SELECTION_UV, (16, 16));
+		builder.settings((x, y), false, BASE_TEXT_Z);
 		let _ = write!(
 			builder,
 			"{}{}{}{}{}",
@@ -740,16 +753,21 @@ impl SelectedText {
 			self.valuefix.as_ref().map_or("", String::as_str),
 		);
 
-
 		if self.editable {
+			let cursor_prefixing = self.value.split_at(self.cursor).0;
+			let duration_from_last_interaction = self.last_interaction.elapsed().as_ref().map_err(SystemTimeError::duration).cloned().unwrap_or_else(identity);
 			if let Some(selection) = self.selection && self.editable {
 				let (start, end) = if self.cursor > selection { (selection, self.cursor) } else { (self.cursor, selection) };
 				let start = self.value.split_at(start).0.width();
 				let end = self.value.split_at(end).0.width();
-				builder.draw_texture_region_z((prefix_width + start + x, y), 0.5, SELECTION_UV + (1, 0), (end - start - 1, 16), (14, 16));
-				builder.draw_texture_z((prefix_width + end + x - 1, y), 0.5, SELECTION_UV + (1, 0), (1, 16));
+				builder.draw_texture_region_z((prefix_width + start + x, y), SELECTED_TEXT_Z, SELECTION_UV + (1, 1), (end - start - 1, 16), (14, 14));
+				if duration_from_last_interaction < Duration::from_millis(1500) || duration_from_last_interaction.subsec_millis() < 500 {
+					builder.draw_texture_region_z((x + cursor_prefixing.width() + prefix_width - 1, y), SELECTED_TEXT_Z, SELECTION_UV, (2, 16), (1, 16));
+				}
 			} else {
-				builder.draw_texture((x + self.value.split_at(self.cursor).0.width() + prefix_width, y), SELECTION_UV, (2, 16));
+				if duration_from_last_interaction < Duration::from_millis(1500) || duration_from_last_interaction.subsec_millis() < 500 {
+					builder.draw_texture_region_z((x + cursor_prefixing.width() + prefix_width, y), SELECTED_TEXT_Z, SELECTION_UV, (2, 16), (1, 16));
+				}
 			}
 		}
 	}
