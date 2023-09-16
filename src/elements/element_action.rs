@@ -1,13 +1,13 @@
 use compact_str::CompactString;
 use std::fs::OpenOptions;
-use std::ops::Deref;
 use std::process::Command;
 
 use notify::{EventKind, PollWatcher, RecursiveMode, Watcher};
 use uuid::Uuid;
 
-use crate::assets::*;
-use crate::elements::element_type::{NbtByteArray, NbtElement, NbtIntArray, NbtLongArray};
+use crate::assets::{ACTION_WHEEL_Z, COPY_FORMATTED_UV, COPY_RAW_UV, OPEN_ARRAY_IN_HEX_UV, OPEN_IN_TXT};
+use crate::elements::chunk::NbtChunk;
+use crate::elements::element::NbtElement;
 use crate::vertex_buffer_builder::VertexBufferBuilder;
 use crate::{FileUpdateSubscription, FileUpdateSubscriptionType};
 
@@ -87,11 +87,8 @@ impl ElementAction {
 			Self::OpenArrayInHex => {
 				use std::io::Write;
 
-				let path = std::env::temp_dir().join(format!(
-					"nbtworkbench-{:0width$x}.hex",
-					(unsafe { core::arch::x86_64::_rdtsc() as usize }).wrapping_mul(element as *mut NbtElement as usize),
-					width = usize::BITS as usize / 8
-				));
+				let hash = (unsafe { core::arch::x86_64::_rdtsc() as usize }).wrapping_mul(element as *mut NbtElement as usize);
+				let path = std::env::temp_dir().join(format!("nbtworkbench-{hash:0width$x}.hex", width = usize::BITS as usize / 8));
 				let (tx, rx) = std::sync::mpsc::channel();
 				let Ok(mut watcher) = PollWatcher::new(
 					move |event| {
@@ -114,32 +111,29 @@ impl ElementAction {
 				if let Ok(mut file) = OpenOptions::new().write(true).create(true).open(&path) {
 					if file
 						.write_all(&unsafe {
-							match element.id() {
-								NbtByteArray::ID => {
-									subscription_type = FileUpdateSubscriptionType::ByteArray;
-									let mut vec = Vec::with_capacity(element.data.byte_array.len());
-									for child in element.data.byte_array.children() {
-										vec.push(child.data.byte.deref().value as u8);
-									}
-									vec
+							if let Some(array) = element.as_byte_array() {
+								subscription_type = FileUpdateSubscriptionType::ByteArray;
+								let mut vec = Vec::with_capacity(array.len());
+								for child in array.children() {
+									vec.push(child.as_byte_unchecked().value as u8);
 								}
-								NbtIntArray::ID => {
-									subscription_type = FileUpdateSubscriptionType::IntArray;
-									let mut vec = Vec::with_capacity(element.data.int_array.len() * 4);
-									for child in element.data.long_array.children() {
-										vec.extend(child.data.int.deref().value.to_be_bytes());
-									}
-									vec
+								vec
+							} else if let Some(array) = element.as_int_array() {
+								subscription_type = FileUpdateSubscriptionType::IntArray;
+								let mut vec = Vec::with_capacity(array.len() * 4);
+								for child in array.children() {
+									vec.extend(child.as_int_unchecked().value.to_be_bytes());
 								}
-								NbtLongArray::ID => {
-									subscription_type = FileUpdateSubscriptionType::LongArray;
-									let mut vec = Vec::with_capacity(element.data.long_array.len() * 8);
-									for child in element.data.long_array.children() {
-										vec.extend(child.data.long.deref().value.to_be_bytes());
-									}
-									vec
+								vec
+							} else if let Some(array) = element.as_long_array() {
+								subscription_type = FileUpdateSubscriptionType::LongArray;
+								let mut vec = Vec::with_capacity(array.len() * 8);
+								for child in array.children() {
+									vec.extend(child.as_long_unchecked().value.to_be_bytes());
 								}
-								_ => return None,
+								vec
+							} else {
+								return None;
 							}
 						})
 						.is_err()
@@ -165,11 +159,8 @@ impl ElementAction {
 			Self::OpenInTxt => {
 				use std::io::Write;
 
-				let path = std::env::temp_dir().join(format!(
-					"nbtworkbench-{:0width$x}.txt",
-					(unsafe { core::arch::x86_64::_rdtsc() as usize }).wrapping_mul(element as *mut NbtElement as usize),
-					width = usize::BITS as usize / 8
-				));
+				let hash = (unsafe { core::arch::x86_64::_rdtsc() as usize }).wrapping_mul(element as *mut NbtElement as usize);
+				let path = std::env::temp_dir().join(format!("nbtworkbench-{hash:0width$x}.txt", width = usize::BITS as usize / 8));
 				let (tx, rx) = std::sync::mpsc::channel();
 				let Ok(mut watcher) = PollWatcher::new(
 					move |event| {
@@ -189,7 +180,11 @@ impl ElementAction {
 					return None;
 				};
 				if let Ok(mut file) = OpenOptions::new().write(true).create(true).open(&path) {
-					if let Some(key) = key && write!(&mut file, "{key}: ").is_err() { return None };
+					if let Some(key) = key && element.id() != NbtChunk::ID {
+						if write!(&mut file, "{key}: ").is_err() {
+							return None;
+						}
+					}
 					if write!(&mut file, "{element:#?}").is_err() {
 						return None;
 					}

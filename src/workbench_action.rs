@@ -1,9 +1,8 @@
+use std::path::PathBuf;
 use compact_str::{CompactString, ToCompactString};
 
-use crate::assets::*;
-use crate::elements::chunk::{NbtChunk, NbtRegion};
-use crate::elements::compound::NbtCompound;
-use crate::elements::element_type::NbtElement;
+use crate::assets::{ADD_TAIL_UV, ADD_UV, MOVE_TAIL_UV, MOVE_UV, REMOVE_TAIL_UV, REMOVE_UV, RENAME_TAIL_UV, RENAME_UV, REPLACE_TAIL_UV, REPLACE_UV};
+use crate::elements::element::NbtElement;
 use crate::vertex_buffer_builder::VertexBufferBuilder;
 use crate::{encompasses, encompasses_or_equal, panic_unchecked, FileUpdateSubscription, Position};
 use crate::{Navigate, OptionExt};
@@ -34,14 +33,14 @@ pub enum WorkbenchAction {
 
 impl WorkbenchAction {
 	#[cfg_attr(debug_assertions, inline(never))]
-	pub fn undo(self, root: &mut NbtElement, bookmarks: &mut Vec<usize>, subscription: &mut Option<FileUpdateSubscription>) -> Self {
-		unsafe { self.undo0(root, bookmarks, subscription).panic_unchecked("Failed to undo action") }
+	pub fn undo(self, root: &mut NbtElement, bookmarks: &mut Vec<usize>, subscription: &mut Option<FileUpdateSubscription>, path: &mut Option<PathBuf>, name: &mut Box<str>) -> Self {
+		unsafe { self.undo0(root, bookmarks, subscription, path, name).panic_unchecked("Failed to undo action") }
 	}
 
 	#[cfg_attr(not(debug_assertions), inline(always))]
 	#[cfg_attr(debug_assertions, inline(never))]
 	#[allow(clippy::collapsible_else_if, clippy::too_many_lines, clippy::cognitive_complexity)]
-	unsafe fn undo0(self, root: &mut NbtElement, bookmarks: &mut Vec<usize>, subscription: &mut Option<FileUpdateSubscription>) -> Option<Self> {
+	unsafe fn undo0(self, root: &mut NbtElement, bookmarks: &mut Vec<usize>, subscription: &mut Option<FileUpdateSubscription>, path: &mut Option<PathBuf>, name: &mut Box<str>) -> Option<Self> {
 		Some(match self {
 			Self::Remove { element: (key, value), indices } => {
 				let (&last, rem) = indices.split_last()?;
@@ -54,11 +53,12 @@ impl WorkbenchAction {
 							element.increment(height, true_height);
 						}
 						Position::Last | Position::Only => {
-							match element.id() {
-								NbtCompound::ID => {
-									element.data.compound.insert(last, key?, value);
-								}
-								_ => element.insert(last, value).ok().panic_unchecked("Should've been able to add to element"),
+							if let Some(compound) = element.as_compound_mut() {
+								compound.insert(last, key?, value);
+							} else if let Some(chunk) = element.as_chunk_mut() {
+								chunk.insert(last, key?, value);
+							} else {
+								let _ = element.insert(last, value);
 							}
 							let start = bookmarks.binary_search(&line_number).unwrap_or_else(std::convert::identity);
 							for bookmark in bookmarks.iter_mut().skip(start) {
@@ -111,30 +111,43 @@ impl WorkbenchAction {
 				Self::Remove { element, indices }
 			}
 			Self::Rename { indices, key, value } => {
-				let (&last, rem) = indices.split_last()?;
-				let mut override_value = None;
-				let key = if let Some(key) = key {
-					let parent = Navigate::new(rem.iter().copied(), root).last().2;
-					Some(if parent.id() == NbtRegion::ID {
-						let (map, chunks) = &mut *parent.data.region.chunks;
-						let from = map.get(last).copied()? as usize;
-						let to = ((key.parse::<u8>().ok()? as usize) << 5) | (value.as_ref()?.parse::<u8>().ok()? as usize);
-						chunks.swap(from, to);
-						override_value = Some((from & 31).to_compact_string());
-						(from >> 5).to_compact_string()
-					} else if parent.id() == NbtCompound::ID {
-						parent.data.compound.update_key(last, key)?
+				if let Some((&last, rem)) = indices.split_last() {
+					let mut override_value = None;
+					let key = if let Some(key) = key {
+						let parent = Navigate::new(rem.iter().copied(), root).last().2;
+						Some(if let Some(region) = parent.as_region_mut() {
+							let (map, chunks) = &mut *region.chunks;
+							let from = map.get(last).copied()? as usize;
+							let to = ((key.parse::<u8>().ok()? as usize) << 5) | (value.as_ref()?.parse::<u8>().ok()? as usize);
+							chunks.swap(from, to);
+							override_value = Some((from & 31).to_compact_string());
+							(from >> 5).to_compact_string()
+						} else if let Some(compound) = parent.as_compound_mut() {
+							compound.update_key(last, key)?
+						} else if let Some(chunk) = parent.as_chunk_mut() {
+							chunk.update_key(last, key)?
+						} else {
+							key
+						})
 					} else {
-						parent.data.chunk.inner.update_key(last, key)?
-					})
+						None
+					};
+					let value = override_value.or_else(|| value.and_then(|value| Navigate::new(indices.iter().copied(), root).last().2.set_value(value)));
+					if key.is_some() || value.is_some() {
+						crate::recache_along_indices(rem, root);
+					}
+					Self::Rename { indices, key, value }
 				} else {
-					None
-				};
-				let value = override_value.or_else(|| value.and_then(|value| Navigate::new(indices.iter().copied(), root).last().2.set_value(value)));
-				if key.is_some() || value.is_some() {
-					crate::recache_along_indices(rem, root);
+					let old = PathBuf::from(value?.into_string());
+					let old_name = old.file_name().and_then(|str| str.to_str())?.to_owned().into_boxed_str();
+					let value = if let Some(new) = path.replace(old) {
+						new.to_str()?.to_compact_string()
+					} else {
+						name.to_compact_string()
+					};
+					*name = old_name;
+					Self::Rename { indices, key, value: Some(value) }
 				}
-				Self::Rename { indices, key, value }
 			}
 			Self::Move { mut from, to, original_key } => {
 				let mut changed_subscription_indices = false;
@@ -187,8 +200,10 @@ impl WorkbenchAction {
 								element.increment(height, true_height);
 							}
 							Position::Last | Position::Only => {
-								if element.id() == NbtCompound::ID {
-									element.data.compound.insert(last, original_key?, mov);
+								if let Some(compound) = element.as_compound_mut() {
+									compound.insert(last, original_key?, mov);
+								} else if let Some(chunk) = element.as_chunk_mut() {
+									chunk.insert(last, original_key?, mov);
 								} else {
 									if element.insert(last, mov).is_err() {
 										return None;
@@ -226,10 +241,10 @@ impl WorkbenchAction {
 							let (old_key, old_value) = element.remove(last).panic_unchecked("index is always valid");
 							let old_true_height = old_value.true_height();
 							element.decrement(old_value.height(), old_value.true_height());
-							if element.id() == NbtCompound::ID {
-								element.data.compound.insert(last, key?, value);
-							} else if element.id() == NbtChunk::ID {
-								element.data.chunk.inner.insert(last, key?, value);
+							if let Some(compound) = element.as_compound_mut() {
+								compound.insert(last, key?, value);
+							} else if let Some(chunk) = element.as_chunk_mut() {
+								chunk.insert(last, key?, value);
 							} else {
 								if element.insert(last, value).is_err() {
 									panic_unchecked("oh crap");

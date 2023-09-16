@@ -5,10 +5,10 @@ use std::intrinsics::likely;
 use std::slice::{Iter, IterMut};
 use std::thread::Scope;
 
-use crate::assets::*;
+use crate::assets::{BASE_TEXT_Z, BASE_Z, CONNECTION_UV, LIST_UV};
 use crate::decoder::Decoder;
 use crate::elements::chunk::NbtChunk;
-use crate::elements::element_type::{id_to_string_name, NbtElement};
+use crate::elements::element::{id_to_string_name, NbtElement};
 use crate::encoder::UncheckedBufWriter;
 use crate::{DropFn, OptionExt, RenderContext, StrExt, VertexBufferBuilder};
 

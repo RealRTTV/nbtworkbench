@@ -6,7 +6,7 @@ use std::ptr::NonNull;
 
 use compact_str::CompactString;
 
-use crate::assets::*;
+use crate::assets::{BASE_TEXT_Z, BASE_Z, STRING_UV};
 use crate::decoder::Decoder;
 use crate::encoder::UncheckedBufWriter;
 use crate::{RenderContext, StrExt, VertexBufferBuilder};
@@ -115,51 +115,55 @@ impl Clone for TwentyThree {
 }
 
 impl TwentyThree {
-	pub fn new(mut s: CompactString) -> Self {
+	#[must_use]
+	pub fn new(s: CompactString) -> Self {
 		unsafe {
 			let len = s.len();
-			if len > 23 {
+			let res = if len > 23 {
+				let mut owned = s.into_string();
 				let res = Self {
 					heap: ManuallyDrop::new(HeapTwentyThree {
-						ptr: NonNull::new_unchecked(s.as_mut_ptr()),
+						ptr: NonNull::new_unchecked(owned.as_mut_ptr()),
 						len,
 						_pad: MaybeUninit::uninit_array(),
 						variant: 254,
 					}),
 				};
-				core::mem::forget(s);
+				core::mem::forget(owned);
 				res
 			} else {
 				let ptr = s.as_ptr();
-				Self {
+				let res = Self {
 					stack: ManuallyDrop::new(if len == 23 {
 						StackTwentyThree { data: ptr.cast::<[u8; 23]>().read() }
 					} else {
 						let mut data = MaybeUninit::<u8>::uninit_array();
 						data.as_mut_ptr().cast::<u8>().copy_from_nonoverlapping(ptr, len);
-						// data.as_mut_ptr().cast::<u8>().add(len).write_bytes(0, 22 - len);
 						data[22].write(192 + len as u8);
 						StackTwentyThree {
 							data: MaybeUninit::array_assume_init(data),
 						}
 					}),
-				}
-			}
+				};
+				core::mem::forget(s);
+				res
+			};
+			res
 		}
 	}
 
+	#[must_use]
 	pub fn as_str(&self) -> &str {
 		unsafe {
 			let last = self.heap.variant;
-			if last == 254 {
-				core::str::from_utf8_unchecked(core::slice::from_raw_parts(self.heap.ptr.as_ptr(), self.heap.len))
+			let (ptr, len) = if last == 254 {
+				(self.heap.ptr.as_ptr().cast_const(), self.heap.len)
+			} else if last < 192 {
+				(self.stack.data.as_ptr(), 23)
 			} else {
-				if last < 192 {
-					core::str::from_utf8_unchecked(core::slice::from_raw_parts(self.stack.data.as_ptr(), 23))
-				} else {
-					core::str::from_utf8_unchecked(core::slice::from_raw_parts(self.stack.data.as_ptr(), (last - 192) as usize))
-				}
-			}
+				(self.stack.data.as_ptr(), (last - 192) as usize)
+			};
+			core::str::from_utf8_unchecked(core::slice::from_raw_parts(ptr, len))
 		}
 	}
 }
@@ -175,8 +179,7 @@ impl Deref for TwentyThree {
 impl Drop for TwentyThree {
 	fn drop(&mut self) {
 		unsafe {
-			let last = self.heap.variant;
-			if last == 254 {
+			if self.heap.variant == 254 {
 				dealloc(self.heap.ptr.as_ptr(), Layout::array::<u8>(self.heap.len).unwrap_unchecked());
 			}
 		}

@@ -68,11 +68,9 @@ macro_rules! array {
 					let vec = alloc(Layout::array::<NbtElement>(len).unwrap_unchecked()).cast::<NbtElement>();
 					for idx in 0..len {
 						let mut element = NbtElement {
-							data: ManuallyDrop::new(NbtElementData {
-								$element_field: core::mem::transmute(<$t>::from_be_bytes(
-									decoder.data.add(idx * core::mem::size_of::<$t>()).cast::<[u8; core::mem::size_of::<$t>()]>().read(),
-								)),
-							}),
+							$element_field: core::mem::transmute(<$t>::from_be_bytes(
+								decoder.data.add(idx * core::mem::size_of::<$t>()).cast::<[u8; core::mem::size_of::<$t>()]>().read(),
+							)),
 						};
 						element.id.id = $id;
 						vec.add(idx).write(element);
@@ -100,7 +98,7 @@ macro_rules! array {
 		impl $name {
 			#[inline(always)]
 			fn transmute(element: &NbtElement) -> $t {
-				unsafe { element.data.deref().$element_field.deref().value }
+				unsafe { element.deref().$element_field.deref().value }
 			}
 
 			#[inline]
@@ -239,10 +237,10 @@ macro_rules! array {
 						}
 
 						let ghost_tail_mod = if let Some((id, x, y, _)) = ctx.ghost && ctx.pos() + (0, 16 - *remaining_scroll * 16 - 8) == (x, y) && id == $id {
-																											false
-																										} else {
-																											true
-																										};
+																													false
+																												} else {
+																													true
+																												};
 
 						builder.draw_texture(ctx.pos() - (16, 0), CONNECTION_UV, (16, (!(idx == self.len() - 1 && ghost_tail_mod)) as usize * 7 + 9));
 						if !tail {

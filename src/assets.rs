@@ -142,7 +142,7 @@ pub const TOOLTIP_Z: u8 = 240;
 pub fn icon() -> Vec<u8> {
 	#[cfg(debug_assertions)]
 	let start = unsafe { core::arch::x86_64::_rdtsc() };
-	let original = match (SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap().as_micros() & 7) as u8 {
+	let original = match (SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).expect("time cant go backwards").as_micros() & 7) as u8 {
 		// its a good random only because its used once
 		0 => OTHERSIDE_MUSIC_DISC_ICON,
 		1 => PIGSTEP_MUSIC_DISC_ICON,

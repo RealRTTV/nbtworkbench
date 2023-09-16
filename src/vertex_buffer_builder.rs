@@ -2,7 +2,7 @@ use std::ops::BitAnd;
 
 use winit::dpi::PhysicalSize;
 
-use crate::assets::*;
+use crate::assets::{BASE_TEXT_Z, BASE_Z, TOOLTIP_UV, TOOLTIP_Z};
 use crate::StrExt;
 
 pub struct VertexBufferBuilder {

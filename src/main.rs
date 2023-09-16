@@ -52,16 +52,18 @@
 #![feature(alloc_error_hook)]
 #![feature(alloc_error_handler)]
 #![feature(iter_next_chunk)]
-// #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+#![feature(const_collections_with_hasher)]
+#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 use std::convert::identity;
 use std::fmt::Write;
 
 use compact_str::{CompactString, ToCompactString};
 use notify::PollWatcher;
+use static_assertions::const_assert_eq;
 use uuid::Uuid;
 
-use elements::element_type::NbtElement;
+use elements::element::NbtElement;
 use vertex_buffer_builder::VertexBufferBuilder;
 
 use crate::assets::{
@@ -71,7 +73,7 @@ use crate::assets::{
 };
 use crate::elements::chunk::{NbtChunk, NbtRegion};
 use crate::elements::compound::NbtCompound;
-use crate::elements::element_type::{NbtByte, NbtByteArray, NbtDouble, NbtFloat, NbtInt, NbtIntArray, NbtLong, NbtLongArray, NbtShort};
+use crate::elements::element::{NbtByte, NbtByteArray, NbtDouble, NbtFloat, NbtInt, NbtIntArray, NbtLong, NbtLongArray, NbtShort};
 use crate::elements::list::NbtList;
 use crate::elements::string::NbtString;
 use crate::tree_travel::Navigate;
@@ -86,6 +88,8 @@ mod vertex_buffer_builder;
 mod window;
 pub mod workbench;
 mod workbench_action;
+mod shader;
+mod text_shader;
 
 #[macro_export]
 macro_rules! flags {
@@ -195,100 +199,77 @@ pub fn sum_indices<I: Iterator<Item = usize>>(indices: I, mut root: &NbtElement)
 		let mut total = 0;
 		let mut indices = indices.peekable();
 		while let Some(idx) = indices.next() {
-			root = match root.id() {
-				NbtByteArray::ID | NbtIntArray::ID | NbtLongArray::ID => {
-					if idx >= root.data.byte_array.len() {
-						panic_unchecked("byte array oob")
-					} else {
-						total += 1 + idx;
-						break;
-					}
+			root = if let NbtByteArray::ID | NbtIntArray::ID | NbtLongArray::ID = root.id() {
+				total += 1 + idx;
+				break;
+			} else if let Some(list) = root.as_list() {
+				total += 1 + list.children().take(idx).map(NbtElement::height).sum::<usize>();
+				if let Some(root) = list.get(idx) {
+					root
+				} else {
+					break;
 				}
-				NbtList::ID => {
-					if idx >= root.data.list.len() {
-						panic_unchecked("list oob")
-					} else {
-						total += 1;
-						for jdx in 0..idx {
-							// SAFETY: n < len (is valid bounds) implies n - m (where m is a positive integer <= n) < len (is valid bounds)
-							total += root.data.list.get(jdx).panic_unchecked("index oob").height();
-						}
-						// SAFETY: asserted beforehand
-						root.data.list.get(idx).panic_unchecked("index oob")
-					}
+			} else if let Some(compound) = root.as_compound() {
+				total += 1 + compound.children().take(idx).map(|(_, b)| b).map(NbtElement::height).sum::<usize>();
+				if let Some((_, root)) = compound.get(idx) {
+					root
+				} else {
+					break;
 				}
-				NbtCompound::ID => {
-					if idx >= root.data.compound.len() {
-						panic_unchecked("compound oob")
-					} else {
-						total += 1;
-						for jdx in 0..idx {
-							// SAFETY: n < len (is valid bounds) implies n - m (where m is a positive integer <= n) < len (is valid bounds)
-							total += root.data.compound.get(jdx).panic_unchecked("index oob").1.height();
-						}
-						// SAFETY: asserted beforehand
-						root.data.compound.get(idx).panic_unchecked("index oob").1
-					}
+			} else if let Some(chunk) = root.as_chunk() {
+				total += 1 + chunk.children().take(idx).map(|(_, b)| b).map(NbtElement::height).sum::<usize>();
+				if let Some((_, root)) = chunk.get(idx) {
+					root
+				} else {
+					break;
 				}
-				NbtRegion::ID => {
-					if idx >= root.data.region.len() {
-						panic_unchecked("region oob")
-					} else {
-						total += 1;
-						for jdx in 0..idx {
-							// SAFETY: n < len (is valid bounds) implies n - m (where m is a positive integer <= n) < len (is valid bounds)
-							total += root.data.region.get(jdx).panic_unchecked("index oob").height();
-						}
-						// SAFETY: asserted beforehand
-						root.data.region.get(idx).panic_unchecked("index oob")
-					}
+			} else if let Some(region) = root.as_region() {
+				total += 1 + region.children().take(idx).map(NbtElement::height).sum::<usize>();
+				if let Some(root) = region.get(idx) {
+					root
+				} else {
+					break;
 				}
-				_ => {
-					total += root.height();
-					if indices.peek().is_some() {
-						panic_unchecked("tried to index non-indexable")
-					} else {
-						break;
-					}
+			} else {
+				total += root.height();
+				if indices.peek().is_some() {
+					panic_unchecked("tried to index non-indexable")
+				} else {
+					break;
 				}
-			}
+			};
 		}
 		total
 	}
 }
 
 pub fn recache_along_indices(indices: &[usize], root: &mut NbtElement) {
-	unsafe {
-		match root.id() {
-			NbtRegion::ID => {
-				if let Some((&idx, rest)) = indices.split_first() {
-					recache_along_indices(rest, root.data.region.get_mut(idx).panic_unchecked("expected valid index"));
-				}
-				root.data.region.recache_depth();
-			}
-			NbtByteArray::ID | NbtIntArray::ID | NbtLongArray::ID => {
-				root.data.byte_array.recache_depth();
-			}
-			NbtList::ID => {
-				if let Some((&idx, rest)) = indices.split_first() {
-					recache_along_indices(rest, root.data.list.get_mut(idx).panic_unchecked("expected valid index"));
-				}
-				root.data.list.recache_depth();
-			}
-			NbtCompound::ID => {
-				if let Some((&idx, rest)) = indices.split_first() {
-					recache_along_indices(rest, root.data.compound.get_mut(idx).panic_unchecked("expected valid index").1);
-				}
-				root.data.compound.recache_depth();
-			}
-			NbtChunk::ID => {
-				if let Some((&idx, rest)) = indices.split_first() {
-					recache_along_indices(rest, root.data.chunk.inner.get_mut(idx).panic_unchecked("expected valid index").1);
-				}
-				root.data.chunk.inner.recache_depth();
-			}
-			_ => panic_unchecked("Found non-complex element in indices"),
+	if let Some(region) = root.as_region_mut() {
+		if let Some((&idx, rest)) = indices.split_first() {
+			recache_along_indices(rest, unsafe { region.get_mut(idx).panic_unchecked("expected valid index") });
 		}
+		region.recache_depth();
+	} else if let Some(array) = root.as_byte_array_mut() {
+		array.recache_depth();
+	} else if let Some(array) = root.as_int_array_mut() {
+		array.recache_depth();
+	} else if let Some(array) = root.as_long_array_mut() {
+		array.recache_depth();
+	} else if let Some(list) = root.as_list_mut() {
+		if let Some((&idx, rest)) = indices.split_first() {
+			recache_along_indices(rest, unsafe { list.get_mut(idx).panic_unchecked("expected valid index") });
+		}
+		list.recache_depth();
+	} else if let Some(compound) = root.as_compound_mut() {
+		if let Some((&idx, rest)) = indices.split_first() {
+			recache_along_indices(rest, unsafe { compound.get_mut(idx).panic_unchecked("expected valid index") }.1);
+		}
+		compound.recache_depth();
+	} else if let Some(chunk) = root.as_chunk_mut() {
+		if let Some((&idx, rest)) = indices.split_first() {
+			recache_along_indices(rest, unsafe { chunk.get_mut(idx).panic_unchecked("expected valid index") }.1);
+		}
+		chunk.recache_depth();
 	}
 }
 
@@ -862,30 +843,15 @@ pub unsafe fn panic_unchecked(msg: &str) -> ! {
 	core::hint::unreachable_unchecked()
 }
 
-trait IntoOk {
-	type Ok;
-
-	fn into_ok(self) -> Self::Ok;
-}
-
-impl<T> IntoOk for Result<T, core::convert::Infallible> {
-	type Ok = T;
-
-	fn into_ok(self) -> T {
-		match self {
-			Ok(x) => x,
-			Err(e) => match e {},
-		}
-	}
-}
-
 pub mod elements {
 	pub mod array;
 	pub mod chunk;
 	pub mod compound;
 	pub mod element_action;
-	pub mod element_type;
+	pub mod element;
 	pub mod list;
 	pub mod primitive;
 	pub mod string;
 }
+
+const_assert_eq!(VertexBufferBuilder::CHAR_WIDTH[b':' as usize], VertexBufferBuilder::CHAR_WIDTH[b',' as usize]);

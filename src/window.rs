@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::num::NonZeroU64;
 use std::time::SystemTime;
 
@@ -13,7 +14,7 @@ use winit::platform::windows::WindowBuilderExtWindows;
 use winit::window::{Icon, Window, WindowBuilder};
 use zune_inflate::DeflateOptions;
 
-use crate::assets::*;
+use crate::assets::HEADER_SIZE;
 use crate::vertex_buffer_builder::VertexBufferBuilder;
 use crate::workbench::Workbench;
 use crate::{assets, OptionExt};
@@ -26,14 +27,14 @@ pub fn run() -> ! {
 	let window = WindowBuilder::new()
 		.with_title("NBT Workbench")
 		.with_transparent(std::env::args().any(|x| x.eq("--transparent")))
-		.with_inner_size(PhysicalSize::new(250, WINDOW_HEIGHT as u32))
-		.with_min_inner_size(PhysicalSize::new(WINDOW_WIDTH as u32, (HEADER_SIZE + 16) as u32))
+		.with_inner_size(PhysicalSize::new(WINDOW_WIDTH as u32, WINDOW_HEIGHT as u32))
+		.with_min_inner_size(PhysicalSize::new(520, (HEADER_SIZE + 16) as u32))
 		.with_window_icon(Some(Icon::from_rgba(assets::icon(), assets::ICON_WIDTH as u32, assets::ICON_HEIGHT as u32).expect("valid format")))
 		.with_drag_and_drop(true)
 		.build(&event_loop)
 		.expect("Window was constructable");
 	let mut state = State::new(&window);
-	let mut workbench = Workbench::new(&window);
+	let mut workbench = Workbench::new(|title| window.set_title(title));
 
 	event_loop.run(move |event, _, _| match event {
 		Event::RedrawRequested(window_id) if window_id == window.id() => match state.render(&mut workbench, &window) {
@@ -195,7 +196,10 @@ impl State {
 			],
 			label: Some("Diffuse Bind Group"),
 		});
-		let shader = device.create_shader_module(include_wgsl!("shader.wgsl"));
+		let shader = device.create_shader_module(ShaderModuleDescriptor {
+			label: Some("Shader"),
+			source: ShaderSource::Wgsl(Cow::Borrowed(crate::shader::SOURCE)),
+		});
 		let render_pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
 			label: Some("Render Pipeline Layout"),
 			bind_group_layouts: &[&texture_bind_group_layout],
@@ -288,7 +292,10 @@ impl State {
 				}),
 			}],
 		});
-		let text_shader = device.create_shader_module(include_wgsl!("text_shader.wgsl"));
+		let text_shader = device.create_shader_module(ShaderModuleDescriptor {
+			label: Some("Text Shader"),
+			source: ShaderSource::Wgsl(Cow::Borrowed(crate::text_shader::SOURCE)),
+		});
 		let text_render_pipeline_payout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
 			label: Some("Text Render Pipeline Layout"),
 			bind_group_layouts: &[&unicode_bind_group_layout],
@@ -388,18 +395,18 @@ impl State {
 			WindowEvent::Moved(_) => false,
 			WindowEvent::CloseRequested => false,
 			WindowEvent::Destroyed => false,
-			WindowEvent::DroppedFile(file) => workbench.on_open_file(file, window).is_some(),
+			WindowEvent::DroppedFile(file) => workbench.on_open_file(file, |title| window.set_title(title)).is_some(),
 			WindowEvent::HoveredFile(_) => false,
 			WindowEvent::HoveredFileCancelled => false,
 			WindowEvent::ReceivedCharacter(_) => false,
 			WindowEvent::Focused(_) => false,
-			WindowEvent::KeyboardInput { input, .. } => workbench.on_key_input(*input, window),
+			WindowEvent::KeyboardInput { input, .. } => workbench.on_key_input(*input, |title| window.set_title(title)),
 			WindowEvent::ModifiersChanged(_) => false,
 			WindowEvent::CursorMoved { position, .. } => workbench.on_mouse_move(*position),
 			WindowEvent::CursorEntered { .. } => false,
 			WindowEvent::CursorLeft { .. } => false,
 			WindowEvent::MouseWheel { delta, .. } => workbench.on_scroll(*delta),
-			WindowEvent::MouseInput { state, button, .. } => workbench.on_mouse_input(*state, *button, window),
+			WindowEvent::MouseInput { state, button, .. } => workbench.on_mouse_input(*state, *button, |title| window.set_title(title)),
 			WindowEvent::TouchpadPressure { .. } => false,
 			WindowEvent::AxisMotion { .. } => false,
 			WindowEvent::Touch(_) => false,

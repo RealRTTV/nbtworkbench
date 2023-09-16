@@ -5,10 +5,15 @@ use std::path::{Path, PathBuf};
 use flate2::Compression;
 use uuid::Uuid;
 
-use crate::assets::*;
+use crate::assets::{
+	BYTE_ARRAY_GHOST_UV, BYTE_ARRAY_UV, BYTE_GHOST_UV, BYTE_UV, CHUNK_GHOST_UV, CHUNK_UV, COMPOUND_GHOST_UV, COMPOUND_ROOT_UV, COMPOUND_UV, DOUBLE_GHOST_UV, DOUBLE_UV, ENABLED_FREEHAND_MODE_UV,
+	FLOAT_GHOST_UV, FLOAT_UV, FREEHAND_MODE_UV, GZIP_FILE_TYPE_UV, HEADER_SIZE, HELD_SCROLLBAR_UV, INT_ARRAY_GHOST_UV, INT_ARRAY_UV, INT_GHOST_UV, INT_UV, LINE_NUMBER_SEPARATOR_UV, LIST_GHOST_UV,
+	LIST_UV, LONG_ARRAY_GHOST_UV, LONG_ARRAY_UV, LONG_GHOST_UV, LONG_UV, MCA_FILE_TYPE_UV, NBT_FILE_TYPE_UV, REDO_UV, REGION_UV, SCROLLBAR_Z, SHORT_GHOST_UV, SHORT_UV, SNBT_FILE_TYPE_UV,
+	STRING_GHOST_UV, STRING_UV, UNDO_UV, UNHELD_SCROLLBAR_UV, UNKNOWN_NBT_GHOST_UV, UNKNOWN_NBT_UV, ZLIB_FILE_TYPE_UV,
+};
 use crate::elements::chunk::NbtRegion;
 use crate::elements::compound::NbtCompound;
-use crate::elements::element_type::NbtElement;
+use crate::elements::element::NbtElement;
 use crate::vertex_buffer_builder::{Vec2u, VertexBufferBuilder};
 use crate::workbench_action::WorkbenchAction;
 use crate::{LinkedQueue, RenderContext, StrExt};
@@ -57,15 +62,11 @@ impl Tab {
 	}
 
 	pub fn save(&mut self) -> bool {
-		if let Some(dir) = &self.path {
-			if write(dir, self.compression.encode(&self.value)).is_err() {
-				return false;
-			};
-			self.history_changed = false;
-			true
-		} else {
-			false
-		}
+		if write(self.path.as_deref().unwrap_or_else(|| self.name.as_ref().as_ref()), self.compression.encode(&self.value)).is_err() {
+			return false;
+		};
+		self.history_changed = false;
+		true
 	}
 
 	#[allow(clippy::too_many_lines)]
@@ -74,14 +75,10 @@ impl Tab {
 		let mouse_y = ctx.mouse_y;
 
 		let horizontal_scroll_before = core::mem::replace(&mut builder.horizontal_scroll, self.horizontal_scroll(held_entry));
-		if self.value.id() == NbtCompound::ID {
-			unsafe {
-				self.value.data.compound.render_root(builder, &self.name, ctx);
-			}
-		} else if self.value.id() == NbtRegion::ID {
-			unsafe {
-				self.value.data.region.render_root(builder, &self.name, ctx);
-			}
+		if let Some(compound) = self.value.as_compound() {
+			compound.render_root(builder, &self.name, ctx);
+		} else if let Some(region) = self.value.as_region() {
+			region.render_root(builder, &self.name, ctx);
 		}
 		ctx.render_line_numbers(builder, &self.bookmarks);
 		builder.horizontal_scroll = horizontal_scroll_before;
@@ -92,7 +89,7 @@ impl Tab {
 			if height > total {
 				let offset = total * self.scroll() / height + HEADER_SIZE;
 				let height = (total * total) / height;
-				let held = ((builder.window_width() - 4)..(builder.window_width())).contains(&mouse_x) && (offset..=(offset + height)).contains(&mouse_y) || held;
+				let held = ((builder.window_width() - 8)..(builder.window_width())).contains(&mouse_x) && (offset..=(offset + height)).contains(&mouse_y) || held;
 				let uv = if held { HELD_SCROLLBAR_UV } else { UNHELD_SCROLLBAR_UV };
 				builder.draw_texture_z((builder.window_width() - 7, offset), SCROLLBAR_Z, uv, (6, 1));
 				if height > 2 {
@@ -157,11 +154,7 @@ impl Tab {
 			builder.draw_texture((builder.window_width() - 18, 26), freehand_uv, (16, 16));
 		}
 		{
-			let mx = if (24..46).contains(&mouse_y) {
-				Some(mouse_x & !0b1111)
-			} else {
-				None
-			};
+			let mx = if (24..46).contains(&mouse_y) { Some(mouse_x & !0b1111) } else { None };
 			builder.draw_texture((0, 26), if mx == Some(0) { BYTE_UV } else { BYTE_GHOST_UV }, (16, 16));
 			builder.draw_texture((16, 26), if mx == Some(16) { SHORT_UV } else { SHORT_GHOST_UV }, (16, 16));
 			builder.draw_texture((32, 26), if mx == Some(32) { INT_UV } else { INT_GHOST_UV }, (16, 16));
@@ -174,15 +167,7 @@ impl Tab {
 			builder.draw_texture((144, 26), if mx == Some(144) { STRING_UV } else { STRING_GHOST_UV }, (16, 16));
 			builder.draw_texture((160, 26), if mx == Some(160) { LIST_UV } else { LIST_GHOST_UV }, (16, 16));
 			builder.draw_texture((176, 26), if mx == Some(176) { COMPOUND_UV } else { COMPOUND_GHOST_UV }, (16, 16));
-			builder.draw_texture(
-				(192, 26),
-				if mx == Some(192) && self.value.id() == NbtRegion::ID {
-					CHUNK_UV
-				} else {
-					CHUNK_GHOST_UV
-				},
-				(16, 16),
-			);
+			builder.draw_texture((192, 26), if mx == Some(192) && self.value.id() == NbtRegion::ID { CHUNK_UV } else { CHUNK_GHOST_UV }, (16, 16));
 			builder.draw_texture((208, 26), if mx == Some(208) { UNKNOWN_NBT_UV } else { UNKNOWN_NBT_GHOST_UV }, (16, 16));
 		}
 	}

@@ -10,10 +10,10 @@ use compact_str::{format_compact, CompactString, ToCompactString};
 use fxhash::FxHasher;
 use hashbrown::raw::RawTable;
 
-use crate::assets::*;
+use crate::assets::{BASE_TEXT_Z, BASE_Z, COMPOUND_ROOT_UV, COMPOUND_UV, CONNECTION_UV, HEADER_SIZE, LINE_NUMBER_CONNECTOR_Z, LINE_NUMBER_SEPARATOR_UV};
 use crate::decoder::Decoder;
 use crate::elements::chunk::NbtChunk;
-use crate::elements::element_type::NbtElement;
+use crate::elements::element::NbtElement;
 use crate::encoder::UncheckedBufWriter;
 use crate::{DropFn, OptionExt, RenderContext, StrExt, VertexBufferBuilder};
 
@@ -864,11 +864,13 @@ impl CompoundMap {
 	}
 
 	#[must_use]
+	#[inline]
 	pub fn iter(&self) -> CompoundMapIter<'_> {
 		CompoundMapIter(self.entries.iter())
 	}
 
 	#[must_use]
+	#[inline]
 	pub fn iter_mut(&mut self) -> CompoundMapIterMut<'_> {
 		CompoundMapIterMut(self.entries.iter_mut())
 	}

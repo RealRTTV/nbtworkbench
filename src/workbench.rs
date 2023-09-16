@@ -14,14 +14,16 @@ use fxhash::{FxBuildHasher, FxHashSet};
 use uuid::Uuid;
 use winit::dpi::PhysicalPosition;
 use winit::event::{ElementState, KeyboardInput, MouseButton, MouseScrollDelta, VirtualKeyCode};
-use winit::window::Window;
 use zune_inflate::DeflateDecoder;
 
-use crate::assets::*;
+use crate::assets::{
+	ACTION_WHEEL_Z, BASE_TEXT_Z, BASE_Z, DARK_STRIPE_UV, EDITED_UV, HEADER_SIZE, HELD_ENTRY_Z, HORIZONTAL_SEPARATOR_UV, HOVERED_STRIPE_UV, HOVERED_WIDGET_UV, JUST_OVERLAPPING_BASE_TEXT_Z,
+	LIGHT_STRIPE_UV, SELECTED_ACTION_WHEEL, SELECTED_WIDGET_UV, TRAY_UV, UNEDITED_UV, UNSELECTED_ACTION_WHEEL, UNSELECTED_WIDGET_UV,
+};
 use crate::elements::chunk::{NbtChunk, NbtRegion};
 use crate::elements::compound::NbtCompound;
-use crate::elements::element_type::NbtElement;
-use crate::elements::element_type::{NbtByte, NbtByteArray, NbtDouble, NbtFloat, NbtInt, NbtIntArray, NbtLong, NbtLongArray, NbtShort};
+use crate::elements::element::NbtElement;
+use crate::elements::element::{NbtByte, NbtByteArray, NbtDouble, NbtFloat, NbtInt, NbtIntArray, NbtLong, NbtLongArray, NbtShort};
 use crate::elements::list::{NbtList, ValueIterator};
 use crate::elements::string::NbtString;
 use crate::selected_text::{KeyResult, SelectedText};
@@ -57,7 +59,7 @@ pub struct Workbench {
 impl Workbench {
 	#[inline]
 	#[must_use]
-	pub fn new(window: &Window) -> Self {
+	pub fn new(f: impl Fn(&str) + Copy) -> Self {
 		let mut workbench = Self {
 			tabs: vec![],
 			tab: 0,
@@ -75,7 +77,7 @@ impl Workbench {
 			action_wheel: None,
 			subscription: None,
 		};
-		if let Some(x) = &std::env::args().nth(1).and_then(|x| PathBuf::from_str(&x).ok()) && workbench.on_open_file(x, window).is_some() {
+		if let Some(x) = &std::env::args().nth(1).and_then(|x| PathBuf::from_str(&x).ok()) && workbench.on_open_file(x, f).is_some() {
 			// yay!
 		} else {
 			workbench.tabs.push(Tab {
@@ -100,7 +102,7 @@ impl Workbench {
 				uuid: Uuid::new_v4(),
 				freehand_mode: false,
 			});
-			window.set_title(if cfg!(debug_assertions) {
+			f(if cfg!(debug_assertions) {
 				"test.nbt - NBT Workbench"
 			} else {
 				"new.nbt - NBT Workbench"
@@ -111,7 +113,7 @@ impl Workbench {
 
 	#[inline]
 	#[allow(clippy::equatable_if_let)]
-	pub fn on_open_file(&mut self, path: &Path, window: &Window) -> Option<()> {
+	pub fn on_open_file(&mut self, path: &Path, f: impl Fn(&str)) -> Option<()> {
 		let buf = read(path).ok()?;
 		let (nbt, compressed) = {
 			if path.extension().and_then(OsStr::to_str) == Some("mca") {
@@ -138,7 +140,7 @@ impl Workbench {
 					self.selected_text = None;
 				};
 				self.tabs.push(entry);
-				self.set_tab(self.tabs.len() - 1, window);
+				self.set_tab(self.tabs.len() - 1, f);
 				Some(())
 			}
 		}
@@ -182,7 +184,7 @@ impl Workbench {
 
 	#[inline]
 	#[allow(clippy::collapsible_if)]
-	pub fn on_mouse_input(&mut self, state: ElementState, button: MouseButton, window: &Window) -> bool {
+	pub fn on_mouse_input(&mut self, state: ElementState, button: MouseButton, f: impl Fn(&str)) -> bool {
 		let horizontal_scroll = self.horizontal_scroll();
 		let shift = self.held_keys.contains(&VirtualKeyCode::LShift) | self.held_keys.contains(&VirtualKeyCode::RShift);
 		let x = self.mouse_x;
@@ -194,7 +196,7 @@ impl Workbench {
 			self.scrollbar_offset = None;
 			self.held_mouse_keys.remove(&button);
 			if y < 19 && x > 2 && y > 3 {
-				self.click_tab(button, window);
+				self.click_tab(button, f);
 			} else if y >= HEADER_SIZE {
 				let left_margin = self.left_margin();
 				'a: {
@@ -355,39 +357,41 @@ impl Workbench {
 				let (_, _, parent, mut line_number) = Navigate::new(rest.iter().copied(), &mut tab.value).last();
 				let mut old_key = None;
 				if let Some(key) = key {
-					if parent.id() == NbtCompound::ID {
-						unsafe {
-							old_key = parent.data.compound.update_key(last, key);
-						}
-					} else if parent.id() == NbtChunk::ID {
-						unsafe {
-							old_key = parent.data.chunk.inner.update_key(last, key);
-						}
-					} else if parent.id() == NbtRegion::ID {
-						unsafe {
-							old_key = Some({
-								let Some((x, z)) = key.split_once('|') else {
-									return;
-								};
-								let Ok(x @ 0..=31) = x.trim_end().parse() else {
-									return;
-								};
-								let Ok(z @ 0..=31) = z.trim_start().parse() else {
-									return;
-								};
-								let pos = ((x as u16) << 5) | z as u16;
-								let (_, chunks) = &*parent.data.region.chunks;
-								if !chunks[pos as usize].is_null() {
-									return;
-								}
-								let mut element = parent.data.region.remove(last);
-								let old_key = format_compact!("{}|{}", element.as_chunk_unchecked().x, element.as_chunk_unchecked().z);
+					if let Some(compound) = parent.as_compound_mut() {
+						old_key = compound.update_key(last, key);
+					} else if let Some(chunk) = parent.as_chunk_mut() {
+						old_key = chunk.update_key(last, key);
+					} else if let Some(region) = parent.as_region_mut() {
+						old_key = Some({
+							let Some((x, z)) = key.split_once('|') else {
+								return;
+							};
+							let Ok(x @ 0..=31) = x.trim_end().parse() else {
+								return;
+							};
+							let Ok(z @ 0..=31) = z.trim_start().parse() else {
+								return;
+							};
+							let pos = ((x as u16) << 5) | z as u16;
+							let (_, chunks) = &*region.chunks;
+							if !chunks[pos as usize].is_null() {
+								return;
+							}
+							let mut element = region.remove(last);
+							let old_key = format_compact!("{}|{}", unsafe { element.as_chunk_unchecked().x }, unsafe { element.as_chunk_unchecked().z });
+							// all values inside a region are chunks
+							unsafe {
 								element.as_chunk_unchecked_mut().x = x;
+							}
+							unsafe {
 								element.as_chunk_unchecked_mut().z = z;
-								parent.data.region.insert_unchecked(last, element);
-								old_key
-							});
-						}
+							}
+							// chunk is asserted above
+							unsafe {
+								region.insert_unchecked(pos as usize, last, element);
+							}
+							old_key
+						});
 					}
 				}
 				let (diff, true_diff) = (value.height(), value.true_height());
@@ -433,10 +437,10 @@ impl Workbench {
 			let (&last, rest) = unsafe { subscription.indices.split_last().panic_unchecked("always has at least one element") };
 			let (_, _, parent, mut line_number) = Navigate::new(rest.iter().copied(), &mut tab.value).last();
 			let old_key;
-			if parent.id() == NbtCompound::ID {
-				old_key = unsafe { Some(parent.data.compound.get_mut(last).panic_unchecked("valid index").0.to_compact_string()) };
-			} else if parent.id() == NbtChunk::ID {
-				old_key = unsafe { Some(parent.data.chunk.inner.get_mut(last).panic_unchecked("valid index").0.to_compact_string()) };
+			if let Some(compound) = parent.as_compound_mut() {
+				old_key = unsafe { Some(compound.get_mut(last).panic_unchecked("valid index").0.to_compact_string()) };
+			} else if let Some(chunk) = parent.as_chunk_mut() {
+				old_key = unsafe { Some(chunk.get_mut(last).panic_unchecked("valid index").0.to_compact_string()) };
 			} else {
 				old_key = None;
 			}
@@ -614,16 +618,11 @@ impl Workbench {
 					Position::Only | Position::Last => {
 						indices.push(idx + 1);
 						let duplicate = unsafe { element.get(idx).panic_unchecked("it exists mate, let's stop playing around") }.clone();
-						match element.id() {
-							NbtCompound::ID => unsafe {
-								element
-									.data
-									.compound
-									.insert(idx + 1, key.panic_unchecked("it's a compound, it **has** a key for every value"), duplicate);
-							},
-							// this is the same thing, literally the same thing, i refuse to believe that it can't be added
-							_ => {
-								let _ = element.insert(idx + 1, duplicate);
+						if let Some(compound) = element.as_compound_mut() {
+							compound.insert(idx + 1, unsafe { key.panic_unchecked("it's a compound, it **has** a key for every value") }, duplicate);
+						} else {
+							if element.insert(idx + 1, duplicate).is_err() {
+								return false;
 							}
 						}
 					}
@@ -674,7 +673,7 @@ impl Workbench {
 					return false;
 				}
 			} else {
-				if write!(&mut buf, "{}{}{element}", key.unwrap_or(CompactString::new_inline("")), if key_exists { ": " } else { "" }).is_err() {
+				if write!(&mut buf, "{}{}{element}", key.unwrap_or(CompactString::new_inline("")), if key_exists { ":" } else { "" }).is_err() {
 					return false;
 				}
 			}
@@ -852,7 +851,7 @@ impl Workbench {
 	}
 
 	#[inline]
-	fn click_tab(&mut self, button: MouseButton, window: &Window) {
+	fn click_tab(&mut self, button: MouseButton, f: impl Fn(&str)) {
 		let mouse_x = self.mouse_x + self.tab_scroll;
 		if mouse_x < 2 {
 			return;
@@ -866,7 +865,7 @@ impl Workbench {
 				if button == MouseButton::Middle {
 					let tab = self.tabs.remove(idx);
 					std::thread::spawn(move || drop(tab));
-					self.set_tab(idx.saturating_sub(1), window);
+					self.set_tab(idx.saturating_sub(1), f);
 				} else if idx == self.tab && x > width - 16 && x < width {
 					if button == MouseButton::Left {
 						tab.compression = tab.compression.cycle();
@@ -876,7 +875,7 @@ impl Workbench {
 				} else if idx == self.tab && x + 1 >= width - 32 && x < width - 16 {
 					tab.save();
 				} else if button == MouseButton::Left {
-					self.set_tab(idx, window);
+					self.set_tab(idx, f);
 				}
 
 				return;
@@ -964,26 +963,21 @@ impl Workbench {
 		}
 
 		let mut indices = vec![];
-		let mut iter = Traverse::new(y, &mut tab.value);
+		let mut iter = TraverseParents::new(y, &mut tab.value);
 		while let Some((position, idx, key, value, _)) = iter.next() {
-			match position {
-				Position::First | Position::Only => {} // do nothing
-				Position::Middle => {
-					indices.push(idx);
-				}
-				Position::Last => {
-					indices.push(idx);
-					self.selected_text = SelectedText::new(
-						indices.len() * 16 + 32 + 4 + left_margin,
-						self.mouse_x + horizontal_scroll,
-						y * 16 + HEADER_SIZE,
-						key.map(|x| (x.into_string().into_boxed_str(), true)),
-						Some(value.value()).map(|(a, b)| (a.into_string().into_boxed_str(), b)),
-						value.id() == NbtChunk::ID,
-						indices,
-					);
-					return self.selected_text.is_some();
-				}
+			indices.push(idx);
+			if let Position::Last | Position::Only = position {
+				let child = unsafe { value.get(idx).panic_unchecked("Child didn't exist somehow") };
+				self.selected_text = SelectedText::new(
+					indices.len() * 16 + 32 + 4 + left_margin,
+					self.mouse_x + horizontal_scroll,
+					y * 16 + HEADER_SIZE,
+					key.or_else(|| child.as_chunk().map(|chunk| chunk.x.to_compact_string())).map(|x| (x.into_string().into_boxed_str(), true)),
+					Some(child.value()).map(|(a, b)| (a.into_string().into_boxed_str(), b)),
+					child.id() == NbtChunk::ID,
+					indices,
+				);
+				return self.selected_text.is_some();
 			}
 		}
 		false
@@ -1076,10 +1070,9 @@ impl Workbench {
 			if child_idx == 0 || parent.len().is_none_or(|x| x == 0) {
 				return;
 			}
-			let original_key = match parent.id() {
-				NbtCompound::ID => unsafe { Some(parent.data.compound.get(child_idx).panic_unchecked("Index obviously exists").0.to_compact_string()) },
-				_ => None,
-			};
+			let original_key = parent
+				.as_compound_mut()
+				.map(|compound| unsafe { compound.get(child_idx).panic_unchecked("Index obviously exists").0.to_compact_string() });
 			*y -= unsafe { parent.get(child_idx - 1).panic_unchecked("if i exist, the one before me exists") }.height() * 16;
 			parent.swap(child_idx, child_idx - 1);
 			let from = indices.clone();
@@ -1113,10 +1106,9 @@ impl Workbench {
 			if parent.len().is_none_or(|x| x == child_idx + 1) {
 				return;
 			}
-			let original_key = match parent.id() {
-				NbtCompound::ID => unsafe { Some(parent.data.compound.get(child_idx).panic_unchecked("Index obviously exists").0.to_compact_string()) },
-				_ => None,
-			};
+			let original_key = parent
+				.as_compound_mut()
+				.map(|compound| unsafe { compound.get(child_idx).panic_unchecked("Index obviously exists").0.to_compact_string() });
 			*y += unsafe { parent.get(child_idx + 1).panic_unchecked("checked above") }.height() * 16;
 			parent.swap(child_idx, child_idx + 1);
 			let from = indices.clone();
@@ -1178,21 +1170,25 @@ impl Workbench {
 
 			let (k, v, indices, new_y) = if ctrl && last_index > 0 {
 				let mut indices = indices.into_vec();
-				let tail = Navigate::new(indices.iter().copied().take(original_indices_len - 1), &mut tab.value).last().2;
 				*indices.last_mut().panic_unchecked("indices cannot be empty, we're in it") = 0;
-				let (k, v) = tail.children().panic_unchecked("we are a child, some must exist").map_or_else(
-					|mut iter| {
-						let (k, v) = iter.next().panic_unchecked("we are a child, some must exist");
-						(Some((k.to_compact_string(), true)), Some(v.value()))
-					},
-					|iter| match iter {
-						iter @ ValueIterator::Generic(_) => (None, Some(iter.enumerate().next().panic_unchecked("we're the child, it can't be empty").1.value())),
-						iter @ ValueIterator::Region(_, _) => {
-							let chunk = unsafe { iter.enumerate().next().panic_unchecked("we're the child, it can't be empty").1.as_chunk_unchecked() };
-							(Some((chunk.x.to_compact_string(), true)), Some((chunk.z.to_compact_string(), true)))
-						}
-					},
-				);
+				let (k, v) = Navigate::new(indices.iter().copied().take(original_indices_len - 1), &mut tab.value)
+					.last()
+					.2
+					.children()
+					.panic_unchecked("we are a child, some must exist")
+					.map_or_else(
+						|mut iter| {
+							let (k, v) = iter.next().panic_unchecked("we are a child, some must exist");
+							(Some((k.to_compact_string(), true)), Some(v.value()))
+						},
+						|iter| match iter {
+							iter @ ValueIterator::Generic(_) => (None, Some(iter.enumerate().next().panic_unchecked("we're the child, it can't be empty").1.value())),
+							iter @ ValueIterator::Region(_, _) => {
+								let chunk = unsafe { iter.enumerate().next().panic_unchecked("we're the child, it can't be empty").1.as_chunk_unchecked() };
+								(Some((chunk.x.to_compact_string(), true)), Some((chunk.z.to_compact_string(), true)))
+							}
+						},
+					);
 				let new_y = sum_indices(indices.iter().copied(), &tab.value) * 16;
 				(k, v, indices, new_y)
 			} else {
@@ -1200,12 +1196,21 @@ impl Workbench {
 				let mut indices = vec![];
 				// SAFETY: total is -1'd meaning that it's original range of 1..=root.height() is now ..root.height(), which is in range
 				let (k, v) = 'w: {
-					let mut iter = Traverse::new(total, &mut tab.value);
-					let _ = iter.next();
+					let mut iter = TraverseParents::new(total, &mut tab.value);
 					while let Some((position, idx, key, value, _)) = iter.next() {
 						indices.push(idx);
-						if position == Position::Last {
-							break 'w (key.map(|k| (k, true)), Some(value.value()));
+						if let Position::Last | Position::Only = position {
+							break 'w (
+								key.or_else(|| {
+									value
+										.as_region()
+										.and_then(|region| region.get(idx))
+										.and_then(NbtElement::as_chunk)
+										.map(|chunk| chunk.x.to_compact_string())
+								})
+								.map(|k| (k, true)),
+								value.get(idx).map(NbtElement::value),
+							);
 						}
 					}
 					panic_unchecked("Iterator was empty, somehow")
@@ -1308,7 +1313,14 @@ impl Workbench {
 						indices.push(idx);
 						if let Position::Last | Position::Only = position {
 							break 'w (
-								key.map(|k| (k, true)),
+								key.or_else(|| {
+									value
+										.as_region()
+										.and_then(|region| region.get(idx))
+										.and_then(NbtElement::as_chunk)
+										.map(|chunk| chunk.x.to_compact_string())
+								})
+								.map(|k| (k, true)),
 								Some(value.get(idx).map(NbtElement::value).panic_unchecked("We are literally given an `idx`")),
 								indices,
 								y + 16 - HEADER_SIZE,
@@ -1438,8 +1450,8 @@ impl Workbench {
 					let (key, value) = {
 						let element = Navigate::new(rem.iter().copied(), &mut tab.value).last().2;
 						if key {
-							if element.id() == NbtCompound::ID {
-								let idx = element.data.compound.entries.idx_of(&value);
+							if let Some(compound) = element.as_compound_mut() {
+								let idx = compound.entries.idx_of(&value);
 								if let Some(idx) = idx {
 									return if idx == last {
 										self.selected_text = None;
@@ -1448,9 +1460,9 @@ impl Workbench {
 										ignore_already_present_key
 									};
 								}
-								(Some(element.data.compound.update_key(last, value.clone()).unwrap_or(value)), None)
-							} else if element.id() == NbtChunk::ID {
-								let idx = element.data.chunk.inner.entries.idx_of(&value);
+								(Some(compound.update_key(last, value.clone()).unwrap_or(value)), None)
+							} else if let Some(chunk) = element.as_chunk_mut() {
+								let idx = chunk.entries.idx_of(&value);
 								if let Some(idx) = idx {
 									return if idx == last {
 										self.selected_text = None;
@@ -1459,23 +1471,23 @@ impl Workbench {
 										ignore_already_present_key
 									};
 								}
-								(Some(element.data.chunk.inner.update_key(last, value.clone()).unwrap_or(value)), None)
-							} else if element.id() == NbtRegion::ID {
+								(Some(chunk.update_key(last, value.clone()).unwrap_or(value)), None)
+							} else if let Some(region) = element.as_region_mut() {
 								let (Ok(x @ 0..=31), Ok(z @ 0..=31)) = (value.parse::<u8>(), valuefix.panic_unchecked("A chunk has a key and value").parse::<u8>()) else {
 									return ignore_already_present_key;
 								};
 								let (old_x, old_z) = {
-									let chunk = element.data.region.get_mut(last).panic_unchecked("Last index was valid").as_chunk_unchecked_mut();
+									let chunk = region.get_mut(last).panic_unchecked("Last index was valid").as_chunk_unchecked_mut();
 									(core::mem::replace(&mut chunk.x, x), core::mem::replace(&mut chunk.z, z))
 								};
 								let new_idx = ((x as usize) << 5) | (z as usize);
-								if !element.data.region.chunks.deref().1[new_idx].is_null() || (old_x == x && old_z == z) {
-									let chunk = element.data.region.get_mut(last).panic_unchecked("Last index was valid").as_chunk_unchecked_mut();
+								if !region.chunks.deref().1[new_idx].is_null() || (old_x == x && old_z == z) {
+									let chunk = region.get_mut(last).panic_unchecked("Last index was valid").as_chunk_unchecked_mut();
 									chunk.x = old_x;
 									chunk.z = old_z;
 									return ignore_already_present_key;
 								}
-								let (map, chunks) = &mut *element.data.region.chunks;
+								let (map, chunks) = &mut *region.chunks;
 								let from = core::mem::replace(&mut map[last], new_idx as u16) as usize;
 								chunks.swap(from, new_idx);
 								(Some(old_x.to_compact_string()), Some(old_z.to_compact_string()))
@@ -1483,22 +1495,22 @@ impl Workbench {
 								panic_unchecked("Expected key-value indices chain tail to be of type compound")
 							}
 						} else {
-							if element.id() == NbtRegion::ID {
+							if let Some(region) = element.as_region_mut() {
 								let (Ok(x @ 0..=31), Ok(z @ 0..=31)) = (keyfix.panic_unchecked("A chunk always has a key and value").parse::<u8>(), value.parse::<u8>()) else {
 									return ignore_already_present_key;
 								};
 								let (old_x, old_z) = {
-									let chunk = element.data.region.get_mut(last).panic_unchecked("Last index was valid").as_chunk_unchecked_mut();
+									let chunk = region.get_mut(last).panic_unchecked("Last index was valid").as_chunk_unchecked_mut();
 									(core::mem::replace(&mut chunk.x, x), core::mem::replace(&mut chunk.z, z))
 								};
 								let new_idx = ((x as usize) << 5) | (z as usize);
-								if !element.data.region.chunks.deref().1[new_idx].is_null() || (old_x == x && old_z == z) {
-									let chunk = element.data.region.get_mut(last).panic_unchecked("Last index was valid").as_chunk_unchecked_mut();
+								if !region.chunks.deref().1[new_idx].is_null() || (old_x == x && old_z == z) {
+									let chunk = region.get_mut(last).panic_unchecked("Last index was valid").as_chunk_unchecked_mut();
 									chunk.x = old_x;
 									chunk.z = old_z;
 									return ignore_already_present_key;
 								};
-								let (map, chunks) = &mut *element.data.region.chunks;
+								let (map, chunks) = &mut *region.chunks;
 								let from = core::mem::replace(&mut map[last], new_idx as u16) as usize;
 								chunks.swap(from, new_idx);
 								(Some(old_x.to_compact_string()), Some(old_z.to_compact_string()))
@@ -1520,9 +1532,11 @@ impl Workbench {
 					self.selected_text = None;
 				} else {
 					let buf = PathBuf::from(value);
-					return if let Some(name) = buf.file_name().and_then(OsStr::to_str) {
-						tab.name = name.into();
-						tab.path = Some(buf);
+					return if let Some(name) = buf.file_name().and_then(OsStr::to_str).map(ToOwned::to_owned) {
+						let old_name = core::mem::replace(&mut tab.name, name.into_boxed_str());
+						tab.undos.push(WorkbenchAction::Rename { indices: Box::new([]), key: None, value: Some(tab.path.replace(buf).as_deref().and_then(|path| path.to_str()).map(|str| str.to_compact_string()).unwrap_or_else(|| old_name.to_compact_string())) });
+						tab.redos.clear();
+						tab.history_changed = true;
 						self.selected_text = None;
 						true
 					} else {
@@ -1536,7 +1550,7 @@ impl Workbench {
 
 	#[cfg_attr(not(debug_assertions), inline)]
 	#[allow(clippy::collapsible_if, clippy::too_many_lines, clippy::cognitive_complexity)]
-	pub fn on_key_input(&mut self, key: KeyboardInput, window: &Window) -> bool {
+	pub fn on_key_input(&mut self, key: KeyboardInput, f: impl Fn(&str)) -> bool {
 		if key.state == ElementState::Pressed {
 			if let Some(key) = key.virtual_keycode {
 				self.held_keys.insert(key);
@@ -1622,39 +1636,39 @@ impl Workbench {
 				}
 				{
 					if key == VirtualKeyCode::Key1 {
-						self.set_tab(0, window);
+						self.set_tab(0, f);
 						return true;
 					}
 					if key == VirtualKeyCode::Key2 {
-						self.set_tab(1, window);
+						self.set_tab(1, f);
 						return true;
 					}
 					if key == VirtualKeyCode::Key3 {
-						self.set_tab(2, window);
+						self.set_tab(2, f);
 						return true;
 					}
 					if key == VirtualKeyCode::Key4 {
-						self.set_tab(3, window);
+						self.set_tab(3, f);
 						return true;
 					}
 					if key == VirtualKeyCode::Key5 {
-						self.set_tab(4, window);
+						self.set_tab(4, f);
 						return true;
 					}
 					if key == VirtualKeyCode::Key6 {
-						self.set_tab(5, window);
+						self.set_tab(5, f);
 						return true;
 					}
 					if key == VirtualKeyCode::Key7 {
-						self.set_tab(6, window);
+						self.set_tab(6, f);
 						return true;
 					}
 					if key == VirtualKeyCode::Key8 {
-						self.set_tab(7, window);
+						self.set_tab(7, f);
 						return true;
 					}
 					if key == VirtualKeyCode::Key9 {
-						self.set_tab(self.tabs.len().saturating_sub(1), window);
+						self.set_tab(self.tabs.len().saturating_sub(1), f);
 						return true;
 					}
 				}
@@ -1719,7 +1733,7 @@ impl Workbench {
 						uuid: Uuid::new_v4(),
 						freehand_mode: false,
 					});
-					self.set_tab(self.tabs.len() - 1, window);
+					self.set_tab(self.tabs.len() - 1, f);
 					self.selected_text = None;
 					return true;
 				}
@@ -1735,7 +1749,7 @@ impl Workbench {
 					if let Some(tab) = self.tab() && !tab.history_changed {
 						let t = self.tabs.remove(self.tab);
 						std::thread::spawn(move || drop(t));
-						self.set_tab(self.tab.saturating_sub(1), window);
+						self.set_tab(self.tab.saturating_sub(1), f);
 						self.selected_text = None;
 						return true;
 					}
@@ -1743,7 +1757,7 @@ impl Workbench {
 				if key == VirtualKeyCode::Z && flags == flags!(Ctrl) {
 					if let Some(tab) = self.tabs.get_mut(self.tab) {
 						if let Some(action) = tab.undos.pop() {
-							tab.redos.push(action.undo(&mut tab.value, &mut tab.bookmarks, &mut self.subscription));
+							tab.redos.push(action.undo(&mut tab.value, &mut tab.bookmarks, &mut self.subscription, &mut tab.path, &mut tab.name));
 							self.selected_text = None;
 							return true;
 						}
@@ -1752,7 +1766,7 @@ impl Workbench {
 				if key == VirtualKeyCode::Y && flags == flags!(Ctrl) {
 					if let Some(tab) = self.tabs.get_mut(self.tab) {
 						if let Some(action) = tab.redos.pop() {
-							tab.undos.push(action.undo(&mut tab.value, &mut tab.bookmarks, &mut self.subscription));
+							tab.undos.push(action.undo(&mut tab.value, &mut tab.bookmarks, &mut self.subscription, &mut tab.path, &mut tab.name));
 							self.selected_text = None;
 							return true;
 						}
@@ -1858,10 +1872,10 @@ impl Workbench {
 	}
 
 	#[inline]
-	fn set_tab(&mut self, idx: usize, window: &Window) {
+	fn set_tab(&mut self, idx: usize, f: impl Fn(&str)) {
 		self.tab = idx.min(self.tabs.len().saturating_sub(1));
 		if let Some(tab) = self.tab() {
-			window.set_title(format!("{} - NBT Workbench", tab.name).as_str());
+			f(format!("{} - NBT Workbench", tab.name).as_str());
 		}
 	}
 

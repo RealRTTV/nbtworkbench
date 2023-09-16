@@ -5,7 +5,7 @@ use std::time::{Duration, SystemTime, SystemTimeError};
 
 use winit::event::VirtualKeyCode;
 
-use crate::assets::*;
+use crate::assets::{BASE_TEXT_Z, ELEMENT_HIGHLIGHT_Z, HEADER_SIZE, SELECTED_TEXT_Z, SELECTION_UV};
 use crate::selected_text::KeyResult::{Down, Failed, Finish, ForceClose, ForceOpen, Keyfix, NothingSpecial, Revert, ShiftDown, ShiftUp, Up, Valuefix};
 use crate::vertex_buffer_builder::VertexBufferBuilder;
 use crate::{flags, is_jump_char_boundary, is_utf8_char_boundary, LinkedQueue, OptionExt, StrExt};

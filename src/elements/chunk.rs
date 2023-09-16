@@ -8,9 +8,9 @@ use std::thread::Scope;
 use compact_str::{format_compact, CompactString, ToCompactString};
 use zune_inflate::{DeflateDecoder, DeflateOptions};
 
-use crate::assets::*;
-use crate::elements::compound::{CompoundMapIter, CompoundMapIterMut, NbtCompound};
-use crate::elements::element_type::NbtElement;
+use crate::assets::{BASE_TEXT_Z, BASE_Z, CHUNK_UV, CONNECTION_UV, HEADER_SIZE, LINE_NUMBER_CONNECTOR_Z, LINE_NUMBER_SEPARATOR_UV, REGION_UV};
+use crate::elements::compound::NbtCompound;
+use crate::elements::element::NbtElement;
 use crate::elements::list::{ValueIterator, ValueMutIterator};
 use crate::encoder::UncheckedBufWriter;
 use crate::tab::FileFormat;
@@ -136,6 +136,7 @@ impl NbtRegion {
 					let (format, element) = thread.join().ok()??;
 					region.insert_unchecked(
 						pos,
+						region.len(),
 						NbtElement::Chunk(NbtChunk::from_compound(core::mem::transmute(element), ((pos >> 5) as u8 & 31, pos as u8 & 31), format, timestamp)),
 					);
 				}
@@ -250,22 +251,20 @@ impl NbtRegion {
 	/// * Index is outside the range of `NbtRegion`
 	#[inline]
 	pub fn insert(&mut self, idx: usize, mut value: NbtElement) -> Result<(), NbtElement> {
-		unsafe {
-			if value.id() == NbtChunk::ID {
-				let mut pos = ((value.data.chunk.x as u16) << 5) | (value.data.chunk.z as u16);
-				let (map, chunks) = &mut *self.chunks;
-				while !chunks[pos as usize].is_null() && pos < chunks.len() as u16 {
-					pos += 1;
-				}
-				value.data.deref_mut().chunk.x = (pos >> 5) as u8 & 31;
-				value.data.deref_mut().chunk.z = pos as u8 & 31;
-				if pos < chunks.len() as u16 && idx <= map.len() && chunks[pos as usize].is_null() {
-					let (height, true_height) = (value.height(), value.true_height());
-					map.insert(idx, pos);
-					chunks[map[idx] as usize] = value;
-					self.increment(height, true_height);
-					return Ok(());
-				}
+		if let Some(chunk) = value.as_chunk_mut() {
+			let mut pos = ((chunk.x as u16) << 5) | (chunk.z as u16);
+			let (map, chunks) = &mut *self.chunks;
+			while !chunks[pos as usize].is_null() && pos < chunks.len() as u16 {
+				pos += 1;
+			}
+			chunk.x = (pos >> 5) as u8 & 31;
+			chunk.z = pos as u8 & 31;
+			if pos < chunks.len() as u16 && idx <= map.len() && chunks[pos as usize].is_null() {
+				let (height, true_height) = (value.height(), value.true_height());
+				map.insert(idx, pos);
+				chunks[map[idx] as usize] = value;
+				self.increment(height, true_height);
+				return Ok(());
 			}
 		}
 
@@ -280,10 +279,10 @@ impl NbtRegion {
 	///
 	/// * `pos` is between 0..=1023
 	#[inline]
-	pub unsafe fn insert_unchecked(&mut self, pos: usize, value: NbtElement) {
+	pub unsafe fn insert_unchecked(&mut self, pos: usize, idx: usize, value: NbtElement) {
 		self.increment(value.height(), value.true_height());
 		let (map, chunks) = &mut *self.chunks;
-		map.push(pos as u16);
+		map.insert(idx, pos as u16);
 		unsafe {
 			chunks.as_mut_ptr().cast::<NbtElement>().add(pos).write(value);
 		}
@@ -456,8 +455,8 @@ impl NbtRegion {
 
 	#[inline]
 	pub fn drop(&mut self, mut key: Option<CompactString>, mut element: NbtElement, y: &mut usize, depth: usize, target_depth: usize, mut line_number: usize, indices: &mut Vec<usize>) -> DropFn {
-		if *y < 16 && *y >= 8 && depth == target_depth && element.id() == NbtChunk::ID {
-			let (_x, z) = unsafe { (element.data.chunk.x, element.data.chunk.z) };
+		if *y < 16 && *y >= 8 && depth == target_depth && let Some(chunk) = element.as_chunk() {
+			let (_x, z) = (chunk.x, chunk.z);
 			let before = (self.height(), self.true_height());
 			indices.push(0);
 			if let Err(element) = self.insert(0, element) {
@@ -465,8 +464,8 @@ impl NbtRegion {
 			}
 			self.open = true;
 			return DropFn::Dropped(self.height as usize - before.0, self.true_height as usize - before.1, Some(z.to_compact_string()), line_number + 1);
-		} else if self.height() == 1 && *y < 24 && *y >= 16 && depth == target_depth && element.id() == NbtChunk::ID {
-			let (_x, z) = unsafe { (element.data.chunk.x, element.data.chunk.z) };
+		} else if self.height() == 1 && *y < 24 && *y >= 16 && depth == target_depth && let Some(chunk) = element.as_chunk() {
+			let (_x, z) = (chunk.x, chunk.z);
 			let before = self.true_height();
 			indices.push(self.len());
 			if let Err(element) = self.insert(self.len(), element) {
@@ -489,14 +488,14 @@ impl NbtRegion {
 			for (idx, value) in self.children_mut().enumerate() {
 				*ptr = idx;
 				let heights = (element.height(), element.true_height());
-				if *y < 8 && depth == target_depth && element.id() == NbtChunk::ID {
-					let (_x, z) = unsafe { (element.data.chunk.x, element.data.chunk.z) };
+				if *y < 8 && depth == target_depth && let Some(chunk) = element.as_chunk() {
+					let (_x, z) = (chunk.x, chunk.z);
 					if let Err(element) = self.insert(idx, element) {
 						return DropFn::InvalidType(key, element);
 					}
 					return DropFn::Dropped(heights.0, heights.1, Some(z.to_compact_string()), line_number + 1);
-				} else if *y >= value.height() * 16 - 8 && *y < value.height() * 16 && depth == target_depth && element.id() == NbtChunk::ID {
-					let (_x, z) = unsafe { (element.data.chunk.x, element.data.chunk.z) };
+				} else if *y >= value.height() * 16 - 8 && *y < value.height() * 16 && depth == target_depth && let Some(chunk) = element.as_chunk() {
+					let (_x, z) = (chunk.x, chunk.z);
 					*ptr = idx + 1;
 					let true_height = element.true_height();
 					if let Err(element) = self.insert(idx + 1, element) {
@@ -578,10 +577,8 @@ impl NbtRegion {
 impl Debug for NbtRegion {
 	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
 		let mut r#struct = f.debug_struct("Region");
-		for child in self.children() {
-			unsafe {
-				r#struct.field(&format!("x: {:02}, z: {:02}", child.data.chunk.x, child.data.chunk.z), &child.data.chunk);
-			}
+		for chunk in self.children().map(|x| unsafe { x.as_chunk_unchecked() }) {
+			r#struct.field(&format!("x: {:02}, z: {:02}", chunk.x, chunk.z), &chunk);
 		}
 		r#struct.finish()
 	}
@@ -590,7 +587,7 @@ impl Debug for NbtRegion {
 #[repr(C)]
 #[allow(clippy::module_name_repetitions)]
 pub struct NbtChunk {
-	pub inner: Box<NbtCompound>,
+	inner: Box<NbtCompound>,
 	last_modified: u32,
 	// need to restrict this file format to only use GZIP, ZLIB and Uncompressed
 	compression: FileFormat,
@@ -654,77 +651,6 @@ impl NbtChunk {
 			pad.as_mut_ptr().write_bytes(0, pad_len);
 			writer.write(&pad.assume_init());
 		}
-	}
-
-	#[inline]
-	pub fn increment(&mut self, amount: usize, true_amount: usize) {
-		self.inner.increment(amount, true_amount);
-	}
-
-	#[inline]
-	pub fn decrement(&mut self, amount: usize, true_amount: usize) {
-		self.inner.decrement(amount, true_amount);
-	}
-
-	#[inline]
-	#[must_use]
-	pub const fn height(&self) -> usize {
-		self.inner.height()
-	}
-
-	#[inline]
-	#[must_use]
-	pub const fn true_height(&self) -> usize {
-		self.inner.true_height()
-	}
-
-	#[inline]
-	pub fn toggle(&mut self) -> Option<()> {
-		self.inner.toggle()
-	}
-
-	#[inline]
-	#[must_use]
-	pub const fn open(&self) -> bool {
-		self.inner.open()
-	}
-
-	#[inline]
-	#[must_use]
-	pub fn len(&self) -> usize {
-		self.inner.len()
-	}
-
-	#[inline]
-	#[must_use]
-	pub fn is_empty(&self) -> bool {
-		self.inner.is_empty()
-	}
-
-	/// # Errors
-	///
-	/// * Never
-	#[inline]
-	pub fn insert_full(&mut self, idx: usize, key: CompactString, value: NbtElement) {
-		self.inner.insert(idx, key, value);
-	}
-
-	#[inline]
-	#[must_use]
-	pub fn remove_idx(&mut self, idx: usize) -> Option<(CompactString, NbtElement)> {
-		self.inner.remove_idx(idx)
-	}
-
-	#[inline]
-	#[must_use]
-	pub fn get(&self, idx: usize) -> Option<(&str, &NbtElement)> {
-		self.inner.get(idx)
-	}
-
-	#[inline]
-	#[must_use]
-	pub fn get_mut(&mut self, idx: usize) -> Option<(&str, &mut NbtElement)> {
-		self.inner.get_mut(idx)
 	}
 
 	#[inline]
@@ -862,25 +788,22 @@ impl NbtChunk {
 	}
 
 	#[inline]
-	#[must_use]
-	pub fn children(&self) -> CompoundMapIter<'_> {
-		self.inner.children()
-	}
-
-	#[inline]
-	#[must_use]
-	pub fn children_mut(&mut self) -> CompoundMapIterMut<'_> {
-		self.inner.children_mut()
-	}
-
-	#[inline]
-	pub fn shut(&mut self) {
-		self.inner.shut();
-	}
-
-	#[inline]
 	pub fn render_icon(pos: impl Into<(usize, usize)>, z: u8, builder: &mut VertexBufferBuilder) {
 		builder.draw_texture_z(pos, z, CHUNK_UV, (16, 16));
+	}
+}
+
+impl Deref for NbtChunk {
+	type Target = NbtCompound;
+
+	fn deref(&self) -> &Self::Target {
+		&self.inner
+	}
+}
+
+impl DerefMut for NbtChunk {
+	fn deref_mut(&mut self) -> &mut Self::Target {
+		&mut self.inner
 	}
 }
 
@@ -902,6 +825,7 @@ impl Display for NbtChunk {
 	}
 }
 
+#[allow(clippy::missing_fields_in_debug)]
 impl Debug for NbtChunk {
 	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
 		write!(f, "{} | {}", self.x, self.z)?;
