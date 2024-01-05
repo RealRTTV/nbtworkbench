@@ -470,11 +470,10 @@ impl State {
 			let mut builder = VertexBufferBuilder::new(self.size, assets::ATLAS_WIDTH, assets::ATLAS_HEIGHT, workbench.scroll());
 			workbench.render(&mut builder);
 
-			// todo, cache in the workbench
-			if builder.drew_tooltip() {
-				window.set_cursor_visible(false);
-			} else {
-				window.set_cursor_visible(true);
+			let show_cursor = !builder.drew_tooltip();
+			if show_cursor != workbench.cursor_visible {
+				window.set_cursor_visible(show_cursor);
+				workbench.cursor_visible = show_cursor;
 			}
 
 			{

@@ -1,6 +1,9 @@
 #[macro_export]
 macro_rules! primitive {
 	($uv:ident, $s:expr, $name:ident, $t:ty, $id:literal) => {
+		primitive!($uv, $s, $name, $t, $id, |x: $t| x.to_compact_string());
+	};
+	($uv:ident, $s:expr, $name:ident, $t:ty, $id:literal, $compact_format:expr) => {
 		#[derive(Copy, Clone, Default)]
 		#[repr(transparent)]
 		pub struct $name {
@@ -26,17 +29,10 @@ macro_rules! primitive {
 			}
 
 			#[inline]
-			pub fn set(&mut self, option: Option<$t>) {
-				if let Some(t) = option {
-					self.value = t;
-				}
-			}
-
-			#[inline]
 			pub fn render(&self, builder: &mut VertexBufferBuilder, name: Option<&str>, ctx: &mut RenderContext) {
 				ctx.line_number();
 				Self::render_icon(ctx.pos(), BASE_Z, builder);
-				let str = self.value.to_compact_string();
+				let str = $compact_format(self.value);
 				if ctx.forbid(ctx.pos(), builder) {
 					builder.settings(ctx.pos() + (20, 0), false, 1);
 					let _ = match name {
@@ -52,11 +48,16 @@ macro_rules! primitive {
 			pub fn render_icon(pos: impl Into<(usize, usize)>, z: u8, builder: &mut VertexBufferBuilder) {
 				builder.draw_texture_z(pos, z, $uv, (16, 16));
 			}
+
+			#[inline]
+			pub fn value(&self) -> CompactString {
+				$compact_format(self.value)
+			}
 		}
 
 		impl Display for $name {
 			fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-				write!(f, "{}", self.value)?;
+				write!(f, "{}", $compact_format(self.value))?;
 				if let Some(s) = $s {
 					write!(f, "{s}")?;
 				}

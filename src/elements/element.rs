@@ -27,8 +27,8 @@ primitive!(BYTE_UV, { Some('b') }, NbtByte, i8, 1);
 primitive!(SHORT_UV, { Some('s') }, NbtShort, i16, 2);
 primitive!(INT_UV, { None::<char> }, NbtInt, i32, 3);
 primitive!(LONG_UV, { Some('L') }, NbtLong, i64, 4);
-primitive!(FLOAT_UV, { Some('f') }, NbtFloat, f32, 5);
-primitive!(DOUBLE_UV, { Some('d') }, NbtDouble, f64, 6);
+primitive!(FLOAT_UV, { Some('f') }, NbtFloat, f32, 5, |x| format_compact!("{x:.149}").trim_end_matches('0').trim_end_matches('.').to_compact_string());
+primitive!(DOUBLE_UV, { Some('d') }, NbtDouble, f64, 6, |x| format_compact!("{x:.1076}").trim_end_matches('0').trim_end_matches('.').to_compact_string());
 array!(byte, NbtByteArray, i8, 7, 1, 'B', BYTE_ARRAY_UV, BYTE_UV);
 array!(int, NbtIntArray, i32, 11, 3, 'I', INT_ARRAY_UV, INT_UV);
 array!(long, NbtLongArray, i64, 12, 4, 'L', LONG_ARRAY_UV, LONG_UV);
@@ -90,111 +90,111 @@ impl Clone for NbtElement {
 impl NbtElement {
 	#[must_use]
 	#[inline]
-	pub const fn Byte(x: NbtByte) -> Self {
-		let mut this = Self { byte: ManuallyDrop::new(x) };
+	pub const fn Byte(this: NbtByte) -> Self {
+		let mut this = Self { byte: ManuallyDrop::new(this) };
 		this.id.id = NbtByte::ID;
 		this
 	}
 
 	#[must_use]
 	#[inline]
-	pub const fn Short(x: NbtShort) -> Self {
-		let mut this = Self { short: ManuallyDrop::new(x) };
+	pub const fn Short(this: NbtShort) -> Self {
+		let mut this = Self { short: ManuallyDrop::new(this) };
 		this.id.id = NbtShort::ID;
 		this
 	}
 
 	#[must_use]
 	#[inline]
-	pub const fn Int(x: NbtInt) -> Self {
-		let mut this = Self { int: ManuallyDrop::new(x) };
+	pub const fn Int(this: NbtInt) -> Self {
+		let mut this = Self { int: ManuallyDrop::new(this) };
 		this.id.id = NbtInt::ID;
 		this
 	}
 
 	#[must_use]
 	#[inline]
-	pub const fn Long(x: NbtLong) -> Self {
-		let mut this = Self { long: ManuallyDrop::new(x) };
+	pub const fn Long(this: NbtLong) -> Self {
+		let mut this = Self { long: ManuallyDrop::new(this) };
 		this.id.id = NbtLong::ID;
 		this
 	}
 
 	#[must_use]
 	#[inline]
-	pub const fn Float(x: NbtFloat) -> Self {
-		let mut this = Self { float: ManuallyDrop::new(x) };
+	pub const fn Float(this: NbtFloat) -> Self {
+		let mut this = Self { float: ManuallyDrop::new(this) };
 		this.id.id = NbtFloat::ID;
 		this
 	}
 
 	#[must_use]
 	#[inline]
-	pub const fn Double(x: NbtDouble) -> Self {
-		let mut this = Self { double: ManuallyDrop::new(x) };
+	pub const fn Double(this: NbtDouble) -> Self {
+		let mut this = Self { double: ManuallyDrop::new(this) };
 		this.id.id = NbtDouble::ID;
 		this
 	}
 
 	#[must_use]
 	#[inline]
-	pub fn ByteArray(x: NbtByteArray) -> Self {
-		let mut this = Self { byte_array: ManuallyDrop::new(x) };
+	pub fn ByteArray(this: NbtByteArray) -> Self {
+		let mut this = Self { byte_array: ManuallyDrop::new(this) };
 		this.id.id = NbtByteArray::ID;
 		this
 	}
 
 	#[must_use]
 	#[inline]
-	pub fn String(x: NbtString) -> Self {
-		let mut this = Self { string: ManuallyDrop::new(x) };
+	pub fn String(this: NbtString) -> Self {
+		let mut this = Self { string: ManuallyDrop::new(this) };
 		this.id.id = NbtString::ID;
 		this
 	}
 
 	#[must_use]
 	#[inline]
-	pub fn List(x: NbtList) -> Self {
-		let mut this = Self { list: ManuallyDrop::new(x) };
+	pub fn List(this: NbtList) -> Self {
+		let mut this = Self { list: ManuallyDrop::new(this) };
 		this.id.id = NbtList::ID;
 		this
 	}
 
 	#[must_use]
 	#[inline]
-	pub fn Compound(x: NbtCompound) -> Self {
-		let mut this = Self { compound: ManuallyDrop::new(x) };
+	pub fn Compound(this: NbtCompound) -> Self {
+		let mut this = Self { compound: ManuallyDrop::new(this) };
 		this.id.id = NbtCompound::ID;
 		this
 	}
 
 	#[must_use]
-	pub fn IntArray(x: NbtIntArray) -> Self {
-		let mut this = Self { int_array: ManuallyDrop::new(x) };
+	pub fn IntArray(this: NbtIntArray) -> Self {
+		let mut this = Self { int_array: ManuallyDrop::new(this) };
 		this.id.id = NbtIntArray::ID;
 		this
 	}
 
 	#[must_use]
 	#[inline]
-	pub fn LongArray(x: NbtLongArray) -> Self {
-		let mut this = Self { long_array: ManuallyDrop::new(x) };
+	pub fn LongArray(this: NbtLongArray) -> Self {
+		let mut this = Self { long_array: ManuallyDrop::new(this) };
 		this.id.id = NbtLongArray::ID;
 		this
 	}
 
 	#[must_use]
 	#[inline]
-	pub fn Chunk(x: NbtChunk) -> Self {
-		let mut this = Self { chunk: ManuallyDrop::new(x) };
+	pub fn Chunk(this: NbtChunk) -> Self {
+		let mut this = Self { chunk: ManuallyDrop::new(this) };
 		this.id.id = NbtChunk::ID;
 		this
 	}
 
 	#[must_use]
 	#[inline]
-	pub fn Region(x: NbtRegion) -> Self {
-		let mut this = Self { region: ManuallyDrop::new(x) };
+	pub fn Region(this: NbtRegion) -> Self {
+		let mut this = Self { region: ManuallyDrop::new(this) };
 		this.id.id = NbtRegion::ID;
 		this
 	}
@@ -252,34 +252,34 @@ impl NbtElement {
 
 		if let Some(s2) = s.strip_prefix("NaN") {
 			s = s2.trim_start();
-			if let Some(s2) = s.strip_prefix('f') {
-				return Some((s2.trim_start(), Self::Float(NbtFloat { value: f32::NAN })));
+			return if let Some(s2) = s.strip_prefix('f') {
+				Some((s2.trim_start(), Self::Float(NbtFloat { value: f32::NAN })))
 			} else if let Some(s2) = s.strip_prefix('d') {
-				return Some((s2.trim_start(), Self::Double(NbtDouble { value: f64::NAN })));
+				Some((s2.trim_start(), Self::Double(NbtDouble { value: f64::NAN })))
 			} else {
-				return Some((s2.trim_start(), Self::Double(NbtDouble { value: f64::NAN })));
+				Some((s2.trim_start(), Self::Double(NbtDouble { value: f64::NAN })))
 			}
 		}
 
 		if let Some(s2) = s.strip_prefix("Infinity").or_else(|| s.strip_prefix("inf")) {
 			s = s2.trim_start();
-			if let Some(s2) = s.strip_prefix('f') {
-				return Some((s2.trim_start(), Self::Float(NbtFloat { value: f32::INFINITY })));
+			return if let Some(s2) = s.strip_prefix('f') {
+				Some((s2.trim_start(), Self::Float(NbtFloat { value: f32::INFINITY })))
 			} else if let Some(s2) = s.strip_prefix('d') {
-				return Some((s2.trim_start(), Self::Double(NbtDouble { value: f64::INFINITY })));
+				Some((s2.trim_start(), Self::Double(NbtDouble { value: f64::INFINITY })))
 			} else {
-				return Some((s2.trim_start(), Self::Double(NbtDouble { value: f64::INFINITY })));
+				Some((s2.trim_start(), Self::Double(NbtDouble { value: f64::INFINITY })))
 			}
 		}
 
 		if let Some(s2) = s.strip_prefix("-Infinity").or_else(|| s.strip_prefix("-inf")) {
 			s = s2.trim_start();
-			if let Some(s2) = s.strip_prefix('f') {
-				return Some((s2.trim_start(), Self::Float(NbtFloat { value: f32::NEG_INFINITY })));
+			return if let Some(s2) = s.strip_prefix('f') {
+				Some((s2.trim_start(), Self::Float(NbtFloat { value: f32::NEG_INFINITY })))
 			} else if let Some(s2) = s.strip_prefix('d') {
-				return Some((s2.trim_start(), Self::Double(NbtDouble { value: f64::NEG_INFINITY })));
+				Some((s2.trim_start(), Self::Double(NbtDouble { value: f64::NEG_INFINITY })))
 			} else {
-				return Some((s2.trim_start(), Self::Double(NbtDouble { value: f64::NEG_INFINITY })));
+				Some((s2.trim_start(), Self::Double(NbtDouble { value: f64::NEG_INFINITY })))
 			}
 		}
 
@@ -633,33 +633,33 @@ impl NbtElement {
 		unsafe {
 			Some(match self.id() {
 				NbtByte::ID => {
-					let before = self.byte.value.to_compact_string();
-					self.byte.set(value.parse().ok());
+					let before = self.byte.value();
+					let _ = value.parse().map(|x| self.byte.value = x);
 					before
 				}
 				NbtShort::ID => {
-					let before = self.short.value.to_compact_string();
-					self.short.set(value.parse().ok());
+					let before = self.short.value();
+					let _ = value.parse().map(|x| self.short.value = x);
 					before
 				}
 				NbtInt::ID => {
-					let before = self.int.value.to_compact_string();
-					self.int.set(value.parse().ok());
+					let before = self.int.value();
+					let _ = value.parse().map(|x| self.int.value = x);
 					before
 				}
 				NbtLong::ID => {
-					let before = self.long.value.to_compact_string();
-					self.long.set(value.parse().ok());
+					let before = self.long.value();
+					let _ = value.parse().map(|x| self.long.value = x);
 					before
 				}
 				NbtFloat::ID => {
-					let before = self.float.value.to_compact_string();
-					self.float.set(value.parse().ok());
+					let before = self.float.value();
+					let _ = value.parse().map(|x| self.float.value = x);
 					before
 				}
 				NbtDouble::ID => {
-					let before = self.double.value.to_compact_string();
-					self.double.set(value.parse().ok());
+					let before = self.double.value();
+					let _ = value.parse().map(|x| self.double.value = x);
 					before
 				}
 				NbtString::ID => core::mem::replace(self, Self::String(NbtString::new(value))).string.str.as_str().to_compact_string(),
@@ -745,12 +745,12 @@ impl NbtElement {
 	pub fn value(&self) -> (CompactString, bool) {
 		unsafe {
 			match self.id() {
-				NbtByte::ID => (self.byte.value.to_compact_string(), true),
-				NbtShort::ID => (self.short.value.to_compact_string(), true),
-				NbtInt::ID => (self.int.value.to_compact_string(), true),
-				NbtLong::ID => (self.long.value.to_compact_string(), true),
-				NbtFloat::ID => (self.float.value.to_compact_string(), true),
-				NbtDouble::ID => (self.double.value.to_compact_string(), true),
+				NbtByte::ID => (self.byte.value(), true),
+				NbtShort::ID => (self.short.value(), true),
+				NbtInt::ID => (self.int.value(), true),
+				NbtLong::ID => (self.long.value(), true),
+				NbtFloat::ID => (self.float.value(), true),
+				NbtDouble::ID => (self.double.value(), true),
 				NbtByteArray::ID => (self.byte_array.value(), false),
 				NbtString::ID => (self.string.str.as_str().to_compact_string(), true),
 				NbtList::ID => (self.list.value(), false),

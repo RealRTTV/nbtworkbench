@@ -44,7 +44,7 @@ wgsl! {
 				output.uv = vec2<f32>(0.0, 0.0);
 			}
 			case 2u: {
-				output.uv = vec2<f32>(0.0,1.0);
+				output.uv = vec2<f32>(0.0, 1.0);
 			}
 			default: {
 				output.uv = vec2<f32>(1.0, 1.0);

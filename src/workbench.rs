@@ -54,6 +54,7 @@ pub struct Workbench {
 	scrollbar_offset: Option<usize>,
 	action_wheel: Option<(usize, usize)>,
 	subscription: Option<FileUpdateSubscription>,
+	pub cursor_visible: bool,
 }
 
 impl Workbench {
@@ -76,6 +77,7 @@ impl Workbench {
 			scrollbar_offset: None,
 			action_wheel: None,
 			subscription: None,
+			cursor_visible: true,
 		};
 		if let Some(x) = &std::env::args().nth(1).and_then(|x| PathBuf::from_str(&x).ok()) && workbench.on_open_file(x, f).is_some() {
 			// yay!
@@ -398,12 +400,6 @@ impl Workbench {
 				let old_value = core::mem::replace(unsafe { parent.get_mut(last).panic_unchecked("Valid index") }, value);
 				let old_true_height = old_value.true_height();
 				let (diff, true_diff) = (diff.wrapping_sub(old_value.height()), true_diff.wrapping_sub(old_true_height));
-				tab.undos.push(WorkbenchAction::Replace {
-					indices: subscription.indices.clone(),
-					value: (old_key.or(Some(CompactString::new_inline("_"))), old_value),
-				});
-				tab.redos.clear();
-				tab.history_changed = true;
 				for idx in 0..last {
 					line_number += unsafe { parent.get_mut(idx).panic_unchecked("always valid idx") }.true_height();
 				}
@@ -417,12 +413,16 @@ impl Workbench {
 					parent.increment(diff, true_diff);
 				}
 				recache_along_indices(rest, &mut tab.value);
+				tab.append_to_history(WorkbenchAction::Replace {
+					indices: subscription.indices.clone(),
+					value: (old_key.or(Some(CompactString::new_inline("_"))), old_value),
+				});
 			} else {
 				if tab.value.id() == value.id() {
 					tab.bookmarks.clear();
 					tab.horizontal_scroll = 0;
 					tab.scroll = 0;
-					tab.undos.clear();
+
 					tab.undos.push(WorkbenchAction::Replace {
 						indices: Box::new([]),
 						value: (None, core::mem::replace(tab.value.as_mut(), value)),
@@ -452,12 +452,6 @@ impl Workbench {
 			let (diff, true_diff) = (new_value.height(), new_value.true_height());
 			let (diff, true_diff) = (diff.wrapping_sub(before.height()), true_diff.wrapping_sub(old_true_height));
 			let old_value = core::mem::replace(before, new_value);
-			tab.undos.push(WorkbenchAction::Replace {
-				indices: subscription.indices.clone(),
-				value: (old_key, old_value),
-			});
-			tab.redos.clear();
-			tab.history_changed = true;
 			for idx in 0..last {
 				line_number += unsafe { parent.get_mut(idx).panic_unchecked("valid idx") }.true_height();
 			}
@@ -471,6 +465,10 @@ impl Workbench {
 				parent.increment(diff, true_diff);
 			}
 			recache_along_indices(&subscription.indices, &mut tab.value);
+			tab.append_to_history(WorkbenchAction::Replace {
+				indices: subscription.indices.clone(),
+				value: (old_key, old_value),
+			});
 		}
 
 		if let Some(subscription) = &mut self.subscription {
@@ -642,9 +640,7 @@ impl Workbench {
 					subscription.indices[indices.len() - 1] += 1;
 				}
 			}
-			tab.undos.push(WorkbenchAction::Add { indices: indices.into_boxed_slice() });
-			tab.redos.clear();
-			tab.history_changed = true;
+			tab.append_to_history(WorkbenchAction::Add { indices: indices.into_boxed_slice() });
 			true
 		} else {
 			false
@@ -738,11 +734,10 @@ impl Workbench {
 					}
 				}
 			}
-			tab.undos.push(WorkbenchAction::Remove {
+			tab.append_to_history(WorkbenchAction::Remove {
 				element: (key, value),
 				indices: indices.into_boxed_slice(),
 			});
-			tab.redos.clear();
 			true
 		} else {
 			false
@@ -773,12 +768,10 @@ impl Workbench {
 		match NbtElement::drop(tab.value.as_mut(), key.clone(), element, &mut y.clone(), 2, x, 1, &mut indices) {
 			DropFn::InvalidType(key, element) | DropFn::Missed(key, element) => {
 				if let Some(from_indices) = from_indices {
-					tab.undos.push(WorkbenchAction::Remove {
+					tab.append_to_history(WorkbenchAction::Remove {
 						indices: from_indices,
 						element: (key, element),
 					});
-					tab.redos.clear();
-					tab.history_changed = true;
 				}
 
 				self.selected_text = None;
@@ -794,18 +787,16 @@ impl Workbench {
 					}
 
 					if from_indices.as_ref() != indices.as_slice() {
-						tab.undos.push(WorkbenchAction::Move {
+						tab.append_to_history(WorkbenchAction::Move {
 							from: from_indices,
 							to: indices.clone().into_boxed_slice(),
 							original_key: key,
 						});
-						tab.redos.clear();
 					}
 				} else {
-					tab.undos.push(WorkbenchAction::Add {
+					tab.append_to_history(WorkbenchAction::Add {
 						indices: indices.clone().into_boxed_slice(),
 					});
-					tab.redos.clear();
 				}
 				recache_along_indices(&indices[..indices.len() - 1], &mut tab.value);
 				let start = tab.bookmarks.binary_search(&line_number).unwrap_or_else(identity);
@@ -816,7 +807,6 @@ impl Workbench {
 						*bookmark += true_height;
 					}
 				}
-				tab.history_changed = true;
 				self.subscription = None;
 			}
 		}
@@ -858,37 +848,64 @@ impl Workbench {
 		}
 
 		let mut x = mouse_x - 2;
-		for (idx, tab) in self.tabs.iter_mut().enumerate() {
-			let width = tab.name.width() + 48 + 5;
+		'a: {
+			for (idx, tab) in self.tabs.iter_mut().enumerate() {
+				let width = tab.name.width() + 48 + 5;
 
-			if x <= width {
-				if button == MouseButton::Middle {
-					let tab = self.tabs.remove(idx);
-					std::thread::spawn(move || drop(tab));
-					self.set_tab(idx.saturating_sub(1), f);
-				} else if idx == self.tab && x > width - 16 && x < width {
-					if button == MouseButton::Left {
-						tab.compression = tab.compression.cycle();
-					} else if button == MouseButton::Right {
-						tab.compression = tab.compression.rev_cycle();
+				if x <= width {
+					if button == MouseButton::Middle {
+						let tab = self.tabs.remove(idx);
+						std::thread::spawn(move || drop(tab));
+						self.set_tab(idx.saturating_sub(1), f);
+					} else if idx == self.tab && x > width - 16 && x < width {
+						if button == MouseButton::Left {
+							tab.compression = tab.compression.cycle();
+						} else if button == MouseButton::Right {
+							tab.compression = tab.compression.rev_cycle();
+						}
+					} else if idx == self.tab && x + 1 >= width - 32 && x < width - 16 {
+						tab.save();
+					} else if button == MouseButton::Left {
+						self.set_tab(idx, f);
 					}
-				} else if idx == self.tab && x + 1 >= width - 32 && x < width - 16 {
-					tab.save();
-				} else if button == MouseButton::Left {
-					self.set_tab(idx, f);
+
+					return;
 				}
 
-				return;
+				x -= width;
+
+				if x < 6 {
+					break 'a;
+				} else {
+					x -= 6;
+				}
 			}
 
-			x -= width;
-
-			if x < 6 {
-				break;
-			} else {
-				x -= 6;
+			if button == MouseButton::Middle {
+				self.new_tab(f);
 			}
 		}
+	}
+
+	#[inline]
+	pub fn new_tab(&mut self, f: impl Fn(&str)) {
+		self.tabs.push(Tab {
+			value: Box::new(NbtElement::Compound(NbtCompound::new())),
+			name: "new.nbt".into(),
+			path: None,
+			compression: FileFormat::Nbt,
+			undos: LinkedQueue::new(),
+			redos: LinkedQueue::new(),
+			history_changed: false,
+			scroll: 0,
+			horizontal_scroll: 0,
+			window_height: self.window_height,
+			window_width: self.window_width,
+			bookmarks: vec![],
+			uuid: Uuid::new_v4(),
+			freehand_mode: false,
+		});
+		self.set_tab(self.tabs.len() - 1, f);
 	}
 
 	#[inline]
@@ -1086,8 +1103,7 @@ impl Workbench {
 					subscription.indices[indices.len() - 1] -= 1;
 				}
 			}
-			tab.undos.push(WorkbenchAction::Move { from, to, original_key });
-			tab.redos.clear();
+			tab.append_to_history(WorkbenchAction::Move { from, to, original_key });
 			tab.scroll = tab.scroll.min((*y - HEADER_SIZE).saturating_sub(16));
 			tab.scroll = tab.scroll();
 		}
@@ -1122,8 +1138,7 @@ impl Workbench {
 					subscription.indices[indices.len() - 1] += 1;
 				}
 			}
-			tab.undos.push(WorkbenchAction::Move { from, to, original_key });
-			tab.redos.clear();
+			tab.append_to_history(WorkbenchAction::Move { from, to, original_key });
 
 			if *y + 48 > tab.scroll + tab.window_height - HEADER_SIZE {
 				tab.scroll = *y + 48 - (tab.window_height - HEADER_SIZE);
@@ -1526,17 +1541,14 @@ impl Workbench {
 						}
 					};
 
-					tab.undos.push(WorkbenchAction::Rename { indices, key, value });
-					tab.redos.clear();
-					tab.history_changed = true;
+					tab.append_to_history(WorkbenchAction::Rename { indices, key, value });
 					self.selected_text = None;
 				} else {
 					let buf = PathBuf::from(value);
 					return if let Some(name) = buf.file_name().and_then(OsStr::to_str).map(ToOwned::to_owned) {
 						let old_name = core::mem::replace(&mut tab.name, name.into_boxed_str());
-						tab.undos.push(WorkbenchAction::Rename { indices: Box::new([]), key: None, value: Some(tab.path.replace(buf).as_deref().and_then(|path| path.to_str()).map(|str| str.to_compact_string()).unwrap_or_else(|| old_name.to_compact_string())) });
-						tab.redos.clear();
-						tab.history_changed = true;
+						let action = WorkbenchAction::Rename { indices: Box::new([]), key: None, value: Some(tab.path.replace(buf).as_deref().and_then(|path| path.to_str()).map(|str| str.to_compact_string()).unwrap_or_else(|| old_name.to_compact_string())) };
+						tab.append_to_history(action);
 						self.selected_text = None;
 						true
 					} else {
@@ -1717,23 +1729,7 @@ impl Workbench {
 					}
 				}
 				if key == VirtualKeyCode::N && flags == flags!(Ctrl) {
-					self.tabs.push(Tab {
-						value: Box::new(NbtElement::Compound(NbtCompound::new())),
-						name: "new.nbt".into(),
-						path: None,
-						compression: FileFormat::Nbt,
-						undos: LinkedQueue::new(),
-						redos: LinkedQueue::new(),
-						history_changed: false,
-						scroll: 0,
-						horizontal_scroll: 0,
-						window_height: self.window_height,
-						window_width: self.window_width,
-						bookmarks: vec![],
-						uuid: Uuid::new_v4(),
-						freehand_mode: false,
-					});
-					self.set_tab(self.tabs.len() - 1, f);
+					self.new_tab(f);
 					self.selected_text = None;
 					return true;
 				}

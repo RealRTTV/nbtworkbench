@@ -181,6 +181,12 @@ impl Tab {
 		}
 	}
 
+	pub fn append_to_history(&mut self, action: WorkbenchAction) {
+		self.undos.push(action);
+		self.redos.clear();
+		self.history_changed = true;
+	}
+
 	#[must_use]
 	pub fn scroll(&self) -> usize {
 		let height = self.value.height() * 16 + 48;

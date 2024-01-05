@@ -148,7 +148,7 @@ macro_rules! hash {
 /// * keyboard-based element dropping (press numbers before to specify count for move operations, right shift to enable mode)
 /// * animations!!!!
 fn main() -> ! {
-	window::run();
+	window::run()
 }
 
 pub enum DropFn {
@@ -160,16 +160,9 @@ pub enum DropFn {
 /// Yoinked from `itertools`.
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Position {
-	/// Only element present in the iterator, all following elements will only appear with len > 1
 	Only,
-
-	/// First element present in the iterator
 	First,
-
-	/// Middle element(s) present in the iterator, will only occur for len > 2
 	Middle,
-
-	/// Tail element, aka the `Last` element.
 	Last,
 }
 
