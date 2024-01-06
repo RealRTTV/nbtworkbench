@@ -123,6 +123,7 @@ pub const INT_ARRAY_GHOST_UV: Vec2u = Vec2u::new(112, 16);
 pub const LONG_ARRAY_GHOST_UV: Vec2u = Vec2u::new(0, 48);
 pub const REGION_GHOST_UV: Vec2u = Vec2u::new(96, 48);
 pub const CHUNK_GHOST_UV: Vec2u = Vec2u::new(64, 48);
+pub const ALERT_UV: Vec2u = Vec2u::new(112, 144);
 
 pub const BASE_Z: u8 = 0;
 pub const BASE_TEXT_Z: u8 = 10;
@@ -137,6 +138,8 @@ pub const ACTION_WHEEL_Z: u8 = 190;
 pub const SCROLLBAR_Z: u8 = 200;
 pub const SCROLLBAR_BOOKMARK_Z: u8 = SCROLLBAR_Z + 1;
 pub const HELD_ENTRY_Z: u8 = 210;
+pub const ALERT_Z: u8 = 240;
+pub const ALERT_TEXT_Z: u8 = ALERT_Z + 5;
 pub const TOOLTIP_Z: u8 = 250;
 
 #[allow(clippy::cast_ptr_alignment)]

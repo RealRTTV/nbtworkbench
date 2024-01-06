@@ -1,6 +1,8 @@
+use std::ffi::OsStr;
 use std::fs::write;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use anyhow::{Result, anyhow, Context};
 
 use flate2::Compression;
 use uuid::Uuid;
@@ -38,14 +40,14 @@ pub struct Tab {
 
 impl Tab {
 	#[must_use]
-	pub fn new(nbt: NbtElement, path: &Path, compression: FileFormat, window_height: usize, window_width: usize) -> Option<Self> {
+	pub fn new(nbt: NbtElement, path: &Path, compression: FileFormat, window_height: usize, window_width: usize) -> Result<Self> {
 		if !(nbt.id() == NbtCompound::ID || nbt.id() == NbtRegion::ID) {
-			return None;
+			return Err(anyhow!("Parsed NBT was not a Compound or Region"));
 		}
 
-		Some(Self {
+		Ok(Self {
 			value: Box::new(nbt),
-			name: path.file_name()?.to_str()?.into(),
+			name: path.file_name().map(OsStr::to_string_lossy).context("Could not obtain path filename")?.into(),
 			path: Some(path.to_path_buf()),
 			compression,
 			undos: LinkedQueue::new(),

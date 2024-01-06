@@ -1,3 +1,5 @@
+use anyhow::{Result, Context, anyhow};
+
 use std::convert::identity;
 use std::ffi::OsStr;
 use std::fmt::Write;
@@ -31,6 +33,8 @@ use crate::vertex_buffer_builder::VertexBufferBuilder;
 use crate::window::{WINDOW_HEIGHT, WINDOW_WIDTH};
 use crate::workbench_action::WorkbenchAction;
 use crate::{encompasses, encompasses_or_equal, flags, panic_unchecked, recache_along_indices, sum_indices, DropFn, FileUpdateSubscription, FileUpdateSubscriptionType, HeldEntry, LinkedQueue, OptionExt, Position, RenderContext, StrExt, Bookmark};
+use crate::alert::Alert;
+use crate::color::TextColor;
 
 pub struct Workbench {
 	pub tabs: Vec<Tab>,
@@ -49,6 +53,7 @@ pub struct Workbench {
 	action_wheel: Option<(usize, usize)>,
 	subscription: Option<FileUpdateSubscription>,
 	pub cursor_visible: bool,
+	alerts: Vec<Alert>,
 }
 
 impl Workbench {
@@ -72,9 +77,12 @@ impl Workbench {
 			action_wheel: None,
 			subscription: None,
 			cursor_visible: true,
+			alerts: vec![],
 		};
-		if let Some(x) = &std::env::args().nth(1).and_then(|x| PathBuf::from_str(&x).ok()) && workbench.on_open_file(x, f).is_some() {
-			// yay!
+		if let Some(x) = &std::env::args().nth(1).and_then(|x| PathBuf::from_str(&x).ok()) {
+			if let Err(e) = workbench.on_open_file(x, f) {
+				workbench.alert(Alert::new("Error!", TextColor::Red, e.to_string()))
+			}
 		} else {
 			workbench.tabs.push(Tab {
 				#[cfg(debug_assertions)]
@@ -108,38 +116,34 @@ impl Workbench {
 	}
 
 	#[inline]
+	pub fn alert(&mut self, alert: Alert) {
+		self.alerts.insert(0, alert);
+	}
+
+	#[inline]
 	#[allow(clippy::equatable_if_let)]
-	pub fn on_open_file(&mut self, path: &Path, f: impl Fn(&str)) -> Option<()> {
-		let buf = read(path).ok()?;
+	pub fn on_open_file(&mut self, path: &Path, f: impl Fn(&str)) -> Result<()> {
+		let buf = read(path)?;
 		let (nbt, compressed) = {
 			if path.extension().and_then(OsStr::to_str) == Some("mca") {
-				(NbtElement::from_mca(buf.as_slice())?, FileFormat::Mca)
+				(NbtElement::from_mca(buf.as_slice()).context("Failed to parse MCA file")?, FileFormat::Mca)
 			} else if let Some(0x1F8B) = buf.first_chunk::<2>().copied().map(u16::from_be_bytes) {
-				(NbtElement::from_file(&DeflateDecoder::new(buf.as_slice()).decode_gzip().ok()?)?, FileFormat::Gzip)
+				(NbtElement::from_file(&DeflateDecoder::new(buf.as_slice()).decode_gzip().context("Failed to decode gzip compressed NBT")?).context("Failed to parse NBT")?, FileFormat::Gzip)
 			} else if let Some(0x7801 | 0x789C | 0x78DA) = buf.first_chunk::<2>().copied().map(u16::from_be_bytes) {
-				(NbtElement::from_file(&DeflateDecoder::new(buf.as_slice()).decode_zlib().ok()?)?, FileFormat::Zlib)
+				(NbtElement::from_file(&DeflateDecoder::new(buf.as_slice()).decode_zlib().context("Failed to decode zlib compressed NBT")?).context("Failed to parse NBT")?, FileFormat::Zlib)
 			} else if let Some(nbt) = NbtElement::from_file(buf.as_slice()) {
 				(nbt, FileFormat::Nbt)
 			} else {
-				let nbt = core::str::from_utf8(&buf).ok().and_then(NbtElement::from_str)?.1;
-				if let NbtCompound::ID | NbtRegion::ID = nbt.id() {
-					(nbt, FileFormat::Snbt)
-				} else {
-					return None;
-				}
+				(core::str::from_utf8(&buf).ok().and_then(NbtElement::from_str).context(anyhow!("Failed to find file type for file {}", path.file_name().unwrap_or(&OsStr::new("")).to_string_lossy()))?.1, FileFormat::Snbt)
 			}
 		};
-		match Tab::new(nbt, path, compressed, self.window_height, self.window_width) {
-			None => None,
-			Some(entry) => {
-				if !self.close_selected_text(false) {
-					self.selected_text = None;
-				};
-				self.tabs.push(entry);
-				self.set_tab(self.tabs.len() - 1, f);
-				Some(())
-			}
-		}
+		let tab = Tab::new(nbt, path, compressed, self.window_height, self.window_width)?;
+		if !self.close_selected_text(false) {
+			self.selected_text = None;
+		};
+		self.tabs.push(tab);
+		self.set_tab(self.tabs.len() - 1, f);
+		Ok(())
 	}
 
 	#[inline]
@@ -341,13 +345,13 @@ impl Workbench {
 
 	#[inline]
 	#[allow(clippy::too_many_lines)]
-	pub fn try_subscription(&mut self) {
-		fn write_snbt(subscription: &FileUpdateSubscription, data: &[u8], tab: &mut Tab) {
+	pub fn try_subscription(&mut self) -> Result<()> {
+		fn write_snbt(subscription: &FileUpdateSubscription, data: &[u8], tab: &mut Tab) -> Result<()> {
 			let Some((key, value)) = core::str::from_utf8(data).ok().and_then(NbtElement::from_str) else {
-				return;
+				return Err(anyhow!("SNBT failed to parse."));
 			};
 			if value.id() == NbtChunk::ID && tab.value.id() != NbtRegion::ID {
-				return;
+				return Err(anyhow!("Chunk SNBT is only supported for Region Tabs"));
 			}
 			if let Some((&last, rest)) = subscription.indices.split_last() {
 				let (_, _, parent, mut line_number) = Navigate::new(rest.iter().copied(), &mut tab.value).last();
@@ -360,18 +364,18 @@ impl Workbench {
 					} else if let Some(region) = parent.as_region_mut() {
 						old_key = Some({
 							let Some((x, z)) = key.split_once('|') else {
-								return;
+								return Err(anyhow!("Could not find chunk delimiter"));
 							};
 							let Ok(x @ 0..=31) = x.trim_end().parse() else {
-								return;
+								return Err(anyhow!("Invalid X coordinate for chunk"));
 							};
 							let Ok(z @ 0..=31) = z.trim_start().parse() else {
-								return;
+								return Err(anyhow!("Invalid Y coordinate for chunk"));
 							};
 							let pos = ((x as u16) << 5) | z as u16;
 							let (_, chunks) = &*region.chunks;
 							if !chunks[pos as usize].is_null() {
-								return;
+								return Err(anyhow!("Replacement chunk is already filled"));
 							}
 							let mut element = region.remove(last);
 							let old_key = format_compact!("{}|{}", unsafe { element.as_chunk_unchecked().x }, unsafe { element.as_chunk_unchecked().z });
@@ -424,11 +428,14 @@ impl Workbench {
 					});
 					tab.redos.clear();
 					tab.history_changed = true;
+				} else {
+					return Err(anyhow!("Root element type cannot be changed"))
 				}
 			}
+			Ok(())
 		}
 
-		fn write_array(subscription: &FileUpdateSubscription, tab: &mut Tab, mut new_value: NbtElement) {
+		fn write_array(subscription: &FileUpdateSubscription, tab: &mut Tab, mut new_value: NbtElement) -> Result<()> {
 			let (&last, rest) = unsafe { subscription.indices.split_last().panic_unchecked("always has at least one element") };
 			let (_, _, parent, mut line_number) = Navigate::new(rest.iter().copied(), &mut tab.value).last();
 			let old_key;
@@ -465,49 +472,51 @@ impl Workbench {
 				indices: subscription.indices.clone(),
 				value: (old_key, old_value),
 			});
+			Ok(())
 		}
 
 		if let Some(subscription) = &mut self.subscription {
 			if let Some(tab) = self.tabs.iter_mut().find(|tab| tab.uuid == subscription.tab_uuid) {
-				if subscription.watcher.poll().is_err() {
+				if let Err(e) = subscription.watcher.poll().map_err(|x| anyhow!("{x}")) {
 					self.subscription = None;
-					return;
+					return Err(e);
 				};
 				match subscription.rx.try_recv() {
 					Ok(data) => match subscription.subscription_type {
-						FileUpdateSubscriptionType::Snbt => write_snbt(subscription, &data, tab),
+						FileUpdateSubscriptionType::Snbt => write_snbt(subscription, &data, tab)?,
 						FileUpdateSubscriptionType::ByteArray => write_array(subscription, tab, {
 							let mut array = NbtByteArray::new();
 							for (idx, byte) in data.into_iter().enumerate() {
 								let _ = array.insert(idx, NbtElement::Byte(NbtByte { value: byte as i8 }));
 							}
 							NbtElement::ByteArray(array)
-						}),
+						})?,
 						FileUpdateSubscriptionType::IntArray => write_array(subscription, tab, {
 							let mut array = NbtIntArray::new();
 							let iter = data.array_chunks::<4>();
 							if !iter.remainder().is_empty() {
-								return;
+								return Err(anyhow!("Expected a multiple of 4 bytes for int array"));
 							}
 							for (idx, &chunk) in iter.enumerate() {
 								let _ = array.insert(idx, NbtElement::Int(NbtInt { value: i32::from_be_bytes(chunk) }));
 							}
 							NbtElement::IntArray(array)
-						}),
+						})?,
 						FileUpdateSubscriptionType::LongArray => write_array(subscription, tab, {
 							let mut array = NbtLongArray::new();
 							let iter = data.array_chunks::<8>();
 							if !iter.remainder().is_empty() {
-								return;
+								return Err(anyhow!("Expected a multiple of 8 bytes for long array"));
 							}
 							for (idx, &chunk) in iter.enumerate() {
 								let _ = array.insert(idx, NbtElement::Long(NbtLong { value: i64::from_be_bytes(chunk) }));
 							}
 							NbtElement::LongArray(array)
-						}),
+						})?,
 					},
 					Err(TryRecvError::Disconnected) => {
 						self.subscription = None;
+						return Err(anyhow!("Could not update; file subscription disconnected."));
 					}
 					Err(TryRecvError::Empty) => {
 						// do nothing ig
@@ -515,8 +524,11 @@ impl Workbench {
 				}
 			} else {
 				self.subscription = None;
+				return Err(anyhow!("Could not update; file subscription tab closed."));
 			}
 		}
+
+		Ok(())
 	}
 
 	#[inline]
@@ -1987,6 +1999,7 @@ impl Workbench {
 		}
 		self.render_action_wheel(builder);
 		self.render_held_entry(builder);
+		self.render_alerts(builder);
 	}
 
 	#[inline]
@@ -2000,6 +2013,19 @@ impl Workbench {
 	fn render_held_entry(&self, builder: &mut VertexBufferBuilder) {
 		if let Some(element) = self.held_entry.element() {
 			NbtElement::render_icon(element.id(), (self.mouse_x.saturating_sub(8), self.mouse_y.saturating_sub(8)), HELD_ENTRY_Z, builder);
+		}
+	}
+
+	#[inline]
+	fn render_alerts(&mut self, builder: &mut VertexBufferBuilder) {
+		let mut idx = 0;
+		while let Some(alert) = self.alerts.get_mut(idx) {
+			if alert.invisible() {
+				self.alerts.remove(idx);
+			} else {
+				alert.render(builder, idx);
+				idx += 1;
+			}
 		}
 	}
 

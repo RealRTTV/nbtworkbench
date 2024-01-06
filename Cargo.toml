@@ -56,3 +56,4 @@ uuid = { version = "1.4.1", features = ["v4"] }
 compact_str = "0.7.1"
 wgsl-inline = "0.1.3" # minify no work for some reason
 static_assertions = "1.1.0"
+anyhow = "1.0.79"

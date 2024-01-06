@@ -18,6 +18,8 @@ use crate::assets::HEADER_SIZE;
 use crate::vertex_buffer_builder::VertexBufferBuilder;
 use crate::workbench::Workbench;
 use crate::{assets, OptionExt};
+use crate::alert::Alert;
+use crate::color::TextColor;
 
 pub const WINDOW_HEIGHT: usize = 420;
 pub const WINDOW_WIDTH: usize = 620;
@@ -395,7 +397,12 @@ impl State {
 			WindowEvent::Moved(_) => false,
 			WindowEvent::CloseRequested => false,
 			WindowEvent::Destroyed => false,
-			WindowEvent::DroppedFile(file) => workbench.on_open_file(file, |title| window.set_title(title)).is_some(),
+			WindowEvent::DroppedFile(file) => {
+				if let Err(e) = workbench.on_open_file(file, |title| window.set_title(title)) {
+					workbench.alert(Alert::new("Error!", TextColor::Red, e.to_string()))
+				}
+				true
+			},
 			WindowEvent::HoveredFile(_) => false,
 			WindowEvent::HoveredFileCancelled => false,
 			WindowEvent::ReceivedCharacter(_) => false,
@@ -425,7 +432,9 @@ impl State {
 			workbench.tick();
 			self.last_tick = SystemTime::now();
 		}
-		workbench.try_subscription();
+		if let Err(e) = workbench.try_subscription() {
+			workbench.alert(Alert::new("Error!", TextColor::Red, e.to_string()))
+		}
 		let output = self.surface.get_current_texture()?;
 		let view = output.texture.create_view(&TextureViewDescriptor::default());
 		let mut encoder = self.device.create_command_encoder(&CommandEncoderDescriptor { label: Some("Command Encoder") });

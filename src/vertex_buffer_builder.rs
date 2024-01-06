@@ -3,6 +3,7 @@ use std::ops::BitAnd;
 use winit::dpi::PhysicalSize;
 
 use crate::assets::{BASE_TEXT_Z, BASE_Z, TOOLTIP_UV, TOOLTIP_Z};
+use crate::color::TextColor;
 use crate::StrExt;
 
 pub struct VertexBufferBuilder {
@@ -65,7 +66,7 @@ impl VertexBufferBuilder {
 			text_coords: (0, 0),
 			dropshadow: false,
 			text_z: BASE_TEXT_Z,
-			color: 0xFFFFFF,
+			color: TextColor::White.to_raw(),
 			two_over_width: 2.0 / size.width as f32,
 			negative_two_over_height: -2.0 / size.height as f32,
 			drew_tooltip: false,
@@ -252,7 +253,7 @@ impl VertexBufferBuilder {
 		self.draw_texture_region_z(pos, z, uv, dims, dims);
 	}
 
-	#[inline]
+	#[inline(never)]
 	#[allow(clippy::many_single_char_names)]
 	pub fn draw_texture_region_z(&mut self, pos: impl Into<(usize, usize)>, z: u8, uv: impl Into<(usize, usize)>, dims: impl Into<(usize, usize)>, uv_dims: impl Into<(usize, usize)>) {
 		unsafe {

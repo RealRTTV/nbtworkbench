@@ -68,6 +68,7 @@ use elements::element::NbtElement;
 use vertex_buffer_builder::VertexBufferBuilder;
 
 use crate::assets::{BASE_TEXT_Z, BASE_Z, BOOKMARK_UV, BOOKMARK_Z, BYTE_ARRAY_GHOST_UV, BYTE_GHOST_UV, CHUNK_GHOST_UV, COMPOUND_GHOST_UV, DOUBLE_GHOST_UV, END_LINE_NUMBER_SEPARATOR_UV, FLOAT_GHOST_UV, HEADER_SIZE, HIDDEN_BOOKMARK_UV, INT_ARRAY_GHOST_UV, INT_GHOST_UV, INVALID_STRIPE_UV, LINE_NUMBER_SEPARATOR_UV, LINE_NUMBER_Z, LIST_GHOST_UV, LONG_ARRAY_GHOST_UV, LONG_GHOST_UV, REGION_GHOST_UV, SCROLLBAR_BOOKMARK_Z, SELECTED_TOGGLE_OFF_UV, SELECTED_TOGGLE_ON_UV, SHORT_GHOST_UV, STRING_GHOST_UV, TEXT_UNDERLINE_UV, TOGGLE_Z, UNSELECTED_TOGGLE_OFF_UV, UNSELECTED_TOGGLE_ON_UV};
+use crate::color::TextColor;
 use crate::elements::chunk::{NbtChunk, NbtRegion};
 use crate::elements::compound::NbtCompound;
 use crate::elements::element::{NbtByte, NbtByteArray, NbtDouble, NbtFloat, NbtInt, NbtIntArray, NbtLong, NbtLongArray, NbtShort};
@@ -87,6 +88,8 @@ pub mod workbench;
 mod workbench_action;
 mod shader;
 mod text_shader;
+mod alert;
+mod color;
 
 #[macro_export]
 macro_rules! flags {
@@ -457,13 +460,13 @@ impl RenderContext {
 				if idx % 2 == 0 {
 					0xC33C3C
 				} else {
-					0xFF5555
+					TextColor::Red.to_raw()
 				}
 			} else {
 				if idx % 2 == 0 {
 					0x777777
 				} else {
-					0xAAAAAA
+					TextColor::Gray.to_raw()
 				}
 			};
 			let color = core::mem::replace(&mut builder.color, color);
@@ -646,6 +649,16 @@ impl Ord for Bookmark {
 	fn cmp(&self, other: &Self) -> Ordering {
 		self.true_line_number.cmp(&other.true_line_number)
 	}
+}
+
+pub fn smoothstep64(x: f64) -> f64 {
+	let x = x.clamp(0.0, 1.0);
+	3.0 * x * x - 2.0 * x * x * x
+}
+
+pub fn smoothstep32(x: f32) -> f32 {
+	let x = x.clamp(0.0, 1.0);
+	3.0 * x * x - 2.0 * x * x * x
 }
 
 pub trait StrExt {
