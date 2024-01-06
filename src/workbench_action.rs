@@ -4,13 +4,13 @@ use compact_str::{CompactString, ToCompactString};
 use crate::assets::{ADD_TAIL_UV, ADD_UV, MOVE_TAIL_UV, MOVE_UV, REMOVE_TAIL_UV, REMOVE_UV, RENAME_TAIL_UV, RENAME_UV, REPLACE_TAIL_UV, REPLACE_UV};
 use crate::elements::element::NbtElement;
 use crate::vertex_buffer_builder::VertexBufferBuilder;
-use crate::{encompasses, encompasses_or_equal, panic_unchecked, FileUpdateSubscription, Position};
+use crate::{encompasses, encompasses_or_equal, panic_unchecked, FileUpdateSubscription, Position, Bookmark};
 use crate::{Navigate, OptionExt};
 
 pub enum WorkbenchAction {
 	Remove {
 		element: (Option<CompactString>, NbtElement),
-		indices: Box<[usize]>,
+		indices: Box<[usize]>
 	},
 	Add {
 		indices: Box<[usize]>,
@@ -33,21 +33,21 @@ pub enum WorkbenchAction {
 
 impl WorkbenchAction {
 	#[cfg_attr(debug_assertions, inline(never))]
-	pub fn undo(self, root: &mut NbtElement, bookmarks: &mut Vec<usize>, subscription: &mut Option<FileUpdateSubscription>, path: &mut Option<PathBuf>, name: &mut Box<str>) -> Self {
+	pub fn undo(self, root: &mut NbtElement, bookmarks: &mut Vec<Bookmark>, subscription: &mut Option<FileUpdateSubscription>, path: &mut Option<PathBuf>, name: &mut Box<str>) -> Self {
 		unsafe { self.undo0(root, bookmarks, subscription, path, name).panic_unchecked("Failed to undo action") }
 	}
 
 	#[cfg_attr(not(debug_assertions), inline(always))]
 	#[cfg_attr(debug_assertions, inline(never))]
 	#[allow(clippy::collapsible_else_if, clippy::too_many_lines, clippy::cognitive_complexity)]
-	unsafe fn undo0(self, root: &mut NbtElement, bookmarks: &mut Vec<usize>, subscription: &mut Option<FileUpdateSubscription>, path: &mut Option<PathBuf>, name: &mut Box<str>) -> Option<Self> {
+	unsafe fn undo0(self, root: &mut NbtElement, bookmarks: &mut Vec<Bookmark>, subscription: &mut Option<FileUpdateSubscription>, path: &mut Option<PathBuf>, name: &mut Box<str>) -> Option<Self> {
 		Some(match self {
 			Self::Remove { element: (key, value), indices } => {
 				let (&last, rem) = indices.split_last()?;
 				let (height, true_height) = (value.height(), value.true_height());
 
 				let mut iter = Navigate::new(rem.iter().copied(), root);
-				while let Some((position, _, _, element, line_number)) = iter.next() {
+				while let Some((position, _, _, element, mut line_number)) = iter.next() {
 					match position {
 						Position::First | Position::Middle => {
 							element.increment(height, true_height);
@@ -60,13 +60,14 @@ impl WorkbenchAction {
 							} else {
 								let _ = element.insert(last, value);
 							}
-							let start = bookmarks.binary_search(&line_number).unwrap_or_else(std::convert::identity);
+							for n in 0..last {
+								line_number += element.get(n)?.true_height();
+							}
+							line_number += 1;
+							let start = bookmarks.binary_search(&Bookmark::new(line_number, 0)).map_or_else(|x| x + 1, std::convert::identity);
 							for bookmark in bookmarks.iter_mut().skip(start) {
-								if *bookmark - line_number < true_height {
-									// do nothing, since the bookmark is within the tail node
-								} else {
-									*bookmark += true_height;
-								}
+								bookmark.true_line_number += true_height;
+								bookmark.line_number += height;
 							}
 							break;
 						}
@@ -83,18 +84,28 @@ impl WorkbenchAction {
 				Self::Add { indices }
 			}
 			Self::Add { indices } => {
-				let line_number = Navigate::new(indices.iter().copied(), root).last().3;
 				let (&last, rem) = indices.split_last()?;
-				let element = Navigate::new(rem.iter().copied(), root).last().2.remove(last)?;
-				let (height, true_height) = (element.1.height(), element.1.true_height());
+				let (_, _, parent, mut line_number) = Navigate::new(rem.iter().copied(), root).last();
+				for n in 0..last {
+					line_number += parent.get(n)?.true_height();
+				}
+				line_number += 1;
+				let (key, element) = parent.remove(last)?;
+				let (height, true_height) = (element.height(), element.true_height());
 				let mut iter = Navigate::new(rem.iter().copied(), root);
 				while let Some((_, _, _, element, _)) = iter.next() {
 					element.decrement(height, true_height);
 				}
 
-				let start = bookmarks.binary_search(&line_number).unwrap_or_else(std::convert::identity);
-				for bookmark in bookmarks.iter_mut().skip(start) {
-					*bookmark -= true_height;
+				let mut idx = bookmarks.binary_search(&Bookmark::new(line_number, 0)).unwrap_or_else(std::convert::identity);
+				while let Some(bookmark) = bookmarks.get_mut(idx) {
+					if bookmark.true_line_number - line_number < true_height {
+						let _ = bookmarks.remove(idx);
+					} else {
+						bookmark.true_line_number -= true_height;
+						bookmark.line_number -= height;
+						idx += 1;
+					}
 				}
 
 				if let Some(inner_subscription) = subscription {
@@ -108,7 +119,7 @@ impl WorkbenchAction {
 				}
 				crate::recache_along_indices(rem, root);
 
-				Self::Remove { element, indices }
+				Self::Remove { element: (key, element), indices }
 			}
 			Self::Rename { indices, key, value } => {
 				if let Some((&last, rem)) = indices.split_last() {
@@ -153,17 +164,27 @@ impl WorkbenchAction {
 				let mut changed_subscription_indices = false;
 
 				let (key, mov) = {
-					let line_number = Navigate::new(to.iter().copied(), root).last().3;
 					let (&last, rem) = to.split_last()?;
-					let element = Navigate::new(rem.iter().copied(), root).last().2.remove(last)?;
-					let (height, true_height) = (element.1.height(), element.1.true_height());
+					let (_, _, parent, mut line_number) = Navigate::new(rem.iter().copied(), root).last();
+					for n in 0..last {
+						line_number += parent.get(n)?.true_height();
+					}
+					line_number += 1;
+					let (key, element) = parent.remove(last)?;
+					let (height, true_height) = (element.height(), element.true_height());
 					let mut iter = Navigate::new(rem.iter().copied(), root);
 					while let Some((_, _, _, element, _)) = iter.next() {
 						element.decrement(height, true_height);
 					}
-					let start = bookmarks.binary_search(&line_number).unwrap_or_else(std::convert::identity);
-					for bookmark in bookmarks.iter_mut().skip(start) {
-						*bookmark -= true_height;
+					let mut idx = bookmarks.binary_search(&Bookmark::new(line_number, 0)).unwrap_or_else(std::convert::identity);
+					while let Some(bookmark) = bookmarks.get_mut(idx) {
+						if bookmark.true_line_number - line_number < true_height {
+							let _ = bookmarks.remove(idx);
+						} else {
+							bookmark.true_line_number -= true_height;
+							bookmark.line_number -= height;
+							idx += 1;
+						}
 					}
 					if let Some(subscription) = subscription {
 						if to == subscription.indices {
@@ -176,7 +197,7 @@ impl WorkbenchAction {
 						}
 					}
 					crate::recache_along_indices(rem, root);
-					element
+					(key, element)
 				};
 
 				{
@@ -213,9 +234,10 @@ impl WorkbenchAction {
 							}
 						}
 					}
-					let start = bookmarks.binary_search(&line_number).unwrap_or_else(std::convert::identity);
+					let start = bookmarks.binary_search(&Bookmark::new(line_number, 0)).map_or_else(|x| x + 1, std::convert::identity);
 					for bookmark in bookmarks.iter_mut().skip(start) {
-						*bookmark += true_height;
+						bookmark.true_line_number += true_height;
+						bookmark.line_number += height;
 					}
 					if let Some(subscription) = subscription && !changed_subscription_indices && encompasses_or_equal(rem, &subscription.indices) {
 						if subscription.indices[rem.len()] <= last {
@@ -251,12 +273,13 @@ impl WorkbenchAction {
 								}
 							}
 
-							let mut idx = bookmarks.binary_search(&line_number).unwrap_or_else(std::convert::identity);
+							let mut idx = bookmarks.binary_search(&Bookmark::new(line_number, 0)).unwrap_or_else(std::convert::identity);
 							while let Some(bookmark) = bookmarks.get_mut(idx) {
-								if *bookmark < old_true_height + line_number {
+								if bookmark.line_number < old_true_height + line_number {
 									bookmarks.remove(idx);
 								} else {
-									*bookmark = (*bookmark).wrapping_add(true_diff);
+									bookmark.true_line_number = bookmark.true_line_number.wrapping_add(true_diff);
+									bookmark.line_number = bookmark.line_number.wrapping_add(diff);
 									idx += 1;
 								}
 							}

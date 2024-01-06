@@ -1,13 +1,13 @@
 [package]
 name = "nbtworkbench"
-version = "0.1.7"
+version = "0.1.8"
 edition = "2021"
 description = "A modern NBT Editor written in rust. Optimized beyond belief"
 license-file = "LICENSE"
 repository = "https://github.com/RealRTTV/nbtworkbench"
 readme = "README.md"
-keywords = ["nbt", "window", "unsafe"]
-categories = ["nbt"] # idk
+keywords = ["nbt", "window", "unsafe", "editor", "tree"]
+categories = ["graphics", "rendering", "text-editors", "parser-implementations"] # idk
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

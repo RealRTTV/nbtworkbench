@@ -16,10 +16,7 @@ use winit::dpi::PhysicalPosition;
 use winit::event::{ElementState, KeyboardInput, MouseButton, MouseScrollDelta, VirtualKeyCode};
 use zune_inflate::DeflateDecoder;
 
-use crate::assets::{
-	ACTION_WHEEL_Z, BASE_TEXT_Z, BASE_Z, DARK_STRIPE_UV, EDITED_UV, HEADER_SIZE, HELD_ENTRY_Z, HORIZONTAL_SEPARATOR_UV, HOVERED_STRIPE_UV, HOVERED_WIDGET_UV, JUST_OVERLAPPING_BASE_TEXT_Z,
-	LIGHT_STRIPE_UV, SELECTED_ACTION_WHEEL, SELECTED_WIDGET_UV, TRAY_UV, UNEDITED_UV, UNSELECTED_ACTION_WHEEL, UNSELECTED_WIDGET_UV,
-};
+use crate::assets::{ACTION_WHEEL_Z, BASE_TEXT_Z, BASE_Z, BOOKMARK_UV, DARK_STRIPE_UV, EDITED_UV, HEADER_SIZE, HELD_ENTRY_Z, HIDDEN_BOOKMARK_UV, HORIZONTAL_SEPARATOR_UV, HOVERED_STRIPE_UV, HOVERED_WIDGET_UV, JUST_OVERLAPPING_BASE_TEXT_Z, LIGHT_STRIPE_UV, SELECTED_ACTION_WHEEL, SELECTED_WIDGET_UV, TRAY_UV, UNEDITED_UV, UNSELECTED_ACTION_WHEEL, UNSELECTED_WIDGET_UV};
 use crate::elements::chunk::{NbtChunk, NbtRegion};
 use crate::elements::compound::NbtCompound;
 use crate::elements::element::NbtElement;
@@ -33,10 +30,7 @@ use crate::vertex_buffer_builder::Vec2u;
 use crate::vertex_buffer_builder::VertexBufferBuilder;
 use crate::window::{WINDOW_HEIGHT, WINDOW_WIDTH};
 use crate::workbench_action::WorkbenchAction;
-use crate::{
-	encompasses, encompasses_or_equal, flags, panic_unchecked, recache_along_indices, sum_indices, DropFn, FileUpdateSubscription, FileUpdateSubscriptionType, HeldEntry, LinkedQueue, OptionExt,
-	Position, RenderContext, StrExt,
-};
+use crate::{encompasses, encompasses_or_equal, flags, panic_unchecked, recache_along_indices, sum_indices, DropFn, FileUpdateSubscription, FileUpdateSubscriptionType, HeldEntry, LinkedQueue, OptionExt, Position, RenderContext, StrExt, Bookmark};
 
 pub struct Workbench {
 	pub tabs: Vec<Tab>,
@@ -404,9 +398,10 @@ impl Workbench {
 					line_number += unsafe { parent.get_mut(idx).panic_unchecked("always valid idx") }.true_height();
 				}
 				line_number += 1;
-				let idx = tab.bookmarks.binary_search(&line_number).unwrap_or_else(identity);
-				for bookmark in tab.bookmarks.iter_mut().skip(idx).take_while(|bookmark| **bookmark < line_number + old_true_height) {
-					*bookmark = (*bookmark).wrapping_add(true_diff);
+				let idx = tab.bookmarks.binary_search(&Bookmark::new(line_number, 0)).unwrap_or_else(identity);
+				for bookmark in tab.bookmarks.iter_mut().skip(idx).take_while(|bookmark| bookmark.true_line_number < line_number + old_true_height) {
+					bookmark.true_line_number = bookmark.true_line_number.wrapping_add(true_diff);
+					bookmark.line_number = bookmark.line_number.wrapping_add(diff);
 				}
 				let mut iter = Navigate::new(rest.iter().copied(), &mut tab.value);
 				while let Some((_, _, _, parent, _)) = iter.next() {
@@ -456,9 +451,10 @@ impl Workbench {
 				line_number += unsafe { parent.get_mut(idx).panic_unchecked("valid idx") }.true_height();
 			}
 			line_number += 1;
-			let idx = tab.bookmarks.binary_search(&line_number).unwrap_or_else(identity);
-			for bookmark in tab.bookmarks.iter_mut().skip(idx).take_while(|bookmark| **bookmark < line_number + old_true_height) {
-				*bookmark = (*bookmark).wrapping_add(true_diff);
+			let idx = tab.bookmarks.binary_search(&Bookmark::new(line_number, 0)).unwrap_or_else(identity);
+			for bookmark in tab.bookmarks.iter_mut().skip(idx).take_while(|bookmark| bookmark.true_line_number < line_number + old_true_height) {
+				bookmark.true_line_number = bookmark.true_line_number.wrapping_add(true_diff);
+				bookmark.line_number = bookmark.line_number.wrapping_add(diff);
 			}
 			let mut iter = Navigate::new(rest.iter().copied(), &mut tab.value);
 			while let Some((_, _, _, parent, _)) = iter.next() {
@@ -560,12 +556,13 @@ impl Workbench {
 
 			recache_along_indices(&indices[..indices.len() - 1], &mut tab.value);
 			value.1.shut();
-			let mut idx = tab.bookmarks.binary_search(&line_number).unwrap_or_else(identity);
+			let mut idx = tab.bookmarks.binary_search(&Bookmark::new(line_number, 0)).unwrap_or_else(identity);
 			while let Some(bookmark) = tab.bookmarks.get_mut(idx) {
-				if *bookmark - line_number < true_height {
+				if bookmark.true_line_number - line_number < true_height {
 					let _ = tab.bookmarks.remove(idx);
 				} else {
-					*bookmark -= true_height;
+					bookmark.true_line_number -= true_height;
+					bookmark.line_number -= height;
 					idx += 1;
 				}
 			}
@@ -627,12 +624,13 @@ impl Workbench {
 				}
 			}
 			recache_along_indices(&indices[..indices.len() - 1], &mut tab.value);
-			let start = tab.bookmarks.binary_search(&line_number).unwrap_or_else(identity);
+			let start = tab.bookmarks.binary_search(&Bookmark::new(line_number, 0)).unwrap_or_else(identity);
 			for bookmark in tab.bookmarks.iter_mut().skip(start) {
-				if *bookmark - line_number < true_height {
+				if bookmark.true_line_number - line_number < true_height {
 					// do nothing, since the bookmark is within the tail node
 				} else {
-					*bookmark += true_height;
+					bookmark.true_line_number += true_height;
+					bookmark.line_number += height;
 				}
 			}
 			if let Some(subscription) = &mut self.subscription && encompasses(&indices[..indices.len() - 1], &subscription.indices) {
@@ -716,12 +714,13 @@ impl Workbench {
 				unsafe { panic_unchecked("parents were dodged") }
 			};
 			recache_along_indices(&indices[..indices.len() - 1], &mut tab.value);
-			let mut idx = tab.bookmarks.binary_search(&line_number).unwrap_or_else(identity);
+			let mut idx = tab.bookmarks.binary_search(&Bookmark::new(line_number, 0)).unwrap_or_else(identity);
 			while let Some(bookmark) = tab.bookmarks.get_mut(idx) {
-				if *bookmark - line_number < true_height {
+				if bookmark.true_line_number - line_number < true_height {
 					let _ = tab.bookmarks.remove(idx);
 				} else {
-					*bookmark += true_height;
+					bookmark.true_line_number -= true_height;
+					bookmark.line_number -= height;
 					idx += 1;
 				}
 			}
@@ -776,7 +775,7 @@ impl Workbench {
 
 				self.selected_text = None;
 			}
-			DropFn::Dropped(_, true_height, _, line_number) => {
+			DropFn::Dropped(height, true_height, _, line_number) => {
 				if let Some(from_indices) = from_indices {
 					if let Some(subscription) = &mut self.subscription && encompasses_or_equal(&from_indices, &subscription.indices) {
 						let (_, rest) = subscription.indices.split_at(from_indices.len());
@@ -799,13 +798,10 @@ impl Workbench {
 					});
 				}
 				recache_along_indices(&indices[..indices.len() - 1], &mut tab.value);
-				let start = tab.bookmarks.binary_search(&line_number).unwrap_or_else(identity);
+				let start = tab.bookmarks.binary_search(&Bookmark::new(line_number, 0)).unwrap_or_else(identity);
 				for bookmark in tab.bookmarks.iter_mut().skip(start) {
-					if *bookmark - line_number < true_height {
-						// do nothing, since the bookmark is within the tail node
-					} else {
-						*bookmark += true_height;
-					}
+					bookmark.true_line_number += true_height;
+					bookmark.line_number += height;
 				}
 				self.subscription = None;
 			}
@@ -932,7 +928,8 @@ impl Workbench {
 			return false;
 		}
 
-		let (depth, (_, _, element, _)) = Traverse::new(y, &mut tab.value).enumerate().last();
+		let (depth, (_, _, element, line_number)) = Traverse::new(y, &mut tab.value).enumerate().last();
+		let true_height = element.true_height();
 
 		if depth != x && !ignore_depth {
 			return false;
@@ -947,6 +944,7 @@ impl Workbench {
 		if increment == 0 {
 			return true;
 		}
+		let open = element.open();
 
 		let mut iter = TraverseParents::new(y, &mut tab.value);
 		let mut indices = Vec::with_capacity(depth);
@@ -958,6 +956,32 @@ impl Workbench {
 		tab.scroll = tab.scroll();
 		// toggle has no effect on true height
 		recache_along_indices(&indices, &mut tab.value);
+		let element = unsafe { Traverse::new(y, &mut tab.value).last().panic_unchecked("nothing is wrong i didn't do .next") }.2;
+		let start = tab.bookmarks.binary_search(&Bookmark::new(line_number, 0)).unwrap_or_else(identity);
+		let mut next_line_number = line_number;
+		let mut next_line_number_idx = 0;
+		for bookmark in tab.bookmarks.iter_mut().skip(start) {
+			if bookmark.true_line_number - line_number < true_height {
+				if open {
+					while next_line_number < bookmark.true_line_number {
+						next_line_number += unsafe { element.get(next_line_number_idx).panic_unchecked("expected index to be valid for parent index") }.true_height();
+						next_line_number_idx += 1;
+					}
+					let new_line_number = y + next_line_number_idx + 1;
+					bookmark.line_number = new_line_number;
+					if bookmark.true_line_number == next_line_number {
+						bookmark.uv = BOOKMARK_UV;
+					} else {
+						bookmark.uv = HIDDEN_BOOKMARK_UV;
+					}
+				} else {
+					bookmark.line_number = y;
+					bookmark.uv = HIDDEN_BOOKMARK_UV;
+				}
+			} else {
+				bookmark.line_number = bookmark.line_number.wrapping_add(increment);
+			}
+		}
 		true
 	}
 
@@ -1021,11 +1045,12 @@ impl Workbench {
 				.panic_unchecked("Traverse always has something")
 		}
 		.3;
-		match tab.bookmarks.binary_search(&true_height) {
+		let line_number = Bookmark::new(true_height, (self.mouse_y + scroll - HEADER_SIZE) / 16);
+		match tab.bookmarks.binary_search(&line_number) {
 			Ok(idx) => {
 				let _ = tab.bookmarks.remove(idx);
 			}
-			Err(idx) => tab.bookmarks.insert(idx, true_height),
+			Err(idx) => tab.bookmarks.insert(idx, line_number),
 		}
 		true
 	}
@@ -1369,12 +1394,12 @@ impl Workbench {
 
 	#[inline]
 	pub fn force_close(&mut self) {
-		if let Some(SelectedText { indices, .. }) = self.selected_text.as_ref() {
+		if let Some(SelectedText { indices, y, .. }) = self.selected_text.as_ref() {
 			let indices = indices.clone();
 			let Some(tab) = self.tabs.get_mut(self.tab) else {
 				return;
 			};
-			let element = Navigate::new(indices.iter().copied(), &mut tab.value).last().2;
+			let (_, _, element, line_number) = Navigate::new(indices.iter().copied(), &mut tab.value).last();
 			let decrement = element.height() - 1;
 			if element.open() && element.toggle().is_some() {
 				let mut iter = Navigate::new(indices.iter().copied(), &mut tab.value);
@@ -1384,19 +1409,25 @@ impl Workbench {
 					}
 				}
 				recache_along_indices(&indices, &mut tab.value);
+				let start = tab.bookmarks.binary_search(&Bookmark::new(line_number, 0)).unwrap_or_else(identity);
+				for bookmark in tab.bookmarks.iter_mut().skip(start) {
+					bookmark.line_number = (*y - HEADER_SIZE) / 16;
+					bookmark.uv = HIDDEN_BOOKMARK_UV;
+				}
 			}
 		}
 	}
 
 	#[inline]
 	pub fn force_open(&mut self) {
-		if let Some(SelectedText { indices, .. }) = self.selected_text.as_ref() {
+		if let Some(SelectedText { indices, y, .. }) = self.selected_text.as_ref() {
 			let indices = indices.clone();
 			let Some(tab) = self.tabs.get_mut(self.tab) else {
 				return;
 			};
 			let shift = self.held_keys.contains(&VirtualKeyCode::LShift) | self.held_keys.contains(&VirtualKeyCode::RShift);
-			let element = Navigate::new(indices.iter().copied(), &mut tab.value).last().2;
+			let (_, _, element, line_number) = Navigate::new(indices.iter().copied(), &mut tab.value).last();
+			let true_height = element.true_height();
 			let pred = if shift {
 				std::thread::scope(|scope| element.expand(scope));
 				true
@@ -1412,6 +1443,39 @@ impl Workbench {
 					}
 				}
 				recache_along_indices(&indices, &mut tab.value);
+				let start = tab.bookmarks.binary_search(&Bookmark::new(line_number, 0)).unwrap_or_else(identity);
+				if shift {
+					let parent_line_number = (*y - HEADER_SIZE) / 16;
+					for bookmark in tab.bookmarks.iter_mut().skip(start) {
+						if bookmark.true_line_number - line_number < true_height {
+							bookmark.line_number = parent_line_number + bookmark.true_line_number - line_number;
+							bookmark.uv = BOOKMARK_UV;
+						} else {
+							bookmark.line_number += increment;
+						}
+					}
+				} else {
+					let element = Navigate::new(indices.iter().copied(), &mut tab.value).last().2;
+					let mut next_line_number = line_number;
+					let mut next_line_number_idx = 0;
+					for bookmark in tab.bookmarks.iter_mut().skip(start) {
+						if bookmark.true_line_number - line_number < true_height {
+							while next_line_number < bookmark.true_line_number {
+								next_line_number += unsafe { element.get(next_line_number_idx).panic_unchecked("expected index to be valid for parent index") }.true_height();
+								next_line_number_idx += 1;
+							}
+							let new_line_number = y + next_line_number_idx + 1;
+							bookmark.line_number = new_line_number;
+							if bookmark.true_line_number == next_line_number {
+								bookmark.uv = BOOKMARK_UV;
+							} else {
+								bookmark.uv = HIDDEN_BOOKMARK_UV;
+							}
+						} else {
+							bookmark.line_number += increment;
+						}
+					}
+				}
 			}
 		}
 	}
@@ -1911,7 +1975,7 @@ impl Workbench {
 				}
 			}),
 		);
-		let mut ctx = RenderContext::new(forbidden, ghost, left_margin, (self.mouse_x, self.mouse_y), self.window_width);
+		let mut ctx = RenderContext::new(forbidden, ghost, left_margin, (self.mouse_x, self.mouse_y));
 		tab.render(builder, &mut ctx, self.scrollbar_offset.is_some(), self.held_entry.element());
 		if let Some(selected_text) = &self.selected_text {
 			builder.horizontal_scroll = horizontal_scroll;

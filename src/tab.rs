@@ -16,7 +16,7 @@ use crate::elements::compound::NbtCompound;
 use crate::elements::element::NbtElement;
 use crate::vertex_buffer_builder::{Vec2u, VertexBufferBuilder};
 use crate::workbench_action::WorkbenchAction;
-use crate::{LinkedQueue, RenderContext, StrExt};
+use crate::{Bookmark, LinkedQueue, RenderContext, StrExt};
 
 pub struct Tab {
 	pub value: Box<NbtElement>,
@@ -31,7 +31,7 @@ pub struct Tab {
 	pub window_height: usize,
 	pub window_width: usize,
 	// must be ordered least to greatest
-	pub bookmarks: Vec<usize>,
+	pub bookmarks: Vec<Bookmark>,
 	pub uuid: Uuid,
 	pub freehand_mode: bool,
 }
@@ -101,6 +101,8 @@ impl Tab {
 			}
 		}
 
+		ctx.render_scrollbar_bookmarks(builder, &self.bookmarks, &self.value);
+
 		{
 			let mut tail = self.undos.tail.as_deref();
 			builder.draw_texture((builder.window_width() - 107, 27), LINE_NUMBER_SEPARATOR_UV + (0, 1), (2, 14));
@@ -138,7 +140,7 @@ impl Tab {
 			let freehand_uv = {
 				let hovering = (builder.window_width() - 16..builder.window_width()).contains(&mouse_x) && (26..42).contains(&mouse_y);
 				if hovering {
-					builder.draw_tooltip(&["Freehand Mode (alt + f)"], (mouse_x, mouse_y));
+					builder.draw_tooltip(&["Freehand Mode (Alt + F)"], (mouse_x, mouse_y));
 				}
 
 				if self.freehand_mode {

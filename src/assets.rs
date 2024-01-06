@@ -135,8 +135,9 @@ pub const SELECTED_TEXT_Z: u8 = 130;
 pub const ELEMENT_HIGHLIGHT_Z: u8 = SELECTED_TEXT_Z;
 pub const ACTION_WHEEL_Z: u8 = 190;
 pub const SCROLLBAR_Z: u8 = 200;
+pub const SCROLLBAR_BOOKMARK_Z: u8 = SCROLLBAR_Z + 1;
 pub const HELD_ENTRY_Z: u8 = 210;
-pub const TOOLTIP_Z: u8 = 240;
+pub const TOOLTIP_Z: u8 = 250;
 
 #[allow(clippy::cast_ptr_alignment)]
 pub fn icon() -> Vec<u8> {

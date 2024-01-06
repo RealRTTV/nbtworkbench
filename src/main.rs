@@ -55,6 +55,7 @@
 #![feature(const_collections_with_hasher)]
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
+use std::cmp::Ordering;
 use std::convert::identity;
 use std::fmt::Write;
 
@@ -66,11 +67,7 @@ use uuid::Uuid;
 use elements::element::NbtElement;
 use vertex_buffer_builder::VertexBufferBuilder;
 
-use crate::assets::{
-	BASE_TEXT_Z, BASE_Z, BOOKMARK_UV, BOOKMARK_Z, BYTE_ARRAY_GHOST_UV, BYTE_GHOST_UV, CHUNK_GHOST_UV, COMPOUND_GHOST_UV, DOUBLE_GHOST_UV, END_LINE_NUMBER_SEPARATOR_UV, FLOAT_GHOST_UV, HEADER_SIZE,
-	HIDDEN_BOOKMARK_UV, INT_ARRAY_GHOST_UV, INT_GHOST_UV, INVALID_STRIPE_UV, LINE_NUMBER_SEPARATOR_UV, LINE_NUMBER_Z, LIST_GHOST_UV, LONG_ARRAY_GHOST_UV, LONG_GHOST_UV, REGION_GHOST_UV,
-	SELECTED_TOGGLE_OFF_UV, SELECTED_TOGGLE_ON_UV, SHORT_GHOST_UV, STRING_GHOST_UV, TEXT_UNDERLINE_UV, TOGGLE_Z, UNSELECTED_TOGGLE_OFF_UV, UNSELECTED_TOGGLE_ON_UV,
-};
+use crate::assets::{BASE_TEXT_Z, BASE_Z, BOOKMARK_UV, BOOKMARK_Z, BYTE_ARRAY_GHOST_UV, BYTE_GHOST_UV, CHUNK_GHOST_UV, COMPOUND_GHOST_UV, DOUBLE_GHOST_UV, END_LINE_NUMBER_SEPARATOR_UV, FLOAT_GHOST_UV, HEADER_SIZE, HIDDEN_BOOKMARK_UV, INT_ARRAY_GHOST_UV, INT_GHOST_UV, INVALID_STRIPE_UV, LINE_NUMBER_SEPARATOR_UV, LINE_NUMBER_Z, LIST_GHOST_UV, LONG_ARRAY_GHOST_UV, LONG_GHOST_UV, REGION_GHOST_UV, SCROLLBAR_BOOKMARK_Z, SELECTED_TOGGLE_OFF_UV, SELECTED_TOGGLE_ON_UV, SHORT_GHOST_UV, STRING_GHOST_UV, TEXT_UNDERLINE_UV, TOGGLE_Z, UNSELECTED_TOGGLE_OFF_UV, UNSELECTED_TOGGLE_ON_UV};
 use crate::elements::chunk::{NbtChunk, NbtRegion};
 use crate::elements::compound::NbtCompound;
 use crate::elements::element::{NbtByte, NbtByteArray, NbtDouble, NbtFloat, NbtInt, NbtIntArray, NbtLong, NbtLongArray, NbtShort};
@@ -136,7 +133,6 @@ macro_rules! hash {
 /// * [chunk](NbtChunk) section rendering
 /// # Minor Features
 /// * __ctrl + h__, open a playground `nbt` file to help with user interaction (bonus points if I have some way to tell if you haven't used this editor before)
-/// * bookmark positions on the scrollbar section (i'd suggest a `Bookmark` struct and height manipulation on toggles and drops and stuff)
 /// * [`last_modified`] field actually gets some impl
 /// * warnings for closing files that have unsaved changes (and closing the program with unsaved changes)
 /// * autosave
@@ -340,13 +336,12 @@ pub struct RenderContext {
 	pub y_offset: usize,
 	// must be sorted least to greatest
 	line_numbers: Vec<usize>,
-	window_width: usize,
 }
 
 impl RenderContext {
 	#[must_use]
 	#[allow(clippy::type_complexity)] // forbidden is fine to be like that, c'mon
-	pub fn new(forbidden: (usize, Option<(Box<str>, Box<str>)>), ghost: Option<(u8, usize, usize, usize)>, left_margin: usize, mouse: (usize, usize), window_width: usize) -> Self {
+	pub fn new(forbidden: (usize, Option<(Box<str>, Box<str>)>), ghost: Option<(u8, usize, usize, usize)>, left_margin: usize, mouse: (usize, usize)) -> Self {
 		Self {
 			forbidden_y: forbidden.0,
 			forbidden_key: forbidden.1,
@@ -362,7 +357,6 @@ impl RenderContext {
 			y_offset: HEADER_SIZE,
 			line_numbers: vec![],
 			ghost_line_number: None,
-			window_width,
 		}
 	}
 
@@ -415,7 +409,7 @@ impl RenderContext {
 	#[inline]
 	pub fn draw_forbid_underline_width(&self, x: usize, y: usize, overridden_width: usize, builder: &mut VertexBufferBuilder) {
 		if self.forbidden_key.is_some() {
-			builder.draw_texture_region_z((x, y), BASE_Z, INVALID_STRIPE_UV + (1, 1), (self.window_width, 16), (14, 14));
+			builder.draw_texture_region_z((x, y), BASE_Z, INVALID_STRIPE_UV + (1, 1), (builder.window_width(), 16), (14, 14));
 			builder.draw_texture_region_z((x + 20, y + 14), BASE_Z, TEXT_UNDERLINE_UV, (overridden_width, 2), (16, 2));
 		}
 	}
@@ -439,10 +433,10 @@ impl RenderContext {
 	}
 
 	#[inline]
-	pub fn render_line_numbers(&self, builder: &mut VertexBufferBuilder, mut bookmarks: &[usize]) {
+	pub fn render_line_numbers(&self, builder: &mut VertexBufferBuilder, mut bookmarks: &[Bookmark]) {
 		let start = self.line_numbers.first();
 		while let Some((&first, rest)) = bookmarks.split_first() {
-			if start.is_some_and(|&start| start > first) {
+			if start.is_some_and(|&start| start > first.true_line_number) {
 				bookmarks = rest;
 			} else {
 				break;
@@ -477,11 +471,11 @@ impl RenderContext {
 			let _ = write!(builder, "{render_line_number}");
 			builder.color = color;
 
-			if let Some((&first, rest)) = bookmarks.split_first() && self.ghost_line_number.is_none_or(|(offset, _)| render_line_number != offset) && actual_line_number == first {
+			if let Some((&first, rest)) = bookmarks.split_first() && self.ghost_line_number.is_none_or(|(offset, _)| render_line_number != offset) && actual_line_number == first.true_line_number {
 				bookmarks = rest;
 				builder.draw_texture_region_z((2, y + 2), BOOKMARK_Z, BOOKMARK_UV, (builder.text_coords.0, 12), (16, 16));
 			}
-			if let Some((&first, rest)) = bookmarks.split_first() && next_line_number.is_none_or(|next_line_number| self.ghost_line_number.is_none_or(|(offset, _)| next_line_number != offset) && actual_line_number <= first && first < next_line_number) {
+			while let Some((&first, rest)) = bookmarks.split_first() && next_line_number.is_none_or(|next_line_number| self.ghost_line_number.is_none_or(|(offset, _)| next_line_number != offset) && actual_line_number <= first.true_line_number && first.true_line_number < next_line_number) {
 				bookmarks = rest;
 				builder.draw_texture_region_z((2, y + 15), BOOKMARK_Z, HIDDEN_BOOKMARK_UV, (builder.text_coords.0, 2), (16, 16));
 			}
@@ -493,6 +487,15 @@ impl RenderContext {
 			};
 			builder.draw_texture_z((builder.text_coords.0 + 4, y), LINE_NUMBER_Z, uv, (2, 16));
 			y += 16;
+		}
+	}
+
+	#[inline]
+	pub fn render_scrollbar_bookmarks(&self, builder: &mut VertexBufferBuilder, bookmarks: &[Bookmark], root: &NbtElement) {
+		let height = root.height();
+		for bookmark in bookmarks {
+			let y = HEADER_SIZE + (bookmark.line_number * (builder.window_height() - HEADER_SIZE)) / height;
+			builder.draw_texture_z((builder.window_width() - 8, y), SCROLLBAR_BOOKMARK_Z, bookmark.uv, (8, 2));
 		}
 	}
 
@@ -606,6 +609,42 @@ impl<T: Clone> Clone for SinglyLinkedNode<T> {
 			value: self.value.clone(),
 			prev: self.prev.clone(),
 		}
+	}
+}
+
+#[derive(Copy, Clone)]
+pub struct Bookmark {
+	true_line_number: usize,
+	line_number: usize,
+	uv: Vec2u,
+}
+
+impl Bookmark {
+	pub fn new(true_line_number: usize, line_number: usize) -> Self {
+		Self {
+			true_line_number,
+			line_number,
+			uv: BOOKMARK_UV,
+		}
+	}
+}
+
+impl PartialEq for Bookmark {
+	fn eq(&self, other: &Self) -> bool {
+		self.true_line_number.eq(&other.true_line_number)
+	}
+}
+
+impl Eq for Bookmark {}
+
+impl PartialOrd<Self> for Bookmark {
+	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+		Some(self.cmp(other))
+	}
+}
+impl Ord for Bookmark {
+	fn cmp(&self, other: &Self) -> Ordering {
+		self.true_line_number.cmp(&other.true_line_number)
 	}
 }
 
