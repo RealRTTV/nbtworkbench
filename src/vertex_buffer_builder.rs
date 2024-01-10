@@ -68,8 +68,8 @@ impl VertexBufferBuilder {
 			dropshadow: false,
 			text_z: BASE_TEXT_Z,
 			color: TextColor::White.to_raw(),
-			two_over_width: 2.0 / (size.width - size.width % scale as u32) as f32,
-			negative_two_over_height: -2.0 / (size.height - size.height % scale as u32) as f32,
+			two_over_width: 2.0 / size.width as f32,
+			negative_two_over_height: -2.0 / size.height as f32,
 			drew_tooltip: false,
 			scale: scale as f32,
 		}
