@@ -26,6 +26,7 @@ pub struct VertexBufferBuilder {
 	two_over_width: f32,
 	negative_two_over_height: f32,
 	drew_tooltip: bool,
+	scale: f32,
 }
 
 impl core::fmt::Write for VertexBufferBuilder {
@@ -49,7 +50,7 @@ impl core::fmt::Write for VertexBufferBuilder {
 impl VertexBufferBuilder {
 	pub const CHAR_WIDTH: &'static [u8] = include_bytes!("assets/char_widths.hex");
 
-	pub fn new(size: PhysicalSize<u32>, texture_width: usize, texture_height: usize, scroll: usize) -> Self {
+	pub fn new(size: PhysicalSize<u32>, texture_width: usize, texture_height: usize, scroll: usize, scale: usize) -> Self {
 		Self {
 			vertices: Vec::with_capacity(98304),
 			indices: Vec::with_capacity(65536),
@@ -67,9 +68,10 @@ impl VertexBufferBuilder {
 			dropshadow: false,
 			text_z: BASE_TEXT_Z,
 			color: TextColor::White.to_raw(),
-			two_over_width: 2.0 / size.width as f32,
-			negative_two_over_height: -2.0 / size.height as f32,
+			two_over_width: 2.0 / (size.width - size.width % scale as u32) as f32,
+			negative_two_over_height: -2.0 / (size.height - size.height % scale as u32) as f32,
 			drew_tooltip: false,
+			scale: scale as f32,
 		}
 	}
 
@@ -148,15 +150,15 @@ impl VertexBufferBuilder {
 				self.text_vertices.reserve_exact(98304);
 				self.text_indices.reserve_exact(36864);
 			}
-			let x = (x as isize - self.horizontal_scroll as isize) as f32;
-			let y = y as f32;
+			let x = (x as isize - self.horizontal_scroll as isize) as f32 * self.scale;
+			let y = y as f32 *  self.scale;
 			let z_and_color = f32::from_bits(((255 - z) as u32) | (color << 8));
 			let char = f32::from_bits(char as u32);
 
 			let x0 = x.mul_add(self.two_over_width, -1.0);
-			let x1 = self.two_over_width.mul_add(16.0, x0);
+			let x1 = self.two_over_width.mul_add(16.0 * self.scale, x0);
 			let y1 = y.mul_add(self.negative_two_over_height, 1.0);
-			let y0 = self.negative_two_over_height.mul_add(16.0, y1);
+			let y0 = self.negative_two_over_height.mul_add(16.0 * self.scale, y1);
 
 			let len = self.text_vertices_len;
 			let vec = &mut self.text_vertices;
@@ -203,13 +205,13 @@ impl VertexBufferBuilder {
 	}
 
 	#[inline]
-	pub const fn window_height(&self) -> usize {
-		self.window_height as usize
+	pub fn window_height(&self) -> usize {
+		(self.window_height / self.scale) as usize
 	}
 
 	#[inline]
-	pub const fn window_width(&self) -> usize {
-		self.window_width as usize
+	pub fn window_width(&self) -> usize {
+		(self.window_width / self.scale) as usize
 	}
 
 	#[inline]
@@ -261,13 +263,13 @@ impl VertexBufferBuilder {
 			let uv = uv.into();
 			let dims = dims.into();
 			let uv_dims = uv_dims.into();
-			let x = (pos.0 as isize - self.horizontal_scroll as isize) as f32;
-			let y = pos.1 as f32;
+			let x = (pos.0 as isize - self.horizontal_scroll as isize) as f32 * self.scale;
+			let y = pos.1 as f32 * self.scale;
 			let z = 1.0 - z as f32 / 256.0;
 			let u = uv.0 as f32;
 			let v = uv.1 as f32;
-			let width = dims.0 as f32;
-			let height = dims.1 as f32;
+			let width = dims.0 as f32 * self.scale;
+			let height = dims.1 as f32 * self.scale;
 			let uv_width = uv_dims.0 as f32;
 			let uv_height = uv_dims.1 as f32;
 

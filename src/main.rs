@@ -382,7 +382,7 @@ impl RenderContext {
 		let x = (pos.0 - self.left_margin) / 16;
 		let y = (pos.1 - HEADER_SIZE) / 16;
 		let hovered = if (self.mouse_x >= self.left_margin) & (self.mouse_y >= HEADER_SIZE) {
-			(x == (self.mouse_x - self.left_margin) / 16) & (y == (self.mouse_y - HEADER_SIZE) / 16)
+			(x >= (self.mouse_x - self.left_margin) / 16) & (y == (self.mouse_y - HEADER_SIZE) / 16)
 		} else {
 			false
 		};

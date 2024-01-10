@@ -39,10 +39,14 @@ use crate::color::TextColor;
 pub struct Workbench {
 	pub tabs: Vec<Tab>,
 	pub tab: usize,
+	raw_mouse_x: usize,
 	mouse_x: usize,
+	raw_mouse_y: usize,
 	mouse_y: usize,
 	pub window_height: usize,
+	raw_window_height: usize,
 	pub window_width: usize,
+	raw_window_width: usize,
 	held_mouse_keys: FxHashSet<MouseButton>,
 	held_keys: FxHashSet<VirtualKeyCode>,
 	pub held_entry: HeldEntry,
@@ -54,6 +58,7 @@ pub struct Workbench {
 	subscription: Option<FileUpdateSubscription>,
 	pub cursor_visible: bool,
 	alerts: Vec<Alert>,
+	pub scale: usize,
 }
 
 impl Workbench {
@@ -63,10 +68,14 @@ impl Workbench {
 		let mut workbench = Self {
 			tabs: vec![],
 			tab: 0,
+			raw_mouse_x: 0,
 			mouse_x: 0,
+			raw_mouse_y: 0,
 			mouse_y: 0,
 			window_height: WINDOW_HEIGHT,
+			raw_window_height: WINDOW_HEIGHT,
 			window_width: WINDOW_WIDTH,
+			raw_window_width: WINDOW_WIDTH,
 			held_mouse_keys: FxHashSet::with_hasher(FxBuildHasher::default()),
 			held_keys: FxHashSet::with_hasher(FxBuildHasher::default()),
 			held_entry: HeldEntry::Empty,
@@ -78,6 +87,7 @@ impl Workbench {
 			subscription: None,
 			cursor_visible: true,
 			alerts: vec![],
+			scale: 1,
 		};
 		if let Some(x) = &std::env::args().nth(1).and_then(|x| PathBuf::from_str(&x).ok()) {
 			if let Err(e) = workbench.on_open_file(x, f) {
@@ -161,7 +171,7 @@ impl Workbench {
 							}
 							tabs_width
 						}
-						.saturating_sub(self.window_width),
+							.saturating_sub(self.window_width),
 					);
 				} else {
 					let Some(tab) = self.tabs.get_mut(self.tab) else {
@@ -257,8 +267,10 @@ impl Workbench {
 			self.held_mouse_keys.insert(button);
 			'a: {
 				if self.tab().is_some_and(|tab| !tab.freehand_mode) && self.held_entry.is_empty() && (24..46).contains(&y) && button == MouseButton::Left {
-					if self.hold_entry(button) {
-						break 'a;
+					match self.hold_entry(button) {
+						Ok(true) => break 'a,
+						Err(e) => self.alert(Alert::new("Error!", TextColor::Red, e.to_string())),
+						_ => {},
 					}
 				}
 				if self.tab().is_some_and(|tab| !tab.freehand_mode) && self.held_entry.is_empty() && y >= HEADER_SIZE + 16 && x >= self.left_margin() + 16 && button == MouseButton::Left {
@@ -822,10 +834,19 @@ impl Workbench {
 	}
 
 	#[inline]
-	fn hold_entry(&mut self, button: MouseButton) -> bool {
+	fn hold_entry(&mut self, button: MouseButton) -> Result<bool> {
 		if let Some(tab) = self.tab() && button == MouseButton::Left {
-			if self.mouse_x & !0b1111 == 208 && let Some(element) = cli_clipboard::get_contents().ok().and_then(|x| NbtElement::from_str(&x)) && (element.1.id() != NbtChunk::ID || tab.value.id() == NbtRegion::ID) {
-				self.held_entry = HeldEntry::FromAether(element);
+			if self.mouse_x / 16 == 13 {
+				match NbtElement::from_str(&cli_clipboard::get_contents().map_err(|e| anyhow!("{}", e.to_string()))?) {
+					Some((key, element)) => {
+						if element.id() == NbtChunk::ID && tab.value.id() != NbtRegion::ID {
+							return Err(anyhow!("Chunks are not supported for non-region tabs"))
+						} else {
+							self.held_entry = HeldEntry::FromAether((key, element))
+						}
+					},
+					None => return Err(anyhow!("Could not parse clipboard as SNBT"))
+				}
 			} else {
 				self.held_entry = unsafe { HeldEntry::FromAether((None, NbtElement::from_id(match self.mouse_x / 16 {
 					0 => NbtByte::ID,
@@ -841,11 +862,11 @@ impl Workbench {
 					10 => NbtList::ID,
 					11 => NbtCompound::ID,
 					12 if tab.value.id() == NbtRegion::ID => NbtChunk::ID,
-					_ => return false
+					_ => return Ok(false)
 				}).panic_unchecked("Type was invalid somehow, even though we map each one"))) };
 			}
 		}
-		true
+		Ok(true)
 	}
 
 	#[inline]
@@ -943,7 +964,7 @@ impl Workbench {
 		let (depth, (_, _, element, line_number)) = Traverse::new(y, &mut tab.value).enumerate().last();
 		let true_height = element.true_height();
 
-		if depth != x && !ignore_depth {
+		if x > depth && !ignore_depth {
 			return false;
 		}
 		let before = element.height();
@@ -1056,7 +1077,7 @@ impl Workbench {
 				.last()
 				.panic_unchecked("Traverse always has something")
 		}
-		.3;
+			.3;
 		let line_number = Bookmark::new(true_height, (self.mouse_y + scroll - HEADER_SIZE) / 16);
 		match tab.bookmarks.binary_search(&line_number) {
 			Ok(idx) => {
@@ -1191,14 +1212,14 @@ impl Workbench {
 	pub unsafe fn selected_text_up(&mut self, ctrl: bool) {
 		let left_margin = self.left_margin();
 		if let Some(SelectedText {
-			y,
-			indices,
-			cursor,
-			keyfix,
-			prefix,
-			value: str_value,
-			..
-		}) = self.selected_text.clone()
+						y,
+						indices,
+						cursor,
+						keyfix,
+						prefix,
+						value: str_value,
+						..
+					}) = self.selected_text.clone()
 		{
 			let Some(&last_index) = indices.last() else {
 				return;
@@ -1260,7 +1281,7 @@ impl Workbench {
 										.and_then(NbtElement::as_chunk)
 										.map(|chunk| chunk.x.to_compact_string())
 								})
-								.map(|k| (k, true)),
+									.map(|k| (k, true)),
 								value.get(idx).map(NbtElement::value),
 							);
 						}
@@ -1296,19 +1317,19 @@ impl Workbench {
 	pub unsafe fn selected_text_down(&mut self, ctrl: bool) {
 		let left_margin = self.left_margin();
 		if let Some(SelectedText {
-			y,
-			indices,
-			cursor,
-			keyfix,
-			prefix,
-			value: str_value,
-			..
-		}) = self.selected_text.clone()
+						y,
+						indices,
+						cursor,
+						keyfix,
+						prefix,
+						value: str_value,
+						..
+					}) = self.selected_text.clone()
 		{
 			let total = if let Some(tab) = self.tab() {
 				let mut total = sum_indices(indices.iter().copied(), &tab.value);
 				total += 1; // move down
-			// down needs a check that it doesn't surpass the end
+				// down needs a check that it doesn't surpass the end
 				if total >= tab.value.height() {
 					return;
 				}
@@ -1372,7 +1393,7 @@ impl Workbench {
 										.and_then(NbtElement::as_chunk)
 										.map(|chunk| chunk.x.to_compact_string())
 								})
-								.map(|k| (k, true)),
+									.map(|k| (k, true)),
 								Some(value.get(idx).map(NbtElement::value).panic_unchecked("We are literally given an `idx`")),
 								indices,
 								y + 16 - HEADER_SIZE,
@@ -1522,15 +1543,15 @@ impl Workbench {
 	pub fn close_selected_text(&mut self, ignore_already_present_key: bool) -> bool {
 		unsafe {
 			if let Some(SelectedText {
-				indices,
-				value,
-				prefix,
-				suffix,
-				keyfix,
-				valuefix,
-				editable: true,
-				..
-			}) = self.selected_text.clone()
+							indices,
+							value,
+							prefix,
+							suffix,
+							keyfix,
+							valuefix,
+							editable: true,
+							..
+						}) = self.selected_text.clone()
 			{
 				let Some(tab) = self.tabs.get_mut(self.tab) else {
 					return false;
@@ -1714,6 +1735,30 @@ impl Workbench {
 						KeyResult::Failed => {} // next thing pls
 					}
 				}
+				if key == VirtualKeyCode::Equals && flags == flags!(Ctrl) {
+					self.scale = usize::min(self.scale + 1, 6);
+					self.mouse_x = self.raw_mouse_x / self.scale;
+					self.mouse_y = self.raw_mouse_y / self.scale;
+					self.window_width = self.raw_window_width / self.scale;
+					self.window_height = self.raw_window_height / self.scale;
+					for tab in &mut self.tabs {
+						tab.window_width = self.window_width;
+						tab.window_height = self.window_height;
+					}
+					return true;
+				}
+				if key == VirtualKeyCode::Minus && flags == flags!(Ctrl) {
+					self.scale = usize::max(1, self.scale - 1);
+					self.mouse_x = self.raw_mouse_x / self.scale;
+					self.mouse_y = self.raw_mouse_y / self.scale;
+					self.mouse_y = self.raw_mouse_y / self.scale;
+					self.window_width = self.raw_window_width / self.scale;
+					for tab in &mut self.tabs {
+						tab.window_width = self.window_width;
+						tab.window_height = self.window_height;
+					}
+					return true;
+				}
 				if self.action_wheel.is_some() && key == VirtualKeyCode::Escape && flags == flags!() {
 					self.action_wheel = None;
 					return true;
@@ -1888,8 +1933,10 @@ impl Workbench {
 
 	#[inline]
 	pub fn on_mouse_move(&mut self, pos: PhysicalPosition<f64>) -> bool {
-		self.mouse_x = pos.x as usize;
-		self.mouse_y = pos.y as usize;
+		self.raw_mouse_x = pos.x as usize;
+		self.raw_mouse_y = pos.y as usize;
+		self.mouse_x = self.raw_mouse_x / self.scale;
+		self.mouse_y = self.raw_mouse_y / self.scale;
 		let mouse_y = self.mouse_y;
 		if let Some(scrollbar_offset) = self.scrollbar_offset && let Some(tab) = self.tab_mut() && mouse_y >= HEADER_SIZE {
 			let mouse_y = mouse_y - HEADER_SIZE;
@@ -1907,17 +1954,19 @@ impl Workbench {
 
 	#[inline]
 	pub fn window_height(&mut self, window_height: usize) {
-		self.window_height = window_height;
+		self.raw_window_height = window_height;
+		self.window_height = self.raw_window_height / self.scale;
 		for tab in &mut self.tabs {
-			tab.window_height = window_height;
+			tab.window_height = self.window_height;
 		}
 	}
 
 	#[inline]
 	pub fn window_width(&mut self, window_width: usize) {
-		self.window_width = window_width;
+		self.raw_window_width = window_width;
+		self.window_width = self.raw_window_width / self.scale;
 		for tab in &mut self.tabs {
-			tab.window_width = window_width;
+			tab.window_width = self.window_width;
 		}
 	}
 
@@ -2020,7 +2069,7 @@ impl Workbench {
 	fn render_alerts(&mut self, builder: &mut VertexBufferBuilder) {
 		let mut idx = 0;
 		while let Some(alert) = self.alerts.get_mut(idx) {
-			if alert.invisible() {
+			if alert.is_invisible() {
 				self.alerts.remove(idx);
 			} else {
 				alert.render(builder, idx);

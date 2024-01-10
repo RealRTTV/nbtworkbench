@@ -13,8 +13,6 @@ pub struct Alert {
 }
 
 impl Alert {
-    const HEIGHT: usize = 16;
-
     pub fn new(title: impl Into<String>, title_color: TextColor, message: impl Into<String>) -> Self {
         let title = title.into();
         let message = message.into();
@@ -30,7 +28,7 @@ impl Alert {
     pub fn render(&mut self, builder: &mut VertexBufferBuilder, idx: usize) {
         use core::fmt::Write;
 
-        let pos = Vec2u::new(builder.window_width() - (self.width + 24) + self.get_inset(), idx * Self::HEIGHT + HEADER_SIZE);
+        let pos = Vec2u::new(builder.window_width() - (self.width + 24) + self.get_inset(), idx * 40 + HEADER_SIZE);
         builder.draw_texture_z(pos, ALERT_Z, ALERT_UV, (16, 40));
         builder.draw_texture_region_z(pos + (12, 4), ALERT_Z, ALERT_UV + (12, 4), (self.width + 8, 32), (24, 32));
         builder.draw_texture_z(pos + (self.width + 20, 0), ALERT_Z, ALERT_UV + (36, 0), (4, 40));
@@ -48,7 +46,7 @@ impl Alert {
         let _ = write!(builder, "{}", self.message);
     }
 
-    pub fn invisible(&mut self) -> bool {
+    pub fn is_invisible(&mut self) -> bool {
         let ms = Instant::now().duration_since(*self.timestamp.get_or_insert(Instant::now())).as_millis() as usize;
         let display_time = (self.message.len() + self.title.len()) * 200 / 3 + 5000;
         ms > 500 + display_time

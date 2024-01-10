@@ -476,7 +476,7 @@ impl State {
 				}),
 			});
 
-			let mut builder = VertexBufferBuilder::new(self.size, assets::ATLAS_WIDTH, assets::ATLAS_HEIGHT, workbench.scroll());
+			let mut builder = VertexBufferBuilder::new(self.size, assets::ATLAS_WIDTH, assets::ATLAS_HEIGHT, workbench.scroll(), workbench.scale);
 			workbench.render(&mut builder);
 
 			let show_cursor = !builder.drew_tooltip();

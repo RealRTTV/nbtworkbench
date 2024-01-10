@@ -121,6 +121,7 @@ impl Tab {
 				}
 			}
 		}
+
 		{
 			let mut tail = self.redos.tail.as_deref();
 			builder.draw_texture((builder.window_width() - 213, 27), LINE_NUMBER_SEPARATOR_UV + (0, 1), (2, 14));
@@ -137,6 +138,7 @@ impl Tab {
 				}
 			}
 		}
+
 		{
 			builder.draw_texture((builder.window_width() - 22, 26), LINE_NUMBER_SEPARATOR_UV, (2, 16));
 			let freehand_uv = {
@@ -157,22 +159,52 @@ impl Tab {
 			};
 			builder.draw_texture((builder.window_width() - 18, 26), freehand_uv, (16, 16));
 		}
+
 		{
 			let mx = if (24..46).contains(&mouse_y) { Some(mouse_x & !0b1111) } else { None };
-			builder.draw_texture((0, 26), if mx == Some(0) { BYTE_UV } else { BYTE_GHOST_UV }, (16, 16));
-			builder.draw_texture((16, 26), if mx == Some(16) { SHORT_UV } else { SHORT_GHOST_UV }, (16, 16));
-			builder.draw_texture((32, 26), if mx == Some(32) { INT_UV } else { INT_GHOST_UV }, (16, 16));
-			builder.draw_texture((48, 26), if mx == Some(48) { LONG_UV } else { LONG_GHOST_UV }, (16, 16));
-			builder.draw_texture((64, 26), if mx == Some(64) { FLOAT_UV } else { FLOAT_GHOST_UV }, (16, 16));
-			builder.draw_texture((80, 26), if mx == Some(80) { DOUBLE_UV } else { DOUBLE_GHOST_UV }, (16, 16));
-			builder.draw_texture((96, 26), if mx == Some(96) { BYTE_ARRAY_UV } else { BYTE_ARRAY_GHOST_UV }, (16, 16));
-			builder.draw_texture((112, 26), if mx == Some(112) { INT_ARRAY_UV } else { INT_ARRAY_GHOST_UV }, (16, 16));
-			builder.draw_texture((128, 26), if mx == Some(128) { LONG_ARRAY_UV } else { LONG_ARRAY_GHOST_UV }, (16, 16));
-			builder.draw_texture((144, 26), if mx == Some(144) { STRING_UV } else { STRING_GHOST_UV }, (16, 16));
-			builder.draw_texture((160, 26), if mx == Some(160) { LIST_UV } else { LIST_GHOST_UV }, (16, 16));
-			builder.draw_texture((176, 26), if mx == Some(176) { COMPOUND_UV } else { COMPOUND_GHOST_UV }, (16, 16));
-			builder.draw_texture((192, 26), if mx == Some(192) && self.value.id() == NbtRegion::ID { CHUNK_UV } else { CHUNK_GHOST_UV }, (16, 16));
-			builder.draw_texture((208, 26), if mx == Some(208) { UNKNOWN_NBT_UV } else { UNKNOWN_NBT_GHOST_UV }, (16, 16));
+			for (idx, (selected, unselected, name)) in [
+				(BYTE_UV, BYTE_GHOST_UV, "Byte"),
+				(SHORT_UV, SHORT_GHOST_UV, "Short"),
+				(INT_UV, INT_GHOST_UV, "Int"),
+				(LONG_UV, LONG_GHOST_UV, "Long"),
+				(FLOAT_UV, FLOAT_GHOST_UV, "Float"),
+				(DOUBLE_UV, DOUBLE_GHOST_UV, "Double"),
+				(BYTE_ARRAY_UV, BYTE_ARRAY_GHOST_UV, "Byte Array"),
+				(INT_ARRAY_UV, INT_ARRAY_GHOST_UV, "Int Array"),
+				(LONG_ARRAY_UV, LONG_ARRAY_GHOST_UV, "Long Array"),
+				(STRING_UV, STRING_GHOST_UV, "String"),
+				(LIST_UV, LIST_GHOST_UV, "List"),
+				(COMPOUND_UV, COMPOUND_GHOST_UV, "Compound"),
+			].into_iter().enumerate() {
+				let uv = if mx == Some(idx * 16) {
+					builder.draw_tooltip(&[name], (mouse_x, mouse_y));
+					selected
+				} else {
+					unselected
+				};
+
+				builder.draw_texture((idx * 16, 26), uv, (16, 16));
+			}
+
+			{
+				let uv = if mx == Some(192) && self.value.id() == NbtRegion::ID {
+					builder.draw_tooltip(&["Chunk"], (mouse_x, mouse_y));
+					CHUNK_UV
+				} else {
+					CHUNK_GHOST_UV
+				};
+				builder.draw_texture((192, 26), uv, (16, 16));
+			}
+
+			{
+				let uv = if mx == Some(208) {
+					builder.draw_tooltip(&["Clipboard"], (mouse_x, mouse_y));
+					UNKNOWN_NBT_UV
+				} else {
+					UNKNOWN_NBT_GHOST_UV
+				};
+				builder.draw_texture((208, 26), uv, (16, 16));
+			}
 		}
 	}
 
