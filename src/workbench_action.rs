@@ -143,7 +143,7 @@ impl WorkbenchAction {
 					} else {
 						None
 					};
-					let value = override_value.or_else(|| value.and_then(|value| Navigate::new(indices.iter().copied(), root).last().2.set_value(value)));
+					let value = override_value.or_else(|| value.and_then(|value| Navigate::new(indices.iter().copied(), root).last().2.set_value(value).map(|x| x.0)));
 					if key.is_some() || value.is_some() {
 						crate::recache_along_indices(rem, root);
 					}

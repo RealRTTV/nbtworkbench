@@ -186,7 +186,8 @@ macro_rules! array {
 					if !self.is_empty() {
 						ctx.draw_toggle(ctx.pos() - (16, 0), self.open, builder);
 					}
-					if ctx.forbid(ctx.pos(), builder) {
+					ctx.render_errors(ctx.pos(), builder);
+					if ctx.forbid(ctx.pos()) {
 						builder.settings(ctx.pos() + (20, 0), false, 1);
 						let _ = match key {
 							Some(x) => write!(builder, "{x}: {}", self.value()),
@@ -215,7 +216,7 @@ macro_rules! array {
 				if self.open {
 					ctx.x_offset += 16;
 
-					ctx.check_key(|_, _| false, false);
+					ctx.check_for_key_duplicate(|_, _| false, false);
 					for (idx, element) in self.children().enumerate() {
 						if ctx.y_offset > builder.window_height() {
 							break;
@@ -250,7 +251,8 @@ macro_rules! array {
 						ctx.line_number();
 						Self::render_element_icon(ctx.pos(), builder);
 						let str = Self::transmute(element).to_compact_string();
-						if ctx.forbid(ctx.pos(), builder) {
+						ctx.render_errors(ctx.pos(), builder);
+						if ctx.forbid(ctx.pos()) {
 							builder.settings(ctx.pos() + (20, 0), false, 1);
 							let _ = write!(builder, "{str}");
 						}

@@ -317,6 +317,10 @@ impl SelectedText {
 		}
 	}
 
+	pub fn width(&self) -> usize {
+		self.prefix.width() + self.keyfix.as_deref().map(str::width).unwrap_or(0) + self.value.width() + self.valuefix.as_deref().map(str::width).unwrap_or(0) + self.suffix.width()
+	}
+
 	#[cfg_attr(not(debug_assertions), inline)]
 	#[allow(clippy::cognitive_complexity, clippy::too_many_lines)] // i handled this fn well
 	#[must_use]
@@ -761,11 +765,11 @@ impl SelectedText {
 				let start = self.value.split_at(start).0.width();
 				let end = self.value.split_at(end).0.width();
 				builder.draw_texture_region_z((prefix_width + start + x, y), SELECTED_TEXT_Z, SELECTION_UV + (1, 1), (end - start - 1, 16), (14, 14));
-				if duration_from_last_interaction < Duration::from_millis(1500) || duration_from_last_interaction.subsec_millis() < 500 {
+				if duration_from_last_interaction < Duration::from_millis(500) || duration_from_last_interaction.subsec_millis() < 500 {
 					builder.draw_texture_region_z((x + cursor_prefixing.width() + prefix_width - 1, y), SELECTED_TEXT_Z, SELECTION_UV, (2, 16), (1, 16));
 				}
 			} else {
-				if duration_from_last_interaction < Duration::from_millis(1500) || duration_from_last_interaction.subsec_millis() < 500 {
+				if duration_from_last_interaction < Duration::from_millis(500) || duration_from_last_interaction.subsec_millis() < 500 {
 					builder.draw_texture_region_z((x + cursor_prefixing.width() + prefix_width, y), SELECTED_TEXT_Z, SELECTION_UV, (2, 16), (1, 16));
 				}
 			}

@@ -257,7 +257,8 @@ impl NbtList {
 			if !self.is_empty() {
 				ctx.draw_toggle(ctx.pos() - (16, 0), self.open, builder);
 			}
-			if ctx.forbid(ctx.pos(), builder) {
+			ctx.render_errors(ctx.pos(), builder);
+			if ctx.forbid(ctx.pos()) {
 				builder.settings(ctx.pos() + (20, 0), false, BASE_TEXT_Z);
 				let _ = match name {
 					Some(x) => write!(builder, "{x}: {}", self.value()),
@@ -327,7 +328,7 @@ impl NbtList {
 				if *remaining_scroll == 0 {
 					builder.draw_texture(ctx.pos() - (16, 0), CONNECTION_UV, (16, (!(idx == self.len() - 1 && ghost_tail_mod)) as usize * 7 + 9));
 				}
-				ctx.check_key(|_, _| false, false);
+				ctx.check_for_key_duplicate(|_, _| false, false);
 				element.render(remaining_scroll, builder, None, tail && idx == self.len() - 1 && ghost_tail_mod, ctx);
 
 				let pos = ctx.pos();

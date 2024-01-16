@@ -33,16 +33,16 @@ impl core::fmt::Write for VertexBufferBuilder {
 	fn write_str(&mut self, text: &str) -> std::fmt::Result {
 		let (mut x, y) = self.text_coords;
 		x += text.chars().fold(0, |offset, char| {
-			offset + if (char as u32) < 56832 { self.draw_char(char as u16, x + offset, y, self.text_z) } else { 0 }
+			let char = if (char as u32) < 56832 { char as u16 } else { 56829 };
+			offset + self.draw_char(char, x + offset, y, self.text_z)
 		});
 		self.text_coords = (x, y);
 		Ok(())
 	}
 
 	fn write_char(&mut self, c: char) -> std::fmt::Result {
-		if (c as u32) < 56832 {
-			self.text_coords.0 += self.draw_char(c as u16, self.text_coords.0, self.text_coords.1, self.text_z);
-		}
+		let c = if (c as u32) < 56832 { c as u16 } else { 56829 };
+		self.text_coords.0 += self.draw_char(c, self.text_coords.0, self.text_coords.1, self.text_z);
 		Ok(())
 	}
 }

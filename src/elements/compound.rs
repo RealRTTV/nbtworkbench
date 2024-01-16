@@ -247,7 +247,8 @@ impl NbtCompound {
 			if !self.is_empty() {
 				ctx.draw_toggle(ctx.pos() - (16, 0), self.open, builder);
 			}
-			if ctx.forbid(ctx.pos(), builder) {
+			ctx.render_errors(ctx.pos(), builder);
+			if ctx.forbid(ctx.pos()) {
 				builder.settings(ctx.pos() + (20, 0), false, BASE_TEXT_Z);
 				let _ = write!(builder, "{} [{}]", str, self.value());
 			}
@@ -283,11 +284,11 @@ impl NbtCompound {
 				if children_contains_forbidden {
 					let mut y = ctx.y_offset;
 					for (name, value) in self.children() {
-						ctx.check_key(|text, _| text == name, false);
+						ctx.check_for_key_duplicate(|text, _| text == name, false);
 						// first check required so this don't render when it's the only selected
-						if y.saturating_sub(remaining_scroll * 16) != ctx.forbidden_y && y.saturating_sub(remaining_scroll * 16) >= HEADER_SIZE && ctx.key_invalid {
+						if y.saturating_sub(remaining_scroll * 16) != ctx.forbidden_y && y.saturating_sub(remaining_scroll * 16) >= HEADER_SIZE && ctx.key_duplicate_error {
 							ctx.red_line_numbers[1] = y.saturating_sub(remaining_scroll * 16);
-							ctx.draw_forbid_underline(ctx.x_offset, y.saturating_sub(remaining_scroll * 16), builder);
+							ctx.draw_error_underline(ctx.x_offset, y.saturating_sub(remaining_scroll * 16), builder);
 							break;
 						}
 						y += value.height() * 16;
@@ -322,8 +323,8 @@ impl NbtCompound {
 				if remaining_scroll == 0 {
 					builder.draw_texture(ctx.pos() - (16, 0), CONNECTION_UV, (16, (idx != self.len() - 1 || !ghost_tail_mod) as usize * 7 + 9));
 				}
-				ctx.check_key(|text, _| self.entries.has(text) && name != text, false);
-				if ctx.key_invalid && ctx.y_offset == ctx.forbidden_y {
+				ctx.check_for_key_duplicate(|text, _| self.entries.has(text) && name != text, false);
+				if ctx.key_duplicate_error && ctx.y_offset == ctx.forbidden_y {
 					ctx.red_line_numbers[0] = ctx.y_offset;
 				}
 				value.render(&mut remaining_scroll, builder, Some(name), idx == self.len() - 1 && ghost_tail_mod, ctx);
@@ -410,7 +411,8 @@ impl NbtCompound {
 			if !self.is_empty() {
 				ctx.draw_toggle(ctx.pos() - (16, 0), self.open, builder);
 			}
-			if ctx.forbid(ctx.pos(), builder) {
+			ctx.render_errors(ctx.pos(), builder);
+			if ctx.forbid(ctx.pos()) {
 				builder.settings(ctx.pos() + (20, 0), false, BASE_TEXT_Z);
 				let _ = match name {
 					Some(x) => write!(builder, "{x}: {}", self.value()),
@@ -456,11 +458,11 @@ impl NbtCompound {
 				if children_contains_forbidden {
 					let mut y = ctx.y_offset;
 					for (name, value) in self.children() {
-						ctx.check_key(|text, _| text == name, false);
+						ctx.check_for_key_duplicate(|text, _| text == name, false);
 						// first check required so this don't render when it's the only selected
-						if y.saturating_sub(*remaining_scroll * 16) != ctx.forbidden_y && y.saturating_sub(*remaining_scroll * 16) >= HEADER_SIZE && ctx.key_invalid {
+						if y.saturating_sub(*remaining_scroll * 16) != ctx.forbidden_y && y.saturating_sub(*remaining_scroll * 16) >= HEADER_SIZE && ctx.key_duplicate_error {
 							ctx.red_line_numbers[1] = y.saturating_sub(*remaining_scroll * 16);
-							ctx.draw_forbid_underline(ctx.x_offset, y.saturating_sub(*remaining_scroll * 16), builder);
+							ctx.draw_error_underline(ctx.x_offset, y.saturating_sub(*remaining_scroll * 16), builder);
 							break;
 						}
 						y += value.height() * 16;
@@ -495,8 +497,8 @@ impl NbtCompound {
 				if *remaining_scroll == 0 {
 					builder.draw_texture(ctx.pos() - (16, 0), CONNECTION_UV, (16, (idx != self.len() - 1 || !ghost_tail_mod) as usize * 7 + 9));
 				}
-				ctx.check_key(|text, _| self.entries.has(text) && key != text, false);
-				if ctx.key_invalid && ctx.y_offset == ctx.forbidden_y {
+				ctx.check_for_key_duplicate(|text, _| self.entries.has(text) && key != text, false);
+				if ctx.key_duplicate_error && ctx.y_offset == ctx.forbidden_y {
 					ctx.red_line_numbers[0] = ctx.y_offset;
 				}
 				entry.render(remaining_scroll, builder, Some(key), tail && idx == self.len() - 1 && ghost_tail_mod, ctx);

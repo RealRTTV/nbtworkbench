@@ -336,7 +336,8 @@ impl NbtRegion {
 			if !self.is_empty() {
 				ctx.draw_toggle(ctx.pos() - (16, 0), self.open, builder);
 			}
-			if ctx.forbid(ctx.pos(), builder) {
+			ctx.render_errors(ctx.pos(), builder);
+			if ctx.forbid(ctx.pos()) {
 				builder.settings(ctx.pos() + (20, 0), false, BASE_TEXT_Z);
 				let _ = write!(builder, "{str} [{}]", self.value());
 			}
@@ -374,12 +375,12 @@ impl NbtRegion {
 							let value = unsafe { value.as_chunk_unchecked() };
 							let x = value.x.to_compact_string();
 							let z = value.z.to_compact_string();
-							ctx.check_key(|key, value| key.parse::<u8>().ok() == x.parse::<u8>().ok() && value.parse::<u8>().ok() == z.parse::<u8>().ok(), true);
+							ctx.check_for_key_duplicate(|key, value| key.parse::<u8>().ok() == x.parse::<u8>().ok() && value.parse::<u8>().ok() == z.parse::<u8>().ok(), true);
 							// first check required so this don't render when it's the only selected
 							let y2 = y.saturating_sub(remaining_scroll * 16);
-							if y2 != ctx.forbidden_y && y2 >= HEADER_SIZE && ctx.key_invalid {
+							if y2 != ctx.forbidden_y && y2 >= HEADER_SIZE && ctx.key_duplicate_error {
 								ctx.red_line_numbers[1] = y2;
-								ctx.draw_forbid_underline_width(ctx.x_offset, y2, x.width() + ", ".width() + z.width(), builder);
+								ctx.draw_error_underline_width(ctx.x_offset, 0, y2, x.width() + ", ".width() + z.width(), builder);
 								break 'a true;
 							}
 							y += value.height() * 16;
@@ -421,8 +422,8 @@ impl NbtRegion {
 				}
 				let forbidden_y = ctx.forbidden_y;
 				let pos = ctx.pos();
-				ctx.check_key(|_, _| shadowing_other && pos.y == forbidden_y, true);
-				if ctx.key_invalid {
+				ctx.check_for_key_duplicate(|_, _| shadowing_other && pos.y == forbidden_y, true);
+				if ctx.key_duplicate_error {
 					ctx.red_line_numbers[0] = ctx.y_offset;
 				}
 				value.render(builder, &mut remaining_scroll, idx == self.len() - 1 && ghost_tail_mod, ctx);
@@ -679,7 +680,8 @@ impl NbtChunk {
 			if !self.is_empty() {
 				ctx.draw_toggle(ctx.pos() - (16, 0), self.open(), builder);
 			}
-			if ctx.forbid(ctx.pos(), builder) {
+			ctx.render_errors(ctx.pos(), builder);
+			if ctx.forbid(ctx.pos()) {
 				builder.settings(ctx.pos() + (20, 0), false, BASE_TEXT_Z);
 				let _ = write!(builder, "{name}");
 			}
@@ -722,11 +724,11 @@ impl NbtChunk {
 				if children_contains_forbidden {
 					let mut y = ctx.y_offset;
 					for (name, value) in self.children() {
-						ctx.check_key(|text, _| text == name, false);
+						ctx.check_for_key_duplicate(|text, _| text == name, false);
 						// first check required so this don't render when it's the only selected
-						if y.saturating_sub(*remaining_scroll * 16) != ctx.forbidden_y && y.saturating_sub(*remaining_scroll * 16) >= HEADER_SIZE && ctx.key_invalid {
+						if y.saturating_sub(*remaining_scroll * 16) != ctx.forbidden_y && y.saturating_sub(*remaining_scroll * 16) >= HEADER_SIZE && ctx.key_duplicate_error {
 							ctx.red_line_numbers[1] = y.saturating_sub(*remaining_scroll * 16);
-							ctx.draw_forbid_underline(ctx.x_offset, y.saturating_sub(*remaining_scroll * 16), builder);
+							ctx.draw_error_underline(ctx.x_offset, y.saturating_sub(*remaining_scroll * 16), builder);
 							break;
 						}
 						y += value.height() * 16;
@@ -761,8 +763,8 @@ impl NbtChunk {
 				if *remaining_scroll == 0 {
 					builder.draw_texture(ctx.pos() - (16, 0), CONNECTION_UV, (16, (idx != self.len() - 1 || !ghost_tail_mod) as usize * 7 + 9));
 				}
-				ctx.check_key(|text, _| self.inner.entries.has(text) && key != text, false);
-				if ctx.key_invalid && ctx.y_offset == ctx.forbidden_y {
+				ctx.check_for_key_duplicate(|text, _| self.inner.entries.has(text) && key != text, false);
+				if ctx.key_duplicate_error && ctx.y_offset == ctx.forbidden_y {
 					ctx.red_line_numbers[0] = ctx.y_offset;
 				}
 				entry.render(remaining_scroll, builder, Some(key), tail && idx == self.len() - 1 && ghost_tail_mod, ctx);

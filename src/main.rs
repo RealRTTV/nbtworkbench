@@ -324,10 +324,12 @@ pub enum FileUpdateSubscriptionType {
 }
 
 pub struct RenderContext {
+	selecting_key: bool,
 	forbidden_y: usize,
-	forbidden_key: Option<(Box<str>, Box<str>)>,
-	extend_forbid_for_value: bool,
-	key_invalid: bool,
+	forbidden_key_value: Option<(Box<str>, Box<str>)>,
+	extend_forbid: bool,
+	invalid_value_error: bool,
+	key_duplicate_error: bool,
 	ghost: Option<(u8, usize, usize, usize)>,
 	ghost_line_number: Option<(usize, usize)>,
 	left_margin: usize,
@@ -344,12 +346,14 @@ pub struct RenderContext {
 impl RenderContext {
 	#[must_use]
 	#[allow(clippy::type_complexity)] // forbidden is fine to be like that, c'mon
-	pub fn new(forbidden: (usize, Option<(Box<str>, Box<str>)>), ghost: Option<(u8, usize, usize, usize)>, left_margin: usize, mouse: (usize, usize)) -> Self {
+	pub fn new(forbidden: (usize, Option<(bool, Box<str>, Box<str>)>), ghost: Option<(u8, usize, usize, usize)>, left_margin: usize, mouse: (usize, usize)) -> Self {
 		Self {
+			selecting_key: forbidden.1.as_ref().is_some_and(|(x, _, _)| *x),
 			forbidden_y: forbidden.0,
-			forbidden_key: forbidden.1,
-			extend_forbid_for_value: false,
-			key_invalid: false,
+			forbidden_key_value: forbidden.1.map(|(_, k, v)| (k, v)),
+			extend_forbid: false,
+			invalid_value_error: false,
+			key_duplicate_error: false,
 			ghost,
 			left_margin,
 			mouse_x: mouse.0,
@@ -369,10 +373,17 @@ impl RenderContext {
 	}
 
 	#[inline]
-	pub fn check_key<F: FnOnce(&str, &str) -> bool>(&mut self, f: F, extend: bool) {
-		if let Some((forbidden_key, forbidden_value)) = self.forbidden_key.as_ref() {
-			self.key_invalid = f(forbidden_key, forbidden_value);
-			self.extend_forbid_for_value = extend;
+	pub fn check_for_key_duplicate<F: FnOnce(&str, &str) -> bool>(&mut self, f: F, extend: bool) {
+		if let Some((forbidden_key, forbidden_value)) = self.forbidden_key_value.as_ref() {
+			self.key_duplicate_error = f(forbidden_key, forbidden_value);
+			self.extend_forbid = extend;
+		}
+	}
+
+	#[inline]
+	pub fn check_for_invalid_value<F: FnOnce(&str) -> bool>(&mut self, f: F) {
+		if let Some((_, forbidden_value)) = self.forbidden_key_value.as_ref() {
+			self.invalid_value_error = f(forbidden_value);
 		}
 	}
 
@@ -397,12 +408,9 @@ impl RenderContext {
 
 	#[inline]
 	#[must_use]
-	pub fn forbid(&self, pos: impl Into<(usize, usize)>, builder: &mut VertexBufferBuilder) -> bool {
-		let (x, y) = pos.into();
+	pub fn forbid(&self, pos: impl Into<(usize, usize)>) -> bool {
+		let (_, y) = pos.into();
 		if y == self.forbidden_y {
-			if self.key_invalid {
-				self.draw_forbid_underline(x, y, builder);
-			}
 			false
 		} else {
 			true
@@ -410,17 +418,33 @@ impl RenderContext {
 	}
 
 	#[inline]
-	pub fn draw_forbid_underline_width(&self, x: usize, y: usize, overridden_width: usize, builder: &mut VertexBufferBuilder) {
-		if self.forbidden_key.is_some() {
-			builder.draw_texture_region_z((x, y), BASE_Z, INVALID_STRIPE_UV + (1, 1), (builder.window_width(), 16), (14, 14));
-			builder.draw_texture_region_z((x + 20, y + 14), BASE_Z, TEXT_UNDERLINE_UV, (overridden_width, 2), (16, 2));
+	pub fn render_errors(&mut self, pos: impl Into<(usize, usize)>, builder: &mut VertexBufferBuilder) {
+		let (x, y) = pos.into();
+		if self.key_duplicate_error | self.invalid_value_error {
+			self.red_line_numbers[0] = self.forbidden_y;
+			self.draw_error_underline(x, y, builder);
 		}
 	}
 
 	#[inline]
-	pub fn draw_forbid_underline(&self, x: usize, y: usize, builder: &mut VertexBufferBuilder) {
-		if let Some((forbidden_key, forbidden_value)) = self.forbidden_key.as_ref() {
-			self.draw_forbid_underline_width(x, y, forbidden_key.width() + (": ".width() + forbidden_value.width()) * self.extend_forbid_for_value as usize, builder);
+	pub fn draw_error_underline_width(&self, x: usize, x_shift: usize, y: usize, overridden_width: usize, builder: &mut VertexBufferBuilder) {
+		builder.draw_texture_region_z((x, y), BASE_Z, INVALID_STRIPE_UV + (1, 1), (builder.window_width(), 16), (14, 14));
+		builder.draw_texture_region_z((x + x_shift + 20, y + 14), BASE_Z, TEXT_UNDERLINE_UV, (overridden_width, 2), (16, 2));
+	}
+
+	#[inline]
+	pub fn draw_error_underline(&self, x: usize, y: usize, builder: &mut VertexBufferBuilder) {
+		if let Some((forbidden_key, forbidden_value)) = self.forbidden_key_value.as_ref() {
+			let key_width = forbidden_key.width();
+			let value_width = forbidden_value.width();
+			let (overridden_width, x_shift) = if self.extend_forbid {
+				(key_width + value_width + ": ".width(), 0)
+			} else if self.selecting_key {
+				(key_width, 0)
+			} else {
+				(value_width, key_width + ": ".width())
+			};
+			self.draw_error_underline_width(x, x_shift, y, overridden_width, builder);
 		}
 	}
 
@@ -490,6 +514,22 @@ impl RenderContext {
 			};
 			builder.draw_texture_z((builder.text_coords.0 + 4, y), LINE_NUMBER_Z, uv, (2, 16));
 			y += 16;
+		}
+	}
+
+	#[inline]
+	pub fn render_key_value_errors(&mut self, builder: &mut VertexBufferBuilder) {
+		if self.mouse_y < HEADER_SIZE { return; }
+		let y = (self.mouse_y - HEADER_SIZE) / 16;
+		if self.red_line_numbers.into_iter().any(|red_line_number| red_line_number == y) && self.mouse_x <= self.left_margin {
+			let mut errors = vec![];
+			if self.invalid_value_error {
+				errors.push("The currently entered key is not a valid key under the currently selected type.");
+			}
+			if self.key_duplicate_error {
+				errors.push("The current key is a duplicate of another one.");
+			}
+			builder.draw_tooltip(&errors, (self.mouse_x, self.mouse_y));
 		}
 	}
 

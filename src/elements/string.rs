@@ -70,7 +70,8 @@ impl NbtString {
 		ctx.line_number();
 		Self::render_icon(ctx.pos(), BASE_Z, builder);
 
-		if ctx.forbid(ctx.pos(), builder) {
+		ctx.render_errors(ctx.pos(), builder);
+		if ctx.forbid(ctx.pos()) {
 			builder.settings(ctx.pos() + (20, 0), false, BASE_TEXT_Z);
 			let _ = match name {
 				Some(x) => write!(builder, "{x}: {}", self.str.as_str()),

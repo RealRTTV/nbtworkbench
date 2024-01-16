@@ -629,40 +629,40 @@ impl NbtElement {
 	}
 
 	#[inline]
-	pub fn set_value(&mut self, value: CompactString) -> Option<CompactString> {
+	pub fn set_value(&mut self, value: CompactString) -> Option<(CompactString, bool)> {
 		unsafe {
 			Some(match self.id() {
 				NbtByte::ID => {
 					let before = self.byte.value();
-					let _ = value.parse().map(|x| self.byte.value = x);
-					before
+					let success = value.parse().map(|x| self.byte.value = x).is_ok();
+					(before, success)
 				}
 				NbtShort::ID => {
 					let before = self.short.value();
-					let _ = value.parse().map(|x| self.short.value = x);
-					before
+					let success = value.parse().map(|x| self.short.value = x).is_ok();
+					(before, success)
 				}
 				NbtInt::ID => {
 					let before = self.int.value();
-					let _ = value.parse().map(|x| self.int.value = x);
-					before
+					let success = value.parse().map(|x| self.int.value = x).is_ok();
+					(before, success)
 				}
 				NbtLong::ID => {
 					let before = self.long.value();
-					let _ = value.parse().map(|x| self.long.value = x);
-					before
+					let success = value.parse().map(|x| self.long.value = x).is_ok();
+					(before, success)
 				}
 				NbtFloat::ID => {
 					let before = self.float.value();
-					let _ = value.parse().map(|x| self.float.value = x);
-					before
+					let success = value.parse().map(|x| self.float.value = x).is_ok();
+					(before, success)
 				}
 				NbtDouble::ID => {
 					let before = self.double.value();
-					let _ = value.parse().map(|x| self.double.value = x);
-					before
+					let success = value.parse().map(|x| self.double.value = x).is_ok();
+					(before, success)
 				}
-				NbtString::ID => core::mem::replace(self, Self::String(NbtString::new(value))).string.str.as_str().to_compact_string(),
+				NbtString::ID => (core::mem::replace(self, Self::String(NbtString::new(value))).string.str.as_str().to_compact_string(), true),
 				_ => return None,
 			})
 		}

@@ -23,6 +23,8 @@ use crate::color::TextColor;
 
 pub const WINDOW_HEIGHT: usize = 420;
 pub const WINDOW_WIDTH: usize = 620;
+pub const MIN_WINDOW_HEIGHT: usize = HEADER_SIZE + 16;
+pub const MIN_WINDOW_WIDTH: usize = 520;
 
 pub fn run() -> ! {
 	let event_loop = EventLoop::new();
@@ -30,7 +32,7 @@ pub fn run() -> ! {
 		.with_title("NBT Workbench")
 		.with_transparent(std::env::args().any(|x| x.eq("--transparent")))
 		.with_inner_size(PhysicalSize::new(WINDOW_WIDTH as u32, WINDOW_HEIGHT as u32))
-		.with_min_inner_size(PhysicalSize::new(520, (HEADER_SIZE + 16) as u32))
+		.with_min_inner_size(PhysicalSize::new(MIN_WINDOW_WIDTH as u32, MIN_WINDOW_HEIGHT as u32))
 		.with_window_icon(Some(Icon::from_rgba(assets::icon(), assets::ICON_WIDTH as u32, assets::ICON_HEIGHT as u32).expect("valid format")))
 		.with_drag_and_drop(true)
 		.build(&event_loop)

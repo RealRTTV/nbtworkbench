@@ -33,7 +33,9 @@ macro_rules! primitive {
 				ctx.line_number();
 				Self::render_icon(ctx.pos(), BASE_Z, builder);
 				let str = $compact_format(self.value);
-				if ctx.forbid(ctx.pos(), builder) {
+				ctx.check_for_invalid_value(|value| value.parse::<$t>().is_err());
+				ctx.render_errors(ctx.pos(), builder);
+				if ctx.forbid(ctx.pos()) {
 					builder.settings(ctx.pos() + (20, 0), false, 1);
 					let _ = match name {
 						Some(x) => write!(builder, "{x}: {str}"),
