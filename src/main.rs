@@ -374,7 +374,7 @@ impl RenderContext {
 
 	#[inline]
 	pub fn check_for_key_duplicate<F: FnOnce(&str, &str) -> bool>(&mut self, f: F, extend: bool) {
-		if let Some((forbidden_key, forbidden_value)) = self.forbidden_key_value.as_ref() {
+		if let Some((forbidden_key, forbidden_value)) = self.forbidden_key_value.as_ref() && self.selecting_key {
 			self.key_duplicate_error = f(forbidden_key, forbidden_value);
 			self.extend_forbid = extend;
 		}
@@ -382,7 +382,8 @@ impl RenderContext {
 
 	#[inline]
 	pub fn check_for_invalid_value<F: FnOnce(&str) -> bool>(&mut self, f: F) {
-		if let Some((_, forbidden_value)) = self.forbidden_key_value.as_ref() {
+		let (_, y) = self.pos().into();
+		if let Some((_, forbidden_value)) = self.forbidden_key_value.as_ref() && self.forbidden_y == y && !self.selecting_key {
 			self.invalid_value_error = f(forbidden_value);
 		}
 	}
@@ -420,16 +421,18 @@ impl RenderContext {
 	#[inline]
 	pub fn render_errors(&mut self, pos: impl Into<(usize, usize)>, builder: &mut VertexBufferBuilder) {
 		let (x, y) = pos.into();
-		if self.key_duplicate_error | self.invalid_value_error {
-			self.red_line_numbers[0] = self.forbidden_y;
+		if (self.key_duplicate_error | self.invalid_value_error) && self.forbidden_y == y {
+			self.red_line_numbers[0] = (self.forbidden_y - HEADER_SIZE) / 16;
 			self.draw_error_underline(x, y, builder);
 		}
 	}
 
 	#[inline]
-	pub fn draw_error_underline_width(&self, x: usize, x_shift: usize, y: usize, overridden_width: usize, builder: &mut VertexBufferBuilder) {
-		builder.draw_texture_region_z((x, y), BASE_Z, INVALID_STRIPE_UV + (1, 1), (builder.window_width(), 16), (14, 14));
-		builder.draw_texture_region_z((x + x_shift + 20, y + 14), BASE_Z, TEXT_UNDERLINE_UV, (overridden_width, 2), (16, 2));
+	pub fn draw_error_underline_width(&self, x: usize, y: usize, overridden_width: usize, builder: &mut VertexBufferBuilder) {
+		let horizontal_scroll_before = core::mem::replace(&mut builder.horizontal_scroll, 0);
+		builder.draw_texture_region_z((0, y), BASE_Z, INVALID_STRIPE_UV + (1, 1), (builder.window_width(), 16), (14, 14));
+		builder.horizontal_scroll = horizontal_scroll_before;
+		builder.draw_texture_region_z((x + 20, y + 14), BASE_Z, TEXT_UNDERLINE_UV, (overridden_width, 2), (16, 2));
 	}
 
 	#[inline]
@@ -444,7 +447,7 @@ impl RenderContext {
 			} else {
 				(value_width, key_width + ": ".width())
 			};
-			self.draw_error_underline_width(x, x_shift, y, overridden_width, builder);
+			self.draw_error_underline_width(x + x_shift, y, overridden_width, builder);
 		}
 	}
 
@@ -521,15 +524,17 @@ impl RenderContext {
 	pub fn render_key_value_errors(&mut self, builder: &mut VertexBufferBuilder) {
 		if self.mouse_y < HEADER_SIZE { return; }
 		let y = (self.mouse_y - HEADER_SIZE) / 16;
-		if self.red_line_numbers.into_iter().any(|red_line_number| red_line_number == y) && self.mouse_x <= self.left_margin {
+		if self.red_line_numbers.into_iter().any(|red_line_number| red_line_number == y) {
 			let mut errors = vec![];
 			if self.invalid_value_error {
-				errors.push("The currently entered key is not a valid key under the currently selected type.");
+				errors.push("Error! The currently entered value is not valid for this type.");
 			}
 			if self.key_duplicate_error {
-				errors.push("The current key is a duplicate of another one.");
+				errors.push("Error! The current key is a duplicate of another one.");
 			}
+			let color_before = core::mem::replace(&mut builder.color, TextColor::Red.to_raw());
 			builder.draw_tooltip(&errors, (self.mouse_x, self.mouse_y));
+			builder.color = color_before;
 		}
 	}
 

@@ -380,7 +380,7 @@ impl NbtRegion {
 							let y2 = y.saturating_sub(remaining_scroll * 16);
 							if y2 != ctx.forbidden_y && y2 >= HEADER_SIZE && ctx.key_duplicate_error {
 								ctx.red_line_numbers[1] = y2;
-								ctx.draw_error_underline_width(ctx.x_offset, 0, y2, x.width() + ", ".width() + z.width(), builder);
+								ctx.draw_error_underline_width(ctx.x_offset, y2, x.width() + ", ".width() + z.width(), builder);
 								break 'a true;
 							}
 							y += value.height() * 16;

@@ -111,7 +111,7 @@ impl VertexBufferBuilder {
 
 		let (mut x, y) = pos.into();
 		let Some(text_width) = text.iter().map(|x| x.width()).max() else { return };
-		if x + text_width + 3 >= self.window_width() {
+		if x + text_width + 3 >= self.window_width() && x >= text_width + 3 {
 			x -= text_width + 3;
 		}
 		let old_text_z = core::mem::replace(&mut self.text_z, TOOLTIP_Z);
