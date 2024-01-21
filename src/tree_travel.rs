@@ -29,11 +29,22 @@ impl<'a, I: Iterator<Item = usize> + ExactSizeIterator> Navigate<'a, I> {
 		let (key, node) = {
 			match node.as_pattern_mut() {
 				NbtPatternMut::Compound(compound) => {
-					self.line_number += 1 + compound.children().take(idx).map(|(_, b)| b).map(NbtElement::true_height).sum::<usize>();
-					compound.get_mut(idx).map(|(a, b)| (Some(a.to_compact_string()), b))
+					self.line_number += 1 + compound
+						.children()
+						.take(idx)
+						.map(|(_, b)| b)
+						.map(NbtElement::true_height)
+						.sum::<usize>();
+					compound
+						.get_mut(idx)
+						.map(|(a, b)| (Some(a.to_compact_string()), b))
 				}
 				NbtPatternMut::List(list) => {
-					self.line_number += 1 + list.children().take(idx).map(NbtElement::true_height).sum::<usize>();
+					self.line_number += 1 + list
+						.children()
+						.take(idx)
+						.map(NbtElement::true_height)
+						.sum::<usize>();
 					list.get_mut(idx).map(|b| (None, b))
 				}
 				NbtPatternMut::ByteArray(array) => {
@@ -49,12 +60,23 @@ impl<'a, I: Iterator<Item = usize> + ExactSizeIterator> Navigate<'a, I> {
 					array.get_mut(idx).map(|b| (None, b))
 				}
 				NbtPatternMut::Region(region) => {
-					self.line_number += 1 + region.children().take(idx).map(NbtElement::true_height).sum::<usize>();
+					self.line_number += 1 + region
+						.children()
+						.take(idx)
+						.map(NbtElement::true_height)
+						.sum::<usize>();
 					region.get_mut(idx).map(|b| (None, b))
 				}
 				NbtPatternMut::Chunk(chunk) => {
-					self.line_number += 1 + chunk.children().take(idx).map(|(_, b)| b).map(NbtElement::true_height).sum::<usize>();
-					chunk.get_mut(idx).map(|(a, b)| (Some(a.to_compact_string()), b))
+					self.line_number += 1 + chunk
+						.children()
+						.take(idx)
+						.map(|(_, b)| b)
+						.map(NbtElement::true_height)
+						.sum::<usize>();
+					chunk
+						.get_mut(idx)
+						.map(|(a, b)| (Some(a.to_compact_string()), b))
 				}
 				_ => None,
 			}?
@@ -91,7 +113,11 @@ impl<'a, I: Iterator<Item = usize> + ExactSizeIterator> Navigate<'a, I> {
 			self.step();
 		}
 
-		unsafe { self.node.map(|(a, b, c)| (a, b, c, self.line_number)).panic_unchecked("List cannot be empty") }
+		unsafe {
+			self.node
+				.map(|(a, b, c)| (a, b, c, self.line_number))
+				.panic_unchecked("List cannot be empty")
+		}
 	}
 }
 
@@ -211,9 +237,7 @@ impl<'a> Traverse<'a> {
 
 	#[must_use]
 	pub fn last(mut self) -> Option<(usize, Option<CompactString>, &'a mut NbtElement, usize)> {
-		if self.cut && !self.head {
-			return None;
-		}
+		if self.cut && !self.head { return None }
 		while self.y > 0 {
 			self.step();
 		}
@@ -221,7 +245,10 @@ impl<'a> Traverse<'a> {
 	}
 
 	pub const fn enumerate(self) -> EnumeratedTraverse<'a> {
-		EnumeratedTraverse { inner: self, depth: 0 }
+		EnumeratedTraverse {
+			inner: self,
+			depth: 0,
+		}
 	}
 }
 
@@ -234,7 +261,12 @@ pub struct EnumeratedTraverse<'a> {
 impl<'a> EnumeratedTraverse<'a> {
 	#[must_use]
 	#[allow(clippy::type_complexity)] // literally can't otherwise the compiler crashes... yeah...
-	pub fn last(mut self) -> (usize, (usize, Option<CompactString>, &'a mut NbtElement, usize)) {
+	pub fn last(
+		mut self,
+	) -> (
+		usize,
+		(usize, Option<CompactString>, &'a mut NbtElement, usize),
+	) {
 		while self.inner.y > 0 {
 			self.depth += 1;
 			self.inner.step();
@@ -351,7 +383,11 @@ impl<'a> TraverseParents<'a> {
 	}
 
 	fn extras(&self) -> (usize, Option<CompactString>, bool) {
-		let node = unsafe { self.node.as_ref().panic_unchecked("Expected a value for parent element") };
+		let node = unsafe {
+			self.node
+				.as_ref()
+				.panic_unchecked("Expected a value for parent element")
+		};
 		if let Some(region) = node.as_region() {
 			let mut remaining_y = self.y - 1;
 			for (idx, element) in region.children().enumerate() {
@@ -399,10 +435,16 @@ impl<'a> TraverseParents<'a> {
 	}
 
 	#[allow(clippy::should_implement_trait)] // no
-	pub fn next(&mut self) -> Option<(Position, usize, Option<CompactString>, &mut NbtElement, usize)> {
-		if self.cut {
-			return None;
-		}
+	pub fn next(
+		&mut self,
+	) -> Option<(
+		Position,
+		usize,
+		Option<CompactString>,
+		&mut NbtElement,
+		usize,
+	)> {
+		if self.cut { return None }
 
 		let head = core::mem::replace(&mut self.head, false);
 
@@ -419,6 +461,12 @@ impl<'a> TraverseParents<'a> {
 			(true, true) => Position::Only,
 		};
 
-		Some((position, idx, key, &mut **self.node.as_mut()?, self.line_number))
+		Some((
+			position,
+			idx,
+			key,
+			&mut **self.node.as_mut()?,
+			self.line_number,
+		))
 	}
 }

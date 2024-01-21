@@ -25,24 +25,26 @@ impl Default for UncheckedBufWriter {
 impl Drop for UncheckedBufWriter {
 	fn drop(&mut self) {
 		unsafe {
-			dealloc(self.buf.cast::<u8>(), Layout::array::<u8>(WIDTH).unwrap_unchecked());
+			dealloc(
+				self.buf.cast::<u8>(),
+				Layout::array::<u8>(WIDTH).unwrap_unchecked(),
+			);
 		}
 	}
 }
 
 impl UncheckedBufWriter {
-	pub fn new() -> Self {
-		Self::default()
-	}
+	pub fn new() -> Self { Self::default() }
 
-	pub const fn remaining(&self) -> usize {
-		WIDTH - 1 - self.buf_len
-	}
+	pub const fn remaining(&self) -> usize { WIDTH - 1 - self.buf_len }
 
 	pub fn write(&mut self, bytes: &[u8]) {
 		unsafe {
 			if likely(bytes.len() < self.remaining()) {
-				self.buf.add(self.buf_len).cast::<u8>().copy_from_nonoverlapping(bytes.as_ptr(), bytes.len());
+				self.buf
+					.add(self.buf_len)
+					.cast::<u8>()
+					.copy_from_nonoverlapping(bytes.as_ptr(), bytes.len());
 				self.buf_len += bytes.len();
 			} else {
 				self.write_pushing_cold(bytes);
@@ -63,11 +65,19 @@ impl UncheckedBufWriter {
 		self.inner = if self.inner.is_null() {
 			alloc(Layout::array::<u8>(new_size).unwrap_unchecked())
 		} else {
-			realloc(self.inner, Layout::array::<u8>(malloc_size).unwrap_unchecked(), new_size)
+			realloc(
+				self.inner,
+				Layout::array::<u8>(malloc_size).unwrap_unchecked(),
+				new_size,
+			)
 		};
-		self.inner.add(self.inner_len).copy_from_nonoverlapping(self.buf.cast::<u8>(), self.buf_len);
+		self.inner
+			.add(self.inner_len)
+			.copy_from_nonoverlapping(self.buf.cast::<u8>(), self.buf_len);
 		self.inner_len += self.buf_len;
-		self.inner.add(self.inner_len).copy_from_nonoverlapping(bytes.as_ptr(), bytes.len());
+		self.inner
+			.add(self.inner_len)
+			.copy_from_nonoverlapping(bytes.as_ptr(), bytes.len());
 		self.inner_len += bytes.len();
 		self.buf_len = 0;
 	}
@@ -78,9 +88,15 @@ impl UncheckedBufWriter {
 			self.inner = if self.inner.is_null() {
 				alloc(Layout::array::<u8>(self.inner_len + self.buf_len).unwrap_unchecked())
 			} else {
-				realloc(self.inner, Layout::array::<u8>(malloc_size).unwrap_unchecked(), self.inner_len + self.buf_len)
+				realloc(
+					self.inner,
+					Layout::array::<u8>(malloc_size).unwrap_unchecked(),
+					self.inner_len + self.buf_len,
+				)
 			};
-			self.inner.add(self.inner_len).copy_from_nonoverlapping(self.buf.cast::<u8>(), self.buf_len);
+			self.inner
+				.add(self.inner_len)
+				.copy_from_nonoverlapping(self.buf.cast::<u8>(), self.buf_len);
 			self.inner_len += self.buf_len;
 			Vec::from_raw_parts(self.inner, self.inner_len, self.inner_len)
 		}

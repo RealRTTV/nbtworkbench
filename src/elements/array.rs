@@ -43,7 +43,11 @@ macro_rules! array {
 
 			#[inline]
 			pub(in $crate::elements) fn from_str0(mut s: &str) -> Option<(&str, Self)> {
-				s = s.strip_prefix('[')?.trim_start().strip_prefix(concat!($char, ";"))?.trim_start();
+				s = s
+					.strip_prefix('[')?
+					.trim_start()
+					.strip_prefix(concat!($char, ";"))?
+					.trim_start();
 				let mut array = Self::new();
 				while !s.starts_with(']') {
 					let (s2, element) = NbtElement::from_str0(s)?;
@@ -69,7 +73,11 @@ macro_rules! array {
 					for idx in 0..len {
 						let mut element = NbtElement {
 							$element_field: core::mem::transmute(<$t>::from_be_bytes(
-								decoder.data.add(idx * core::mem::size_of::<$t>()).cast::<[u8; core::mem::size_of::<$t>()]>().read(),
+								decoder
+									.data
+									.add(idx * core::mem::size_of::<$t>())
+									.cast::<[u8; core::mem::size_of::<$t>()]>()
+									.read(),
 							)),
 						};
 						element.id.id = $id;
@@ -97,9 +105,7 @@ macro_rules! array {
 
 		impl $name {
 			#[inline(always)]
-			fn transmute(element: &NbtElement) -> $t {
-				unsafe { element.deref().$element_field.deref().value }
-			}
+			fn transmute(element: &NbtElement) -> $t { unsafe { element.deref().$element_field.deref().value } }
 
 			#[inline]
 			pub fn increment(&mut self, _: usize, _: usize) {}
@@ -119,9 +125,7 @@ macro_rules! array {
 
 			#[inline]
 			#[must_use]
-			pub fn true_height(&self) -> usize {
-				self.len() + 1
-			}
+			pub fn true_height(&self) -> usize { self.len() + 1 }
 
 			#[inline]
 			pub fn toggle(&mut self) -> Option<()> {
@@ -131,21 +135,15 @@ macro_rules! array {
 
 			#[inline]
 			#[must_use]
-			pub const fn open(&self) -> bool {
-				self.open
-			}
+			pub const fn open(&self) -> bool { self.open }
 
 			#[inline]
 			#[must_use]
-			pub fn len(&self) -> usize {
-				self.values.len()
-			}
+			pub fn len(&self) -> usize { self.values.len() }
 
 			#[inline]
 			#[must_use]
-			pub fn is_empty(&self) -> bool {
-				self.values.is_empty()
-			}
+			pub fn is_empty(&self) -> bool { self.values.is_empty() }
 
 			/// # Errors
 			///
@@ -196,13 +194,28 @@ macro_rules! array {
 					}
 
 					let pos = ctx.pos();
-					if ctx.ghost(ctx.pos() + (16, 16), builder, |x, y| pos == (x - 16, y - 8), |id| id == $id) {
-						builder.draw_texture(ctx.pos() + (0, 16), CONNECTION_UV, (16, (self.height() != 1) as usize * 7 + 9));
+					if ctx.ghost(
+						ctx.pos() + (16, 16),
+						builder,
+						|x, y| pos == (x - 16, y - 8),
+						|id| id == $id,
+					) {
+						builder.draw_texture(
+							ctx.pos() + (0, 16),
+							CONNECTION_UV,
+							(16, (self.height() != 1) as usize * 7 + 9),
+						);
 						if !tail {
 							builder.draw_texture(ctx.pos() - (16, 0) + (0, 16), CONNECTION_UV, (8, 16));
 						}
 						ctx.y_offset += 16;
-					} else if self.height() == 1 && ctx.ghost(ctx.pos() + (16, 16), builder, |x, y| pos == (x - 16, y - 16), |id| id == $id) {
+					} else if self.height() == 1
+						&& ctx.ghost(
+							ctx.pos() + (16, 16),
+							builder,
+							|x, y| pos == (x - 16, y - 16),
+							|id| id == $id,
+						) {
 						builder.draw_texture(ctx.pos() + (0, 16), CONNECTION_UV, (16, 9));
 						if !tail {
 							builder.draw_texture(ctx.pos() - (16, 0) + (0, 16), CONNECTION_UV, (8, 16));
@@ -216,7 +229,6 @@ macro_rules! array {
 				if self.open {
 					ctx.x_offset += 16;
 
-					ctx.check_for_key_duplicate(|_, _| false, false);
 					for (idx, element) in self.children().enumerate() {
 						if ctx.y_offset > builder.window_height() {
 							break;
@@ -237,21 +249,32 @@ macro_rules! array {
 							ctx.y_offset += 16;
 						}
 
-						let ghost_tail_mod = if let Some((id, x, y, _)) = ctx.ghost && ctx.pos() + (0, 16 - *remaining_scroll * 16 - 8) == (x, y) && id == $id {
-																													false
-																												} else {
-																													true
-																												};
+						let ghost_tail_mod = if let Some((id, x, y, _)) = ctx.ghost
+							&& ctx.pos() + (0, 16 - *remaining_scroll * 16 - 8) == (x, y)
+							&& id == $id
+						{
+							false
+						} else {
+							true
+						};
 
-						builder.draw_texture(ctx.pos() - (16, 0), CONNECTION_UV, (16, (!(idx == self.len() - 1 && ghost_tail_mod)) as usize * 7 + 9));
+						builder.draw_texture(
+							ctx.pos() - (16, 0),
+							CONNECTION_UV,
+							(
+								16,
+								(!(idx == self.len() - 1 && ghost_tail_mod)) as usize * 7 + 9,
+							),
+						);
 						if !tail {
 							builder.draw_texture(ctx.pos() - (32, 0), CONNECTION_UV, (8, 16));
 						}
 
 						ctx.line_number();
 						Self::render_element_icon(ctx.pos(), builder);
-						let str = Self::transmute(element).to_compact_string();
+						ctx.check_for_invalid_value(|value| value.parse::<$t>().is_err());
 						ctx.render_errors(ctx.pos(), builder);
+						let str = Self::transmute(element).to_compact_string();
 						if ctx.forbid(ctx.pos()) {
 							builder.settings(ctx.pos() + (20, 0), false, 1);
 							let _ = write!(builder, "{str}");
@@ -261,7 +284,11 @@ macro_rules! array {
 
 						let pos = ctx.pos();
 						if ctx.ghost(ctx.pos(), builder, |x, y| pos == (x, y + 8), |id| id == $id) {
-							builder.draw_texture(ctx.pos() - (16, 0), CONNECTION_UV, (16, (idx != self.len() - 1) as usize * 7 + 9));
+							builder.draw_texture(
+								ctx.pos() - (16, 0),
+								CONNECTION_UV,
+								(16, (idx != self.len() - 1) as usize * 7 + 9),
+							);
 							if !tail {
 								builder.draw_texture(ctx.pos() - (32, 0), CONNECTION_UV, (8, 16));
 							}
@@ -277,48 +304,40 @@ macro_rules! array {
 
 			#[inline]
 			#[must_use]
-			pub fn get(&self, idx: usize) -> Option<&NbtElement> {
-				self.values.get(idx)
-			}
+			pub fn get(&self, idx: usize) -> Option<&NbtElement> { self.values.get(idx) }
 
 			#[inline]
 			#[must_use]
-			pub fn get_mut(&mut self, idx: usize) -> Option<&mut NbtElement> {
-				self.values.get_mut(idx)
-			}
+			pub fn get_mut(&mut self, idx: usize) -> Option<&mut NbtElement> { self.values.get_mut(idx) }
 
 			#[inline]
 			#[must_use]
 			pub fn value(&self) -> CompactString {
 				let (single, multiple) = id_to_string_name($id);
-				format_compact!("{} {}", self.len(), if self.len() == 1 { single } else { multiple })
+				format_compact!(
+					"{} {}",
+					self.len(),
+					if self.len() == 1 { single } else { multiple }
+				)
 			}
 
 			#[inline] // ret type is #[must_use]
-			pub fn children(&self) -> ValueIterator {
-				ValueIterator::Generic(self.values.iter())
-			}
+			pub fn children(&self) -> ValueIterator { ValueIterator::Generic(self.values.iter()) }
 
 			#[inline] // ret type is #[must_use]
-			pub fn children_mut(&mut self) -> ValueMutIterator {
-				ValueMutIterator::Generic(self.values.iter_mut())
-			}
+			pub fn children_mut(&mut self) -> ValueMutIterator { ValueMutIterator::Generic(self.values.iter_mut()) }
 
 			pub fn drop(&mut self, key: Option<CompactString>, element: NbtElement, y: &mut usize, depth: usize, target_depth: usize, line_number: usize, indices: &mut Vec<usize>) -> DropFn {
 				if 8 <= *y && *y < 16 && depth == target_depth {
 					indices.push(0);
-					if let Err(element) = self.insert(0, element) {
-						return DropFn::InvalidType(key, element);
-					}
+					if let Err(element) = self.insert(0, element) { return DropFn::InvalidType(key, element) }
 					self.open = true;
 					return DropFn::Dropped(1, 1, None, line_number + 1);
 				}
 
 				if self.height() * 16 <= *y && *y < self.height() * 16 + 8 && depth == target_depth {
 					indices.push(self.len());
-					if let Err(element) = self.insert(self.len(), element) {
-						return DropFn::InvalidType(key, element);
-					}
+					if let Err(element) = self.insert(self.len(), element) { return DropFn::InvalidType(key, element) }
 					self.open = true;
 					return DropFn::Dropped(1, 1, None, line_number + self.len());
 				}
@@ -336,15 +355,11 @@ macro_rules! array {
 						for idx in 0..self.values.len() {
 							*ptr = idx;
 							if *y < 8 && depth == target_depth {
-								if let Err(element) = self.insert(idx, element) {
-									return DropFn::InvalidType(key, element);
-								}
+								if let Err(element) = self.insert(idx, element) { return DropFn::InvalidType(key, element) }
 								return DropFn::Dropped(1, 1, None, line_number + idx + 1);
 							} else if *y < 16 && depth == target_depth {
 								*ptr = idx + 1;
-								if let Err(element) = self.insert(idx + 1, element) {
-									return DropFn::InvalidType(key, element);
-								}
+								if let Err(element) = self.insert(idx + 1, element) { return DropFn::InvalidType(key, element) }
 								return DropFn::Dropped(1, 1, None, line_number + idx + 1 + 1);
 							}
 
@@ -359,14 +374,10 @@ macro_rules! array {
 			}
 
 			#[inline]
-			pub fn shut(&mut self) {
-				self.open = false;
-			}
+			pub fn shut(&mut self) { self.open = false; }
 
 			#[inline]
-			pub fn expand(&mut self) {
-				self.open = !self.is_empty();
-			}
+			pub fn expand(&mut self) { self.open = !self.is_empty(); }
 
 			#[inline]
 			pub fn recache_depth(&mut self) {
@@ -381,19 +392,13 @@ macro_rules! array {
 
 			#[inline]
 			#[must_use]
-			pub const fn max_depth(&self) -> usize {
-				self.max_depth as usize
-			}
+			pub const fn max_depth(&self) -> usize { self.max_depth as usize }
 
 			#[inline]
-			pub fn render_icon(pos: impl Into<(usize, usize)>, z: u8, builder: &mut VertexBufferBuilder) {
-				builder.draw_texture_z(pos, z, $uv, (16, 16));
-			}
+			pub fn render_icon(pos: impl Into<(usize, usize)>, z: u8, builder: &mut VertexBufferBuilder) { builder.draw_texture_z(pos, z, $uv, (16, 16)); }
 
 			#[inline]
-			pub fn render_element_icon(pos: impl Into<(usize, usize)>, builder: &mut VertexBufferBuilder) {
-				builder.draw_texture(pos, $element_uv, (16, 16));
-			}
+			pub fn render_element_icon(pos: impl Into<(usize, usize)>, builder: &mut VertexBufferBuilder) { builder.draw_texture(pos, $element_uv, (16, 16)); }
 		}
 
 		impl Display for $name {

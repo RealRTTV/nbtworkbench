@@ -14,9 +14,7 @@ macro_rules! primitive {
 			pub const ID: u8 = $id;
 
 			#[inline]
-			pub fn to_bytes(&self, writer: &mut UncheckedBufWriter) {
-				writer.write(self.value.to_be_bytes().as_ref());
-			}
+			pub fn to_bytes(&self, writer: &mut UncheckedBufWriter) { writer.write(self.value.to_be_bytes().as_ref()); }
 
 			#[inline]
 			pub fn from_bytes(decoder: &mut Decoder) -> Option<Self> {
@@ -32,9 +30,9 @@ macro_rules! primitive {
 			pub fn render(&self, builder: &mut VertexBufferBuilder, name: Option<&str>, ctx: &mut RenderContext) {
 				ctx.line_number();
 				Self::render_icon(ctx.pos(), BASE_Z, builder);
-				let str = $compact_format(self.value);
 				ctx.check_for_invalid_value(|value| value.parse::<$t>().is_err());
 				ctx.render_errors(ctx.pos(), builder);
+				let str = $compact_format(self.value);
 				if ctx.forbid(ctx.pos()) {
 					builder.settings(ctx.pos() + (20, 0), false, 1);
 					let _ = match name {
@@ -47,14 +45,10 @@ macro_rules! primitive {
 			}
 
 			#[inline]
-			pub fn render_icon(pos: impl Into<(usize, usize)>, z: u8, builder: &mut VertexBufferBuilder) {
-				builder.draw_texture_z(pos, z, $uv, (16, 16));
-			}
+			pub fn render_icon(pos: impl Into<(usize, usize)>, z: u8, builder: &mut VertexBufferBuilder) { builder.draw_texture_z(pos, z, $uv, (16, 16)); }
 
 			#[inline]
-			pub fn value(&self) -> CompactString {
-				$compact_format(self.value)
-			}
+			pub fn value(&self) -> CompactString { $compact_format(self.value) }
 		}
 
 		impl Display for $name {
@@ -68,9 +62,7 @@ macro_rules! primitive {
 		}
 
 		impl Debug for $name {
-			fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-				Display::fmt(self, f)
-			}
+			fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result { Display::fmt(self, f) }
 		}
 	};
 }

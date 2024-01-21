@@ -22,7 +22,12 @@ impl NbtString {
 	pub const ID: u8 = 8;
 	pub(in crate::elements) fn from_str0(s: &str) -> Option<(&str, Self)> {
 		let (str, s) = s.snbt_string_read()?;
-		Some((s, Self { str: TwentyThree::new(str) }))
+		Some((
+			s,
+			Self {
+				str: TwentyThree::new(str),
+			},
+		))
 	}
 
 	pub fn from_bytes(decoder: &mut Decoder) -> Option<Self> {
@@ -33,16 +38,16 @@ impl NbtString {
 			})
 		}
 	}
-	pub fn to_bytes(&self, writer: &mut UncheckedBufWriter) {
-		writer.write_str(self.str.as_str());
-	}
+	pub fn to_bytes(&self, writer: &mut UncheckedBufWriter) { writer.write_str(self.str.as_str()); }
 }
 
 impl NbtString {
 	#[inline]
 	#[must_use]
 	pub fn new(str: CompactString) -> Self {
-		Self { str: TwentyThree::new(str) }
+		Self {
+			str: TwentyThree::new(str),
+		}
 	}
 }
 
@@ -57,9 +62,7 @@ impl Display for NbtString {
 }
 
 impl Debug for NbtString {
-	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-		Display::fmt(self, f)
-	}
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result { Display::fmt(self, f) }
 }
 
 impl NbtString {
@@ -83,9 +86,7 @@ impl NbtString {
 	}
 
 	#[inline]
-	pub fn render_icon(pos: impl Into<(usize, usize)>, z: u8, builder: &mut VertexBufferBuilder) {
-		builder.draw_texture_z(pos, z, STRING_UV, (16, 16));
-	}
+	pub fn render_icon(pos: impl Into<(usize, usize)>, z: u8, builder: &mut VertexBufferBuilder) { builder.draw_texture_z(pos, z, STRING_UV, (16, 16)); }
 }
 
 #[repr(C)]
@@ -136,10 +137,14 @@ impl TwentyThree {
 				let ptr = s.as_ptr();
 				let res = Self {
 					stack: ManuallyDrop::new(if len == 23 {
-						StackTwentyThree { data: ptr.cast::<[u8; 23]>().read() }
+						StackTwentyThree {
+							data: ptr.cast::<[u8; 23]>().read(),
+						}
 					} else {
 						let mut data = MaybeUninit::<u8>::uninit_array();
-						data.as_mut_ptr().cast::<u8>().copy_from_nonoverlapping(ptr, len);
+						data.as_mut_ptr()
+							.cast::<u8>()
+							.copy_from_nonoverlapping(ptr, len);
 						data[22].write(192 + len as u8);
 						StackTwentyThree {
 							data: MaybeUninit::array_assume_init(data),
@@ -172,16 +177,17 @@ impl TwentyThree {
 impl Deref for TwentyThree {
 	type Target = str;
 
-	fn deref(&self) -> &Self::Target {
-		self.as_str()
-	}
+	fn deref(&self) -> &Self::Target { self.as_str() }
 }
 
 impl Drop for TwentyThree {
 	fn drop(&mut self) {
 		unsafe {
 			if self.heap.variant == 254 {
-				dealloc(self.heap.ptr.as_ptr(), Layout::array::<u8>(self.heap.len).unwrap_unchecked());
+				dealloc(
+					self.heap.ptr.as_ptr(),
+					Layout::array::<u8>(self.heap.len).unwrap_unchecked(),
+				);
 			}
 		}
 	}

@@ -14,26 +14,36 @@ use winit::platform::windows::WindowBuilderExtWindows;
 use winit::window::{Icon, Window, WindowBuilder};
 use zune_inflate::DeflateOptions;
 
+use crate::alert::Alert;
 use crate::assets::HEADER_SIZE;
+use crate::color::TextColor;
 use crate::vertex_buffer_builder::VertexBufferBuilder;
 use crate::workbench::Workbench;
 use crate::{assets, OptionExt};
-use crate::alert::Alert;
-use crate::color::TextColor;
 
 pub const WINDOW_HEIGHT: usize = 420;
 pub const WINDOW_WIDTH: usize = 620;
 pub const MIN_WINDOW_HEIGHT: usize = HEADER_SIZE + 16;
 pub const MIN_WINDOW_WIDTH: usize = 520;
 
-pub fn run() -> ! {
+pub fn 	run() -> ! {
 	let event_loop = EventLoop::new();
 	let window = WindowBuilder::new()
 		.with_title("NBT Workbench")
 		.with_transparent(std::env::args().any(|x| x.eq("--transparent")))
 		.with_inner_size(PhysicalSize::new(WINDOW_WIDTH as u32, WINDOW_HEIGHT as u32))
-		.with_min_inner_size(PhysicalSize::new(MIN_WINDOW_WIDTH as u32, MIN_WINDOW_HEIGHT as u32))
-		.with_window_icon(Some(Icon::from_rgba(assets::icon(), assets::ICON_WIDTH as u32, assets::ICON_HEIGHT as u32).expect("valid format")))
+		.with_min_inner_size(PhysicalSize::new(
+			MIN_WINDOW_WIDTH as u32,
+			MIN_WINDOW_HEIGHT as u32,
+		))
+		.with_window_icon(Some(
+			Icon::from_rgba(
+				assets::icon(),
+				assets::ICON_WIDTH as u32,
+				assets::ICON_HEIGHT as u32,
+			)
+			.expect("valid format"),
+		))
 		.with_drag_and_drop(true)
 		.build(&event_loop)
 		.expect("Window was constructable");
@@ -60,7 +70,10 @@ pub fn run() -> ! {
 						std::process::exit(0);
 					}
 					WindowEvent::Resized(new_size) => state.resize(&mut workbench, new_size),
-					WindowEvent::ScaleFactorChanged { new_inner_size: new_size, .. } => state.resize(&mut workbench, *new_size),
+					WindowEvent::ScaleFactorChanged {
+						new_inner_size: new_size,
+						..
+					} => state.resize(&mut workbench, *new_size),
 					_ => {}
 				}
 			}
@@ -94,7 +107,12 @@ impl State {
 			backends: Backends::all(),
 			dx12_shader_compiler: Dx12Compiler::default(),
 		});
-		let surface = unsafe { instance.create_surface(window).ok().panic_unchecked("all safety guarantees are assured") };
+		let surface = unsafe {
+			instance
+				.create_surface(window)
+				.ok()
+				.panic_unchecked("all safety guarantees are assured")
+		};
 		let adapter = instance
 			.request_adapter(&RequestAdapterOptions {
 				power_preference: PowerPreference::None,
@@ -107,7 +125,11 @@ impl State {
 			.request_device(
 				&DeviceDescriptor {
 					features: adapter.features(),
-					limits: if cfg!(target_arch = "wasm32") { Limits::downlevel_webgl2_defaults() } else { Limits::default() },
+					limits: if cfg!(target_arch = "wasm32") {
+						Limits::downlevel_webgl2_defaults()
+					} else {
+						Limits::default()
+					},
 					label: None,
 				},
 				None,
@@ -116,7 +138,12 @@ impl State {
 			.expect("Could obtain device");
 		let config = SurfaceConfiguration {
 			usage: TextureUsages::RENDER_ATTACHMENT,
-			format: surface.get_capabilities(&adapter).formats.into_iter().find(TextureFormat::is_srgb).expect("An SRGB format exists"),
+			format: surface
+				.get_capabilities(&adapter)
+				.formats
+				.into_iter()
+				.find(TextureFormat::is_srgb)
+				.expect("An SRGB format exists"),
 			width: size.width,
 			height: size.height,
 			present_mode: PresentMode::AutoVsync,
@@ -260,13 +287,19 @@ impl State {
 				#[cfg(debug_assertions)]
 				let start = std::time::Instant::now();
 				let vec = unsafe {
-					zune_inflate::DeflateDecoder::new_with_options(include_bytes!("assets/unicode.hex.zib"), DeflateOptions::default().set_confirm_checksum(false))
-						.decode_zlib()
-						.ok()
-						.panic_unchecked("there is no way this fails, otherwise i deserve the ub that comes from this.")
+					zune_inflate::DeflateDecoder::new_with_options(
+						include_bytes!("assets/unicode.hex.zib"),
+						DeflateOptions::default().set_confirm_checksum(false),
+					)
+					.decode_zlib()
+					.ok()
+					.panic_unchecked("there is no way this fails, otherwise i deserve the ub that comes from this.")
 				};
 				#[cfg(debug_assertions)]
-				println!("took {}ms to read compressed unicode", start.elapsed().as_nanos() as f64 / 1_000_000.0);
+				println!(
+					"took {}ms to read compressed unicode",
+					start.elapsed().as_nanos() as f64 / 1_000_000.0
+				);
 				vec
 			},
 			usage: BufferUsages::STORAGE,
@@ -352,7 +385,12 @@ impl State {
 		let load_op = if std::env::args().any(|x| x.eq("--transparent")) {
 			LoadOp::Load
 		} else {
-			LoadOp::Clear(Color { r: 0.013, g: 0.013, b: 0.013, a: 1.0 })
+			LoadOp::Clear(Color {
+				r: 0.013,
+				g: 0.013,
+				b: 0.013,
+				a: 1.0,
+			})
 		};
 
 		Self {
@@ -376,8 +414,7 @@ impl State {
 			self.config.width = new_size.width;
 			self.config.height = new_size.height;
 			self.surface.configure(&self.device, &self.config);
-			workbench.window_height(new_size.height as usize);
-			workbench.window_width(new_size.width as usize);
+			workbench.window_dims(new_size.width as usize, new_size.height as usize);
 			for tab in &mut workbench.tabs {
 				tab.scroll = tab.scroll();
 				tab.horizontal_scroll = tab.horizontal_scroll(workbench.held_entry.element());
@@ -404,7 +441,7 @@ impl State {
 					workbench.alert(Alert::new("Error!", TextColor::Red, e.to_string()))
 				}
 				true
-			},
+			}
 			WindowEvent::HoveredFile(_) => false,
 			WindowEvent::HoveredFileCancelled => false,
 			WindowEvent::ReceivedCharacter(_) => false,
@@ -430,7 +467,12 @@ impl State {
 	}
 
 	fn render(&mut self, workbench: &mut Workbench, window: &Window) -> Result<(), SurfaceError> {
-		if self.last_tick.elapsed().unwrap_or_else(|x| x.duration()).as_millis() >= 25 {
+		if self
+			.last_tick
+			.elapsed()
+			.unwrap_or_else(|x| x.duration())
+			.as_millis() >= 25
+		{
 			workbench.tick();
 			self.last_tick = SystemTime::now();
 		}
@@ -438,8 +480,14 @@ impl State {
 			workbench.alert(Alert::new("Error!", TextColor::Red, e.to_string()))
 		}
 		let output = self.surface.get_current_texture()?;
-		let view = output.texture.create_view(&TextureViewDescriptor::default());
-		let mut encoder = self.device.create_command_encoder(&CommandEncoderDescriptor { label: Some("Command Encoder") });
+		let view = output
+			.texture
+			.create_view(&TextureViewDescriptor::default());
+		let mut encoder = self
+			.device
+			.create_command_encoder(&CommandEncoderDescriptor {
+				label: Some("Command Encoder"),
+			});
 		let depth_texture = self.device.create_texture(&TextureDescriptor {
 			label: Some("Depth Texture"),
 			size: Extent3d {
@@ -466,7 +514,10 @@ impl State {
 				color_attachments: &[Some(RenderPassColorAttachment {
 					view: &view,
 					resolve_target: None,
-					ops: Operations { load: self.load_op, store: true },
+					ops: Operations {
+						load: self.load_op,
+						store: true,
+					},
 				})],
 				depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
 					view: &depth_texture_view,
@@ -478,7 +529,13 @@ impl State {
 				}),
 			});
 
-			let mut builder = VertexBufferBuilder::new(self.size, assets::ATLAS_WIDTH, assets::ATLAS_HEIGHT, workbench.scroll(), workbench.scale);
+			let mut builder = VertexBufferBuilder::new(
+				self.size,
+				assets::ATLAS_WIDTH,
+				assets::ATLAS_HEIGHT,
+				workbench.scroll(),
+				workbench.scale,
+			);
 			workbench.render(&mut builder);
 
 			let show_cursor = !builder.drew_tooltip();

@@ -39,7 +39,10 @@ impl Clone for NbtRegion {
 			for n in 0..1024 {
 				chunkss.add(n).write(chunks.get_unchecked(n).clone());
 			}
-			boxx.write((Vec::from_raw_parts(mapp, map.len(), map.len()), chunkss.cast::<[NbtElement; 32 * 32]>().read()));
+			boxx.write((
+				Vec::from_raw_parts(mapp, map.len(), map.len()),
+				chunkss.cast::<[NbtElement; 32 * 32]>().read(),
+			));
 
 			Self {
 				chunks: Box::from_raw(boxx),
@@ -69,54 +72,50 @@ impl NbtRegion {
 	pub const CHUNK_BANDWIDTH: usize = 32;
 
 	#[must_use]
-	pub fn new() -> Self {
-		Self::default()
-	}
+	pub fn new() -> Self { Self::default() }
 
 	#[must_use]
 	pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
 		fn parse(offset: u32, bytes: &[u8]) -> Option<(FileFormat, NbtElement)> {
-			if offset < 512 {
-				return Some((FileFormat::Zlib, unsafe { core::mem::zeroed() }));
-			}
+			if offset < 512 { return Some((FileFormat::Zlib, unsafe { core::mem::zeroed() })) }
 
 			let len = (offset as usize & 0xFF) * 4096;
 			let offset = ((offset >> 8) - 2) as usize * 4096;
-			if bytes.len() < offset + len {
-				return None;
-			}
+			if bytes.len() < offset + len { return None }
 			let data = &bytes[offset..(offset + len)];
 
 			if let &[a, b, c, d, compression, ref data @ ..] = data {
 				let chunk_len = (u32::from_be_bytes([a, b, c, d]) as usize).checked_sub(1)?;
-				if data.len() < chunk_len {
-					return None;
-				}
+				if data.len() < chunk_len { return None }
 				let data = &data[..chunk_len];
 				let (compression, element) = match compression {
 					1 => (
 						FileFormat::Gzip,
-						NbtElement::from_file(&DeflateDecoder::new_with_options(data, DeflateOptions::default().set_confirm_checksum(false)).decode_gzip().ok()?)?,
+						NbtElement::from_file(
+							&DeflateDecoder::new_with_options(data, DeflateOptions::default().set_confirm_checksum(false))
+								.decode_gzip()
+								.ok()?,
+						)?,
 					),
 					2 => (
 						FileFormat::Zlib,
-						NbtElement::from_file(&DeflateDecoder::new_with_options(data, DeflateOptions::default().set_confirm_checksum(false)).decode_zlib().ok()?)?,
+						NbtElement::from_file(
+							&DeflateDecoder::new_with_options(data, DeflateOptions::default().set_confirm_checksum(false))
+								.decode_zlib()
+								.ok()?,
+						)?,
 					),
 					3 => (FileFormat::Nbt, NbtElement::from_file(data)?),
 					_ => return None,
 				};
-				if element.id() != NbtCompound::ID {
-					return None;
-				}
+				if element.id() != NbtCompound::ID { return None }
 				Some((compression, element))
 			} else {
 				None
 			}
 		}
 
-		if bytes.len() < 8192 {
-			return None;
-		}
+		if bytes.len() < 8192 { return None }
 
 		std::thread::scope(move |s| {
 			let mut region = Self::new();
@@ -125,7 +124,10 @@ impl NbtRegion {
 			let (&timestamps, bytes) = bytes.split_array_ref::<4096>();
 			let mut threads = Vec::new();
 
-			for (&offset, &timestamp) in offsets.array_chunks::<4>().zip(timestamps.array_chunks::<4>()) {
+			for (&offset, &timestamp) in offsets
+				.array_chunks::<4>()
+				.zip(timestamps.array_chunks::<4>())
+			{
 				let timestamp = u32::from_be_bytes(timestamp);
 				let offset = u32::from_be_bytes(offset);
 				threads.push((timestamp, s.spawn(move || parse(offset, bytes))));
@@ -137,7 +139,12 @@ impl NbtRegion {
 					region.insert_unchecked(
 						pos,
 						region.len(),
-						NbtElement::Chunk(NbtChunk::from_compound(core::mem::transmute(element), ((pos >> 5) as u8 & 31, pos as u8 & 31), format, timestamp)),
+						NbtElement::Chunk(NbtChunk::from_compound(
+							core::mem::transmute(element),
+							((pos >> 5) as u8 & 31, pos as u8 & 31),
+							format,
+							timestamp,
+						)),
 					);
 				}
 			}
@@ -154,7 +161,9 @@ impl NbtRegion {
 						if chunk.is_null() {
 							(vec![], 0)
 						} else {
-							let chunk = &(chunk as *const NbtElement).cast::<ManuallyDrop<NbtChunk>>().read();
+							let chunk = &(chunk as *const NbtElement)
+								.cast::<ManuallyDrop<NbtChunk>>()
+								.read();
 							let mut writer = UncheckedBufWriter::new();
 							chunk.to_bytes(&mut writer);
 							(writer.finish(), chunk.last_modified)
@@ -165,7 +174,10 @@ impl NbtRegion {
 				let mut offsets = MaybeUninit::<u32>::uninit_array::<1024>();
 				let mut timestamps = MaybeUninit::<u32>::uninit_array::<1024>();
 				let mut new_chunks = Vec::with_capacity(chunks.len());
-				for (chunk, (offset, timestamp)) in chunks.into_iter().zip(offsets.iter_mut().zip(timestamps.iter_mut())) {
+				for (chunk, (offset, timestamp)) in chunks
+					.into_iter()
+					.zip(offsets.iter_mut().zip(timestamps.iter_mut()))
+				{
 					let Ok((chunk, last_modified)) = chunk.join() else {
 						return;
 					};
@@ -213,9 +225,7 @@ impl NbtRegion {
 
 	#[inline]
 	#[must_use]
-	pub const fn true_height(&self) -> usize {
-		self.true_height as usize
-	}
+	pub const fn true_height(&self) -> usize { self.true_height as usize }
 
 	#[inline]
 	pub fn toggle(&mut self) -> Option<()> {
@@ -228,21 +238,15 @@ impl NbtRegion {
 
 	#[inline]
 	#[must_use]
-	pub const fn open(&self) -> bool {
-		self.open
-	}
+	pub const fn open(&self) -> bool { self.open }
 
 	#[inline]
 	#[must_use]
-	pub fn len(&self) -> usize {
-		(*self.chunks).0.len()
-	}
+	pub fn len(&self) -> usize { (*self.chunks).0.len() }
 
 	#[inline]
 	#[must_use]
-	pub fn is_empty(&self) -> bool {
-		(*self.chunks).0.is_empty()
-	}
+	pub fn is_empty(&self) -> bool { (*self.chunks).0.is_empty() }
 
 	/// # Errors
 	///
@@ -284,7 +288,11 @@ impl NbtRegion {
 		let (map, chunks) = &mut *self.chunks;
 		map.insert(idx, pos as u16);
 		unsafe {
-			chunks.as_mut_ptr().cast::<NbtElement>().add(pos).write(value);
+			chunks
+				.as_mut_ptr()
+				.cast::<NbtElement>()
+				.add(pos)
+				.write(value);
 		}
 	}
 
@@ -292,7 +300,12 @@ impl NbtRegion {
 	#[must_use]
 	pub fn remove(&mut self, idx: usize) -> NbtElement {
 		let (map, chunks) = &mut *self.chunks;
-		unsafe { core::ptr::replace(core::ptr::addr_of_mut!(chunks[map.remove(idx) as usize]), core::mem::zeroed()) }
+		unsafe {
+			core::ptr::replace(
+				core::ptr::addr_of_mut!(chunks[map.remove(idx) as usize]),
+				core::mem::zeroed(),
+			)
+		}
 	}
 
 	#[inline]
@@ -312,7 +325,11 @@ impl NbtRegion {
 	#[inline]
 	#[must_use]
 	pub fn value(&self) -> CompactString {
-		format_compact!("{} chunk{}", self.len(), if self.len() == 1 { "" } else { "s" })
+		format_compact!(
+			"{} chunk{}",
+			self.len(),
+			if self.len() == 1 { "" } else { "s" }
+		)
 	}
 
 	#[inline]
@@ -330,7 +347,12 @@ impl NbtRegion {
 
 			ctx.line_number();
 			// fun hack for connection
-			builder.draw_texture_z((builder.text_coords.0 + 4, ctx.y_offset - 2), LINE_NUMBER_CONNECTOR_Z, LINE_NUMBER_SEPARATOR_UV, (2, 2));
+			builder.draw_texture_z(
+				(builder.text_coords.0 + 4, ctx.y_offset - 2),
+				LINE_NUMBER_CONNECTOR_Z,
+				LINE_NUMBER_SEPARATOR_UV,
+				(2, 2),
+			);
 			Self::render_icon(ctx.pos(), BASE_Z, builder);
 			builder.draw_texture(ctx.pos() - (16, 0), CONNECTION_UV, (16, 9));
 			if !self.is_empty() {
@@ -343,10 +365,25 @@ impl NbtRegion {
 			}
 
 			let pos = ctx.pos();
-			if ctx.ghost(ctx.pos() + (16, 16), builder, |x, y| pos == (x - 16, y - 8), |id| id == NbtChunk::ID) {
-				builder.draw_texture(ctx.pos() + (0, 16), CONNECTION_UV, (16, (self.height() != 1) as usize * 7 + 9));
+			if ctx.ghost(
+				ctx.pos() + (16, 16),
+				builder,
+				|x, y| pos == (x - 16, y - 8),
+				|id| id == NbtChunk::ID,
+			) {
+				builder.draw_texture(
+					ctx.pos() + (0, 16),
+					CONNECTION_UV,
+					(16, (self.height() != 1) as usize * 7 + 9),
+				);
 				ctx.y_offset += 16;
-			} else if self.height() == 1 && ctx.ghost(ctx.pos() + (16, 16), builder, |x, y| pos == (x - 16, y - 16), |id| id == NbtChunk::ID) {
+			} else if self.height() == 1
+				&& ctx.ghost(
+					ctx.pos() + (16, 16),
+					builder,
+					|x, y| pos == (x - 16, y - 16),
+					|id| id == NbtChunk::ID,
+				) {
 				builder.draw_texture(ctx.pos() + (0, 16), CONNECTION_UV, (16, 9));
 				ctx.y_offset += 16;
 			}
@@ -361,7 +398,7 @@ impl NbtRegion {
 				let children_contains_forbidden = 'f: {
 					let mut y = ctx.y_offset;
 					for value in self.children() {
-						if y.saturating_sub(remaining_scroll * 16) == ctx.forbidden_y && ctx.forbidden_y >= HEADER_SIZE {
+						if y.saturating_sub(remaining_scroll * 16) == ctx.selected_y && ctx.selected_y >= HEADER_SIZE {
 							break 'f true;
 						}
 						y += value.height() * 16;
@@ -375,12 +412,20 @@ impl NbtRegion {
 							let value = unsafe { value.as_chunk_unchecked() };
 							let x = value.x.to_compact_string();
 							let z = value.z.to_compact_string();
-							ctx.check_for_key_duplicate(|key, value| key.parse::<u8>().ok() == x.parse::<u8>().ok() && value.parse::<u8>().ok() == z.parse::<u8>().ok(), true);
+							ctx.check_for_key_duplicate(
+								|key, value| key.parse::<u8>().ok() == x.parse::<u8>().ok() && value.is_some_and(|value| value.parse::<u8>().ok() == z.parse::<u8>().ok()),
+								true,
+							);
 							// first check required so this don't render when it's the only selected
 							let y2 = y.saturating_sub(remaining_scroll * 16);
-							if y2 != ctx.forbidden_y && y2 >= HEADER_SIZE && ctx.key_duplicate_error {
+							if y2 != ctx.selected_y && y2 >= HEADER_SIZE && ctx.key_duplicate_error {
 								ctx.red_line_numbers[1] = y2;
-								ctx.draw_error_underline_width(ctx.x_offset, y2, x.width() + ", ".width() + z.width(), builder);
+								ctx.draw_error_underline_width(
+									ctx.x_offset,
+									y2,
+									x.width() + ", ".width() + z.width(),
+									builder,
+								);
 								break 'a true;
 							}
 							y += value.height() * 16;
@@ -406,31 +451,59 @@ impl NbtRegion {
 				}
 
 				let pos = ctx.pos();
-				if ctx.ghost(ctx.pos(), builder, |x, y| pos == (x, y), |id| id == NbtChunk::ID) {
+				if ctx.ghost(
+					ctx.pos(),
+					builder,
+					|x, y| pos == (x, y),
+					|id| id == NbtChunk::ID,
+				) {
 					builder.draw_texture(ctx.pos() - (16, 0), CONNECTION_UV, (16, 16));
 					ctx.y_offset += 16;
 				}
 
-				let ghost_tail_mod = if let Some((_, x, y, _)) = ctx.ghost && ctx.pos() + (0, height * 16 - remaining_scroll * 16 - 8) == (x, y) {
+				let ghost_tail_mod = if let Some((_, x, y, _)) = ctx.ghost
+					&& ctx.pos() + (0, height * 16 - remaining_scroll * 16 - 8) == (x, y)
+				{
 					false
 				} else {
 					true
 				};
 
 				if remaining_scroll == 0 {
-					builder.draw_texture(ctx.pos() - (16, 0), CONNECTION_UV, (16, (idx != self.len() - 1 || !ghost_tail_mod) as usize * 7 + 9));
+					builder.draw_texture(
+						ctx.pos() - (16, 0),
+						CONNECTION_UV,
+						(
+							16,
+							(idx != self.len() - 1 || !ghost_tail_mod) as usize * 7 + 9,
+						),
+					);
 				}
-				let forbidden_y = ctx.forbidden_y;
+				let forbidden_y = ctx.selected_y;
 				let pos = ctx.pos();
 				ctx.check_for_key_duplicate(|_, _| shadowing_other && pos.y == forbidden_y, true);
 				if ctx.key_duplicate_error {
 					ctx.red_line_numbers[0] = ctx.y_offset;
 				}
-				value.render(builder, &mut remaining_scroll, idx == self.len() - 1 && ghost_tail_mod, ctx);
+				value.render(
+					builder,
+					&mut remaining_scroll,
+					idx == self.len() - 1 && ghost_tail_mod,
+					ctx,
+				);
 
 				let pos = ctx.pos();
-				if ctx.ghost(ctx.pos(), builder, |x, y| pos == (x, y + 8), |id| id == NbtChunk::ID) {
-					builder.draw_texture(ctx.pos() - (16, 0), CONNECTION_UV, (16, (idx != self.len() - 1) as usize * 7 + 9));
+				if ctx.ghost(
+					ctx.pos(),
+					builder,
+					|x, y| pos == (x, y + 8),
+					|id| id == NbtChunk::ID,
+				) {
+					builder.draw_texture(
+						ctx.pos() - (16, 0),
+						CONNECTION_UV,
+						(16, (idx != self.len() - 1) as usize * 7 + 9),
+					);
 					ctx.y_offset += 16;
 				}
 			}
@@ -438,9 +511,7 @@ impl NbtRegion {
 	}
 
 	#[inline]
-	pub fn render_icon(pos: impl Into<(usize, usize)>, z: u8, builder: &mut VertexBufferBuilder) {
-		builder.draw_texture_z(pos, z, REGION_UV, (16, 16));
-	}
+	pub fn render_icon(pos: impl Into<(usize, usize)>, z: u8, builder: &mut VertexBufferBuilder) { builder.draw_texture_z(pos, z, REGION_UV, (16, 16)); }
 
 	#[inline]
 	pub fn children(&self) -> ValueIterator {
@@ -456,16 +527,26 @@ impl NbtRegion {
 
 	#[inline]
 	pub fn drop(&mut self, mut key: Option<CompactString>, mut element: NbtElement, y: &mut usize, depth: usize, target_depth: usize, mut line_number: usize, indices: &mut Vec<usize>) -> DropFn {
-		if *y < 16 && *y >= 8 && depth == target_depth && let Some(chunk) = element.as_chunk() {
+		if *y < 16
+			&& *y >= 8 && depth == target_depth
+			&& let Some(chunk) = element.as_chunk()
+		{
 			let (_x, z) = (chunk.x, chunk.z);
 			let before = (self.height(), self.true_height());
 			indices.push(0);
-			if let Err(element) = self.insert(0, element) {
-				return DropFn::InvalidType(key, element);
-			}
+			if let Err(element) = self.insert(0, element) { return DropFn::InvalidType(key, element) }
 			self.open = true;
-			return DropFn::Dropped(self.height as usize - before.0, self.true_height as usize - before.1, Some(z.to_compact_string()), line_number + 1);
-		} else if self.height() == 1 && *y < 24 && *y >= 16 && depth == target_depth && let Some(chunk) = element.as_chunk() {
+			return DropFn::Dropped(
+				self.height as usize - before.0,
+				self.true_height as usize - before.1,
+				Some(z.to_compact_string()),
+				line_number + 1,
+			);
+		} else if self.height() == 1
+			&& *y < 24 && *y >= 16
+			&& depth == target_depth
+			&& let Some(chunk) = element.as_chunk()
+		{
 			let (_x, z) = (chunk.x, chunk.z);
 			let before = self.true_height();
 			indices.push(self.len());
@@ -474,7 +555,12 @@ impl NbtRegion {
 				return DropFn::InvalidType(key, element);
 			}
 			self.open = true;
-			return DropFn::Dropped(self.height as usize - 1, self.true_height as usize - before, Some(z.to_compact_string()), line_number + before + 1);
+			return DropFn::Dropped(
+				self.height as usize - 1,
+				self.true_height as usize - before,
+				Some(z.to_compact_string()),
+				line_number + before + 1,
+			);
 		}
 
 		if *y < 16 {
@@ -489,24 +575,45 @@ impl NbtRegion {
 			for (idx, value) in self.children_mut().enumerate() {
 				*ptr = idx;
 				let heights = (element.height(), element.true_height());
-				if *y < 8 && depth == target_depth && let Some(chunk) = element.as_chunk() {
+				if *y < 8
+					&& depth == target_depth
+					&& let Some(chunk) = element.as_chunk()
+				{
 					let (_x, z) = (chunk.x, chunk.z);
-					if let Err(element) = self.insert(idx, element) {
-						return DropFn::InvalidType(key, element);
-					}
-					return DropFn::Dropped(heights.0, heights.1, Some(z.to_compact_string()), line_number + 1);
-				} else if *y >= value.height() * 16 - 8 && *y < value.height() * 16 && depth == target_depth && let Some(chunk) = element.as_chunk() {
+					if let Err(element) = self.insert(idx, element) { return DropFn::InvalidType(key, element) }
+					return DropFn::Dropped(
+						heights.0,
+						heights.1,
+						Some(z.to_compact_string()),
+						line_number + 1,
+					);
+				} else if *y >= value.height() * 16 - 8
+					&& *y < value.height() * 16
+					&& depth == target_depth
+					&& let Some(chunk) = element.as_chunk()
+				{
 					let (_x, z) = (chunk.x, chunk.z);
 					*ptr = idx + 1;
 					let true_height = element.true_height();
-					if let Err(element) = self.insert(idx + 1, element) {
-						return DropFn::InvalidType(key, element);
-					}
-					return DropFn::Dropped(heights.0, heights.1, Some(z.to_compact_string()), line_number + true_height + 1);
+					if let Err(element) = self.insert(idx + 1, element) { return DropFn::InvalidType(key, element) }
+					return DropFn::Dropped(
+						heights.0,
+						heights.1,
+						Some(z.to_compact_string()),
+						line_number + true_height + 1,
+					);
 				}
 
 				if element.id() != NbtChunk::ID {
-					match value.drop(key, element, y, depth + 1, target_depth, line_number, indices) {
+					match value.drop(
+						key,
+						element,
+						y,
+						depth + 1,
+						target_depth,
+						line_number,
+						indices,
+					) {
 						x @ DropFn::InvalidType(_, _) => return x,
 						DropFn::Missed(k, e) => {
 							key = k;
@@ -539,7 +646,9 @@ impl NbtRegion {
 	pub fn expand<'a, 'b>(&'b mut self, scope: &'a Scope<'a, 'b>) {
 		self.open = !self.is_empty();
 		self.height = self.true_height;
-		let mut iter = self.children_mut().array_chunks::<{ Self::CHUNK_BANDWIDTH }>();
+		let mut iter = self
+			.children_mut()
+			.array_chunks::<{ Self::CHUNK_BANDWIDTH }>();
 		for elements in iter.by_ref() {
 			scope.spawn(|| {
 				for element in elements {
@@ -570,9 +679,7 @@ impl NbtRegion {
 
 	#[inline]
 	#[must_use]
-	pub const fn max_depth(&self) -> usize {
-		self.max_depth as usize
-	}
+	pub const fn max_depth(&self) -> usize { self.max_depth as usize }
 }
 
 impl Debug for NbtRegion {
@@ -632,7 +739,9 @@ impl NbtChunk {
 	pub fn to_bytes(&self, writer: &mut UncheckedBufWriter) {
 		// todo, mcc
 		unsafe {
-			let encoded = self.compression.encode(&*(self.inner.as_ref() as *const NbtCompound).cast::<NbtElement>());
+			let encoded = self
+				.compression
+				.encode(&*(self.inner.as_ref() as *const NbtCompound).cast::<NbtElement>());
 			let len = encoded.len() + 1;
 			// plus four for the len field writing, and + 1 for the compression
 			let pad_len = (4096 - (len + 4) % 4096) % 4096;
@@ -656,9 +765,7 @@ impl NbtChunk {
 
 	#[inline]
 	#[must_use]
-	pub fn value(&self) -> String {
-		format!("{}, {}", self.x, self.z)
-	}
+	pub fn value(&self) -> String { format!("{}, {}", self.x, self.z) }
 
 	#[inline]
 	#[allow(clippy::too_many_lines)]
@@ -687,13 +794,28 @@ impl NbtChunk {
 			}
 
 			let pos = ctx.pos();
-			if ctx.ghost(ctx.pos() + (16, 16), builder, |x, y| pos == (x - 16, y - 8), |id| id != Self::ID) {
-				builder.draw_texture(ctx.pos() + (0, 16), CONNECTION_UV, (16, (self.height() != 1) as usize * 7 + 9));
+			if ctx.ghost(
+				ctx.pos() + (16, 16),
+				builder,
+				|x, y| pos == (x - 16, y - 8),
+				|id| id != Self::ID,
+			) {
+				builder.draw_texture(
+					ctx.pos() + (0, 16),
+					CONNECTION_UV,
+					(16, (self.height() != 1) as usize * 7 + 9),
+				);
 				if !tail {
 					builder.draw_texture(ctx.pos() - (16, 0) + (0, 16), CONNECTION_UV, (8, 16));
 				}
 				ctx.y_offset += 16;
-			} else if self.height() == 1 && ctx.ghost(ctx.pos() + (16, 16), builder, |x, y| pos == (x - 16, y - 16), |id| id != Self::ID) {
+			} else if self.height() == 1
+				&& ctx.ghost(
+					ctx.pos() + (16, 16),
+					builder,
+					|x, y| pos == (x - 16, y - 16),
+					|id| id != Self::ID,
+				) {
 				builder.draw_texture(ctx.pos() + (0, 16), CONNECTION_UV, (16, 9));
 				if !tail {
 					builder.draw_texture(ctx.pos() - (16, 0) + (0, 16), CONNECTION_UV, (8, 16));
@@ -714,7 +836,7 @@ impl NbtChunk {
 				let children_contains_forbidden = 'f: {
 					let mut y = ctx.y_offset;
 					for (_, value) in self.children() {
-						if y.saturating_sub(*remaining_scroll * 16) == ctx.forbidden_y && ctx.forbidden_y >= HEADER_SIZE {
+						if y.saturating_sub(*remaining_scroll * 16) == ctx.selected_y && ctx.selected_y >= HEADER_SIZE {
 							break 'f true;
 						}
 						y += value.height() * 16;
@@ -726,9 +848,13 @@ impl NbtChunk {
 					for (name, value) in self.children() {
 						ctx.check_for_key_duplicate(|text, _| text == name, false);
 						// first check required so this don't render when it's the only selected
-						if y.saturating_sub(*remaining_scroll * 16) != ctx.forbidden_y && y.saturating_sub(*remaining_scroll * 16) >= HEADER_SIZE && ctx.key_duplicate_error {
+						if y.saturating_sub(*remaining_scroll * 16) != ctx.selected_y && y.saturating_sub(*remaining_scroll * 16) >= HEADER_SIZE && ctx.key_duplicate_error {
 							ctx.red_line_numbers[1] = y.saturating_sub(*remaining_scroll * 16);
-							ctx.draw_error_underline(ctx.x_offset, y.saturating_sub(*remaining_scroll * 16), builder);
+							ctx.draw_error_underline(
+								ctx.x_offset,
+								y.saturating_sub(*remaining_scroll * 16),
+								builder,
+							);
 							break;
 						}
 						y += value.height() * 16;
@@ -749,29 +875,58 @@ impl NbtChunk {
 				}
 
 				let pos = ctx.pos();
-				if ctx.ghost(ctx.pos(), builder, |x, y| pos == (x, y), |id| id != Self::ID) {
+				if ctx.ghost(
+					ctx.pos(),
+					builder,
+					|x, y| pos == (x, y),
+					|id| id != Self::ID,
+				) {
 					builder.draw_texture(ctx.pos() - (16, 0), CONNECTION_UV, (16, 16));
 					ctx.y_offset += 16;
 				}
 
-				let ghost_tail_mod = if let Some((_, x, y, _)) = ctx.ghost && ctx.pos() + (0, height * 16 - *remaining_scroll * 16 - 8) == (x, y) {
+				let ghost_tail_mod = if let Some((_, x, y, _)) = ctx.ghost
+					&& ctx.pos() + (0, height * 16 - *remaining_scroll * 16 - 8) == (x, y)
+				{
 					false
 				} else {
 					true
 				};
 
 				if *remaining_scroll == 0 {
-					builder.draw_texture(ctx.pos() - (16, 0), CONNECTION_UV, (16, (idx != self.len() - 1 || !ghost_tail_mod) as usize * 7 + 9));
+					builder.draw_texture(
+						ctx.pos() - (16, 0),
+						CONNECTION_UV,
+						(
+							16,
+							(idx != self.len() - 1 || !ghost_tail_mod) as usize * 7 + 9,
+						),
+					);
 				}
 				ctx.check_for_key_duplicate(|text, _| self.inner.entries.has(text) && key != text, false);
-				if ctx.key_duplicate_error && ctx.y_offset == ctx.forbidden_y {
+				if ctx.key_duplicate_error && ctx.y_offset == ctx.selected_y {
 					ctx.red_line_numbers[0] = ctx.y_offset;
 				}
-				entry.render(remaining_scroll, builder, Some(key), tail && idx == self.len() - 1 && ghost_tail_mod, ctx);
+				entry.render(
+					remaining_scroll,
+					builder,
+					Some(key),
+					tail && idx == self.len() - 1 && ghost_tail_mod,
+					ctx,
+				);
 
 				let pos = ctx.pos();
-				if ctx.ghost(ctx.pos(), builder, |x, y| pos == (x, y + 8), |id| id != Self::ID) {
-					builder.draw_texture(ctx.pos() - (16, 0), CONNECTION_UV, (16, (idx != self.len() - 1) as usize * 7 + 9));
+				if ctx.ghost(
+					ctx.pos(),
+					builder,
+					|x, y| pos == (x, y + 8),
+					|id| id != Self::ID,
+				) {
+					builder.draw_texture(
+						ctx.pos() - (16, 0),
+						CONNECTION_UV,
+						(16, (idx != self.len() - 1) as usize * 7 + 9),
+					);
 					ctx.y_offset += 16;
 				}
 			}
@@ -790,23 +945,17 @@ impl NbtChunk {
 	}
 
 	#[inline]
-	pub fn render_icon(pos: impl Into<(usize, usize)>, z: u8, builder: &mut VertexBufferBuilder) {
-		builder.draw_texture_z(pos, z, CHUNK_UV, (16, 16));
-	}
+	pub fn render_icon(pos: impl Into<(usize, usize)>, z: u8, builder: &mut VertexBufferBuilder) { builder.draw_texture_z(pos, z, CHUNK_UV, (16, 16)); }
 }
 
 impl Deref for NbtChunk {
 	type Target = NbtCompound;
 
-	fn deref(&self) -> &Self::Target {
-		&self.inner
-	}
+	fn deref(&self) -> &Self::Target { &self.inner }
 }
 
 impl DerefMut for NbtChunk {
-	fn deref_mut(&mut self) -> &mut Self::Target {
-		&mut self.inner
-	}
+	fn deref_mut(&mut self) -> &mut Self::Target { &mut self.inner }
 }
 
 impl Display for NbtChunk {

@@ -146,7 +146,12 @@ pub const TOOLTIP_Z: u8 = 250;
 pub fn icon() -> Vec<u8> {
 	#[cfg(debug_assertions)]
 	let start = unsafe { core::arch::x86_64::_rdtsc() };
-	let original = match (SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).expect("time cant go backwards").as_micros() & 7) as u8 {
+	let original = match (SystemTime::now()
+		.duration_since(SystemTime::UNIX_EPOCH)
+		.expect("time cant go backwards")
+		.as_micros()
+		& 7) as u8
+	{
 		// its a good random only because its used once
 		0 => OTHERSIDE_MUSIC_DISC_ICON,
 		1 => PIGSTEP_MUSIC_DISC_ICON,
@@ -162,19 +167,40 @@ pub fn icon() -> Vec<u8> {
 	for y in 0..16 {
 		for x in 0..16 {
 			unsafe {
-				let value = original.as_ptr().cast::<i32>().add(y * 16 + x).read_unaligned();
+				let value = original
+					.as_ptr()
+					.cast::<i32>()
+					.add(y * 16 + x)
+					.read_unaligned();
 				let offset = y * 256 + x * 4;
-				scaled.as_mut_ptr().add(offset).cast::<(i32, i32, i32, i32)>().write((value, value, value, value));
+				scaled
+					.as_mut_ptr()
+					.add(offset)
+					.cast::<(i32, i32, i32, i32)>()
+					.write((value, value, value, value));
 			}
 		}
 		unsafe {
 			let ptr = scaled.as_ptr().cast::<[i32; 64]>().add(y * 4);
-			scaled.as_mut_ptr().cast::<[i32; 64]>().add(y * 4 + 1).cast::<u8>().copy_from_nonoverlapping(ptr.cast(), 256);
-			scaled.as_mut_ptr().cast::<[i32; 64]>().add(y * 4 + 2).cast::<u8>().copy_from_nonoverlapping(ptr.cast(), 512);
+			scaled
+				.as_mut_ptr()
+				.cast::<[i32; 64]>()
+				.add(y * 4 + 1)
+				.cast::<u8>()
+				.copy_from_nonoverlapping(ptr.cast(), 256);
+			scaled
+				.as_mut_ptr()
+				.cast::<[i32; 64]>()
+				.add(y * 4 + 2)
+				.cast::<u8>()
+				.copy_from_nonoverlapping(ptr.cast(), 512);
 		}
 	}
 	let mut scaled = ManuallyDrop::new(core::hint::black_box(scaled));
 	#[cfg(debug_assertions)]
-	println!("took {} cycles", unsafe { core::arch::x86_64::_rdtsc() } - start);
+	println!(
+		"took {} cycles",
+		unsafe { core::arch::x86_64::_rdtsc() } - start
+	);
 	unsafe { Vec::from_raw_parts(scaled.as_mut_ptr().cast::<u8>(), 16384, 16384) }
 }

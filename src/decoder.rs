@@ -39,69 +39,47 @@ impl Decoder {
 
 	#[inline]
 	#[optimize(speed)]
-	pub unsafe fn u8(&mut self) -> u8 {
-		u8::from_be_bytes(self.read_bytes())
-	}
+	pub unsafe fn u8(&mut self) -> u8 { u8::from_be_bytes(self.read_bytes()) }
 
 	#[inline]
 	#[optimize(speed)]
-	pub unsafe fn u16(&mut self) -> u16 {
-		u16::from_be_bytes(self.read_bytes())
-	}
+	pub unsafe fn u16(&mut self) -> u16 { u16::from_be_bytes(self.read_bytes()) }
 
 	#[inline]
 	#[optimize(speed)]
-	pub unsafe fn u32(&mut self) -> u32 {
-		u32::from_be_bytes(self.read_bytes())
-	}
+	pub unsafe fn u32(&mut self) -> u32 { u32::from_be_bytes(self.read_bytes()) }
 
 	#[inline]
 	#[optimize(speed)]
-	pub unsafe fn u64(&mut self) -> u64 {
-		u64::from_be_bytes(self.read_bytes())
-	}
+	pub unsafe fn u64(&mut self) -> u64 { u64::from_be_bytes(self.read_bytes()) }
 
 	#[inline]
 	#[optimize(speed)]
-	pub unsafe fn i8(&mut self) -> i8 {
-		i8::from_be_bytes(self.read_bytes())
-	}
+	pub unsafe fn i8(&mut self) -> i8 { i8::from_be_bytes(self.read_bytes()) }
 
 	#[inline]
 	#[optimize(speed)]
-	pub unsafe fn i16(&mut self) -> i16 {
-		i16::from_be_bytes(self.read_bytes())
-	}
+	pub unsafe fn i16(&mut self) -> i16 { i16::from_be_bytes(self.read_bytes()) }
 
 	#[inline]
 	#[optimize(speed)]
-	pub unsafe fn i32(&mut self) -> i32 {
-		i32::from_be_bytes(self.read_bytes())
-	}
+	pub unsafe fn i32(&mut self) -> i32 { i32::from_be_bytes(self.read_bytes()) }
 
 	#[inline]
 	#[optimize(speed)]
-	pub unsafe fn i64(&mut self) -> i64 {
-		i64::from_be_bytes(self.read_bytes())
-	}
+	pub unsafe fn i64(&mut self) -> i64 { i64::from_be_bytes(self.read_bytes()) }
 
 	#[inline]
 	#[optimize(speed)]
-	pub unsafe fn f32(&mut self) -> f32 {
-		f32::from_be_bytes(self.read_bytes())
-	}
+	pub unsafe fn f32(&mut self) -> f32 { f32::from_be_bytes(self.read_bytes()) }
 
 	#[inline]
 	#[optimize(speed)]
-	pub unsafe fn f64(&mut self) -> f64 {
-		f64::from_be_bytes(self.read_bytes())
-	}
+	pub unsafe fn f64(&mut self) -> f64 { f64::from_be_bytes(self.read_bytes()) }
 
 	#[inline]
 	#[optimize(speed)]
-	pub unsafe fn skip(&mut self, amount: usize) {
-		self.data = self.data.add(amount);
-	}
+	pub unsafe fn skip(&mut self, amount: usize) { self.data = self.data.add(amount); }
 
 	#[inline]
 	#[optimize(speed)]

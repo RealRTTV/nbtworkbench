@@ -70,30 +70,31 @@ impl ElementAction {
 				use core::fmt::Write;
 
 				let mut buffer = key.map_or(String::new(), |x| x.into_string() + ":");
-				if write!(&mut buffer, "{element}").is_err() {
-					return None;
-				}
+				if write!(&mut buffer, "{element}").is_err() { return None }
 				let _ = cli_clipboard::set_contents(buffer);
 			}
 			Self::CopyFormatted => {
 				use core::fmt::Write;
 
 				let mut buffer = key.map_or(String::new(), |x| x.into_string() + ": ");
-				if write!(&mut buffer, "{element:#?}").is_err() {
-					return None;
-				}
+				if write!(&mut buffer, "{element:#?}").is_err() { return None }
 				let _ = cli_clipboard::set_contents(buffer);
 			}
 			Self::OpenArrayInHex => {
 				use std::io::Write;
 
 				let hash = (unsafe { core::arch::x86_64::_rdtsc() as usize }).wrapping_mul(element as *mut NbtElement as usize);
-				let path = std::env::temp_dir().join(format!("nbtworkbench-{hash:0width$x}.hex", width = usize::BITS as usize / 8));
+				let path = std::env::temp_dir().join(format!(
+					"nbtworkbench-{hash:0width$x}.hex",
+					width = usize::BITS as usize / 8
+				));
 				let (tx, rx) = std::sync::mpsc::channel();
 				let Ok(mut watcher) = PollWatcher::new(
 					move |event| {
 						if let Ok(notify::Event {
-							kind: EventKind::Modify(_), paths, ..
+							kind: EventKind::Modify(_),
+							paths,
+							..
 						}) = event
 						{
 							for path in paths {
@@ -103,7 +104,9 @@ impl ElementAction {
 							}
 						}
 					},
-					notify::Config::default().with_manual_polling().with_compare_contents(true),
+					notify::Config::default()
+						.with_manual_polling()
+						.with_compare_contents(true),
 				) else {
 					return None;
 				};
@@ -141,12 +144,8 @@ impl ElementAction {
 						return None;
 					}
 					drop(file);
-					if watcher.watch(&path, RecursiveMode::NonRecursive).is_err() {
-						return None;
-					};
-					if !open_file(&path.display().to_string()) {
-						return None;
-					}
+					if watcher.watch(&path, RecursiveMode::NonRecursive).is_err() { return None };
+					if !open_file(&path.display().to_string()) { return None }
 					return Some(FileUpdateSubscription {
 						subscription_type,
 						indices,
@@ -160,12 +159,17 @@ impl ElementAction {
 				use std::io::Write;
 
 				let hash = (unsafe { core::arch::x86_64::_rdtsc() as usize }).wrapping_mul(element as *mut NbtElement as usize);
-				let path = std::env::temp_dir().join(format!("nbtworkbench-{hash:0width$x}.txt", width = usize::BITS as usize / 8));
+				let path = std::env::temp_dir().join(format!(
+					"nbtworkbench-{hash:0width$x}.txt",
+					width = usize::BITS as usize / 8
+				));
 				let (tx, rx) = std::sync::mpsc::channel();
 				let Ok(mut watcher) = PollWatcher::new(
 					move |event| {
 						if let Ok(notify::Event {
-							kind: EventKind::Modify(_), paths, ..
+							kind: EventKind::Modify(_),
+							paths,
+							..
 						}) = event
 						{
 							for path in paths {
@@ -175,26 +179,22 @@ impl ElementAction {
 							}
 						}
 					},
-					notify::Config::default().with_manual_polling().with_compare_contents(true),
+					notify::Config::default()
+						.with_manual_polling()
+						.with_compare_contents(true),
 				) else {
 					return None;
 				};
 				if let Ok(mut file) = OpenOptions::new().write(true).create(true).open(&path) {
-					if let Some(key) = key && element.id() != NbtChunk::ID {
-						if write!(&mut file, "{key}: ").is_err() {
-							return None;
-						}
+					if let Some(key) = key
+						&& element.id() != NbtChunk::ID
+					{
+						if write!(&mut file, "{key}: ").is_err() { return None }
 					}
-					if write!(&mut file, "{element:#?}").is_err() {
-						return None;
-					}
+					if write!(&mut file, "{element:#?}").is_err() { return None }
 					drop(file);
-					if watcher.watch(&path, RecursiveMode::NonRecursive).is_err() {
-						return None;
-					};
-					if !open_file(&path.display().to_string()) {
-						return None;
-					}
+					if watcher.watch(&path, RecursiveMode::NonRecursive).is_err() { return None };
+					if !open_file(&path.display().to_string()) { return None }
 					return Some(FileUpdateSubscription {
 						subscription_type: FileUpdateSubscriptionType::Snbt,
 						indices,

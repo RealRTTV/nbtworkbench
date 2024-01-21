@@ -138,15 +138,11 @@ impl NbtList {
 
 	#[inline]
 	#[must_use]
-	pub const fn true_height(&self) -> usize {
-		self.true_height as usize
-	}
+	pub const fn true_height(&self) -> usize { self.true_height as usize }
 
 	#[inline]
 	#[must_use]
-	pub const fn id(&self) -> u8 {
-		self.element
-	}
+	pub const fn id(&self) -> u8 { self.element }
 
 	#[inline]
 	pub fn toggle(&mut self) -> Option<()> {
@@ -159,21 +155,15 @@ impl NbtList {
 
 	#[inline]
 	#[must_use]
-	pub const fn open(&self) -> bool {
-		self.open
-	}
+	pub const fn open(&self) -> bool { self.open }
 
 	#[inline]
 	#[must_use]
-	pub fn len(&self) -> usize {
-		self.elements.len()
-	}
+	pub fn len(&self) -> usize { self.elements.len() }
 
 	#[inline]
 	#[must_use]
-	pub fn is_empty(&self) -> bool {
-		self.elements.is_empty()
-	}
+	pub fn is_empty(&self) -> bool { self.elements.is_empty() }
 
 	/// # Errors
 	///
@@ -203,21 +193,21 @@ impl NbtList {
 
 	#[inline]
 	#[must_use]
-	pub fn get(&self, idx: usize) -> Option<&NbtElement> {
-		self.elements.get(idx)
-	}
+	pub fn get(&self, idx: usize) -> Option<&NbtElement> { self.elements.get(idx) }
 
 	#[inline]
 	#[must_use]
-	pub fn get_mut(&mut self, idx: usize) -> Option<&mut NbtElement> {
-		self.elements.get_mut(idx)
-	}
+	pub fn get_mut(&mut self, idx: usize) -> Option<&mut NbtElement> { self.elements.get_mut(idx) }
 
 	#[inline]
 	#[must_use]
 	pub fn value(&self) -> CompactString {
 		let (single, multiple) = id_to_string_name(self.element);
-		format_compact!("{} {}", self.len(), if self.len() == 1 { single } else { multiple })
+		format_compact!(
+			"{} {}",
+			self.len(),
+			if self.len() == 1 { single } else { multiple }
+		)
 	}
 }
 
@@ -235,9 +225,7 @@ impl Display for NbtList {
 }
 
 impl Debug for NbtList {
-	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-		f.debug_list().entries(self.children()).finish()
-	}
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result { f.debug_list().entries(self.children()).finish() }
 }
 
 impl NbtList {
@@ -273,7 +261,11 @@ impl NbtList {
 				|x, y| pos + (16, 8) == (x, y),
 				|id| (id != NbtChunk::ID) && (id == self.element || self.is_empty()),
 			) {
-				builder.draw_texture(ctx.pos() + (0, 16), CONNECTION_UV, (16, (self.height() != 1) as usize * 7 + 9));
+				builder.draw_texture(
+					ctx.pos() + (0, 16),
+					CONNECTION_UV,
+					(16, (self.height() != 1) as usize * 7 + 9),
+				);
 				if !tail {
 					builder.draw_texture(ctx.pos() - (16, 0) + (0, 16), CONNECTION_UV, (8, 16));
 				}
@@ -314,26 +306,57 @@ impl NbtList {
 				}
 
 				let pos = ctx.pos();
-				if ctx.ghost(ctx.pos(), builder, |x, y| pos == (x, y), |id| (id != NbtChunk::ID) && (id == self.element || self.is_empty())) {
+				if ctx.ghost(
+					ctx.pos(),
+					builder,
+					|x, y| pos == (x, y),
+					|id| (id != NbtChunk::ID) && (id == self.element || self.is_empty()),
+				) {
 					builder.draw_texture(ctx.pos() - (16, 0), CONNECTION_UV, (16, 16));
 					ctx.y_offset += 16;
 				}
 
-				let ghost_tail_mod = if let Some((id, x, y, _)) = ctx.ghost && (id == self.element || self.is_empty()) && id != NbtChunk::ID && ctx.pos() + (0, height * 16 - *remaining_scroll * 16 - 8) == (x, y) {
+				let ghost_tail_mod = if let Some((id, x, y, _)) = ctx.ghost
+					&& (id == self.element || self.is_empty())
+					&& id != NbtChunk::ID
+					&& ctx.pos() + (0, height * 16 - *remaining_scroll * 16 - 8) == (x, y)
+				{
 					false
 				} else {
 					true
 				};
 
 				if *remaining_scroll == 0 {
-					builder.draw_texture(ctx.pos() - (16, 0), CONNECTION_UV, (16, (!(idx == self.len() - 1 && ghost_tail_mod)) as usize * 7 + 9));
+					builder.draw_texture(
+						ctx.pos() - (16, 0),
+						CONNECTION_UV,
+						(
+							16,
+							(!(idx == self.len() - 1 && ghost_tail_mod)) as usize * 7 + 9,
+						),
+					);
 				}
 				ctx.check_for_key_duplicate(|_, _| false, false);
-				element.render(remaining_scroll, builder, None, tail && idx == self.len() - 1 && ghost_tail_mod, ctx);
+				element.render(
+					remaining_scroll,
+					builder,
+					None,
+					tail && idx == self.len() - 1 && ghost_tail_mod,
+					ctx,
+				);
 
 				let pos = ctx.pos();
-				if ctx.ghost(ctx.pos(), builder, |x, y| pos == (x, y + 8), |id| (id != NbtChunk::ID) && (id == self.element || self.is_empty())) {
-					builder.draw_texture(ctx.pos() - (16, 0), CONNECTION_UV, (16, (idx != self.len() - 1) as usize * 7 + 9));
+				if ctx.ghost(
+					ctx.pos(),
+					builder,
+					|x, y| pos == (x, y + 8),
+					|id| (id != NbtChunk::ID) && (id == self.element || self.is_empty()),
+				) {
+					builder.draw_texture(
+						ctx.pos() - (16, 0),
+						CONNECTION_UV,
+						(16, (idx != self.len() - 1) as usize * 7 + 9),
+					);
 					ctx.y_offset += 16;
 				}
 			}
@@ -352,24 +375,23 @@ impl NbtList {
 	}
 
 	#[inline]
-	pub fn children(&self) -> ValueIterator {
-		ValueIterator::Generic(self.elements.iter())
-	}
+	pub fn children(&self) -> ValueIterator { ValueIterator::Generic(self.elements.iter()) }
 
 	#[inline]
-	pub fn children_mut(&mut self) -> ValueMutIterator {
-		ValueMutIterator::Generic(self.elements.iter_mut())
-	}
+	pub fn children_mut(&mut self) -> ValueMutIterator { ValueMutIterator::Generic(self.elements.iter_mut()) }
 
 	pub fn drop(&mut self, mut key: Option<CompactString>, mut element: NbtElement, y: &mut usize, depth: usize, target_depth: usize, mut line_number: usize, indices: &mut Vec<usize>) -> DropFn {
 		if *y < 16 && *y >= 8 && depth == target_depth {
 			let before = (self.height(), self.true_height());
 			indices.push(0);
-			if let Err(element) = self.insert(0, element) {
-				return DropFn::InvalidType(key, element);
-			}
+			if let Err(element) = self.insert(0, element) { return DropFn::InvalidType(key, element) }
 			self.open = true;
-			return DropFn::Dropped(self.height as usize - before.0, self.true_height as usize - before.1, None, line_number + 1);
+			return DropFn::Dropped(
+				self.height as usize - before.0,
+				self.true_height as usize - before.1,
+				None,
+				line_number + 1,
+			);
 		} else if self.height() == 1 && *y < 24 && *y >= 16 && depth == target_depth {
 			let before = self.true_height();
 			indices.push(self.len());
@@ -378,7 +400,12 @@ impl NbtList {
 				return DropFn::InvalidType(key, element);
 			}
 			self.open = true;
-			return DropFn::Dropped(self.height as usize - 1, self.true_height as usize - before, None, line_number + before + 1);
+			return DropFn::Dropped(
+				self.height as usize - 1,
+				self.true_height as usize - before,
+				None,
+				line_number + before + 1,
+			);
 		}
 
 		if *y < 16 {
@@ -394,20 +421,24 @@ impl NbtList {
 				*ptr = idx;
 				let heights = (element.height(), element.true_height());
 				if *y < 8 && depth == target_depth {
-					if let Err(element) = self.insert(idx, element) {
-						return DropFn::InvalidType(key, element);
-					}
+					if let Err(element) = self.insert(idx, element) { return DropFn::InvalidType(key, element) }
 					return DropFn::Dropped(heights.0, heights.1, None, line_number + 1);
 				} else if *y >= value.height() * 16 - 8 && *y < value.height() * 16 && depth == target_depth {
 					*ptr = idx + 1;
 					let true_height = value.true_height();
-					if let Err(element) = self.insert(idx + 1, element) {
-						return DropFn::InvalidType(key, element);
-					}
+					if let Err(element) = self.insert(idx + 1, element) { return DropFn::InvalidType(key, element) }
 					return DropFn::Dropped(heights.0, heights.1, None, line_number + true_height + 1);
 				}
 
-				match value.drop(key, element, y, depth + 1, target_depth, line_number + 1, indices) {
+				match value.drop(
+					key,
+					element,
+					y,
+					depth + 1,
+					target_depth,
+					line_number + 1,
+					indices,
+				) {
 					x @ DropFn::InvalidType(_, _) => return x,
 					DropFn::Missed(k, e) => {
 						key = k;
@@ -445,9 +476,7 @@ impl NbtList {
 	}
 
 	#[inline]
-	pub fn render_icon(pos: impl Into<(usize, usize)>, z: u8, builder: &mut VertexBufferBuilder) {
-		builder.draw_texture_z(pos, z, LIST_UV, (16, 16));
-	}
+	pub fn render_icon(pos: impl Into<(usize, usize)>, z: u8, builder: &mut VertexBufferBuilder) { builder.draw_texture_z(pos, z, LIST_UV, (16, 16)); }
 
 	#[inline]
 	pub fn recache_depth(&mut self) {
@@ -463,9 +492,7 @@ impl NbtList {
 
 	#[inline]
 	#[must_use]
-	pub const fn max_depth(&self) -> usize {
-		self.max_depth as usize
-	}
+	pub const fn max_depth(&self) -> usize { self.max_depth as usize }
 }
 
 #[must_use]
@@ -480,7 +507,13 @@ impl<'a> Iterator for ValueIterator<'a> {
 	fn next(&mut self) -> Option<Self::Item> {
 		match self {
 			Self::Generic(iter) => iter.next(),
-			Self::Region(array, iter) => unsafe { iter.next().map(|&x| array.get(x as usize).panic_unchecked("Map index out of bounds")) },
+			Self::Region(array, iter) => unsafe {
+				iter.next().map(|&x| {
+					array
+						.get(x as usize)
+						.panic_unchecked("Map index out of bounds")
+				})
+			},
 		}
 	}
 }
@@ -498,7 +531,13 @@ impl<'a> DoubleEndedIterator for ValueIterator<'a> {
 	fn next_back(&mut self) -> Option<Self::Item> {
 		match self {
 			Self::Generic(iter) => iter.next_back(),
-			Self::Region(array, iter) => unsafe { iter.next_back().map(|&x| array.get(x as usize).panic_unchecked("Map index out of bounds")) },
+			Self::Region(array, iter) => unsafe {
+				iter.next_back().map(|&x| {
+					array
+						.get(x as usize)
+						.panic_unchecked("Map index out of bounds")
+				})
+			},
 		}
 	}
 }
@@ -517,7 +556,11 @@ impl<'a> Iterator for ValueMutIterator<'a> {
 			Self::Generic(iter) => iter.next(),
 			// SAFETY: the only problem here is aliasing, which is assumed to not occur due to `map` indices not being identical, if they are identical it's UB, so all we need is to check if we have two pointers to the same data, which doesn't occur in mutation
 			Self::Region(array, iter) => unsafe {
-				let chunk = iter.next().map(|&x| array.get_mut(x as usize).panic_unchecked("Map index out of bounds"));
+				let chunk = iter.next().map(|&x| {
+					array
+						.get_mut(x as usize)
+						.panic_unchecked("Map index out of bounds")
+				});
 				let ptr = core::mem::transmute::<_, *mut NbtElement>(chunk);
 				core::mem::transmute::<_, Option<&mut NbtElement>>(ptr)
 			},
@@ -540,7 +583,11 @@ impl<'a> DoubleEndedIterator for ValueMutIterator<'a> {
 			Self::Generic(iter) => iter.next_back(),
 			// SAFETY: the only problem here is aliasing, which is assumed to not occur due to `map` indices not being identical, if they are identical it's UB, so all we need is to check if we have two pointers to the same data, which doesn't occur in mutation
 			Self::Region(array, iter) => unsafe {
-				let chunk = iter.next_back().map(|&x| array.get_mut(x as usize).panic_unchecked("Map index out of bounds"));
+				let chunk = iter.next_back().map(|&x| {
+					array
+						.get_mut(x as usize)
+						.panic_unchecked("Map index out of bounds")
+				});
 				let ptr = core::mem::transmute::<_, *mut NbtElement>(chunk);
 				core::mem::transmute::<_, Option<&mut NbtElement>>(ptr)
 			},

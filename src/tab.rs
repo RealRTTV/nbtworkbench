@@ -1,28 +1,26 @@
+use anyhow::{anyhow, Context, Result};
+use compact_str::{CompactString, ToCompactString};
 use std::ffi::OsStr;
 use std::fs::write;
 use std::io::Read;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
-use anyhow::{Result, anyhow, Context};
-use compact_str::{CompactString, ToCompactString};
 
 use flate2::Compression;
 use uuid::Uuid;
 
 use crate::assets::{
-	BYTE_ARRAY_GHOST_UV, BYTE_ARRAY_UV, BYTE_GHOST_UV, BYTE_UV, CHUNK_GHOST_UV, CHUNK_UV, COMPOUND_GHOST_UV, COMPOUND_ROOT_UV, COMPOUND_UV, DOUBLE_GHOST_UV, DOUBLE_UV, ENABLED_FREEHAND_MODE_UV,
-	FLOAT_GHOST_UV, FLOAT_UV, FREEHAND_MODE_UV, GZIP_FILE_TYPE_UV, HEADER_SIZE, HELD_SCROLLBAR_UV, INT_ARRAY_GHOST_UV, INT_ARRAY_UV, INT_GHOST_UV, INT_UV, LINE_NUMBER_SEPARATOR_UV, LIST_GHOST_UV,
-	LIST_UV, LONG_ARRAY_GHOST_UV, LONG_ARRAY_UV, LONG_GHOST_UV, LONG_UV, MCA_FILE_TYPE_UV, NBT_FILE_TYPE_UV, REDO_UV, REGION_UV, SCROLLBAR_Z, SHORT_GHOST_UV, SHORT_UV, SNBT_FILE_TYPE_UV,
-	STRING_GHOST_UV, STRING_UV, UNDO_UV, UNHELD_SCROLLBAR_UV, UNKNOWN_NBT_GHOST_UV, UNKNOWN_NBT_UV, ZLIB_FILE_TYPE_UV,
+	BYTE_ARRAY_GHOST_UV, BYTE_ARRAY_UV, BYTE_GHOST_UV, BYTE_UV, CHUNK_GHOST_UV, CHUNK_UV, COMPOUND_GHOST_UV, COMPOUND_ROOT_UV, COMPOUND_UV, DOUBLE_GHOST_UV, DOUBLE_UV, ENABLED_FREEHAND_MODE_UV, FLOAT_GHOST_UV, FLOAT_UV, FREEHAND_MODE_UV, GZIP_FILE_TYPE_UV, HEADER_SIZE, HELD_SCROLLBAR_UV, INT_ARRAY_GHOST_UV, INT_ARRAY_UV, INT_GHOST_UV, INT_UV, LINE_NUMBER_SEPARATOR_UV, LIST_GHOST_UV, LIST_UV, LONG_ARRAY_GHOST_UV, LONG_ARRAY_UV, LONG_GHOST_UV, LONG_UV, MCA_FILE_TYPE_UV, NBT_FILE_TYPE_UV, REDO_UV,
+	REGION_UV, SCROLLBAR_Z, SHORT_GHOST_UV, SHORT_UV, SNBT_FILE_TYPE_UV, STRING_GHOST_UV, STRING_UV, UNDO_UV, UNHELD_SCROLLBAR_UV, UNKNOWN_NBT_GHOST_UV, UNKNOWN_NBT_UV, ZLIB_FILE_TYPE_UV,
 };
 use crate::elements::chunk::NbtRegion;
 use crate::elements::compound::NbtCompound;
 use crate::elements::element::NbtElement;
-use crate::vertex_buffer_builder::{Vec2u, VertexBufferBuilder};
-use crate::workbench_action::WorkbenchAction;
-use crate::{Bookmark, LinkedQueue, OptionExt, panic_unchecked, RenderContext, StrExt};
 use crate::selected_text::SelectedText;
 use crate::tree_travel::Navigate;
+use crate::vertex_buffer_builder::{Vec2u, VertexBufferBuilder};
+use crate::workbench_action::WorkbenchAction;
+use crate::{panic_unchecked, Bookmark, LinkedQueue, OptionExt, RenderContext, StrExt};
 
 pub struct Tab {
 	pub value: Box<NbtElement>,
@@ -46,13 +44,15 @@ pub struct Tab {
 impl Tab {
 	#[must_use]
 	pub fn new(nbt: NbtElement, path: &Path, compression: FileFormat, window_height: usize, window_width: usize) -> Result<Self> {
-		if !(nbt.id() == NbtCompound::ID || nbt.id() == NbtRegion::ID) {
-			return Err(anyhow!("Parsed NBT was not a Compound or Region"));
-		}
+		if !(nbt.id() == NbtCompound::ID || nbt.id() == NbtRegion::ID) { return Err(anyhow!("Parsed NBT was not a Compound or Region")) }
 
 		Ok(Self {
 			value: Box::new(nbt),
-			name: path.file_name().map(OsStr::to_string_lossy).context("Could not obtain path filename")?.into(),
+			name: path
+				.file_name()
+				.map(OsStr::to_string_lossy)
+				.context("Could not obtain path filename")?
+				.into(),
 			path: Some(path.to_path_buf()),
 			compression,
 			undos: LinkedQueue::new(),
@@ -70,7 +70,14 @@ impl Tab {
 	}
 
 	pub fn save(&mut self) -> bool {
-		if write(self.path.as_deref().unwrap_or_else(|| self.name.as_ref().as_ref()), self.compression.encode(&self.value)).is_err() {
+		if write(
+			self.path
+				.as_deref()
+				.unwrap_or_else(|| self.name.as_ref().as_ref()),
+			self.compression.encode(&self.value),
+		)
+		.is_err()
+		{
 			return false;
 		};
 		self.history_changed = false;
@@ -82,7 +89,10 @@ impl Tab {
 		let mouse_x = ctx.mouse_x;
 		let mouse_y = ctx.mouse_y;
 
-		let horizontal_scroll_before = core::mem::replace(&mut builder.horizontal_scroll, self.horizontal_scroll(held_entry));
+		let horizontal_scroll_before = core::mem::replace(
+			&mut builder.horizontal_scroll,
+			self.horizontal_scroll(held_entry),
+		);
 		if let Some(compound) = self.value.as_compound() {
 			compound.render_root(builder, &self.name, ctx);
 		} else if let Some(region) = self.value.as_region() {
@@ -99,13 +109,33 @@ impl Tab {
 				let scrollbar_height = (total & !0b1111) * total / height;
 				let offset = total * self.scroll() / height + HEADER_SIZE;
 				let held = ((builder.window_width() - 8)..builder.window_width()).contains(&mouse_x) && (offset..=(offset + scrollbar_height)).contains(&mouse_y) || held;
-				let uv = if held { HELD_SCROLLBAR_UV } else { UNHELD_SCROLLBAR_UV };
-				builder.draw_texture_z((builder.window_width() - 7, offset), SCROLLBAR_Z, uv, (6, 1));
+				let uv = if held {
+					HELD_SCROLLBAR_UV
+				} else {
+					UNHELD_SCROLLBAR_UV
+				};
+				builder.draw_texture_z(
+					(builder.window_width() - 7, offset),
+					SCROLLBAR_Z,
+					uv,
+					(6, 1),
+				);
 				if scrollbar_height > 2 {
-					builder.draw_texture_region_z((builder.window_width() - 7, offset + 1), SCROLLBAR_Z, uv + (0, 5), (6, scrollbar_height.saturating_sub(1)), (6, 4));
+					builder.draw_texture_region_z(
+						(builder.window_width() - 7, offset + 1),
+						SCROLLBAR_Z,
+						uv + (0, 5),
+						(6, scrollbar_height.saturating_sub(1)),
+						(6, 4),
+					);
 				}
 				if scrollbar_height > 1 {
-					builder.draw_texture_z((builder.window_width() - 7, offset + scrollbar_height), SCROLLBAR_Z, uv + (0, 15), (6, 1));
+					builder.draw_texture_z(
+						(builder.window_width() - 7, offset + scrollbar_height),
+						SCROLLBAR_Z,
+						uv + (0, 15),
+						(6, 1),
+					);
 				}
 			}
 		}
@@ -114,8 +144,16 @@ impl Tab {
 
 		{
 			let mut tail = self.undos.tail.as_deref();
-			builder.draw_texture((builder.window_width() - 107, 27), LINE_NUMBER_SEPARATOR_UV + (0, 1), (2, 14));
-			builder.draw_texture((builder.window_width() - 129, 26), LINE_NUMBER_SEPARATOR_UV, (2, 16));
+			builder.draw_texture(
+				(builder.window_width() - 107, 27),
+				LINE_NUMBER_SEPARATOR_UV + (0, 1),
+				(2, 14),
+			);
+			builder.draw_texture(
+				(builder.window_width() - 129, 26),
+				LINE_NUMBER_SEPARATOR_UV,
+				(2, 16),
+			);
 			builder.draw_texture((builder.window_width() - 125, 26), UNDO_UV, (16, 16));
 			let mut x = builder.window_width() - 104;
 			for _ in 0..5_usize {
@@ -131,8 +169,16 @@ impl Tab {
 
 		{
 			let mut tail = self.redos.tail.as_deref();
-			builder.draw_texture((builder.window_width() - 213, 27), LINE_NUMBER_SEPARATOR_UV + (0, 1), (2, 14));
-			builder.draw_texture((builder.window_width() - 235, 26), LINE_NUMBER_SEPARATOR_UV, (2, 16));
+			builder.draw_texture(
+				(builder.window_width() - 213, 27),
+				LINE_NUMBER_SEPARATOR_UV + (0, 1),
+				(2, 14),
+			);
+			builder.draw_texture(
+				(builder.window_width() - 235, 26),
+				LINE_NUMBER_SEPARATOR_UV,
+				(2, 16),
+			);
 			builder.draw_texture((builder.window_width() - 231, 26), REDO_UV, (16, 16));
 			let mut x = builder.window_width() - 210;
 			for _ in 0..5_usize {
@@ -147,7 +193,11 @@ impl Tab {
 		}
 
 		{
-			builder.draw_texture((builder.window_width() - 22, 26), LINE_NUMBER_SEPARATOR_UV, (2, 16));
+			builder.draw_texture(
+				(builder.window_width() - 22, 26),
+				LINE_NUMBER_SEPARATOR_UV,
+				(2, 16),
+			);
 			let freehand_uv = {
 				let hovering = (builder.window_width() - 16..builder.window_width()).contains(&mouse_x) && (26..42).contains(&mouse_y);
 				if hovering {
@@ -168,7 +218,11 @@ impl Tab {
 		}
 
 		{
-			let mx = if (24..46).contains(&mouse_y) { Some(mouse_x & !0b1111) } else { None };
+			let mx = if (24..46).contains(&mouse_y) {
+				Some(mouse_x & !0b1111)
+			} else {
+				None
+			};
 			for (idx, (selected, unselected, name)) in [
 				(BYTE_UV, BYTE_GHOST_UV, "Byte"),
 				(SHORT_UV, SHORT_GHOST_UV, "Short"),
@@ -182,7 +236,10 @@ impl Tab {
 				(STRING_UV, STRING_GHOST_UV, "String"),
 				(LIST_UV, LIST_GHOST_UV, "List"),
 				(COMPOUND_UV, COMPOUND_GHOST_UV, "Compound"),
-			].into_iter().enumerate() {
+			]
+			.into_iter()
+			.enumerate()
+			{
 				let uv = if mx == Some(idx * 16) {
 					builder.draw_tooltip(&[name], (mouse_x, mouse_y));
 					selected
@@ -246,16 +303,19 @@ impl Tab {
 		} else {
 			0
 		};
-		let width = self.value.max_depth().max(self.name.width()).max(selected_text_width) + 32 + 48;
+		let width = self
+			.value
+			.max_depth()
+			.max(self.name.width())
+			.max(selected_text_width)
+			+ 32 + 48;
 		let scroll = self.horizontal_scroll;
 		let max = (width + left_margin).saturating_sub(self.window_width);
 		scroll.min(max)
 	}
 
 	#[must_use]
-	pub fn left_margin(&self, held: Option<&NbtElement>) -> usize {
-		((self.value.true_height() + held.map_or(0, NbtElement::true_height)).ilog10() as usize + 1) * 8 + 4 + 8
-	}
+	pub fn left_margin(&self, held: Option<&NbtElement>) -> usize { ((self.value.true_height() + held.map_or(0, NbtElement::true_height)).ilog10() as usize + 1) * 8 + 4 + 8 }
 
 	pub fn set_scroll(&mut self, scroll: f32) {
 		const SCROLL_MULTIPLIER: f32 = 48.0;
@@ -289,15 +349,15 @@ impl Tab {
 	pub fn close_selected_text(&mut self, ignore_invalid_format: bool) -> bool {
 		unsafe {
 			if let Some(SelectedText {
-							indices,
-							value,
-							prefix,
-							suffix,
-							keyfix,
-							valuefix,
-							editable: true,
-							..
-						}) = self.selected_text.clone()
+				indices,
+				value,
+				prefix,
+				suffix,
+				keyfix,
+				valuefix,
+				editable: true,
+				..
+			}) = self.selected_text.clone()
 			{
 				if let Some((&last, rem)) = indices.split_last() {
 					let value = CompactString::from(value);
@@ -315,7 +375,10 @@ impl Tab {
 										ignore_invalid_format
 									};
 								}
-								(Some(compound.update_key(last, value.clone()).unwrap_or(value)), None)
+								(
+									Some(compound.update_key(last, value.clone()).unwrap_or(value)),
+									None,
+								)
 							} else if let Some(chunk) = element.as_chunk_mut() {
 								let idx = chunk.entries.idx_of(&value);
 								if let Some(idx) = idx {
@@ -326,18 +389,35 @@ impl Tab {
 										ignore_invalid_format
 									};
 								}
-								(Some(chunk.update_key(last, value.clone()).unwrap_or(value)), None)
+								(
+									Some(chunk.update_key(last, value.clone()).unwrap_or(value)),
+									None,
+								)
 							} else if let Some(region) = element.as_region_mut() {
-								let (Ok(x @ 0..=31), Ok(z @ 0..=31)) = (value.parse::<u8>(), valuefix.panic_unchecked("A chunk has a key and value").parse::<u8>()) else {
+								let (Ok(x @ 0..=31), Ok(z @ 0..=31)) = (
+									value.parse::<u8>(),
+									valuefix
+										.panic_unchecked("A chunk has a key and value")
+										.parse::<u8>(),
+								) else {
 									return ignore_invalid_format;
 								};
 								let (old_x, old_z) = {
-									let chunk = region.get_mut(last).panic_unchecked("Last index was valid").as_chunk_unchecked_mut();
-									(core::mem::replace(&mut chunk.x, x), core::mem::replace(&mut chunk.z, z))
+									let chunk = region
+										.get_mut(last)
+										.panic_unchecked("Last index was valid")
+										.as_chunk_unchecked_mut();
+									(
+										core::mem::replace(&mut chunk.x, x),
+										core::mem::replace(&mut chunk.z, z),
+									)
 								};
 								let new_idx = ((x as usize) << 5) | (z as usize);
 								if !region.chunks.deref().1[new_idx].is_null() || (old_x == x && old_z == z) {
-									let chunk = region.get_mut(last).panic_unchecked("Last index was valid").as_chunk_unchecked_mut();
+									let chunk = region
+										.get_mut(last)
+										.panic_unchecked("Last index was valid")
+										.as_chunk_unchecked_mut();
 									chunk.x = old_x;
 									chunk.z = old_z;
 									return ignore_invalid_format;
@@ -345,22 +425,39 @@ impl Tab {
 								let (map, chunks) = &mut *region.chunks;
 								let from = core::mem::replace(&mut map[last], new_idx as u16) as usize;
 								chunks.swap(from, new_idx);
-								(Some(old_x.to_compact_string()), Some(old_z.to_compact_string()))
+								(
+									Some(old_x.to_compact_string()),
+									Some(old_z.to_compact_string()),
+								)
 							} else {
 								panic_unchecked("Expected key-value indices chain tail to be of type compound")
 							}
 						} else {
 							if let Some(region) = element.as_region_mut() {
-								let (Ok(x @ 0..=31), Ok(z @ 0..=31)) = (keyfix.panic_unchecked("A chunk always has a key and value").parse::<u8>(), value.parse::<u8>()) else {
+								let (Ok(x @ 0..=31), Ok(z @ 0..=31)) = (
+									keyfix
+										.panic_unchecked("A chunk always has a key and value")
+										.parse::<u8>(),
+									value.parse::<u8>(),
+								) else {
 									return ignore_invalid_format;
 								};
 								let (old_x, old_z) = {
-									let chunk = region.get_mut(last).panic_unchecked("Last index was valid").as_chunk_unchecked_mut();
-									(core::mem::replace(&mut chunk.x, x), core::mem::replace(&mut chunk.z, z))
+									let chunk = region
+										.get_mut(last)
+										.panic_unchecked("Last index was valid")
+										.as_chunk_unchecked_mut();
+									(
+										core::mem::replace(&mut chunk.x, x),
+										core::mem::replace(&mut chunk.z, z),
+									)
 								};
 								let new_idx = ((x as usize) << 5) | (z as usize);
 								if !region.chunks.deref().1[new_idx].is_null() || (old_x == x && old_z == z) {
-									let chunk = region.get_mut(last).panic_unchecked("Last index was valid").as_chunk_unchecked_mut();
+									let chunk = region
+										.get_mut(last)
+										.panic_unchecked("Last index was valid")
+										.as_chunk_unchecked_mut();
 									chunk.x = old_x;
 									chunk.z = old_z;
 									return ignore_invalid_format;
@@ -368,29 +465,51 @@ impl Tab {
 								let (map, chunks) = &mut *region.chunks;
 								let from = core::mem::replace(&mut map[last], new_idx as u16) as usize;
 								chunks.swap(from, new_idx);
-								(Some(old_x.to_compact_string()), Some(old_z.to_compact_string()))
+								(
+									Some(old_x.to_compact_string()),
+									Some(old_z.to_compact_string()),
+								)
 							} else {
 								// no drops dw, well except for the value, but that's a simple thing dw
-								let child = element.get_mut(last).panic_unchecked("Last index was valid");
-								let (previous, success) = child.set_value(value).panic_unchecked("Type of indices tail can accept value writes");
-								if !success {
-									return ignore_invalid_format;
-								}
-								if previous == child.value().0 {
-									return ignore_invalid_format;
-								}
+								let child = element
+									.get_mut(last)
+									.panic_unchecked("Last index was valid");
+								let (previous, success) = child
+									.set_value(value)
+									.panic_unchecked("Type of indices tail can accept value writes");
+								if !success { return ignore_invalid_format }
+								if previous == child.value().0 { return ignore_invalid_format }
 								(None, Some(previous))
 							}
 						}
 					};
 
-					self.append_to_history(WorkbenchAction::Rename { indices, key, value });
+					self.append_to_history(WorkbenchAction::Rename {
+						indices,
+						key,
+						value,
+					});
 					self.selected_text = None;
 				} else {
 					let buf = PathBuf::from(value);
-					return if let Some(name) = buf.file_name().and_then(OsStr::to_str).map(ToOwned::to_owned) {
+					return if let Some(name) = buf
+						.file_name()
+						.and_then(OsStr::to_str)
+						.map(ToOwned::to_owned)
+					{
 						let old_name = core::mem::replace(&mut self.name, name.into_boxed_str());
-						let action = WorkbenchAction::Rename { indices: Box::new([]), key: None, value: Some(self.path.replace(buf).as_deref().and_then(|path| path.to_str()).map(|str| str.to_compact_string()).unwrap_or_else(|| old_name.to_compact_string())) };
+						let action = WorkbenchAction::Rename {
+							indices: Box::new([]),
+							key: None,
+							value: Some(
+								self.path
+									.replace(buf)
+									.as_deref()
+									.and_then(|path| path.to_str())
+									.map(|str| str.to_compact_string())
+									.unwrap_or_else(|| old_name.to_compact_string()),
+							),
+						};
 						self.append_to_history(action);
 						self.selected_text = None;
 						true
@@ -486,7 +605,5 @@ impl FileFormat {
 }
 
 impl ToString for FileFormat {
-	fn to_string(&self) -> String {
-		self.into_str().to_owned()
-	}
+	fn to_string(&self) -> String { self.into_str().to_owned() }
 }

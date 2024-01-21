@@ -33,7 +33,11 @@ impl core::fmt::Write for VertexBufferBuilder {
 	fn write_str(&mut self, text: &str) -> std::fmt::Result {
 		let (mut x, y) = self.text_coords;
 		x += text.chars().fold(0, |offset, char| {
-			let char = if (char as u32) < 56832 { char as u16 } else { 56829 };
+			let char = if (char as u32) < 56832 {
+				char as u16
+			} else {
+				56829
+			};
 			offset + self.draw_char(char, x + offset, y, self.text_z)
 		});
 		self.text_coords = (x, y);
@@ -76,14 +80,10 @@ impl VertexBufferBuilder {
 	}
 
 	#[inline]
-	pub const fn scroll(&self) -> usize {
-		self.scroll
-	}
+	pub const fn scroll(&self) -> usize { self.scroll }
 
 	#[inline]
-	pub const fn drew_tooltip(&self) -> bool {
-		self.drew_tooltip
-	}
+	pub const fn drew_tooltip(&self) -> bool { self.drew_tooltip }
 
 	#[inline]
 	pub fn settings(&mut self, pos: impl Into<(usize, usize)>, dropshadow: bool, z: u8) {
@@ -96,9 +96,24 @@ impl VertexBufferBuilder {
 	fn draw_char(&mut self, c: u16, x: usize, y: usize, z: u8) -> usize {
 		if self.dropshadow {
 			self.draw_unicode_z_color(x + 1, y + 1, z, c, {
-				self.color.wrapping_shr(16).bitand(0xFF).wrapping_mul(21).wrapping_div(85).wrapping_shl(16)
-					| self.color.wrapping_shr(8).bitand(0xFF).wrapping_mul(21).wrapping_div(85).wrapping_shl(8)
-					| self.color.wrapping_shr(0).bitand(0xFF).wrapping_mul(21).wrapping_div(85).wrapping_shl(0)
+				self.color
+					.wrapping_shr(16)
+					.bitand(0xFF)
+					.wrapping_mul(21)
+					.wrapping_div(85)
+					.wrapping_shl(16) | self
+					.color
+					.wrapping_shr(8)
+					.bitand(0xFF)
+					.wrapping_mul(21)
+					.wrapping_div(85)
+					.wrapping_shl(8) | self
+					.color
+					.wrapping_shr(0)
+					.bitand(0xFF)
+					.wrapping_mul(21)
+					.wrapping_div(85)
+					.wrapping_shl(0)
 			});
 		}
 		self.draw_unicode_z_color(x, y, z, c, self.color & 0xFFFFFF);
@@ -110,9 +125,9 @@ impl VertexBufferBuilder {
 		use core::fmt::Write;
 
 		let (mut x, y) = pos.into();
-		let Some(text_width) = text.iter().map(|x| x.width()).max() else { return };
-		if x + text_width + 3 >= self.window_width() && x >= text_width + 3 {
-			x -= text_width + 3;
+		let text_width = text.iter().map(|x| x.width()).max().unwrap_or(0);
+		if x + text_width + 3 >= self.window_width() {
+			x = self.window_width().saturating_sub(text_width + 3);
 		}
 		let old_text_z = core::mem::replace(&mut self.text_z, TOOLTIP_Z);
 		let old_text_coords = core::mem::replace(&mut self.text_coords, (x + 3, y + 3));
@@ -126,17 +141,52 @@ impl VertexBufferBuilder {
 		}
 		let width = max - 3 - x;
 		let height = self.text_coords.1 - 3 - y;
-		self.draw_texture_region_z((x + 3, y), TOOLTIP_Z, TOOLTIP_UV + (3, 0), (width, 3), (10, 3));
+		self.draw_texture_region_z(
+			(x + 3, y),
+			TOOLTIP_Z,
+			TOOLTIP_UV + (3, 0),
+			(width, 3),
+			(10, 3),
+		);
 		self.draw_texture_z((x + width + 3, y), TOOLTIP_Z, TOOLTIP_UV + (13, 0), (3, 3));
 
 		self.draw_texture_z((x, y + height + 3), TOOLTIP_Z, TOOLTIP_UV + (0, 13), (3, 3));
-		self.draw_texture_region_z((x + 3, y + height + 3), TOOLTIP_Z, TOOLTIP_UV + (3, 13), (width, 3), (10, 3));
-		self.draw_texture_z((x + width + 3, y + height + 3), TOOLTIP_Z, TOOLTIP_UV + (13, 13), (3, 3));
+		self.draw_texture_region_z(
+			(x + 3, y + height + 3),
+			TOOLTIP_Z,
+			TOOLTIP_UV + (3, 13),
+			(width, 3),
+			(10, 3),
+		);
+		self.draw_texture_z(
+			(x + width + 3, y + height + 3),
+			TOOLTIP_Z,
+			TOOLTIP_UV + (13, 13),
+			(3, 3),
+		);
 
-		self.draw_texture_region_z((x, y + 3), TOOLTIP_Z, TOOLTIP_UV + (0, 3), (3, height), (3, 10));
-		self.draw_texture_region_z((x + width + 3, y + 3), TOOLTIP_Z, TOOLTIP_UV + (13, 3), (3, height), (3, 10));
+		self.draw_texture_region_z(
+			(x, y + 3),
+			TOOLTIP_Z,
+			TOOLTIP_UV + (0, 3),
+			(3, height),
+			(3, 10),
+		);
+		self.draw_texture_region_z(
+			(x + width + 3, y + 3),
+			TOOLTIP_Z,
+			TOOLTIP_UV + (13, 3),
+			(3, height),
+			(3, 10),
+		);
 
-		self.draw_texture_region_z((x + 3, y + 3), TOOLTIP_Z, TOOLTIP_UV + (3, 3), (width, height), (10, 10));
+		self.draw_texture_region_z(
+			(x + 3, y + 3),
+			TOOLTIP_Z,
+			TOOLTIP_UV + (3, 3),
+			(width, height),
+			(10, 10),
+		);
 
 		self.text_z = old_text_z;
 		self.text_coords = old_text_coords;
@@ -151,7 +201,7 @@ impl VertexBufferBuilder {
 				self.text_indices.reserve_exact(36864);
 			}
 			let x = (x as isize - self.horizontal_scroll as isize) as f32 * self.scale;
-			let y = y as f32 *  self.scale;
+			let y = y as f32 * self.scale;
 			let z_and_color = f32::from_bits(((255 - z) as u32) | (color << 8));
 			let char = f32::from_bits(char as u32);
 
@@ -205,49 +255,45 @@ impl VertexBufferBuilder {
 	}
 
 	#[inline]
-	pub fn window_height(&self) -> usize {
-		(self.window_height / self.scale) as usize
-	}
+	pub fn window_height(&self) -> usize { (self.window_height / self.scale) as usize }
 
 	#[inline]
-	pub fn window_width(&self) -> usize {
-		(self.window_width / self.scale) as usize
-	}
+	pub fn window_width(&self) -> usize { (self.window_width / self.scale) as usize }
 
 	#[inline]
-	pub fn vertices(&self) -> &[u8] {
-		unsafe { core::slice::from_raw_parts(self.vertices.as_ptr().cast::<u8>(), self.vertices.len() * 4) }
-	}
+	pub fn vertices(&self) -> &[u8] { unsafe { core::slice::from_raw_parts(self.vertices.as_ptr().cast::<u8>(), self.vertices.len() * 4) } }
 
 	#[inline]
-	pub fn indices(&self) -> &[u8] {
-		unsafe { core::slice::from_raw_parts(self.indices.as_ptr().cast::<u8>(), self.indices.len() * 4) }
-	}
+	pub fn indices(&self) -> &[u8] { unsafe { core::slice::from_raw_parts(self.indices.as_ptr().cast::<u8>(), self.indices.len() * 4) } }
 
 	#[inline]
 	pub fn text_vertices(&self) -> &[u8] {
-		unsafe { core::slice::from_raw_parts(self.text_vertices.as_ptr().cast::<u8>(), self.text_vertices.len() * 4) }
+		unsafe {
+			core::slice::from_raw_parts(
+				self.text_vertices.as_ptr().cast::<u8>(),
+				self.text_vertices.len() * 4,
+			)
+		}
 	}
 
 	#[inline]
 	pub fn text_indices(&self) -> &[u8] {
-		unsafe { core::slice::from_raw_parts(self.text_indices.as_ptr().cast::<u8>(), self.text_indices.len() * 4) }
+		unsafe {
+			core::slice::from_raw_parts(
+				self.text_indices.as_ptr().cast::<u8>(),
+				self.text_indices.len() * 4,
+			)
+		}
 	}
 
 	#[inline]
-	pub fn indices_len(&self) -> u32 {
-		self.indices.len() as u32
-	}
+	pub fn indices_len(&self) -> u32 { self.indices.len() as u32 }
 
 	#[inline]
-	pub fn text_indices_len(&self) -> u32 {
-		self.text_indices.len() as u32
-	}
+	pub fn text_indices_len(&self) -> u32 { self.text_indices.len() as u32 }
 
 	#[inline]
-	pub fn draw_texture(&mut self, pos: impl Into<(usize, usize)>, uv: impl Into<(usize, usize)>, dims: impl Into<(usize, usize)>) {
-		self.draw_texture_z(pos, BASE_Z, uv, dims);
-	}
+	pub fn draw_texture(&mut self, pos: impl Into<(usize, usize)>, uv: impl Into<(usize, usize)>, dims: impl Into<(usize, usize)>) { self.draw_texture_z(pos, BASE_Z, uv, dims); }
 
 	#[inline]
 	pub fn draw_texture_z(&mut self, pos: impl Into<(usize, usize)>, z: u8, uv: impl Into<(usize, usize)>, dims: impl Into<(usize, usize)>) {
@@ -344,9 +390,7 @@ pub struct Vec2u {
 }
 
 impl Vec2u {
-	pub const fn new(x: usize, y: usize) -> Self {
-		Self { x, y }
-	}
+	pub const fn new(x: usize, y: usize) -> Self { Self { x, y } }
 
 	pub const fn wrapping_sub(self, rhs: Self) -> Self {
 		Self {
@@ -378,9 +422,7 @@ impl From<(usize, usize)> for Vec2u {
 }
 
 impl From<Vec2u> for (usize, usize) {
-	fn from(val: Vec2u) -> Self {
-		(val.x, val.y)
-	}
+	fn from(val: Vec2u) -> Self { (val.x, val.y) }
 }
 
 impl<T: Into<(usize, usize)>> std::ops::Add<T> for Vec2u {
@@ -388,7 +430,10 @@ impl<T: Into<(usize, usize)>> std::ops::Add<T> for Vec2u {
 
 	fn add(self, rhs: T) -> Self::Output {
 		let (x, y) = rhs.into();
-		Self { x: self.x + x, y: self.y + y }
+		Self {
+			x: self.x + x,
+			y: self.y + y,
+		}
 	}
 }
 
@@ -405,7 +450,10 @@ impl<T: Into<(usize, usize)>> std::ops::Sub<T> for Vec2u {
 
 	fn sub(self, rhs: T) -> Self::Output {
 		let (x, y) = rhs.into();
-		Self { x: self.x - x, y: self.y - y }
+		Self {
+			x: self.x - x,
+			y: self.y - y,
+		}
 	}
 }
 

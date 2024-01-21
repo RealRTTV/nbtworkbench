@@ -21,13 +21,9 @@ pub struct SelectedTextCache {
 }
 
 impl SelectedTextCache {
-	pub fn eq(&self, text: &SelectedText) -> bool {
-		(self.value.as_ref() == text.value.as_str()) & (self.keyfix.as_ref().map(Box::as_ref) == text.keyfix.as_deref()) & (self.valuefix.as_ref().map(Box::as_ref) == text.valuefix.as_deref())
-	}
+	pub fn eq(&self, text: &SelectedText) -> bool { (self.value.as_ref() == text.value.as_str()) & (self.keyfix.as_ref().map(Box::as_ref) == text.keyfix.as_deref()) & (self.valuefix.as_ref().map(Box::as_ref) == text.valuefix.as_deref()) }
 
-	pub fn ne(&self, text: &SelectedText) -> bool {
-		(self.value.as_ref() != text.value.as_str()) | (self.keyfix.as_ref().map(Box::as_ref) != text.keyfix.as_deref()) | (self.valuefix.as_ref().map(Box::as_ref) != text.valuefix.as_deref())
-	}
+	pub fn ne(&self, text: &SelectedText) -> bool { (self.value.as_ref() != text.value.as_str()) | (self.keyfix.as_ref().map(Box::as_ref) != text.keyfix.as_deref()) | (self.valuefix.as_ref().map(Box::as_ref) != text.valuefix.as_deref()) }
 }
 
 #[derive(Clone)]
@@ -74,7 +70,10 @@ impl SelectedText {
 			if mouse_x + 4 >= target_x {
 				let (suffix, valuefix) = if let Some((v, b)) = &value {
 					if *b {
-						(if chunk { ", " } else { ": " }.to_owned(), Some(v.clone().into_string()))
+						(
+							if chunk { ", " } else { ": " }.to_owned(),
+							Some(v.clone().into_string()),
+						)
 					} else {
 						(format!("{} {v}", if chunk { ',' } else { ':' }), None)
 					}
@@ -103,7 +102,14 @@ impl SelectedText {
 					);
 				}
 
-				if target_x + key_width < mouse_x + key.chars().last().and_then(|char| VertexBufferBuilder::CHAR_WIDTH.get(char as usize)).copied().unwrap_or(0) as usize
+				if target_x + key_width
+					< mouse_x
+						+ key
+							.chars()
+							.last()
+							.and_then(|char| VertexBufferBuilder::CHAR_WIDTH.get(char as usize))
+							.copied()
+							.unwrap_or(0) as usize
 					&& mouse_x < target_x + key_width + 7
 				{
 					return Some(
@@ -168,7 +174,10 @@ impl SelectedText {
 			if mouse_x + 4 >= value_x {
 				let (keyfix, prefix) = if let Some((k, b)) = key.as_ref() {
 					if *b {
-						(Some(k.as_ref().to_owned()), if chunk { ", " } else { ": " }.to_owned())
+						(
+							Some(k.as_ref().to_owned()),
+							if chunk { ", " } else { ": " }.to_owned(),
+						)
 					} else {
 						(None, format!("{} {k}", if chunk { ',' } else { ':' }))
 					}
@@ -199,7 +208,15 @@ impl SelectedText {
 
 				let value_width = value.width();
 
-				if mouse_x + value.as_ref().chars().last().and_then(|char| VertexBufferBuilder::CHAR_WIDTH.get(char as usize)).copied().unwrap_or(0) as usize > value_x + value_width
+				if mouse_x
+					+ value
+						.as_ref()
+						.chars()
+						.last()
+						.and_then(|char| VertexBufferBuilder::CHAR_WIDTH.get(char as usize))
+						.copied()
+						.unwrap_or(0) as usize
+					> value_x + value_width
 					&& mouse_x < value_x + value_width + 5
 				{
 					return Some(
@@ -256,14 +273,24 @@ impl SelectedText {
 			}
 		}
 
-		let full_width = key.as_ref().map_or(0, |(x, _)| x.width()) + value.as_ref().map_or(0, |(x, _)| x.width()) + if key.is_some() && value.is_some() { ": ".width() } else { 0 };
+		let full_width = key.as_ref().map_or(0, |(x, _)| x.width())
+			+ value.as_ref().map_or(0, |(x, _)| x.width())
+			+ if key.is_some() && value.is_some() {
+				": ".width()
+			} else {
+				0
+			};
 		if key.as_ref().is_none_or(|(_, display)| !*display) && value.as_ref().is_none_or(|(_, display)| !*display) && mouse_x <= target_x + full_width && mouse_x + 16 >= target_x {
 			Some(
 				Self {
 					y,
 					indices: indices.into_boxed_slice(),
 					cursor: 0,
-					value: if key.is_some() { if chunk { ", " } else { ": " }.to_owned() } else { String::new() },
+					value: if key.is_some() {
+						if chunk { ", " } else { ": " }.to_owned()
+					} else {
+						String::new()
+					},
 					selection: None,
 					keyfix: key.map(|(x, _)| x.into_string()),
 					prefix: String::new(),
@@ -311,25 +338,25 @@ impl SelectedText {
 			self.save_state_in_history();
 		}
 
-		if self.undos.get().is_some_and(|x| x.eq(self)) && let Some(undo) = self.undos.get_mut() {
+		if self.undos.get().is_some_and(|x| x.eq(self))
+			&& let Some(undo) = self.undos.get_mut()
+		{
 			undo.cursor = self.cursor;
 			undo.selection = self.selection;
 		}
 	}
 
-	pub fn width(&self) -> usize {
-		self.prefix.width() + self.keyfix.as_deref().map(str::width).unwrap_or(0) + self.value.width() + self.valuefix.as_deref().map(str::width).unwrap_or(0) + self.suffix.width()
-	}
+	pub fn width(&self) -> usize { self.prefix.width() + self.keyfix.as_deref().map(str::width).unwrap_or(0) + self.value.width() + self.valuefix.as_deref().map(str::width).unwrap_or(0) + self.suffix.width() }
 
 	#[cfg_attr(not(debug_assertions), inline)]
 	#[allow(clippy::cognitive_complexity, clippy::too_many_lines)] // i handled this fn well
 	#[must_use]
 	pub fn on_key_press(&mut self, key: VirtualKeyCode, mut char: Option<char>, flags: u8) -> KeyResult {
-		if key == VirtualKeyCode::Escape && flags == flags!() {
-			return Revert;
-		}
+		if key == VirtualKeyCode::Escape && flags == flags!() { return Revert }
 
-		if let VirtualKeyCode::Return | VirtualKeyCode::NumpadEnter = key && flags == flags!() {
+		if let VirtualKeyCode::Return | VirtualKeyCode::NumpadEnter = key
+			&& flags == flags!()
+		{
 			return Finish;
 		}
 
@@ -394,9 +421,17 @@ impl SelectedText {
 			return NothingSpecial;
 		}
 
-		if let Some(selection) = self.selection && flags == flags!() {
-			if let VirtualKeyCode::Back | VirtualKeyCode::Delete = key && self.editable {
-				let (low_selection, high_selection) = if self.cursor < selection { (self.cursor, selection) } else { (selection, self.cursor) };
+		if let Some(selection) = self.selection
+			&& flags == flags!()
+		{
+			if let VirtualKeyCode::Back | VirtualKeyCode::Delete = key
+				&& self.editable
+			{
+				let (low_selection, high_selection) = if self.cursor < selection {
+					(self.cursor, selection)
+				} else {
+					(selection, self.cursor)
+				};
 				let (left, right) = self.value.split_at(low_selection);
 				let (_, right) = right.split_at(high_selection - low_selection);
 				self.value = format!("{left}{right}");
@@ -408,7 +443,11 @@ impl SelectedText {
 
 		if key == VirtualKeyCode::X && flags == flags!(Ctrl) && self.editable {
 			if let Some(selection) = self.selection {
-				let (start, end) = if self.cursor < selection { (self.cursor, selection) } else { (selection, self.cursor) };
+				let (start, end) = if self.cursor < selection {
+					(self.cursor, selection)
+				} else {
+					(selection, self.cursor)
+				};
 				let (low, right) = self.value.split_at(start);
 				let (cut, high) = right.split_at(end - start);
 				if cli_clipboard::set_contents(cut.to_owned()).is_ok() {
@@ -421,7 +460,11 @@ impl SelectedText {
 
 		if key == VirtualKeyCode::C && flags == flags!(Ctrl) && self.editable {
 			if let Some(selection) = self.selection {
-				let (start, end) = if self.cursor < selection { (self.cursor, selection) } else { (selection, self.cursor) };
+				let (start, end) = if self.cursor < selection {
+					(self.cursor, selection)
+				} else {
+					(selection, self.cursor)
+				};
 				let (_, right) = self.value.split_at(start);
 				let (cut, _) = right.split_at(end - start);
 				let _ = cli_clipboard::set_contents(cut.to_owned()).is_ok();
@@ -432,7 +475,11 @@ impl SelectedText {
 		if key == VirtualKeyCode::V && flags == flags!(Ctrl) && self.editable {
 			if let Ok(clipboard) = cli_clipboard::get_contents() {
 				if let Some(selection) = self.selection.take() {
-					let (start, end) = if self.cursor < selection { (self.cursor, selection) } else { (selection, self.cursor) };
+					let (start, end) = if self.cursor < selection {
+						(self.cursor, selection)
+					} else {
+						(selection, self.cursor)
+					};
 					let (left, right) = self.value.split_at(start);
 					self.cursor = left.len() + clipboard.len();
 					let (_, right) = right.split_at(end - start);
@@ -460,7 +507,11 @@ impl SelectedText {
 		if key == VirtualKeyCode::End && flags & !flags!(Shift) == 0 && self.editable {
 			if flags == flags!(Shift) {
 				let new = self.selection.map_or(self.cursor, |x| x.max(self.cursor));
-				self.selection = if new == self.value.len() { None } else { Some(new) };
+				self.selection = if new == self.value.len() {
+					None
+				} else {
+					Some(new)
+				};
 			} else {
 				self.selection = None;
 			}
@@ -573,16 +624,14 @@ impl SelectedText {
 		}
 
 		if key == VirtualKeyCode::Left {
-			if flags == flags!(Alt) || flags == flags!(Shift + Alt) {
-				return ForceClose;
-			}
+			if flags == flags!(Alt) || flags == flags!(Shift + Alt) { return ForceClose }
 
 			if self.editable {
-				if flags & flags!(Shift) == 0 && self.selection.is_none() && self.cursor == 0 && self.keyfix.is_some() {
-					return Keyfix;
-				}
+				if flags & flags!(Shift) == 0 && self.selection.is_none() && self.cursor == 0 && self.keyfix.is_some() { return Keyfix }
 
-				if flags & flags!(Shift) == 0 && let Some(selection) = self.selection.take() {
+				if flags & flags!(Shift) == 0
+					&& let Some(selection) = self.selection.take()
+				{
 					self.cursor = selection.min(self.cursor);
 					return NothingSpecial;
 				}
@@ -641,16 +690,14 @@ impl SelectedText {
 		}
 
 		if key == VirtualKeyCode::Right {
-			if flags == flags!(Alt) || flags == flags!(Shift + Alt) {
-				return ForceOpen;
-			}
+			if flags == flags!(Alt) || flags == flags!(Shift + Alt) { return ForceOpen }
 
 			if self.editable {
-				if flags & flags!(Shift) == 0 && self.selection.is_none() && self.cursor == self.value.len() && self.valuefix.is_some() {
-					return Valuefix;
-				}
+				if flags & flags!(Shift) == 0 && self.selection.is_none() && self.cursor == self.value.len() && self.valuefix.is_some() { return Valuefix }
 
-				if flags & flags!(Shift) == 0 && let Some(selection) = self.selection.take() {
+				if flags & flags!(Shift) == 0
+					&& let Some(selection) = self.selection.take()
+				{
 					self.cursor = selection.max(self.cursor);
 					return NothingSpecial;
 				}
@@ -707,13 +754,22 @@ impl SelectedText {
 			return NothingSpecial;
 		}
 
-		if let VirtualKeyCode::Return | VirtualKeyCode::NumpadEnter = key && flags == flags!(Shift) && self.editable {
+		if let VirtualKeyCode::Return | VirtualKeyCode::NumpadEnter = key
+			&& flags == flags!(Shift)
+			&& self.editable
+		{
 			char = Some('\n');
 		}
 
-		if let Some(char) = char && self.editable {
+		if let Some(char) = char
+			&& self.editable
+		{
 			if let Some(selection) = self.selection {
-				let (low_selection, high_selection) = if self.cursor < selection { (self.cursor, selection) } else { (selection, self.cursor) };
+				let (low_selection, high_selection) = if self.cursor < selection {
+					(self.cursor, selection)
+				} else {
+					(selection, self.cursor)
+				};
 				let (left, right) = self.value.split_at(low_selection);
 				let (_, right) = right.split_at(high_selection - low_selection);
 				self.value = format!("{left}{char}{right}");
@@ -740,9 +796,7 @@ impl SelectedText {
 			self.y - builder.scroll()
 		};
 
-		if y < HEADER_SIZE {
-			return;
-		}
+		if y < HEADER_SIZE { return }
 
 		let prefix_width = self.prefix.as_str().width() + self.keyfix.as_deref().map_or(0, StrExt::width);
 		builder.draw_texture_z((x - 4 - 16, y), ELEMENT_HIGHLIGHT_Z, SELECTION_UV, (16, 16));
@@ -759,18 +813,48 @@ impl SelectedText {
 
 		if self.editable {
 			let cursor_prefixing = self.value.split_at(self.cursor).0;
-			let duration_from_last_interaction = self.last_interaction.elapsed().as_ref().map_err(SystemTimeError::duration).cloned().unwrap_or_else(identity);
-			if let Some(selection) = self.selection && self.editable {
-				let (start, end) = if self.cursor > selection { (selection, self.cursor) } else { (self.cursor, selection) };
+			let duration_from_last_interaction = self
+				.last_interaction
+				.elapsed()
+				.as_ref()
+				.map_err(SystemTimeError::duration)
+				.cloned()
+				.unwrap_or_else(identity);
+			if let Some(selection) = self.selection
+				&& self.editable
+			{
+				let (start, end) = if self.cursor > selection {
+					(selection, self.cursor)
+				} else {
+					(self.cursor, selection)
+				};
 				let start = self.value.split_at(start).0.width();
 				let end = self.value.split_at(end).0.width();
-				builder.draw_texture_region_z((prefix_width + start + x, y), SELECTED_TEXT_Z, SELECTION_UV + (1, 1), (end - start - 1, 16), (14, 14));
+				builder.draw_texture_region_z(
+					(prefix_width + start + x, y),
+					SELECTED_TEXT_Z,
+					SELECTION_UV + (1, 1),
+					(end - start - 1, 16),
+					(14, 14),
+				);
 				if duration_from_last_interaction < Duration::from_millis(500) || duration_from_last_interaction.subsec_millis() < 500 {
-					builder.draw_texture_region_z((x + cursor_prefixing.width() + prefix_width - 1, y), SELECTED_TEXT_Z, SELECTION_UV, (2, 16), (1, 16));
+					builder.draw_texture_region_z(
+						(x + cursor_prefixing.width() + prefix_width - 1, y),
+						SELECTED_TEXT_Z,
+						SELECTION_UV,
+						(2, 16),
+						(1, 16),
+					);
 				}
 			} else {
 				if duration_from_last_interaction < Duration::from_millis(500) || duration_from_last_interaction.subsec_millis() < 500 {
-					builder.draw_texture_region_z((x + cursor_prefixing.width() + prefix_width, y), SELECTED_TEXT_Z, SELECTION_UV, (2, 16), (1, 16));
+					builder.draw_texture_region_z(
+						(x + cursor_prefixing.width() + prefix_width, y),
+						SELECTED_TEXT_Z,
+						SELECTION_UV,
+						(2, 16),
+						(1, 16),
+					);
 				}
 			}
 		}

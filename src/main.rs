@@ -67,7 +67,10 @@ use uuid::Uuid;
 use elements::element::NbtElement;
 use vertex_buffer_builder::VertexBufferBuilder;
 
-use crate::assets::{BASE_TEXT_Z, BASE_Z, BOOKMARK_UV, BOOKMARK_Z, BYTE_ARRAY_GHOST_UV, BYTE_GHOST_UV, CHUNK_GHOST_UV, COMPOUND_GHOST_UV, DOUBLE_GHOST_UV, END_LINE_NUMBER_SEPARATOR_UV, FLOAT_GHOST_UV, HEADER_SIZE, HIDDEN_BOOKMARK_UV, INT_ARRAY_GHOST_UV, INT_GHOST_UV, INVALID_STRIPE_UV, LINE_NUMBER_SEPARATOR_UV, LINE_NUMBER_Z, LIST_GHOST_UV, LONG_ARRAY_GHOST_UV, LONG_GHOST_UV, REGION_GHOST_UV, SCROLLBAR_BOOKMARK_Z, SELECTED_TOGGLE_OFF_UV, SELECTED_TOGGLE_ON_UV, SHORT_GHOST_UV, STRING_GHOST_UV, TEXT_UNDERLINE_UV, TOGGLE_Z, UNSELECTED_TOGGLE_OFF_UV, UNSELECTED_TOGGLE_ON_UV};
+use crate::assets::{
+	BASE_TEXT_Z, BASE_Z, BOOKMARK_UV, BOOKMARK_Z, BYTE_ARRAY_GHOST_UV, BYTE_GHOST_UV, CHUNK_GHOST_UV, COMPOUND_GHOST_UV, DOUBLE_GHOST_UV, END_LINE_NUMBER_SEPARATOR_UV, FLOAT_GHOST_UV, HEADER_SIZE, HIDDEN_BOOKMARK_UV, INT_ARRAY_GHOST_UV, INT_GHOST_UV, INVALID_STRIPE_UV, LINE_NUMBER_SEPARATOR_UV, LINE_NUMBER_Z, LIST_GHOST_UV, LONG_ARRAY_GHOST_UV, LONG_GHOST_UV, REGION_GHOST_UV, SCROLLBAR_BOOKMARK_Z, SELECTED_TOGGLE_OFF_UV, SELECTED_TOGGLE_ON_UV, SHORT_GHOST_UV, STRING_GHOST_UV, TEXT_UNDERLINE_UV,
+	TOGGLE_Z, UNSELECTED_TOGGLE_OFF_UV, UNSELECTED_TOGGLE_ON_UV,
+};
 use crate::color::TextColor;
 use crate::elements::chunk::{NbtChunk, NbtRegion};
 use crate::elements::compound::NbtCompound;
@@ -76,20 +79,20 @@ use crate::elements::list::NbtList;
 use crate::elements::string::NbtString;
 use crate::tree_travel::Navigate;
 use crate::vertex_buffer_builder::Vec2u;
+mod alert;
 mod assets;
+mod color;
 mod decoder;
 mod encoder;
 mod selected_text;
+mod shader;
 mod tab;
+mod text_shader;
 mod tree_travel;
 mod vertex_buffer_builder;
 mod window;
 pub mod workbench;
 mod workbench_action;
-mod shader;
-mod text_shader;
-mod alert;
-mod color;
 
 #[macro_export]
 macro_rules! flags {
@@ -146,9 +149,7 @@ macro_rules! hash {
 /// * macros
 /// * keyboard-based element dropping (press numbers before to specify count for move operations, right shift to enable mode)
 /// * animations!!!!
-fn main() -> ! {
-	window::run()
-}
+fn main() -> ! { window::run() }
 
 pub enum DropFn {
 	Dropped(usize, usize, Option<CompactString>, usize),
@@ -181,9 +182,7 @@ impl HeldEntry {
 	}
 
 	#[must_use]
-	pub const fn is_empty(&self) -> bool {
-		matches!(self, Self::Empty)
-	}
+	pub const fn is_empty(&self) -> bool { matches!(self, Self::Empty) }
 }
 
 pub fn sum_indices<I: Iterator<Item = usize>>(indices: I, mut root: &NbtElement) -> usize {
@@ -195,28 +194,46 @@ pub fn sum_indices<I: Iterator<Item = usize>>(indices: I, mut root: &NbtElement)
 				total += 1 + idx;
 				break;
 			} else if let Some(list) = root.as_list() {
-				total += 1 + list.children().take(idx).map(NbtElement::height).sum::<usize>();
+				total += 1 + list
+					.children()
+					.take(idx)
+					.map(NbtElement::height)
+					.sum::<usize>();
 				if let Some(root) = list.get(idx) {
 					root
 				} else {
 					break;
 				}
 			} else if let Some(compound) = root.as_compound() {
-				total += 1 + compound.children().take(idx).map(|(_, b)| b).map(NbtElement::height).sum::<usize>();
+				total += 1 + compound
+					.children()
+					.take(idx)
+					.map(|(_, b)| b)
+					.map(NbtElement::height)
+					.sum::<usize>();
 				if let Some((_, root)) = compound.get(idx) {
 					root
 				} else {
 					break;
 				}
 			} else if let Some(chunk) = root.as_chunk() {
-				total += 1 + chunk.children().take(idx).map(|(_, b)| b).map(NbtElement::height).sum::<usize>();
+				total += 1 + chunk
+					.children()
+					.take(idx)
+					.map(|(_, b)| b)
+					.map(NbtElement::height)
+					.sum::<usize>();
 				if let Some((_, root)) = chunk.get(idx) {
 					root
 				} else {
 					break;
 				}
 			} else if let Some(region) = root.as_region() {
-				total += 1 + region.children().take(idx).map(NbtElement::height).sum::<usize>();
+				total += 1 + region
+					.children()
+					.take(idx)
+					.map(NbtElement::height)
+					.sum::<usize>();
 				if let Some(root) = region.get(idx) {
 					root
 				} else {
@@ -238,7 +255,9 @@ pub fn sum_indices<I: Iterator<Item = usize>>(indices: I, mut root: &NbtElement)
 pub fn recache_along_indices(indices: &[usize], root: &mut NbtElement) {
 	if let Some(region) = root.as_region_mut() {
 		if let Some((&idx, rest)) = indices.split_first() {
-			recache_along_indices(rest, unsafe { region.get_mut(idx).panic_unchecked("expected valid index") });
+			recache_along_indices(rest, unsafe {
+				region.get_mut(idx).panic_unchecked("expected valid index")
+			});
 		}
 		region.recache_depth();
 	} else if let Some(array) = root.as_byte_array_mut() {
@@ -249,17 +268,30 @@ pub fn recache_along_indices(indices: &[usize], root: &mut NbtElement) {
 		array.recache_depth();
 	} else if let Some(list) = root.as_list_mut() {
 		if let Some((&idx, rest)) = indices.split_first() {
-			recache_along_indices(rest, unsafe { list.get_mut(idx).panic_unchecked("expected valid index") });
+			recache_along_indices(rest, unsafe {
+				list.get_mut(idx).panic_unchecked("expected valid index")
+			});
 		}
 		list.recache_depth();
 	} else if let Some(compound) = root.as_compound_mut() {
 		if let Some((&idx, rest)) = indices.split_first() {
-			recache_along_indices(rest, unsafe { compound.get_mut(idx).panic_unchecked("expected valid index") }.1);
+			recache_along_indices(
+				rest,
+				unsafe {
+					compound
+						.get_mut(idx)
+						.panic_unchecked("expected valid index")
+				}
+				.1,
+			);
 		}
 		compound.recache_depth();
 	} else if let Some(chunk) = root.as_chunk_mut() {
 		if let Some((&idx, rest)) = indices.split_first() {
-			recache_along_indices(rest, unsafe { chunk.get_mut(idx).panic_unchecked("expected valid index") }.1);
+			recache_along_indices(
+				rest,
+				unsafe { chunk.get_mut(idx).panic_unchecked("expected valid index") }.1,
+			);
 		}
 		chunk.recache_depth();
 	}
@@ -298,15 +330,11 @@ pub fn either_encompass(a: &[usize], b: &[usize]) -> bool {
 
 #[inline]
 #[must_use]
-pub const fn is_utf8_char_boundary(x: u8) -> bool {
-	(x as i8) >= -0x40
-}
+pub const fn is_utf8_char_boundary(x: u8) -> bool { (x as i8) >= -0x40 }
 
 #[inline]
 #[must_use]
-pub fn is_jump_char_boundary(x: u8) -> bool {
-	b" \t\r\n/\\()\"'-.,:;<>~!@#$%^&*|+=[]{}~?|".contains(&x)
-}
+pub fn is_jump_char_boundary(x: u8) -> bool { b" \t\r\n/\\()\"'-.,:;<>~!@#$%^&*|+=[]{}~?|".contains(&x) }
 
 pub struct FileUpdateSubscription {
 	subscription_type: FileUpdateSubscriptionType,
@@ -325,9 +353,10 @@ pub enum FileUpdateSubscriptionType {
 
 pub struct RenderContext {
 	selecting_key: bool,
-	forbidden_y: usize,
-	forbidden_key_value: Option<(Box<str>, Box<str>)>,
-	extend_forbid: bool,
+	selected_y: usize,
+	selected_key: Option<Box<str>>,
+	selected_value: Option<Box<str>>,
+	extend_error: bool,
 	invalid_value_error: bool,
 	key_duplicate_error: bool,
 	ghost: Option<(u8, usize, usize, usize)>,
@@ -346,12 +375,13 @@ pub struct RenderContext {
 impl RenderContext {
 	#[must_use]
 	#[allow(clippy::type_complexity)] // forbidden is fine to be like that, c'mon
-	pub fn new(forbidden: (usize, Option<(bool, Box<str>, Box<str>)>), ghost: Option<(u8, usize, usize, usize)>, left_margin: usize, mouse: (usize, usize)) -> Self {
+	pub fn new(selected_y: usize, selected_key: Option<Box<str>>, selected_value: Option<Box<str>>, selecting_key: bool, ghost: Option<(u8, usize, usize, usize)>, left_margin: usize, mouse: (usize, usize)) -> Self {
 		Self {
-			selecting_key: forbidden.1.as_ref().is_some_and(|(x, _, _)| *x),
-			forbidden_y: forbidden.0,
-			forbidden_key_value: forbidden.1.map(|(_, k, v)| (k, v)),
-			extend_forbid: false,
+			selecting_key,
+			selected_y,
+			selected_key,
+			selected_value,
+			extend_error: false,
 			invalid_value_error: false,
 			key_duplicate_error: false,
 			ghost,
@@ -368,23 +398,26 @@ impl RenderContext {
 	}
 
 	#[must_use]
-	pub const fn pos(&self) -> Vec2u {
-		Vec2u::new(self.x_offset, self.y_offset)
-	}
+	pub const fn pos(&self) -> Vec2u { Vec2u::new(self.x_offset, self.y_offset) }
 
 	#[inline]
-	pub fn check_for_key_duplicate<F: FnOnce(&str, &str) -> bool>(&mut self, f: F, extend: bool) {
-		if let Some((forbidden_key, forbidden_value)) = self.forbidden_key_value.as_ref() && self.selecting_key {
-			self.key_duplicate_error = f(forbidden_key, forbidden_value);
-			self.extend_forbid = extend;
+	pub fn check_for_key_duplicate<F: FnOnce(&str, Option<&str>) -> bool>(&mut self, f: F, extend: bool) {
+		if let Some(selected_key) = self.selected_key.as_ref()
+			&& self.selecting_key
+		{
+			self.key_duplicate_error = f(selected_key, self.selected_value.as_ref().map(Box::as_ref));
+			self.extend_error = extend;
 		}
 	}
 
 	#[inline]
 	pub fn check_for_invalid_value<F: FnOnce(&str) -> bool>(&mut self, f: F) {
 		let (_, y) = self.pos().into();
-		if let Some((_, forbidden_value)) = self.forbidden_key_value.as_ref() && self.forbidden_y == y && !self.selecting_key {
-			self.invalid_value_error = f(forbidden_value);
+		if let Some(selected_value) = self.selected_value.as_ref()
+			&& self.selected_y == y
+			&& !self.selecting_key
+		{
+			self.invalid_value_error = f(selected_value);
 		}
 	}
 
@@ -411,7 +444,7 @@ impl RenderContext {
 	#[must_use]
 	pub fn forbid(&self, pos: impl Into<(usize, usize)>) -> bool {
 		let (_, y) = pos.into();
-		if y == self.forbidden_y {
+		if y == self.selected_y {
 			false
 		} else {
 			true
@@ -421,8 +454,8 @@ impl RenderContext {
 	#[inline]
 	pub fn render_errors(&mut self, pos: impl Into<(usize, usize)>, builder: &mut VertexBufferBuilder) {
 		let (x, y) = pos.into();
-		if (self.key_duplicate_error | self.invalid_value_error) && self.forbidden_y == y {
-			self.red_line_numbers[0] = (self.forbidden_y - HEADER_SIZE) / 16;
+		if (self.key_duplicate_error | self.invalid_value_error) && self.selected_y == y {
+			self.red_line_numbers[0] = self.selected_y;
 			self.draw_error_underline(x, y, builder);
 		}
 	}
@@ -430,31 +463,43 @@ impl RenderContext {
 	#[inline]
 	pub fn draw_error_underline_width(&self, x: usize, y: usize, overridden_width: usize, builder: &mut VertexBufferBuilder) {
 		let horizontal_scroll_before = core::mem::replace(&mut builder.horizontal_scroll, 0);
-		builder.draw_texture_region_z((0, y), BASE_Z, INVALID_STRIPE_UV + (1, 1), (builder.window_width(), 16), (14, 14));
+		builder.draw_texture_region_z(
+			(0, y),
+			BASE_Z,
+			INVALID_STRIPE_UV + (1, 1),
+			(builder.window_width(), 16),
+			(14, 14),
+		);
 		builder.horizontal_scroll = horizontal_scroll_before;
-		builder.draw_texture_region_z((x + 20, y + 14), BASE_Z, TEXT_UNDERLINE_UV, (overridden_width, 2), (16, 2));
+		builder.draw_texture_region_z(
+			(x + 20, y + 14),
+			BASE_Z,
+			TEXT_UNDERLINE_UV,
+			(overridden_width, 2),
+			(16, 2),
+		);
 	}
 
 	#[inline]
 	pub fn draw_error_underline(&self, x: usize, y: usize, builder: &mut VertexBufferBuilder) {
-		if let Some((forbidden_key, forbidden_value)) = self.forbidden_key_value.as_ref() {
-			let key_width = forbidden_key.width();
-			let value_width = forbidden_value.width();
-			let (overridden_width, x_shift) = if self.extend_forbid {
+		let key_width = self.selected_key.as_deref().map(str::width).unwrap_or(0);
+		let value_width = self.selected_value.as_deref().map(str::width).unwrap_or(0);
+		let (overridden_width, x_shift) = if self.selected_key.is_some() {
+			if self.extend_error {
 				(key_width + value_width + ": ".width(), 0)
 			} else if self.selecting_key {
 				(key_width, 0)
 			} else {
 				(value_width, key_width + ": ".width())
-			};
-			self.draw_error_underline_width(x + x_shift, y, overridden_width, builder);
-		}
+			}
+		} else {
+			(value_width, 0)
+		};
+		self.draw_error_underline_width(x + x_shift, y, overridden_width, builder);
 	}
 
 	#[inline]
-	pub fn skip_line_numbers(&mut self, n: usize) {
-		self.line_number += n;
-	}
+	pub fn skip_line_numbers(&mut self, n: usize) { self.line_number += n; }
 
 	#[inline]
 	pub fn line_number(&mut self) {
@@ -474,14 +519,26 @@ impl RenderContext {
 		}
 		let mut y = HEADER_SIZE;
 		for (idx, &render_line_number) in self.line_numbers.iter().enumerate() {
-			let actual_line_number = if let Some((offset, height)) = self.ghost_line_number && render_line_number > offset {
+			let actual_line_number = if let Some((offset, height)) = self.ghost_line_number
+				&& render_line_number > offset
+			{
 				render_line_number - height
 			} else {
 				render_line_number
 			};
-			let next_line_number = self.line_numbers.get(idx + 1).copied().map(|next_line_number| {
-				if let Some((offset, height)) = self.ghost_line_number && next_line_number > offset { next_line_number - height } else { next_line_number }
-			});
+			let next_line_number = self
+				.line_numbers
+				.get(idx + 1)
+				.copied()
+				.map(|next_line_number| {
+					if let Some((offset, height)) = self.ghost_line_number
+						&& next_line_number > offset
+					{
+						next_line_number - height
+					} else {
+						next_line_number
+					}
+				});
 
 			let color = if (self.red_line_numbers[0] == y) | (self.red_line_numbers[1] == y) {
 				if idx % 2 == 0 {
@@ -497,17 +554,47 @@ impl RenderContext {
 				}
 			};
 			let color = core::mem::replace(&mut builder.color, color);
-			builder.settings((self.left_margin - render_line_number.ilog10() as usize * 8 - 16, y), false, BASE_TEXT_Z);
+			builder.settings(
+				(
+					self.left_margin - render_line_number.ilog10() as usize * 8 - 16,
+					y,
+				),
+				false,
+				BASE_TEXT_Z,
+			);
 			let _ = write!(builder, "{render_line_number}");
 			builder.color = color;
 
-			if let Some((&first, rest)) = bookmarks.split_first() && self.ghost_line_number.is_none_or(|(offset, _)| render_line_number != offset) && actual_line_number == first.true_line_number {
+			if let Some((&first, rest)) = bookmarks.split_first()
+				&& self
+					.ghost_line_number
+					.is_none_or(|(offset, _)| render_line_number != offset)
+				&& actual_line_number == first.true_line_number
+			{
 				bookmarks = rest;
-				builder.draw_texture_region_z((2, y + 2), BOOKMARK_Z, BOOKMARK_UV, (builder.text_coords.0, 12), (16, 16));
+				builder.draw_texture_region_z(
+					(2, y + 2),
+					BOOKMARK_Z,
+					BOOKMARK_UV,
+					(builder.text_coords.0, 12),
+					(16, 16),
+				);
 			}
-			while let Some((&first, rest)) = bookmarks.split_first() && next_line_number.is_none_or(|next_line_number| self.ghost_line_number.is_none_or(|(offset, _)| next_line_number != offset) && actual_line_number <= first.true_line_number && first.true_line_number < next_line_number) {
+			while let Some((&first, rest)) = bookmarks.split_first()
+				&& next_line_number.is_none_or(|next_line_number| {
+					self.ghost_line_number
+						.is_none_or(|(offset, _)| next_line_number != offset)
+						&& actual_line_number <= first.true_line_number
+						&& first.true_line_number < next_line_number
+				}) {
 				bookmarks = rest;
-				builder.draw_texture_region_z((2, y + 15), BOOKMARK_Z, HIDDEN_BOOKMARK_UV, (builder.text_coords.0, 2), (16, 16));
+				builder.draw_texture_region_z(
+					(2, y + 15),
+					BOOKMARK_Z,
+					HIDDEN_BOOKMARK_UV,
+					(builder.text_coords.0, 2),
+					(16, 16),
+				);
 			}
 
 			let uv = if idx + 1 == self.line_numbers.len() {
@@ -522,9 +609,13 @@ impl RenderContext {
 
 	#[inline]
 	pub fn render_key_value_errors(&mut self, builder: &mut VertexBufferBuilder) {
-		if self.mouse_y < HEADER_SIZE { return; }
-		let y = (self.mouse_y - HEADER_SIZE) / 16;
-		if self.red_line_numbers.into_iter().any(|red_line_number| red_line_number == y) {
+		if self.mouse_y < HEADER_SIZE { return }
+		let y = ((self.mouse_y - HEADER_SIZE) & !0b1111) + HEADER_SIZE;
+		if self
+			.red_line_numbers
+			.into_iter()
+			.any(|red_line_number| red_line_number == y)
+		{
 			let mut errors = vec![];
 			if self.invalid_value_error {
 				errors.push("Error! The currently entered value is not valid for this type.");
@@ -543,31 +634,43 @@ impl RenderContext {
 		let height = root.height();
 		for bookmark in bookmarks {
 			let y = HEADER_SIZE + (bookmark.line_number * (builder.window_height() - HEADER_SIZE)) / height;
-			builder.draw_texture_z((builder.window_width() - 8, y), SCROLLBAR_BOOKMARK_Z, bookmark.uv, (8, 2));
+			builder.draw_texture_z(
+				(builder.window_width() - 8, y),
+				SCROLLBAR_BOOKMARK_Z,
+				bookmark.uv,
+				(8, 2),
+			);
 		}
 	}
 
 	#[must_use]
 	pub fn ghost<F: FnOnce(usize, usize) -> bool, G: FnOnce(u8) -> bool>(&mut self, pos: impl Into<(usize, usize)>, builder: &mut VertexBufferBuilder, f: F, g: G) -> bool {
 		let (x_offset, y_offset) = pos.into();
-		if self.ghost_line_number.is_none() && let Some((id, x, y, true_height)) = self.ghost && f(x, y) && g(id) {
-			builder.draw_texture((x_offset, y_offset), match id {
-				NbtByte::ID => BYTE_GHOST_UV,
-				NbtShort::ID => SHORT_GHOST_UV,
-				NbtInt::ID => INT_GHOST_UV,
-				NbtLong::ID => LONG_GHOST_UV,
-				NbtFloat::ID => FLOAT_GHOST_UV,
-				NbtDouble::ID => DOUBLE_GHOST_UV,
-				NbtByteArray::ID => BYTE_ARRAY_GHOST_UV,
-				NbtString::ID => STRING_GHOST_UV,
-				NbtList::ID => LIST_GHOST_UV,
-				NbtCompound::ID => COMPOUND_GHOST_UV,
-				NbtIntArray::ID => INT_ARRAY_GHOST_UV,
-				NbtLongArray::ID => LONG_ARRAY_GHOST_UV,
-				NbtChunk::ID => CHUNK_GHOST_UV,
-				NbtRegion::ID => REGION_GHOST_UV,
-				_ => unsafe { panic_unchecked("Invalid element id") },
-			}, (16, 16));
+		if self.ghost_line_number.is_none()
+			&& let Some((id, x, y, true_height)) = self.ghost
+			&& f(x, y) && g(id)
+		{
+			builder.draw_texture(
+				(x_offset, y_offset),
+				match id {
+					NbtByte::ID => BYTE_GHOST_UV,
+					NbtShort::ID => SHORT_GHOST_UV,
+					NbtInt::ID => INT_GHOST_UV,
+					NbtLong::ID => LONG_GHOST_UV,
+					NbtFloat::ID => FLOAT_GHOST_UV,
+					NbtDouble::ID => DOUBLE_GHOST_UV,
+					NbtByteArray::ID => BYTE_ARRAY_GHOST_UV,
+					NbtString::ID => STRING_GHOST_UV,
+					NbtList::ID => LIST_GHOST_UV,
+					NbtCompound::ID => COMPOUND_GHOST_UV,
+					NbtIntArray::ID => INT_ARRAY_GHOST_UV,
+					NbtLongArray::ID => LONG_ARRAY_GHOST_UV,
+					NbtChunk::ID => CHUNK_GHOST_UV,
+					NbtRegion::ID => REGION_GHOST_UV,
+					_ => unsafe { panic_unchecked("Invalid element id") },
+				},
+				(16, 16),
+			);
 			self.ghost_line_number = Some((self.line_number, true_height));
 			self.line_number();
 			self.skip_line_numbers(true_height - 1);
@@ -603,12 +706,13 @@ impl<T> Drop for LinkedQueue<T> {
 
 impl<T> LinkedQueue<T> {
 	#[must_use]
-	pub const fn new() -> Self {
-		Self { tail: None, len: 0 }
-	}
+	pub const fn new() -> Self { Self { tail: None, len: 0 } }
 
 	pub fn push(&mut self, value: T) {
-		self.tail = Some(Box::new(SinglyLinkedNode { value, prev: self.tail.take() }));
+		self.tail = Some(Box::new(SinglyLinkedNode {
+			value,
+			prev: self.tail.take(),
+		}));
 		self.len += 1;
 	}
 
@@ -624,19 +728,13 @@ impl<T> LinkedQueue<T> {
 	}
 
 	#[must_use]
-	pub fn get(&self) -> Option<&T> {
-		self.tail.as_ref().map(|x| &x.value)
-	}
+	pub fn get(&self) -> Option<&T> { self.tail.as_ref().map(|x| &x.value) }
 
 	#[must_use]
-	pub fn get_mut(&mut self) -> Option<&mut T> {
-		self.tail.as_mut().map(|x| &mut x.value)
-	}
+	pub fn get_mut(&mut self) -> Option<&mut T> { self.tail.as_mut().map(|x| &mut x.value) }
 
 	#[must_use]
-	pub const fn is_empty(&self) -> bool {
-		self.len == 0
-	}
+	pub const fn is_empty(&self) -> bool { self.len == 0 }
 
 	pub fn clear(&mut self) {
 		while let Some(box SinglyLinkedNode { value: _, prev }) = self.tail.take() {
@@ -678,22 +776,16 @@ impl Bookmark {
 }
 
 impl PartialEq for Bookmark {
-	fn eq(&self, other: &Self) -> bool {
-		self.true_line_number.eq(&other.true_line_number)
-	}
+	fn eq(&self, other: &Self) -> bool { self.true_line_number.eq(&other.true_line_number) }
 }
 
 impl Eq for Bookmark {}
 
 impl PartialOrd<Self> for Bookmark {
-	fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-		Some(self.cmp(other))
-	}
+	fn partial_cmp(&self, other: &Self) -> Option<Ordering> { Some(self.cmp(other)) }
 }
 impl Ord for Bookmark {
-	fn cmp(&self, other: &Self) -> Ordering {
-		self.true_line_number.cmp(&other.true_line_number)
-	}
+	fn cmp(&self, other: &Self) -> Ordering { self.true_line_number.cmp(&other.true_line_number) }
 }
 
 pub fn smoothstep64(x: f64) -> f64 {
@@ -715,9 +807,7 @@ pub trait StrExt {
 }
 
 #[must_use]
-pub const fn valid_unescaped_char(byte: u8) -> bool {
-	matches!(byte, b'0'..=b'9' | b'A'..=b'Z' | b'a'..=b'z' | b'_' | b'-' | b'.' | b'+')
-}
+pub const fn valid_unescaped_char(byte: u8) -> bool { matches!(byte, b'0'..=b'9' | b'A'..=b'Z' | b'a'..=b'z' | b'_' | b'-' | b'.' | b'+') }
 
 impl StrExt for str {
 	#[inline]
@@ -752,11 +842,17 @@ impl StrExt for str {
 		};
 
 		if !self.starts_with('"') && !self.starts_with('\'') {
-			let end_idx = self.char_indices().find(|(_, c)| !valid_unescaped_char(*c as u8)).map(|(idx, _)| idx)?;
-			let (s, s2) = unsafe { (self.get_unchecked(..end_idx), self.get_unchecked(end_idx..self.len())) };
-			if s.needs_escape() {
-				return None;
+			let end_idx = self
+				.char_indices()
+				.find(|(_, c)| !valid_unescaped_char(*c as u8))
+				.map(|(idx, _)| idx)?;
+			let (s, s2) = unsafe {
+				(
+					self.get_unchecked(..end_idx),
+					self.get_unchecked(end_idx..self.len()),
+				)
 			};
+			if s.needs_escape() { return None }
 			Some((s.to_compact_string(), s2))
 		} else {
 			let enclosing = self.as_bytes().first().copied()?;
@@ -768,7 +864,9 @@ impl StrExt for str {
 				while let Some((idx, byte)) = iter.next() {
 					if backslash {
 						if byte == b'x' {
-							if let Ok([(_, a), _]) = iter.next_chunk::<2>() && let Some(a) = MAPPING[a as usize] {
+							if let Ok([(_, a), _]) = iter.next_chunk::<2>()
+								&& let Some(a) = MAPPING[a as usize]
+							{
 								if a < 8 {
 									sub += 3;
 								} else {
@@ -778,7 +876,10 @@ impl StrExt for str {
 								return None;
 							}
 						} else if byte == b'u' {
-							if let Ok([(_, _), (_, b), (_, c), _]) = iter.next_chunk::<4>() && let Some(b) = MAPPING[b as usize] && let Some(c) = MAPPING[c as usize] {
+							if let Ok([(_, _), (_, b), (_, c), _]) = iter.next_chunk::<4>()
+								&& let Some(b) = MAPPING[b as usize]
+								&& let Some(c) = MAPPING[c as usize]
+							{
 								if b < 8 {
 									if c < 8 {
 										sub += 5;
@@ -849,7 +950,10 @@ impl StrExt for str {
 				} else if byte == b'x' {
 					if backslash {
 						backslash = false;
-						if let Ok([a, b]) = iter.next_chunk::<2>() && let Some(a) = MAPPING[a as usize] && let Some(b) = MAPPING[b as usize] {
+						if let Ok([a, b]) = iter.next_chunk::<2>()
+							&& let Some(a) = MAPPING[a as usize]
+							&& let Some(b) = MAPPING[b as usize]
+						{
 							let char = ((a << 4) | b) as char;
 							let len = char.len_utf8();
 							char.encode_utf8(unsafe { core::slice::from_raw_parts_mut(ptr.add(buf_len), len) });
@@ -862,7 +966,13 @@ impl StrExt for str {
 				} else if byte == b'u' {
 					if backslash {
 						backslash = false;
-						if let Ok([a, b, c, d]) = iter.next_chunk::<4>() && let Some(a) = MAPPING[a as usize] && let Some(b) = MAPPING[b as usize] && let Some(c) = MAPPING[c as usize] && let Some(d) = MAPPING[d as usize] && let Some(char) = char::from_u32(((a as u32) << 12) | ((b as u32) << 8) | ((c as u32) << 4) | (d as u32)) {
+						if let Ok([a, b, c, d]) = iter.next_chunk::<4>()
+							&& let Some(a) = MAPPING[a as usize]
+							&& let Some(b) = MAPPING[b as usize]
+							&& let Some(c) = MAPPING[c as usize]
+							&& let Some(d) = MAPPING[d as usize]
+							&& let Some(char) = char::from_u32(((a as u32) << 12) | ((b as u32) << 8) | ((c as u32) << 4) | (d as u32))
+						{
 							let len = char.len_utf8();
 							char.encode_utf8(unsafe { core::slice::from_raw_parts_mut(ptr.add(buf_len), len) });
 							buf_len += len;
@@ -881,19 +991,23 @@ impl StrExt for str {
 				}
 			}
 
-			if self.len() < end + 1 {
-				return None;
-			};
+			if self.len() < end + 1 { return None };
 			unsafe { Some((out, self.get_unchecked((end + 1)..))) }
 		}
 	}
 
-	fn needs_escape(&self) -> bool {
-		self.as_bytes().first().is_some_and(u8::is_ascii_digit) || !self.bytes().all(valid_unescaped_char)
-	}
+	fn needs_escape(&self) -> bool { self.as_bytes().first().is_some_and(u8::is_ascii_digit) || !self.bytes().all(valid_unescaped_char) }
 
 	fn width(&self) -> usize {
-		self.chars().map(|x| if (x as u32) < 56832 { VertexBufferBuilder::CHAR_WIDTH[x as usize] as usize } else { 0 }).sum()
+		self.chars()
+			.map(|x| {
+				if (x as u32) < 56832 {
+					VertexBufferBuilder::CHAR_WIDTH[x as usize] as usize
+				} else {
+					0
+				}
+			})
+			.sum()
 	}
 }
 
@@ -908,13 +1022,9 @@ pub trait OptionExt<T> {
 }
 
 impl<T> OptionExt<T> for Option<T> {
-	unsafe fn panic_unchecked(self, msg: &str) -> T {
-		self.map_or_else(|| panic_unchecked(msg), identity)
-	}
+	unsafe fn panic_unchecked(self, msg: &str) -> T { self.map_or_else(|| panic_unchecked(msg), identity) }
 
-	fn is_none_or(self, f: impl FnOnce(T) -> bool) -> bool {
-		self.map_or(true, f)
-	}
+	fn is_none_or(self, f: impl FnOnce(T) -> bool) -> bool { self.map_or(true, f) }
 }
 
 /// # Safety
@@ -937,11 +1047,14 @@ pub mod elements {
 	pub mod array;
 	pub mod chunk;
 	pub mod compound;
-	pub mod element_action;
 	pub mod element;
+	pub mod element_action;
 	pub mod list;
 	pub mod primitive;
 	pub mod string;
 }
 
-const_assert_eq!(VertexBufferBuilder::CHAR_WIDTH[b':' as usize], VertexBufferBuilder::CHAR_WIDTH[b',' as usize]);
+const_assert_eq!(
+	VertexBufferBuilder::CHAR_WIDTH[b':' as usize],
+	VertexBufferBuilder::CHAR_WIDTH[b',' as usize]
+);
