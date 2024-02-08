@@ -1,3 +1,4 @@
+use std::fmt::{Debug, Formatter};
 use std::ops::BitAnd;
 
 use winit::dpi::PhysicalSize;
@@ -93,6 +94,7 @@ impl VertexBufferBuilder {
 	}
 
 	#[inline]
+	#[rustfmt::skip]
 	fn draw_char(&mut self, c: u16, x: usize, y: usize, z: u8) -> usize {
 		if self.dropshadow {
 			self.draw_unicode_z_color(x + 1, y + 1, z, c, {
@@ -101,14 +103,14 @@ impl VertexBufferBuilder {
 					.bitand(0xFF)
 					.wrapping_mul(21)
 					.wrapping_div(85)
-					.wrapping_shl(16) | self
-					.color
+					.wrapping_shl(16)
+			  | self.color
 					.wrapping_shr(8)
 					.bitand(0xFF)
 					.wrapping_mul(21)
 					.wrapping_div(85)
-					.wrapping_shl(8) | self
-					.color
+					.wrapping_shl(8)
+			  | self.color
 					.wrapping_shr(0)
 					.bitand(0xFF)
 					.wrapping_mul(21)
@@ -220,16 +222,19 @@ impl VertexBufferBuilder {
 			*(ptr.add(1)) = y1;
 			*(ptr.add(2)) = z_and_color;
 			*(ptr.add(3)) = char;
+
 			// top right, 1 -> 0.0, 0.0
 			*(ptr.add(4)) = x0;
 			*(ptr.add(5)) = y1;
 			*(ptr.add(6)) = z_and_color;
 			*(ptr.add(7)) = char;
+
 			// bottom left, 2 -> 0.0, 1.0
 			*(ptr.add(8)) = x0;
 			*(ptr.add(9)) = y0;
 			*(ptr.add(10)) = z_and_color;
 			*(ptr.add(11)) = char;
+
 			// bottom right, 3 -> 1.0, 1.0
 			*(ptr.add(12)) = x1;
 			*(ptr.add(13)) = y0;
@@ -387,6 +392,12 @@ impl VertexBufferBuilder {
 pub struct Vec2u {
 	pub x: usize,
 	pub y: usize,
+}
+
+impl Debug for Vec2u {
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+		write!(f, "({x},{y})", x = self.x, y = self.y)
+	}
 }
 
 impl Vec2u {

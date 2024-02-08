@@ -29,6 +29,7 @@ pub const SELECTION_UV: Vec2u = Vec2u::new(0, 80);
 pub const UNSELECTED_WIDGET_UV: Vec2u = Vec2u::new(80, 64);
 pub const SELECTED_WIDGET_UV: Vec2u = Vec2u::new(96, 64);
 pub const HOVERED_WIDGET_UV: Vec2u = Vec2u::new(112, 64);
+pub const CLOSED_WIDGET_UV: Vec2u = Vec2u::new(80, 144);
 pub const UNSELECTED_ACTION_WHEEL: [Vec2u; 8] = [
 	Vec2u::new(128, 0),
 	Vec2u::new(168, 0),
@@ -68,13 +69,15 @@ pub const ADD_UV: Vec2u = Vec2u::new(16, 96);
 pub const RENAME_UV: Vec2u = Vec2u::new(32, 96);
 pub const MOVE_UV: Vec2u = Vec2u::new(48, 96);
 pub const REPLACE_UV: Vec2u = Vec2u::new(64, 96);
+pub const REORDER_UV: Vec2u = Vec2u::new(80, 96);
 pub const REMOVE_TAIL_UV: Vec2u = Vec2u::new(0, 112);
 pub const ADD_TAIL_UV: Vec2u = Vec2u::new(16, 112);
 pub const RENAME_TAIL_UV: Vec2u = Vec2u::new(32, 112);
 pub const MOVE_TAIL_UV: Vec2u = Vec2u::new(48, 112);
 pub const REPLACE_TAIL_UV: Vec2u = Vec2u::new(64, 112);
-pub const UNDO_UV: Vec2u = Vec2u::new(80, 96);
-pub const REDO_UV: Vec2u = Vec2u::new(80, 112);
+pub const REORDER_TAIL_UV: Vec2u = Vec2u::new(80, 112);
+pub const UNDO_UV: Vec2u = Vec2u::new(32, 144);
+pub const REDO_UV: Vec2u = Vec2u::new(48, 144);
 pub const LINE_NUMBER_SEPARATOR_UV: Vec2u = Vec2u::new(60, 64);
 pub const END_LINE_NUMBER_SEPARATOR_UV: Vec2u = Vec2u::new(62, 64);
 pub const HORIZONTAL_SEPARATOR_UV: Vec2u = Vec2u::new(17, 80); // (14 by 2)
@@ -90,6 +93,8 @@ pub const COPY_RAW_UV: Vec2u = Vec2u::new(3, 131);
 pub const COPY_FORMATTED_UV: Vec2u = Vec2u::new(19, 131);
 pub const OPEN_ARRAY_IN_HEX_UV: Vec2u = Vec2u::new(35, 131);
 pub const OPEN_IN_TXT: Vec2u = Vec2u::new(51, 131);
+pub const SORT_COMPOUND_BY_NAME: Vec2u = Vec2u::new(67, 131);
+pub const SORT_COMPOUND_BY_TYPE: Vec2u = Vec2u::new(83, 131);
 pub const FREEHAND_MODE_UV: Vec2u = Vec2u::new(0, 144);
 pub const ENABLED_FREEHAND_MODE_UV: Vec2u = Vec2u::new(16, 144);
 
@@ -139,7 +144,7 @@ pub const SCROLLBAR_Z: u8 = 200;
 pub const SCROLLBAR_BOOKMARK_Z: u8 = SCROLLBAR_Z + 1;
 pub const HELD_ENTRY_Z: u8 = 210;
 pub const ALERT_Z: u8 = 240;
-pub const ALERT_TEXT_Z: u8 = ALERT_Z + 5;
+pub const ALERT_TEXT_Z: u8 = ALERT_Z + 1;
 pub const TOOLTIP_Z: u8 = 250;
 
 #[allow(clippy::cast_ptr_alignment)]

@@ -19,7 +19,7 @@ use crate::assets::HEADER_SIZE;
 use crate::color::TextColor;
 use crate::vertex_buffer_builder::VertexBufferBuilder;
 use crate::workbench::Workbench;
-use crate::{assets, OptionExt};
+use crate::{assets, OptionExt, WindowProperties};
 
 pub const WINDOW_HEIGHT: usize = 420;
 pub const WINDOW_WIDTH: usize = 620;
@@ -48,7 +48,8 @@ pub fn 	run() -> ! {
 		.build(&event_loop)
 		.expect("Window was constructable");
 	let mut state = State::new(&window);
-	let mut workbench = Workbench::new(|title| window.set_title(title));
+	let mut window_properties = WindowProperties::new(&window);
+	let mut workbench = Workbench::new(&mut window_properties);
 
 	event_loop.run(move |event, _, _| match event {
 		Event::RedrawRequested(window_id) if window_id == window.id() => match state.render(&mut workbench, &window) {
@@ -414,7 +415,7 @@ impl State {
 			self.config.width = new_size.width;
 			self.config.height = new_size.height;
 			self.surface.configure(&self.device, &self.config);
-			workbench.window_dims(new_size.width as usize, new_size.height as usize);
+			workbench.window_dimensions(new_size.width as usize, new_size.height as usize);
 			for tab in &mut workbench.tabs {
 				tab.scroll = tab.scroll();
 				tab.horizontal_scroll = tab.horizontal_scroll(workbench.held_entry.element());
@@ -437,7 +438,7 @@ impl State {
 			WindowEvent::CloseRequested => false,
 			WindowEvent::Destroyed => false,
 			WindowEvent::DroppedFile(file) => {
-				if let Err(e) = workbench.on_open_file(file, |title| window.set_title(title)) {
+				if let Err(e) = workbench.on_open_file(file, &mut WindowProperties::new(&window)) {
 					workbench.alert(Alert::new("Error!", TextColor::Red, e.to_string()))
 				}
 				true
@@ -446,13 +447,13 @@ impl State {
 			WindowEvent::HoveredFileCancelled => false,
 			WindowEvent::ReceivedCharacter(_) => false,
 			WindowEvent::Focused(_) => false,
-			WindowEvent::KeyboardInput { input, .. } => workbench.on_key_input(*input, |title| window.set_title(title)),
+			WindowEvent::KeyboardInput { input, .. } => workbench.on_key_input(*input, &mut WindowProperties::new(&window)),
 			WindowEvent::ModifiersChanged(_) => false,
 			WindowEvent::CursorMoved { position, .. } => workbench.on_mouse_move(*position),
 			WindowEvent::CursorEntered { .. } => false,
 			WindowEvent::CursorLeft { .. } => false,
 			WindowEvent::MouseWheel { delta, .. } => workbench.on_scroll(*delta),
-			WindowEvent::MouseInput { state, button, .. } => workbench.on_mouse_input(*state, *button, |title| window.set_title(title)),
+			WindowEvent::MouseInput { state, button, .. } => workbench.on_mouse_input(*state, *button, &mut WindowProperties::new(&window)),
 			WindowEvent::TouchpadPressure { .. } => false,
 			WindowEvent::AxisMotion { .. } => false,
 			WindowEvent::Touch(_) => false,

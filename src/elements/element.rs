@@ -1074,6 +1074,8 @@ impl NbtElement {
 					ElementAction::CopyRaw,
 					ElementAction::CopyFormatted,
 					ElementAction::OpenInTxt,
+					ElementAction::SortCompoundByName,
+					ElementAction::SortCompoundByType,
 				],
 				NbtIntArray::ID => &[
 					ElementAction::CopyRaw,
@@ -1091,6 +1093,8 @@ impl NbtElement {
 					ElementAction::CopyRaw,
 					ElementAction::CopyFormatted,
 					ElementAction::OpenInTxt,
+					ElementAction::SortCompoundByName,
+					ElementAction::SortCompoundByType,
 				],
 				NbtRegion::ID => &[
 					ElementAction::CopyRaw,

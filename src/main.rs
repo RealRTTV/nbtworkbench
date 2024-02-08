@@ -63,6 +63,7 @@ use compact_str::{CompactString, ToCompactString};
 use notify::PollWatcher;
 use static_assertions::const_assert_eq;
 use uuid::Uuid;
+use winit::window::Window;
 
 use elements::element::NbtElement;
 use vertex_buffer_builder::VertexBufferBuilder;
@@ -79,6 +80,7 @@ use crate::elements::list::NbtList;
 use crate::elements::string::NbtString;
 use crate::tree_travel::Navigate;
 use crate::vertex_buffer_builder::Vec2u;
+
 mod alert;
 mod assets;
 mod color;
@@ -131,20 +133,37 @@ macro_rules! hash {
 	}};
 }
 
+#[macro_export]
+macro_rules! tab {
+    ($self:ident) => {
+		#[allow(unused_unsafe)]
+		unsafe { $self.tabs.get_unchecked($self.tab) }
+	};
+}
+
+#[macro_export]
+macro_rules! tab_mut {
+    ($self:ident) => {
+		#[allow(unused_unsafe)]
+		unsafe { $self.tabs.get_unchecked_mut($self.tab) }
+	};
+}
+
 /// # Refactor
+/// * render trees using `RenderLine` struct/enum
+/// * make `Bookmarks` struct a thing and add functionality there
 /// # Long Term Goals
 /// * web assembly ver
 /// * smart screen
 /// * wiki page for docs on minecraft's format of stuff
 /// * [chunk](NbtChunk) section rendering
 /// # Minor Features
-/// * __ctrl + h__, open a playground `nbt` file to help with user interaction (bonus points if I have some way to tell if you haven't used this editor before)
-/// * [`last_modified`] field actually gets some impl
-/// * warnings for closing files that have unsaved changes (and closing the program with unsaved changes)
-/// * autosave
+/// * sort entries on file read toggle
 /// * gear icon to swap toolbar with settings panel
+/// * __ctrl + h__, open a playground `nbt` file to help with user interaction (bonus points if I have some way to tell if you haven't used this editor before)
+/// * [`last_modified`](NbtChunk) field actually gets some impl
+/// * autosave
 /// * blur behind tooltip
-/// * alerts for a failed file subscription update
 /// # Major Features
 /// * macros
 /// * keyboard-based element dropping (press numbers before to specify count for move operations, right shift to enable mode)
@@ -335,6 +354,23 @@ pub const fn is_utf8_char_boundary(x: u8) -> bool { (x as i8) >= -0x40 }
 #[inline]
 #[must_use]
 pub fn is_jump_char_boundary(x: u8) -> bool { b" \t\r\n/\\()\"'-.,:;<>~!@#$%^&*|+=[]{}~?|".contains(&x) }
+
+pub struct WindowProperties<'a> {
+	window: &'a Window,
+}
+
+impl<'a> WindowProperties<'a> {
+	pub fn new(window: &'a Window) -> Self {
+		Self {
+			window,
+		}
+	}
+
+	pub fn window_title(&mut self, title: &str) -> &mut Self {
+		self.window.set_title(title);
+		self
+	}
+}
 
 pub struct FileUpdateSubscription {
 	subscription_type: FileUpdateSubscriptionType,
@@ -758,7 +794,7 @@ impl<T: Clone> Clone for SinglyLinkedNode<T> {
 	}
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub struct Bookmark {
 	true_line_number: usize,
 	line_number: usize,

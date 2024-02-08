@@ -1,11 +1,14 @@
+use std::convert::identity;
+use std::mem::MaybeUninit;
 use compact_str::{CompactString, ToCompactString};
 use std::path::PathBuf;
 
-use crate::assets::{ADD_TAIL_UV, ADD_UV, MOVE_TAIL_UV, MOVE_UV, REMOVE_TAIL_UV, REMOVE_UV, RENAME_TAIL_UV, RENAME_UV, REPLACE_TAIL_UV, REPLACE_UV};
+use crate::assets::{ADD_TAIL_UV, ADD_UV, MOVE_TAIL_UV, MOVE_UV, REMOVE_TAIL_UV, REMOVE_UV, RENAME_TAIL_UV, RENAME_UV, REORDER_TAIL_UV, REORDER_UV, REPLACE_TAIL_UV, REPLACE_UV};
 use crate::elements::element::NbtElement;
 use crate::vertex_buffer_builder::VertexBufferBuilder;
-use crate::{encompasses, encompasses_or_equal, panic_unchecked, Bookmark, FileUpdateSubscription, Position};
+use crate::{encompasses, encompasses_or_equal, panic_unchecked, Bookmark, FileUpdateSubscription, Position, sum_indices};
 use crate::{Navigate, OptionExt};
+use crate::elements::compound::{CompoundMap, Entry};
 
 pub enum WorkbenchAction {
 	Remove {
@@ -29,6 +32,10 @@ pub enum WorkbenchAction {
 		indices: Box<[usize]>,
 		value: (Option<CompactString>, NbtElement),
 	},
+	ReorderCompound {
+		indices: Box<[usize]>,
+		reordering_indices: Box<[usize]>,
+	}
 }
 
 impl WorkbenchAction {
@@ -373,6 +380,65 @@ impl WorkbenchAction {
 					});
 				}
 			}
+			Self::ReorderCompound { indices: traversal_indices, reordering_indices } => {
+				let line_number = sum_indices(traversal_indices.iter().copied(), root);
+				let (_, _, element, true_line_number) = Navigate::new(traversal_indices.iter().copied(), root).last();
+				let open = element.open();
+				let true_height = element.true_height();
+				let CompoundMap { indices, entries } = if let Some(compound) = element.as_compound_mut() {
+					 &mut *compound.entries
+				} else if let Some(chunk) = element.as_chunk_mut() {
+					&mut *chunk.entries
+				} else {
+					panic_unchecked("invalid type for compound reordering")
+				};
+				let line_numbers = {
+					let mut current_line_number = line_number + 1;
+					entries.iter().map(|entry| { let new_line_number = current_line_number; current_line_number += entry.value.height(); new_line_number }).collect::<Vec<_>>()
+				};
+				let true_line_numbers = {
+					let mut current_line_number = true_line_number + 1;
+					entries.iter().map(|entry| { let new_line_number = current_line_number; current_line_number += entry.value.true_height(); new_line_number }).collect::<Vec<_>>()
+				};
+				let bookmarks_start = bookmarks.binary_search(&Bookmark::new(true_line_number, 0)).unwrap_or_else(identity);
+				let bookmarks_end = bookmarks.binary_search(&Bookmark::new(true_line_number + true_height - 1, 0)).map_or_else(identity, |x| x + 1);
+				let mut new_bookmarks = Box::<[Bookmark]>::new_uninit_slice(bookmarks_end - bookmarks_start);
+				let mut new_bookmarks_len = 0;
+				let mut previous_entries = core::mem::transmute::<_, Box<[MaybeUninit<Entry>]>>(core::mem::take(entries).into_boxed_slice());
+				let mut new_entries = Box::<[Entry]>::new_uninit_slice(previous_entries.len());
+				let mut inverted_indices = Box::<[usize]>::new_uninit_slice(previous_entries.len());
+				let mut current_line_number = line_number + 1;
+				let mut current_true_line_number = true_line_number + 1;
+				for (idx, &new_idx) in reordering_indices.into_iter().enumerate() {
+					let entry = core::mem::replace(previous_entries.get_unchecked_mut(new_idx), MaybeUninit::uninit()).assume_init();
+					*indices.find(entry.hash, |&x| x == new_idx).panic_unchecked("index obviously exists").as_mut() = idx;
+					let line_number = *line_numbers.get_unchecked(new_idx);
+					let true_line_number = *true_line_numbers.get_unchecked(new_idx);
+					let height = entry.value.height();
+					let true_height = entry.value.true_height();
+					let offset = if open { current_line_number as isize - line_number as isize } else { 0 };
+					let true_offset = current_true_line_number as isize - true_line_number as isize;
+					let bookmark_start = bookmarks.binary_search(&Bookmark::new(true_line_number, 0)).unwrap_or_else(identity);
+					let bookmark_end = bookmarks.binary_search(&Bookmark::new(true_line_number + true_height - 1, 0)).map_or_else(identity, |x| x + 1);
+					for bookmark in bookmarks.iter().skip(bookmark_start).take(bookmark_end - bookmark_start) {
+						let adjusted_bookmark = Bookmark::new(bookmark.true_line_number.wrapping_add(true_offset as usize), bookmark.line_number.wrapping_add(offset as usize));
+						new_bookmarks[new_bookmarks_len].write(adjusted_bookmark);
+						new_bookmarks_len += 1;
+					}
+
+					new_entries.get_unchecked_mut(idx).write(entry);
+					// swapped because that swaps the elements in the iterator
+					inverted_indices[new_idx].write(idx);
+					current_true_line_number += true_height;
+					current_line_number += height;
+				}
+				unsafe { core::ptr::copy_nonoverlapping(new_bookmarks.as_ptr().cast::<Bookmark>(), bookmarks.as_mut_ptr().add(bookmarks_start), bookmarks_end - bookmarks_start); }
+				*entries = new_entries.assume_init().into_vec();
+				return Some(Self::ReorderCompound {
+					indices: traversal_indices,
+					reordering_indices: inverted_indices.assume_init(),
+				})
+			}
 		})
 	}
 
@@ -388,6 +454,7 @@ impl WorkbenchAction {
 				if tail { REPLACE_TAIL_UV } else { REPLACE_UV },
 				(16, 16),
 			),
+			Self::ReorderCompound { .. } => builder.draw_texture(pos, if tail { REORDER_TAIL_UV } else { REORDER_UV }, (16, 16)),
 		}
 	}
 }

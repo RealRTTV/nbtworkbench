@@ -1,5 +1,6 @@
 use std::alloc::{alloc, Layout};
 use std::cmp::Ordering;
+use std::convert::identity;
 use std::fmt::{Debug, Display, Formatter, Write};
 use std::hash::Hasher;
 use std::intrinsics::likely;
@@ -15,7 +16,7 @@ use crate::decoder::Decoder;
 use crate::elements::chunk::NbtChunk;
 use crate::elements::element::NbtElement;
 use crate::encoder::UncheckedBufWriter;
-use crate::{DropFn, OptionExt, RenderContext, StrExt, VertexBufferBuilder};
+use crate::{Bookmark, DropFn, OptionExt, RenderContext, StrExt, VertexBufferBuilder};
 
 #[allow(clippy::module_name_repetitions)]
 #[repr(C)]
@@ -1028,6 +1029,60 @@ impl CompoundMap {
 	pub fn get_idx_mut(&mut self, idx: usize) -> Option<(&str, &mut NbtElement)> {
 		let entry = self.entries.get_mut(idx)?;
 		Some((entry.key.as_ref(), &mut entry.value))
+	}
+
+	pub fn sort_by<F: FnMut((&str, &NbtElement), (&str, &NbtElement)) -> Ordering>(&mut self, mut f: F, line_number: usize, true_line_number: usize, true_height: usize, open: bool, bookmarks: &mut [Bookmark]) -> Box<[usize]> {
+		let hashes = self.entries.iter().map(|entry| entry.hash).collect::<Vec<_>>();
+		let true_line_numbers = {
+			let mut current_line_number = true_line_number + 1;
+			self.entries.iter().map(|entry| { let new_line_number = current_line_number; current_line_number += entry.value.true_height(); new_line_number }).collect::<Vec<_>>()
+		};
+		let line_numbers = {
+			let mut current_line_number = line_number + 1;
+			self.entries.iter().map(|entry| { let new_line_number = current_line_number; current_line_number += entry.value.height(); new_line_number }).collect::<Vec<_>>()
+		};
+		let bookmarks_start = bookmarks.binary_search(&Bookmark::new(true_line_number, 0)).unwrap_or_else(identity);
+		let bookmarks_end = bookmarks.binary_search(&Bookmark::new(true_line_number + true_height - 1, 0)).map_or_else(identity, |x| x + 1);
+		let mut new_bookmarks = Box::<[Bookmark]>::new_uninit_slice(bookmarks_end - bookmarks_start);
+		let mut new_bookmarks_len = 0;
+		// yeah, it's hacky but there's not much else I *can* do. plus: it works extremely well.
+		for (idx, entry) in self.entries.iter_mut().enumerate() {
+			entry.hash = idx as u64;
+		}
+		self.entries.sort_by(|a, b| f((&a.key, &a.value), (&b.key, &b.value)));
+		let indices = self.entries.iter().map(|entry| entry.hash as usize).collect::<Vec<_>>();
+		let mut inverted_indices = Box::<[usize]>::new_uninit_slice(self.len());
+		let mut current_true_line_number = true_line_number + 1;
+		let mut current_line_number = line_number + 1;
+		for (new_idx, &idx) in indices.iter().enumerate() {
+			// SAFETY: these indices are valid since the length did not change and since the values written were indexes
+			unsafe {
+				let hash = *hashes.get_unchecked(idx);
+				let entry = self.entries.get_unchecked_mut(new_idx);
+				entry.hash = hash;
+				*self.indices.find(hash, |&x| x == idx).panic_unchecked("index obviously exists").as_mut() = new_idx;
+
+				let true_line_number = *true_line_numbers.get_unchecked(idx);
+				let line_number = *line_numbers.get_unchecked(idx);
+				let true_height = entry.value.true_height();
+				let height = entry.value.height();
+				let true_offset = current_true_line_number as isize - true_line_number as isize;
+				let offset = if open { current_line_number as isize - line_number as isize } else { 0 };
+				let bookmark_start = bookmarks.binary_search(&Bookmark::new(true_line_number, 0)).unwrap_or_else(identity);
+				let bookmark_end = bookmarks.binary_search(&Bookmark::new(true_line_number + true_height - 1, 0)).map_or_else(identity, |x| x + 1);
+				for bookmark in bookmarks.iter().skip(bookmark_start).take(bookmark_end - bookmark_start) {
+					let adjusted_bookmark = Bookmark::new(bookmark.true_line_number.wrapping_add(true_offset as usize), bookmark.line_number.wrapping_add(offset as usize));
+					new_bookmarks[new_bookmarks_len].write(adjusted_bookmark);
+					new_bookmarks_len += 1;
+				}
+
+				current_true_line_number += true_height;
+				current_line_number += height;
+				inverted_indices[idx].write(new_idx);
+			}
+		}
+		unsafe { core::ptr::copy_nonoverlapping(new_bookmarks.as_ptr().cast::<Bookmark>(), bookmarks.as_mut_ptr().add(bookmarks_start), bookmarks_end - bookmarks_start); }
+		unsafe { inverted_indices.assume_init() }
 	}
 
 	#[must_use]
