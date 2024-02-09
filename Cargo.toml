@@ -2,12 +2,12 @@
 name = "nbtworkbench"
 version = "0.1.8"
 edition = "2021"
-description = "A modern NBT Editor written in rust. Optimized beyond belief"
+description = "A modern NBT Editor written in Rust designed for performance and efficiency."
 license-file = "LICENSE"
 repository = "https://github.com/RealRTTV/nbtworkbench"
 readme = "README.md"
 keywords = ["nbt", "window", "unsafe", "editor", "tree"]
-categories = ["graphics", "rendering", "text-editors", "parser-implementations"] # idk
+categories = ["graphics", "rendering", "text-editors", "parser-implementations"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -38,15 +38,15 @@ strip = false
 debug = true
 
 [build-dependencies]
-zune-png = "0.2.1"
+zune-png = "0.4.10"
 winres = "0.1.12"
 flate2 = "1.0.27"
 
 [dependencies]
 zune-inflate = { version = "0.2.54", features = ["gzip", "zlib"] }
 flate2 = "1.0.27"
-winit = "0.28.6"
-wgpu = "0.17.0"
+winit = "0.29.10"
+wgpu = "0.19.1"
 pollster = "0.3.0"
 cli-clipboard = "0.4.0"
 fxhash = "0.2.1"
@@ -54,6 +54,6 @@ hashbrown = { version = "0.14.0", features = ["raw"] }
 notify = "6.0.1"
 uuid = { version = "1.4.1", features = ["v4"] }
 compact_str = "0.7.1"
-wgsl-inline = "0.1.3" # minify no work for some reason
+wgsl-inline = "0.2.0"
 static_assertions = "1.1.0"
 anyhow = "1.0.79"

@@ -26,8 +26,8 @@ pub const WINDOW_WIDTH: usize = 620;
 pub const MIN_WINDOW_HEIGHT: usize = HEADER_SIZE + 16;
 pub const MIN_WINDOW_WIDTH: usize = 520;
 
-pub fn 	run() -> ! {
-	let event_loop = EventLoop::new();
+pub fn run() -> ! {
+	let event_loop = EventLoop::new().expect("Event loop was unconstructable");
 	let window = WindowBuilder::new()
 		.with_title("NBT Workbench")
 		.with_transparent(std::env::args().any(|x| x.eq("--transparent")))
@@ -51,43 +51,38 @@ pub fn 	run() -> ! {
 	let mut window_properties = WindowProperties::new(&window);
 	let mut workbench = Workbench::new(&mut window_properties);
 
-	event_loop.run(move |event, _, _| match event {
-		Event::RedrawRequested(window_id) if window_id == window.id() => match state.render(&mut workbench, &window) {
-			Ok(()) => {}
-			Err(SurfaceError::Lost) => state.surface.configure(&state.device, &state.config),
-			Err(SurfaceError::OutOfMemory) => {
-				std::process::exit(1);
-			}
-			Err(SurfaceError::Timeout) => eprintln!("Frame took too long to process"),
-			Err(SurfaceError::Outdated) => {
-				eprintln!("Surface changed unexpectedly");
-				std::process::exit(1);
-			}
-		},
+	event_loop.run(|event, _| match event {
 		Event::WindowEvent { event, window_id } if window_id == window.id() => {
 			if !State::input(&event, &mut workbench, &window) {
 				match event {
-					WindowEvent::CloseRequested => {
-						std::process::exit(0);
+					WindowEvent::RedrawRequested => {
+						match state.render(&mut workbench, &window) {
+							Ok(()) => {}
+							Err(SurfaceError::Lost) => state.surface.configure(&state.device, &state.config),
+							Err(SurfaceError::OutOfMemory) => std::process::exit(1),
+							Err(SurfaceError::Timeout) => eprintln!("Frame took too long to process"),
+							Err(SurfaceError::Outdated) => {
+								eprintln!("Surface changed unexpectedly");
+								std::process::exit(1);
+							}
+						}
 					}
+					WindowEvent::CloseRequested => std::process::exit(0),
 					WindowEvent::Resized(new_size) => state.resize(&mut workbench, new_size),
-					WindowEvent::ScaleFactorChanged {
-						new_inner_size: new_size,
-						..
-					} => state.resize(&mut workbench, *new_size),
 					_ => {}
 				}
 			}
 		}
-		Event::MainEventsCleared => {
+		Event::AboutToWait => {
 			window.request_redraw();
 		}
 		_ => {}
-	})
+	}).expect("Event loop failed");
+	std::process::exit(0)
 }
 
-struct State {
-	surface: Surface,
+struct State<'window> {
+	surface: Surface<'window>,
 	device: Device,
 	queue: Queue,
 	config: SurfaceConfiguration,
@@ -100,13 +95,15 @@ struct State {
 	last_tick: SystemTime,
 }
 
-impl State {
-	#[allow(clippy::too_many_lines)] // yeah but.... what am I supposed to do?
-	fn new(window: &Window) -> Self {
+impl<'window> State<'window> {
+	#[allow(clippy::too_many_lines)] // yeah, but.... what am I supposed to do?
+	fn new(window: &'window Window) -> Self {
 		let size = window.inner_size();
 		let instance = Instance::new(InstanceDescriptor {
 			backends: Backends::all(),
+			flags: Default::default(),
 			dx12_shader_compiler: Dx12Compiler::default(),
+			gles_minor_version: Default::default(),
 		});
 		let surface = unsafe {
 			instance
@@ -125,8 +122,8 @@ impl State {
 		let (device, queue) = adapter
 			.request_device(
 				&DeviceDescriptor {
-					features: adapter.features(),
-					limits: if cfg!(target_arch = "wasm32") {
+					required_features: adapter.features(),
+					required_limits: if cfg!(target_arch = "wasm32") {
 						Limits::downlevel_webgl2_defaults()
 					} else {
 						Limits::default()
@@ -148,6 +145,7 @@ impl State {
 			width: size.width,
 			height: size.height,
 			present_mode: PresentMode::AutoVsync,
+			desired_maximum_frame_latency: 0,
 			alpha_mode: CompositeAlphaMode::Auto,
 			view_formats: vec![],
 		};
@@ -445,9 +443,8 @@ impl State {
 			}
 			WindowEvent::HoveredFile(_) => false,
 			WindowEvent::HoveredFileCancelled => false,
-			WindowEvent::ReceivedCharacter(_) => false,
 			WindowEvent::Focused(_) => false,
-			WindowEvent::KeyboardInput { input, .. } => workbench.on_key_input(*input, &mut WindowProperties::new(&window)),
+			WindowEvent::KeyboardInput { event, .. } => workbench.on_key_input(event, &mut WindowProperties::new(&window)),
 			WindowEvent::ModifiersChanged(_) => false,
 			WindowEvent::CursorMoved { position, .. } => workbench.on_mouse_move(*position),
 			WindowEvent::CursorEntered { .. } => false,
@@ -464,6 +461,8 @@ impl State {
 			WindowEvent::TouchpadMagnify { .. } => false,
 			WindowEvent::SmartMagnify { .. } => false,
 			WindowEvent::TouchpadRotate { .. } => false,
+			WindowEvent::ActivationTokenDone { .. } => false,
+			WindowEvent::RedrawRequested => false,
 		}
 	}
 
@@ -517,17 +516,19 @@ impl State {
 					resolve_target: None,
 					ops: Operations {
 						load: self.load_op,
-						store: true,
+						store: StoreOp::Store,
 					},
 				})],
 				depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
 					view: &depth_texture_view,
 					depth_ops: Some(Operations {
 						load: LoadOp::Clear(f32::MAX),
-						store: true,
+						store: StoreOp::Store,
 					}),
 					stencil_ops: None,
 				}),
+				timestamp_writes: None,
+				occlusion_query_set: None,
 			});
 
 			let mut builder = VertexBufferBuilder::new(

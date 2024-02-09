@@ -3,7 +3,7 @@ use std::fmt::Write;
 use std::intrinsics::{likely, unlikely};
 use std::time::{Duration, SystemTime, SystemTimeError};
 
-use winit::event::VirtualKeyCode;
+use winit::keyboard::KeyCode;
 
 use crate::assets::{BASE_TEXT_Z, ELEMENT_HIGHLIGHT_Z, HEADER_SIZE, SELECTED_TEXT_Z, SELECTION_UV};
 use crate::selected_text::KeyResult::{Down, Failed, Finish, ForceClose, ForceOpen, Keyfix, NothingSpecial, Revert, ShiftDown, ShiftUp, Up, Valuefix};
@@ -351,16 +351,16 @@ impl SelectedText {
 	#[cfg_attr(not(debug_assertions), inline)]
 	#[allow(clippy::cognitive_complexity, clippy::too_many_lines)] // i handled this fn well
 	#[must_use]
-	pub fn on_key_press(&mut self, key: VirtualKeyCode, mut char: Option<char>, flags: u8) -> KeyResult {
-		if key == VirtualKeyCode::Escape && flags == flags!() { return Revert }
+	pub fn on_key_press(&mut self, key: KeyCode, mut char: Option<char>, flags: u8) -> KeyResult {
+		if key == KeyCode::Escape && flags == flags!() { return Revert }
 
-		if let VirtualKeyCode::Return | VirtualKeyCode::NumpadEnter = key
+		if let KeyCode::Enter | KeyCode::NumpadEnter = key
 			&& flags == flags!()
 		{
 			return Finish;
 		}
 
-		if key == VirtualKeyCode::Z && flags == flags!(Ctrl) && self.editable {
+		if key == KeyCode::KeyZ && flags == flags!(Ctrl) && self.editable {
 			let SelectedTextCache {
 				keyfix,
 				value,
@@ -388,7 +388,7 @@ impl SelectedText {
 			return NothingSpecial;
 		}
 
-		if (key == VirtualKeyCode::Y && flags == flags!(Ctrl) || key == VirtualKeyCode::Z && flags == flags!(Ctrl + Shift)) && self.editable {
+		if (key == KeyCode::KeyY && flags == flags!(Ctrl) || key == KeyCode::KeyZ && flags == flags!(Ctrl + Shift)) && self.editable {
 			let SelectedTextCache {
 				keyfix,
 				value,
@@ -415,7 +415,7 @@ impl SelectedText {
 			return NothingSpecial;
 		}
 
-		if key == VirtualKeyCode::A && flags == flags!(Ctrl) && self.editable {
+		if key == KeyCode::KeyA && flags == flags!(Ctrl) && self.editable {
 			self.cursor = 0;
 			self.selection = Some(self.value.len());
 			return NothingSpecial;
@@ -424,7 +424,7 @@ impl SelectedText {
 		if let Some(selection) = self.selection
 			&& flags == flags!()
 		{
-			if let VirtualKeyCode::Back | VirtualKeyCode::Delete = key
+			if let KeyCode::Backspace | KeyCode::Delete = key
 				&& self.editable
 			{
 				let (low_selection, high_selection) = if self.cursor < selection {
@@ -441,7 +441,7 @@ impl SelectedText {
 			}
 		}
 
-		if key == VirtualKeyCode::X && flags == flags!(Ctrl) && self.editable {
+		if key == KeyCode::KeyX && flags == flags!(Ctrl) && self.editable {
 			if let Some(selection) = self.selection {
 				let (start, end) = if self.cursor < selection {
 					(self.cursor, selection)
@@ -458,7 +458,7 @@ impl SelectedText {
 			}
 		}
 
-		if key == VirtualKeyCode::C && flags == flags!(Ctrl) && self.editable {
+		if key == KeyCode::KeyC && flags == flags!(Ctrl) && self.editable {
 			if let Some(selection) = self.selection {
 				let (start, end) = if self.cursor < selection {
 					(self.cursor, selection)
@@ -472,7 +472,7 @@ impl SelectedText {
 			}
 		}
 
-		if key == VirtualKeyCode::V && flags == flags!(Ctrl) && self.editable {
+		if key == KeyCode::KeyV && flags == flags!(Ctrl) && self.editable {
 			if let Ok(clipboard) = cli_clipboard::get_contents() {
 				if let Some(selection) = self.selection.take() {
 					let (start, end) = if self.cursor < selection {
@@ -493,7 +493,7 @@ impl SelectedText {
 			}
 		}
 
-		if key == VirtualKeyCode::Home && flags & !flags!(Shift) == 0 && self.editable {
+		if key == KeyCode::Home && flags & !flags!(Shift) == 0 && self.editable {
 			if flags == flags!(Shift) {
 				let new = self.selection.map_or(self.cursor, |x| x.min(self.cursor));
 				self.selection = if new == 0 { None } else { Some(new) };
@@ -504,7 +504,7 @@ impl SelectedText {
 			return NothingSpecial;
 		}
 
-		if key == VirtualKeyCode::End && flags & !flags!(Shift) == 0 && self.editable {
+		if key == KeyCode::End && flags & !flags!(Shift) == 0 && self.editable {
 			if flags == flags!(Shift) {
 				let new = self.selection.map_or(self.cursor, |x| x.max(self.cursor));
 				self.selection = if new == self.value.len() {
@@ -519,7 +519,7 @@ impl SelectedText {
 			return NothingSpecial;
 		}
 
-		if key == VirtualKeyCode::Back && flags < 2 && self.editable {
+		if key == KeyCode::Backspace && flags < 2 && self.editable {
 			let (left, right) = self.value.split_at(self.cursor);
 			if flags & flags!(Ctrl) > 0 {
 				if !left.is_empty() {
@@ -564,7 +564,7 @@ impl SelectedText {
 			return NothingSpecial;
 		}
 
-		if key == VirtualKeyCode::Delete && self.editable {
+		if key == KeyCode::Delete && self.editable {
 			let (left, right) = self.value.split_at(self.cursor);
 			if flags & flags!(Ctrl) > 0 {
 				if !right.is_empty() {
@@ -607,7 +607,7 @@ impl SelectedText {
 			return NothingSpecial;
 		}
 
-		if key == VirtualKeyCode::Up {
+		if key == KeyCode::ArrowUp {
 			if flags & !flags!(Ctrl) == 0 {
 				return Up(flags == flags!(Ctrl));
 			} else if flags == flags!(Ctrl + Shift) {
@@ -615,7 +615,7 @@ impl SelectedText {
 			}
 		}
 
-		if key == VirtualKeyCode::Down {
+		if key == KeyCode::ArrowDown {
 			if flags & !flags!(Ctrl) == 0 {
 				return Down(flags == flags!(Ctrl));
 			} else if flags == flags!(Ctrl + Shift) {
@@ -623,7 +623,7 @@ impl SelectedText {
 			}
 		}
 
-		if key == VirtualKeyCode::Left {
+		if key == KeyCode::ArrowLeft {
 			if flags == flags!(Alt) || flags == flags!(Shift + Alt) { return ForceClose }
 
 			if self.editable {
@@ -689,7 +689,7 @@ impl SelectedText {
 			return NothingSpecial;
 		}
 
-		if key == VirtualKeyCode::Right {
+		if key == KeyCode::ArrowRight {
 			if flags == flags!(Alt) || flags == flags!(Shift + Alt) { return ForceOpen }
 
 			if self.editable {
@@ -754,7 +754,7 @@ impl SelectedText {
 			return NothingSpecial;
 		}
 
-		if let VirtualKeyCode::Return | VirtualKeyCode::NumpadEnter = key
+		if let KeyCode::Enter | KeyCode::NumpadEnter = key
 			&& flags == flags!(Shift)
 			&& self.editable
 		{

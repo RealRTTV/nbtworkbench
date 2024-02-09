@@ -14,7 +14,8 @@ use compact_str::{format_compact, CompactString, ToCompactString};
 use fxhash::{FxBuildHasher, FxHashSet};
 use uuid::Uuid;
 use winit::dpi::PhysicalPosition;
-use winit::event::{ElementState, KeyboardInput, MouseButton, MouseScrollDelta, VirtualKeyCode};
+use winit::event::{ElementState, KeyEvent, MouseButton, MouseScrollDelta};
+use winit::keyboard::{KeyCode, PhysicalKey};
 use zune_inflate::DeflateDecoder;
 
 use crate::alert::Alert;
@@ -47,7 +48,7 @@ pub struct Workbench {
 	pub window_width: usize,
 	raw_window_width: usize,
 	held_mouse_keys: FxHashSet<MouseButton>,
-	held_keys: FxHashSet<VirtualKeyCode>,
+	held_keys: FxHashSet<KeyCode>,
 	pub held_entry: HeldEntry,
 	// selected_text: Option<SelectedText>,
 	cache_cursor_x: Option<usize>,
@@ -187,34 +188,42 @@ impl Workbench {
 
 	#[inline]
 	pub fn on_scroll(&mut self, scroll: MouseScrollDelta) -> bool {
-		match scroll {
+		let (h, v) = match scroll {
 			MouseScrollDelta::LineDelta(h, v) => {
-				let shift = self.held_keys.contains(&VirtualKeyCode::LShift) | self.held_keys.contains(&VirtualKeyCode::RShift);
-				if self.mouse_y < 21 {
-					let scroll = if shift { -v } else { -h };
-					self.tab_scroll = ((self.tab_scroll as isize + (scroll * 48.0) as isize).max(0) as usize).min(
-						{
-							let mut tabs_width = 3_usize;
-							for tab in &self.tabs {
-								tabs_width += tab.name.width() + 32 + 6 + 6;
-							}
-							tabs_width
-						}
-						.saturating_sub(self.window_width),
-					);
-				} else {
-					let tab = tab_mut!(self);
-					let held = self.held_entry.element();
-					if shift {
-						tab.set_horizontal_scroll(-v, held);
-						tab.set_scroll(-h);
-					} else {
-						tab.set_horizontal_scroll(-h, held);
-						tab.set_scroll(-v);
-					}
-				}
+				(h, v)
+			},
+			MouseScrollDelta::PixelDelta(pos) => {
+				(pos.x as f32, pos.y as f32)
 			}
-			MouseScrollDelta::PixelDelta(_) => {}
+		};
+		let ctrl = self.held_keys.contains(&KeyCode::ControlLeft) | self.held_keys.contains(&KeyCode::ControlRight);
+		if ctrl {
+			self.set_scale(self.scale.wrapping_add(v.signum() as isize as usize));
+			return true;
+		}
+		let shift = self.held_keys.contains(&KeyCode::ShiftLeft) | self.held_keys.contains(&KeyCode::ShiftRight);
+		if self.mouse_y < 21 {
+			let scroll = if shift { -v } else { -h };
+			self.tab_scroll = ((self.tab_scroll as isize + (scroll * 48.0) as isize).max(0) as usize).min(
+				{
+					let mut tabs_width = 3_usize;
+					for tab in &self.tabs {
+						tabs_width += tab.name.width() + 32 + 6 + 6;
+					}
+					tabs_width
+				}
+					.saturating_sub(self.window_width),
+			);
+		} else {
+			let tab = tab_mut!(self);
+			let held = self.held_entry.element();
+			if shift {
+				tab.set_horizontal_scroll(-v, held);
+				tab.set_scroll(-h);
+			} else {
+				tab.set_horizontal_scroll(-h, held);
+				tab.set_scroll(-v);
+			}
 		}
 		true
 	}
@@ -223,7 +232,7 @@ impl Workbench {
 	#[allow(clippy::collapsible_if)]
 	pub fn on_mouse_input(&mut self, state: ElementState, button: MouseButton, window_properties: &mut WindowProperties<'_>) -> bool {
 		let horizontal_scroll = self.horizontal_scroll();
-		let shift = self.held_keys.contains(&VirtualKeyCode::LShift) | self.held_keys.contains(&VirtualKeyCode::RShift);
+		let shift = self.held_keys.contains(&KeyCode::ShiftLeft) | self.held_keys.contains(&KeyCode::ShiftRight);
 		let x = self.mouse_x;
 		let y = self.mouse_y;
 		if state == ElementState::Released {
@@ -1779,7 +1788,7 @@ impl Workbench {
 		let tab = tab_mut!(self);
 		if let Some(SelectedText { indices, y, .. }) = tab.selected_text.as_ref() {
 			let indices = indices.clone();
-			let shift = self.held_keys.contains(&VirtualKeyCode::LShift) | self.held_keys.contains(&VirtualKeyCode::RShift);
+			let shift = self.held_keys.contains(&KeyCode::ShiftLeft) | self.held_keys.contains(&KeyCode::ShiftRight);
 			let (_, _, element, line_number) = Navigate::new(indices.iter().copied(), &mut tab.value).last();
 			let true_height = element.true_height();
 			let pred = if shift {
@@ -1872,12 +1881,12 @@ impl Workbench {
 		clippy::too_many_lines,
 		clippy::cognitive_complexity
 	)]
-	pub fn on_key_input(&mut self, key: KeyboardInput, window_properties: &mut WindowProperties<'_>) -> bool {
+	pub fn on_key_input(&mut self, key: &KeyEvent, window_properties: &mut WindowProperties<'_>) -> bool {
 		if key.state == ElementState::Pressed {
-			if let Some(key) = key.virtual_keycode {
+			if let PhysicalKey::Code(key) = key.physical_key {
 				self.held_keys.insert(key);
 				let char = self.char_from_key(key);
-				let flags = (self.held_keys.contains(&VirtualKeyCode::LControl) as u8 | self.held_keys.contains(&VirtualKeyCode::RControl) as u8) | ((self.held_keys.contains(&VirtualKeyCode::LShift) as u8 | self.held_keys.contains(&VirtualKeyCode::RShift) as u8) << 1) | ((self.held_keys.contains(&VirtualKeyCode::LAlt) as u8 | self.held_keys.contains(&VirtualKeyCode::RAlt) as u8) << 2);
+				let flags = (self.held_keys.contains(&KeyCode::ControlLeft) as u8 | self.held_keys.contains(&KeyCode::ControlRight) as u8) | ((self.held_keys.contains(&KeyCode::ShiftLeft) as u8 | self.held_keys.contains(&KeyCode::ShiftRight) as u8) << 1) | ((self.held_keys.contains(&KeyCode::AltLeft) as u8 | self.held_keys.contains(&KeyCode::AltRight) as u8) << 2);
 				let left_margin = self.left_margin();
 				let tab = tab_mut!(self);
 				if let Some(selected_text) = &mut tab.selected_text {
@@ -1949,7 +1958,7 @@ impl Workbench {
 					}
 				}
 				// todo, custom help file
-				// if key == VirtualKeyCode::H && flags == flags!(Ctrl) {
+				// if key == KeyCode::H && flags == flags!(Ctrl) {
 				// 	if let Some(tab) = self.tab_mut() {
 				// 		tab.selected_text = None;
 				// 	}
@@ -1972,80 +1981,70 @@ impl Workbench {
 				// 	});
 				// 	return true;
 				// }
-				if key == VirtualKeyCode::V && flags == flags!(Ctrl) && let Some(element) = cli_clipboard::get_contents().ok().and_then(|x| NbtElement::from_str(&x)) && (element.1.id() != NbtChunk::ID || tab.value.id() == NbtRegion::ID) {
+				if key == KeyCode::KeyV && flags == flags!(Ctrl) && let Some(element) = cli_clipboard::get_contents().ok().and_then(|x| NbtElement::from_str(&x)) && (element.1.id() != NbtChunk::ID || tab.value.id() == NbtRegion::ID) {
 					let old_held_entry = core::mem::replace(&mut self.held_entry, HeldEntry::FromAether(element));
 					let HeldEntry::FromAether(pair) = core::mem::replace(&mut self.held_entry, old_held_entry) else {
 						unsafe { panic_unchecked("we just set it you, bozo") }
 					};
 					return self.drop(pair, None, left_margin);
 				}
-				if key == VirtualKeyCode::Equals && flags == flags!(Ctrl) {
-					self.set_scale(unsafe {
-						[
-							self.scale + 1,
-							6,
-							self.raw_window_width / MIN_WINDOW_WIDTH,
-							self.raw_window_height / MIN_WINDOW_HEIGHT,
-						]
-						.into_iter()
-						.min()
-						.panic_unchecked("at least one element exists")
-					});
+				if key == KeyCode::Equal && flags == flags!(Ctrl) {
+					self.set_scale(self.scale + 1);
 					return true;
 				}
-				if key == VirtualKeyCode::Minus && flags == flags!(Ctrl) {
-					self.set_scale(usize::max(1, self.scale - 1));
+				if key == KeyCode::Minus && flags == flags!(Ctrl) {
+					self.set_scale(self.scale - 1);
 					return true;
 				}
-				if self.action_wheel.is_some() && key == VirtualKeyCode::Escape && flags == flags!() {
+				if self.action_wheel.is_some() && key == KeyCode::Escape && flags == flags!() {
 					self.action_wheel = None;
 					return true;
 
 				}
-				if !self.held_entry.is_empty() && key == VirtualKeyCode::Escape && flags == flags!() {
+				if !self.held_entry.is_empty() && key == KeyCode::Escape && flags == flags!() {
 					self.held_entry = HeldEntry::Empty;
 					return true;
 				}
 				{
-					if key == VirtualKeyCode::Key1 {
+					if key == KeyCode::Digit1 {
 						self.set_tab(0, window_properties);
 						return true;
 					}
-					if key == VirtualKeyCode::Key2 {
+					if key == KeyCode::Digit2 {
 						self.set_tab(1, window_properties);
 						return true;
 					}
-					if key == VirtualKeyCode::Key3 {
+					if key == KeyCode::Digit3 {
 						self.set_tab(2, window_properties);
 						return true;
 					}
-					if key == VirtualKeyCode::Key4 {
+					if key == KeyCode::Digit4 {
 						self.set_tab(3, window_properties);
 						return true;
 					}
-					if key == VirtualKeyCode::Key5 {
+					if key == KeyCode::Digit5 {
 						self.set_tab(4, window_properties);
 						return true;
 					}
-					if key == VirtualKeyCode::Key6 {
+					if key == KeyCode::Digit6 {
 						self.set_tab(5, window_properties);
 						return true;
 					}
-					if key == VirtualKeyCode::Key7 {
+					if key == KeyCode::Digit7 {
 						self.set_tab(6, window_properties);
 						return true;
 					}
-					if key == VirtualKeyCode::Key8 {
+					if key == KeyCode::Digit8 {
 						self.set_tab(7, window_properties);
 						return true;
 					}
-					if key == VirtualKeyCode::Key9 {
+					if key == KeyCode::Digit9 {
 						self.set_tab(usize::MAX, window_properties);
 						return true;
 					}
 				}
 				'a: {
-					if key == VirtualKeyCode::R && flags == flags!(Ctrl) {
+					if key == KeyCode::KeyR && flags == flags!(Ctrl) {
 						if tab.history_changed {
 							break 'a;
 						};
@@ -2096,26 +2095,26 @@ impl Workbench {
 						tab.horizontal_scroll = tab.horizontal_scroll(self.held_entry.element());
 					}
 				}
-				if key == VirtualKeyCode::F && flags == flags!(Alt) {
+				if key == KeyCode::KeyF && flags == flags!(Alt) {
 					tab.freehand_mode = !tab.freehand_mode;
 					return true;
 				}
-				if key == VirtualKeyCode::N && flags == flags!(Ctrl) {
+				if key == KeyCode::KeyN && flags == flags!(Ctrl) {
 					tab.selected_text = None;
 					self.new_tab(window_properties);
 					return true;
 				}
-				if key == VirtualKeyCode::S && flags == flags!(Ctrl) {
+				if key == KeyCode::KeyS && flags == flags!(Ctrl) {
 					if tab.save() {
 						tab.selected_text = None;
 						return true;
 					}
 				}
-				if key == VirtualKeyCode::W && flags == flags!(Ctrl) {
+				if key == KeyCode::KeyW && flags == flags!(Ctrl) {
 					self.remove_tab(self.tab, window_properties);
 					return true;
 				}
-				if key == VirtualKeyCode::Z && flags == flags!(Ctrl) {
+				if key == KeyCode::KeyZ && flags == flags!(Ctrl) {
 					if let Some(action) = tab.undos.pop() {
 						tab.redos.push(action.undo(
 							&mut tab.value,
@@ -2128,7 +2127,7 @@ impl Workbench {
 						return true;
 					}
 				}
-				if key == VirtualKeyCode::Y && flags == flags!(Ctrl) {
+				if key == KeyCode::KeyY && flags == flags!(Ctrl) {
 					if let Some(action) = tab.redos.pop() {
 						tab.undos.push(action.undo(
 							&mut tab.value,
@@ -2141,25 +2140,25 @@ impl Workbench {
 						return true;
 					}
 				}
-				if ((key == VirtualKeyCode::Back || key == VirtualKeyCode::Delete) && flags == flags!()) || (key == VirtualKeyCode::X && flags == flags!(Ctrl)) {
+				if ((key == KeyCode::Backspace || key == KeyCode::Delete) && flags == flags!()) || (key == KeyCode::KeyX && flags == flags!(Ctrl)) {
 					if self.delete(flags & flags!(Ctrl) > 0) {
 						tab_mut!(self).selected_text = None;
 						return true;
 					}
 				}
-				if key == VirtualKeyCode::D && flags == flags!(Ctrl) {
+				if key == KeyCode::KeyD && flags == flags!(Ctrl) {
 					if self.duplicate() {
 						tab_mut!(self).selected_text = None;
 						return true;
 					}
 				}
-				if key == VirtualKeyCode::C && flags == flags!(Ctrl) {
+				if key == KeyCode::KeyC && flags == flags!(Ctrl) {
 					if self.copy(false) {
 						tab_mut!(self).selected_text = None;
 						return true;
 					}
 				}
-				if key == VirtualKeyCode::C && flags == flags!(Ctrl + Shift) {
+				if key == KeyCode::KeyC && flags == flags!(Ctrl + Shift) {
 					if self.copy(true) {
 						tab_mut!(self).selected_text = None;
 						return true;
@@ -2167,7 +2166,7 @@ impl Workbench {
 				}
 			}
 		} else if key.state == ElementState::Released {
-			if let Some(x) = key.virtual_keycode {
+			if let PhysicalKey::Code(x) = key.physical_key {
 				self.held_keys.remove(&x);
 			}
 		}
@@ -2201,11 +2200,13 @@ impl Workbench {
 	pub fn window_dimensions(&mut self, window_width: usize, window_height: usize) {
 		self.raw_window_width = window_width;
 		self.raw_window_height = window_height;
-		self.set_scale(usize::min(self.scale, usize::min(self.raw_window_width / MIN_WINDOW_WIDTH, self.raw_window_height / MIN_WINDOW_HEIGHT)));
+		self.set_scale(self.scale);
 	}
 
 	#[inline]
 	fn set_scale(&mut self, scale: usize) {
+		let scale = scale.max(1).min(usize::min(self.raw_window_width / MIN_WINDOW_WIDTH, self.raw_window_height / MIN_WINDOW_HEIGHT));
+
 		self.scale = scale;
 		self.mouse_x = self.raw_mouse_x / self.scale;
 		self.mouse_y = self.raw_mouse_y / self.scale;
@@ -2514,362 +2515,88 @@ impl Workbench {
 		clippy::match_same_arms,
 		clippy::too_many_lines
 	)]
-	fn char_from_key(&self, key: VirtualKeyCode) -> Option<char> {
-		if self.held_keys.contains(&VirtualKeyCode::LControl) || self.held_keys.contains(&VirtualKeyCode::RControl) { return None }
-		let shift = self.held_keys.contains(&VirtualKeyCode::LShift) || self.held_keys.contains(&VirtualKeyCode::RShift);
+	fn char_from_key(&self, key: KeyCode) -> Option<char> {
+		if self.held_keys.contains(&KeyCode::ControlLeft) || self.held_keys.contains(&KeyCode::ControlRight) { return None }
+		let shift = self.held_keys.contains(&KeyCode::ShiftLeft) || self.held_keys.contains(&KeyCode::ShiftRight);
 		Some(match key {
-			VirtualKeyCode::Key1 => {
-				if shift {
-					'!'
-				} else {
-					'1'
-				}
-			}
-			VirtualKeyCode::Key2 => {
-				if shift {
-					'@'
-				} else {
-					'2'
-				}
-			}
-			VirtualKeyCode::Key3 => {
-				if shift {
-					'#'
-				} else {
-					'3'
-				}
-			}
-			VirtualKeyCode::Key4 => {
-				if shift {
-					'$'
-				} else {
-					'4'
-				}
-			}
-			VirtualKeyCode::Key5 => {
-				if shift {
-					'%'
-				} else {
-					'5'
-				}
-			}
-			VirtualKeyCode::Key6 => {
-				if shift {
-					'^'
-				} else {
-					'6'
-				}
-			}
-			VirtualKeyCode::Key7 => {
-				if shift {
-					'&'
-				} else {
-					'7'
-				}
-			}
-			VirtualKeyCode::Key8 => {
-				if shift {
-					'*'
-				} else {
-					'8'
-				}
-			}
-			VirtualKeyCode::Key9 => {
-				if shift {
-					'('
-				} else {
-					'9'
-				}
-			}
-			VirtualKeyCode::Key0 => {
-				if shift {
-					')'
-				} else {
-					'0'
-				}
-			}
-			VirtualKeyCode::A => {
-				if shift {
-					'A'
-				} else {
-					'a'
-				}
-			}
-			VirtualKeyCode::B => {
-				if shift {
-					'B'
-				} else {
-					'b'
-				}
-			}
-			VirtualKeyCode::C => {
-				if shift {
-					'C'
-				} else {
-					'c'
-				}
-			}
-			VirtualKeyCode::D => {
-				if shift {
-					'D'
-				} else {
-					'd'
-				}
-			}
-			VirtualKeyCode::E => {
-				if shift {
-					'E'
-				} else {
-					'e'
-				}
-			}
-			VirtualKeyCode::F => {
-				if shift {
-					'F'
-				} else {
-					'f'
-				}
-			}
-			VirtualKeyCode::G => {
-				if shift {
-					'G'
-				} else {
-					'g'
-				}
-			}
-			VirtualKeyCode::H => {
-				if shift {
-					'H'
-				} else {
-					'h'
-				}
-			}
-			VirtualKeyCode::I => {
-				if shift {
-					'I'
-				} else {
-					'i'
-				}
-			}
-			VirtualKeyCode::J => {
-				if shift {
-					'J'
-				} else {
-					'j'
-				}
-			}
-			VirtualKeyCode::K => {
-				if shift {
-					'K'
-				} else {
-					'k'
-				}
-			}
-			VirtualKeyCode::L => {
-				if shift {
-					'L'
-				} else {
-					'l'
-				}
-			}
-			VirtualKeyCode::M => {
-				if shift {
-					'M'
-				} else {
-					'm'
-				}
-			}
-			VirtualKeyCode::N => {
-				if shift {
-					'N'
-				} else {
-					'n'
-				}
-			}
-			VirtualKeyCode::O => {
-				if shift {
-					'O'
-				} else {
-					'o'
-				}
-			}
-			VirtualKeyCode::P => {
-				if shift {
-					'P'
-				} else {
-					'p'
-				}
-			}
-			VirtualKeyCode::Q => {
-				if shift {
-					'Q'
-				} else {
-					'q'
-				}
-			}
-			VirtualKeyCode::R => {
-				if shift {
-					'R'
-				} else {
-					'r'
-				}
-			}
-			VirtualKeyCode::S => {
-				if shift {
-					'S'
-				} else {
-					's'
-				}
-			}
-			VirtualKeyCode::T => {
-				if shift {
-					'T'
-				} else {
-					't'
-				}
-			}
-			VirtualKeyCode::U => {
-				if shift {
-					'U'
-				} else {
-					'u'
-				}
-			}
-			VirtualKeyCode::V => {
-				if shift {
-					'V'
-				} else {
-					'v'
-				}
-			}
-			VirtualKeyCode::W => {
-				if shift {
-					'W'
-				} else {
-					'w'
-				}
-			}
-			VirtualKeyCode::X => {
-				if shift {
-					'X'
-				} else {
-					'x'
-				}
-			}
-			VirtualKeyCode::Y => {
-				if shift {
-					'Y'
-				} else {
-					'y'
-				}
-			}
-			VirtualKeyCode::Z => {
-				if shift {
-					'Z'
-				} else {
-					'z'
-				}
-			}
-			VirtualKeyCode::Space => ' ',
-			VirtualKeyCode::Caret => '^',
-			VirtualKeyCode::Numpad0 => '0',
-			VirtualKeyCode::Numpad1 => '1',
-			VirtualKeyCode::Numpad2 => '2',
-			VirtualKeyCode::Numpad3 => '3',
-			VirtualKeyCode::Numpad4 => '4',
-			VirtualKeyCode::Numpad5 => '5',
-			VirtualKeyCode::Numpad6 => '6',
-			VirtualKeyCode::Numpad7 => '7',
-			VirtualKeyCode::Numpad8 => '8',
-			VirtualKeyCode::Numpad9 => '9',
-			VirtualKeyCode::NumpadAdd => '+',
-			VirtualKeyCode::NumpadDivide => '/',
-			VirtualKeyCode::NumpadDecimal => '.',
-			VirtualKeyCode::NumpadComma => ',',
-			VirtualKeyCode::NumpadEquals => '=',
-			VirtualKeyCode::NumpadMultiply => '*',
-			VirtualKeyCode::NumpadSubtract => '-',
-			VirtualKeyCode::Apostrophe => {
+			KeyCode::Digit1 => if shift { '!' } else { '1' },
+			KeyCode::Digit2 => if shift { '@' } else { '2' },
+			KeyCode::Digit3 => if shift { '#' } else { '3' },
+			KeyCode::Digit4 => if shift { '$' } else { '4' },
+			KeyCode::Digit5 => if shift { '%' } else { '5' },
+			KeyCode::Digit6 => if shift { '^' } else { '6' },
+			KeyCode::Digit7 => if shift { '&' } else { '7' },
+			KeyCode::Digit8 => if shift { '*' } else { '8' },
+			KeyCode::Digit9 => if shift { '(' } else { '9' },
+			KeyCode::Digit0 => if shift { ')' } else { '0' },
+			KeyCode::KeyA => if shift { 'A' } else { 'a' },
+			KeyCode::KeyB => if shift { 'B' } else { 'b' },
+			KeyCode::KeyC => if shift { 'C' } else { 'c' },
+			KeyCode::KeyD => if shift { 'D' } else { 'd' },
+			KeyCode::KeyE => if shift { 'E' } else { 'e' },
+			KeyCode::KeyF => if shift { 'F' } else { 'f' },
+			KeyCode::KeyG => if shift { 'G' } else { 'g' },
+			KeyCode::KeyH => if shift { 'H' } else { 'h' },
+			KeyCode::KeyI => if shift { 'I' } else { 'i' },
+			KeyCode::KeyJ => if shift { 'J' } else { 'j' },
+			KeyCode::KeyK => if shift { 'K' } else { 'k' },
+			KeyCode::KeyL => if shift { 'L' } else { 'l' },
+			KeyCode::KeyM => if shift { 'M' } else { 'm' },
+			KeyCode::KeyN => if shift { 'N' } else { 'n' },
+			KeyCode::KeyO => if shift { 'O' } else { 'o' },
+			KeyCode::KeyP => if shift { 'P' } else { 'p' },
+			KeyCode::KeyQ => if shift { 'Q' } else { 'q' },
+			KeyCode::KeyR => if shift { 'R' } else { 'r' },
+			KeyCode::KeyS => if shift { 'S' } else { 's' },
+			KeyCode::KeyT => if shift { 'T' } else { 't' },
+			KeyCode::KeyU => if shift { 'U' } else { 'u' },
+			KeyCode::KeyV => if shift { 'V' } else { 'v' },
+			KeyCode::KeyW => if shift { 'W' } else { 'w' },
+			KeyCode::KeyX => if shift { 'X' } else { 'x' },
+			KeyCode::KeyY => if shift { 'Y' } else { 'y' },
+			KeyCode::KeyZ => if shift { 'Z' } else { 'z' },
+			KeyCode::Space => ' ',
+			KeyCode::Numpad0 => '0',
+			KeyCode::Numpad1 => '1',
+			KeyCode::Numpad2 => '2',
+			KeyCode::Numpad3 => '3',
+			KeyCode::Numpad4 => '4',
+			KeyCode::Numpad5 => '5',
+			KeyCode::Numpad6 => '6',
+			KeyCode::Numpad7 => '7',
+			KeyCode::Numpad8 => '8',
+			KeyCode::Numpad9 => '9',
+			KeyCode::NumpadAdd => '+',
+			KeyCode::NumpadDivide => '/',
+			KeyCode::NumpadDecimal => '.',
+			KeyCode::NumpadComma => ',',
+			KeyCode::NumpadEqual => '=',
+			KeyCode::NumpadMultiply => '*',
+			KeyCode::NumpadSubtract => '-',
+			KeyCode::Quote => {
 				if shift {
 					'"'
 				} else {
 					'\''
 				}
 			}
-			VirtualKeyCode::Asterisk => '*',
-			VirtualKeyCode::Backslash => {
+			KeyCode::Backslash => {
 				if shift {
 					'|'
 				} else {
 					'\\'
 				}
 			}
-			VirtualKeyCode::Colon => ':',
-			VirtualKeyCode::Comma => {
-				if shift {
-					'<'
-				} else {
-					','
-				}
-			}
-			VirtualKeyCode::Equals => {
-				if shift {
-					'+'
-				} else {
-					'='
-				}
-			}
-			VirtualKeyCode::Grave => {
-				if shift {
-					'~'
-				} else {
-					'`'
-				}
-			}
-			VirtualKeyCode::LBracket => {
-				if shift {
-					'{'
-				} else {
-					'['
-				}
-			}
-			VirtualKeyCode::Minus => {
-				if shift {
-					'_'
-				} else {
-					'-'
-				}
-			}
-			VirtualKeyCode::Period => {
-				if shift {
-					'>'
-				} else {
-					'.'
-				}
-			}
-			VirtualKeyCode::Plus => '+',
-			VirtualKeyCode::RBracket => {
-				if shift {
-					'}'
-				} else {
-					']'
-				}
-			}
-			VirtualKeyCode::Semicolon => {
-				if shift {
-					':'
-				} else {
-					';'
-				}
-			}
-			VirtualKeyCode::Slash => {
-				if shift {
-					'?'
-				} else {
-					'/'
-				}
-			}
-			VirtualKeyCode::Tab => '\t',
+			KeyCode::Semicolon => if shift { ':' } else { ';' },
+			KeyCode::Comma => if shift { '<' } else { ',' },
+			KeyCode::Equal => if shift { '+' } else { '=' },
+			KeyCode::Backquote => if shift { '~' } else { '`' }
+			KeyCode::BracketLeft => if shift { '{' } else { '[' },
+			KeyCode::Minus => if shift { '_' } else { '-' },
+			KeyCode::Period => if shift { '>' } else { '.' },
+			KeyCode::BracketRight => if shift { '}' } else { ']' },
+			KeyCode::Slash => if shift { '?' } else { '/' },
+			KeyCode::Tab => '\t',
 			_ => return None,
 		})
 	}
