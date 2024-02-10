@@ -1,6 +1,6 @@
 [package]
 name = "nbtworkbench"
-version = "1.0.0"
+version = "1.0.1"
 edition = "2021"
 description = "A modern NBT Editor written in Rust designed for performance and efficiency."
 license-file = "LICENSE"
@@ -8,6 +8,8 @@ repository = "https://github.com/RealRTTV/nbtworkbench"
 readme = "README.md"
 keywords = ["nbt", "window", "unsafe", "editor", "tree"]
 categories = ["graphics", "rendering", "text-editors", "parser-implementations"]
+
+[package.metadata.winres]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
