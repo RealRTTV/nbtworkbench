@@ -32,9 +32,9 @@ jobs:
           rustup component add rust-src --toolchain nightly-x86_64-pc-windows-msvc
         shell: powershell
 
-      #- name: Add mingw64 to path for x86_64-msvc
-      #  shell: bash
-      #  run: echo "C:\msys64\mingw64\bin" >> $GITHUB_PATH
+      - name: Add mingw64 to path for x86_64-msvc
+        shell: bash
+        run: echo "C:\msys64\mingw64\bin" >> $GITHUB_PATH
 
       - name: Build
         shell: cmd
