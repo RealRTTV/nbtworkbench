@@ -28,7 +28,7 @@ jobs:
           Invoke-WebRequest https://win.rustup.rs/ -OutFile rustup-init.exe
           .\rustup-init.exe -y --default-host=x86_64-pc-windows-msvc --default-toolchain=none
           del rustup-init.exe
-          rustup target add x86_64-pc-windows-gnu
+          rustup target add x86_64-pc-windows-gnu --toolchain nightly
         shell: powershell
 
       - name: Build and Test
