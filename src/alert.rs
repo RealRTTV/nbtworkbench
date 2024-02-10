@@ -29,7 +29,7 @@ impl Alert {
 		use core::fmt::Write;
 
 		let pos = Vec2u::new(
-			builder.window_width() - (self.width + 24) + self.get_inset(),
+			(builder.window_width() + self.get_inset()).saturating_sub(self.width + 24),
 			idx * 40 + HEADER_SIZE,
 		);
 		builder.draw_texture_z(pos, ALERT_Z, ALERT_UV, (16, 40));

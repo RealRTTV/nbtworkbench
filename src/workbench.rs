@@ -233,6 +233,7 @@ impl Workbench {
 	#[inline]
 	#[allow(clippy::collapsible_if)]
 	pub fn on_mouse_input(&mut self, state: ElementState, button: MouseButton, window_properties: &mut WindowProperties<'_>) -> bool {
+		let left_margin = self.left_margin();
 		let horizontal_scroll = self.horizontal_scroll();
 		let shift = self.held_keys.contains(&KeyCode::ShiftLeft) | self.held_keys.contains(&KeyCode::ShiftRight);
 		let x = self.mouse_x;
@@ -291,15 +292,6 @@ impl Workbench {
 				}
 			}
 		} else {
-			match self.action_wheel.take() {
-				Some(_) => return true,
-				None => {
-					if button == MouseButton::Right {
-						self.action_wheel = Some((self.mouse_x, self.mouse_y));
-					}
-				}
-			}
-
 			{
 				let tab = tab_mut!(self);
 				if !tab.close_selected_text(false) {
@@ -310,6 +302,18 @@ impl Workbench {
 			self.held_mouse_keys.insert(button);
 			'a: {
 				let freehand_mode = tab!(self).freehand_mode;
+
+				if self.mouse_x >= left_margin && self.mouse_y >= HEADER_SIZE {
+					match self.action_wheel.take() {
+						Some(_) => {},
+						None => {
+							if button == MouseButton::Right {
+								self.action_wheel = Some((((self.mouse_x - left_margin) & !15) + left_margin + 6, ((self.mouse_y - HEADER_SIZE) & !15) + HEADER_SIZE + 7));
+								break 'a;
+							}
+						}
+					}
+				}
 
 				if !freehand_mode && self.held_entry.is_empty() && (24..46).contains(&y) && button == MouseButton::Left {
 					match self.hold_entry(button) {
@@ -2467,11 +2471,11 @@ impl Workbench {
 		if cy >= HEADER_SIZE {
 			if cy > tab.value.height() * 16 + HEADER_SIZE { return };
 			let scroll = tab.scroll();
-			let (depth, (_, _, element, _)) = Traverse::new((cy - HEADER_SIZE) / 16 + scroll / 16, &mut tab.value)
+			let (depth, (_, key, element, _)) = Traverse::new((cy - HEADER_SIZE) / 16 + scroll / 16, &mut tab.value)
 				.enumerate()
 				.last();
 			let min_x = depth * 16 + left_margin;
-			let max_x = min_x + 32;
+			let max_x = min_x + 32 + element.value().0.width() + key.map(|key| key.width() + ": ".width()).unwrap_or(0);
 			if !(min_x..max_x).contains(&cx) { return };
 			builder.draw_texture_z((cx - 31, cy - 31), ACTION_WHEEL_Z, TRAY_UV, (64, 64));
 			for (n, &action) in element.actions().iter().enumerate().take(8) {

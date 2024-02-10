@@ -9,7 +9,6 @@ use std::mem::MaybeUninit;
 const UNICODE: &[u8] = include_bytes!("src/assets/unicode.hex");
 const ATLAS: &[u8] = include_bytes!(r"src/assets/atlas.png");
 
-#[allow(unused_variables)] // intellij being freaky
 fn main() {
 	write(r"src\assets\atlas.hex", zune_png::PngDecoder::new(ATLAS).decode_raw().unwrap()).unwrap();
 
@@ -40,7 +39,8 @@ fn main() {
 			.set_icon_with_id("src/assets/icon_256.ico", "!")
 			.compile()
 		{
-			panic!("{e}");
+			eprintln!("Error! {e}");
+			std::process::exit(1);
 		}
 	}
 

@@ -120,8 +120,8 @@ impl NbtRegion {
 		std::thread::scope(move |s| {
 			let mut region = Self::new();
 
-			let (&offsets, bytes) = bytes.split_array_ref::<4096>();
-			let (&timestamps, bytes) = bytes.split_array_ref::<4096>();
+			let (&offsets, bytes) = bytes.split_first_chunk::<4096>()?;
+			let (&timestamps, bytes) = bytes.split_first_chunk::<4096>()?;
 			let mut threads = Vec::new();
 
 			for (&offset, &timestamp) in offsets
