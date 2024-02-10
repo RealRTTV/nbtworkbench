@@ -97,6 +97,7 @@ pub const SORT_COMPOUND_BY_NAME: Vec2u = Vec2u::new(67, 131);
 pub const SORT_COMPOUND_BY_TYPE: Vec2u = Vec2u::new(83, 131);
 pub const FREEHAND_MODE_UV: Vec2u = Vec2u::new(0, 144);
 pub const ENABLED_FREEHAND_MODE_UV: Vec2u = Vec2u::new(16, 144);
+pub const STEAL_ANIMATION_OVERLAY: Vec2u = Vec2u::new(64, 144);
 
 pub const BYTE_UV: Vec2u = Vec2u::new(0, 0);
 pub const SHORT_UV: Vec2u = Vec2u::new(16, 0);
@@ -131,6 +132,7 @@ pub const CHUNK_GHOST_UV: Vec2u = Vec2u::new(64, 48);
 pub const ALERT_UV: Vec2u = Vec2u::new(112, 144);
 
 pub const BASE_Z: u8 = 0;
+pub const JUST_OVERLAPPING_BASE_Z: u8 = BASE_Z + 1;
 pub const BASE_TEXT_Z: u8 = 10;
 pub const JUST_OVERLAPPING_BASE_TEXT_Z: u8 = BASE_TEXT_Z + 1;
 pub const TOGGLE_Z: u8 = 20;

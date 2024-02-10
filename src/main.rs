@@ -53,6 +53,7 @@
 #![feature(alloc_error_handler)]
 #![feature(iter_next_chunk)]
 #![feature(const_collections_with_hasher)]
+#![feature(duration_constants)]
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 use std::cmp::Ordering;
@@ -158,7 +159,7 @@ macro_rules! tab_mut {
 /// * wiki page for docs on minecraft's format of stuff
 /// * [chunk](NbtChunk) section rendering
 /// # Minor Features
-/// * sort entries on file read toggle
+/// * sort entries on file read config
 /// * gear icon to swap toolbar with settings panel
 /// * __ctrl + h__, open a playground `nbt` file to help with user interaction (bonus points if I have some way to tell if you haven't used this editor before)
 /// * [`last_modified`](NbtChunk) field actually gets some impl

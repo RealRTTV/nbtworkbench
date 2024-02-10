@@ -11,10 +11,7 @@ use flate2::Compression;
 use uuid::Uuid;
 
 use crate::{Bookmark, LinkedQueue, OptionExt, panic_unchecked, RenderContext, StrExt};
-use crate::assets::{
-	BYTE_ARRAY_GHOST_UV, BYTE_ARRAY_UV, BYTE_GHOST_UV, BYTE_UV, CHUNK_GHOST_UV, CHUNK_UV, COMPOUND_GHOST_UV, COMPOUND_ROOT_UV, COMPOUND_UV, DOUBLE_GHOST_UV, DOUBLE_UV, ENABLED_FREEHAND_MODE_UV, FLOAT_GHOST_UV, FLOAT_UV, FREEHAND_MODE_UV, GZIP_FILE_TYPE_UV, HEADER_SIZE, HELD_SCROLLBAR_UV, INT_ARRAY_GHOST_UV, INT_ARRAY_UV, INT_GHOST_UV, INT_UV, LINE_NUMBER_SEPARATOR_UV, LIST_GHOST_UV, LIST_UV, LONG_ARRAY_GHOST_UV, LONG_ARRAY_UV, LONG_GHOST_UV, LONG_UV, MCA_FILE_TYPE_UV, NBT_FILE_TYPE_UV, REDO_UV,
-	REGION_UV, SCROLLBAR_Z, SHORT_GHOST_UV, SHORT_UV, SNBT_FILE_TYPE_UV, STRING_GHOST_UV, STRING_UV, UNDO_UV, UNHELD_SCROLLBAR_UV, UNKNOWN_NBT_GHOST_UV, UNKNOWN_NBT_UV, ZLIB_FILE_TYPE_UV,
-};
+use crate::assets::{BYTE_ARRAY_GHOST_UV, BYTE_ARRAY_UV, BYTE_GHOST_UV, BYTE_UV, CHUNK_GHOST_UV, CHUNK_UV, COMPOUND_GHOST_UV, COMPOUND_ROOT_UV, COMPOUND_UV, DOUBLE_GHOST_UV, DOUBLE_UV, ENABLED_FREEHAND_MODE_UV, FLOAT_GHOST_UV, FLOAT_UV, FREEHAND_MODE_UV, GZIP_FILE_TYPE_UV, HEADER_SIZE, HELD_SCROLLBAR_UV, INT_ARRAY_GHOST_UV, INT_ARRAY_UV, INT_GHOST_UV, INT_UV, JUST_OVERLAPPING_BASE_Z, LINE_NUMBER_SEPARATOR_UV, LIST_GHOST_UV, LIST_UV, LONG_ARRAY_GHOST_UV, LONG_ARRAY_UV, LONG_GHOST_UV, LONG_UV, MCA_FILE_TYPE_UV, NBT_FILE_TYPE_UV, REDO_UV, REGION_UV, SCROLLBAR_Z, SHORT_GHOST_UV, SHORT_UV, SNBT_FILE_TYPE_UV, STEAL_ANIMATION_OVERLAY, STRING_GHOST_UV, STRING_UV, UNDO_UV, UNHELD_SCROLLBAR_UV, UNKNOWN_NBT_GHOST_UV, UNKNOWN_NBT_UV, ZLIB_FILE_TYPE_UV};
 use crate::elements::chunk::NbtRegion;
 use crate::elements::compound::NbtCompound;
 use crate::elements::element::NbtElement;
@@ -88,7 +85,7 @@ impl Tab {
 	}
 
 	#[allow(clippy::too_many_lines)]
-	pub fn render(&self, builder: &mut VertexBufferBuilder, ctx: &mut RenderContext, held: bool, held_entry: Option<&NbtElement>, skip_tooltips: bool) {
+	pub fn render(&self, builder: &mut VertexBufferBuilder, ctx: &mut RenderContext, held: bool, held_entry: Option<&NbtElement>, skip_tooltips: bool, steal_delta: f32) {
 		let mouse_x = ctx.mouse_x;
 		let mouse_y = ctx.mouse_y;
 
@@ -272,6 +269,12 @@ impl Tab {
 				};
 				builder.draw_texture((208, 26), uv, (16, 16));
 			}
+		}
+
+		if steal_delta > 0.0 {
+			let y = ((mouse_y - HEADER_SIZE) & !15) + HEADER_SIZE;
+			let height = (16.0 * steal_delta).round() as usize;
+			builder.draw_texture_region_z((ctx.left_margin - 2, y + (16 - height)), JUST_OVERLAPPING_BASE_Z, STEAL_ANIMATION_OVERLAY, (builder.window_width() + 2 - ctx.left_margin, height), (16, 16));
 		}
 	}
 

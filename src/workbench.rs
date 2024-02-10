@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::string::String;
 use std::sync::mpsc::TryRecvError;
-use std::time::SystemTime;
+use std::time::{Duration, Instant, SystemTime};
 
 use compact_str::{format_compact, CompactString, ToCompactString};
 use fxhash::{FxBuildHasher, FxHashSet};
@@ -59,6 +59,7 @@ pub struct Workbench {
 	pub cursor_visible: bool,
 	alerts: Vec<Alert>,
 	pub scale: usize,
+	steal_animation_data: Option<(Instant, Vec2u)>,
 }
 
 impl Workbench {
@@ -87,6 +88,7 @@ impl Workbench {
 			cursor_visible: true,
 			alerts: vec![],
 			scale: 1,
+			steal_animation_data: None,
 		};
 		'create_tab: {
 			if let Some(x) = &std::env::args()
@@ -238,6 +240,9 @@ impl Workbench {
 		if state == ElementState::Released {
 			if self.process_action_wheel() { return true }
 			self.scrollbar_offset = None;
+			if button == MouseButton::Left {
+				self.steal_animation_data = None;
+			}
 			self.held_mouse_keys.remove(&button);
 			if y < 19 && x > 2 && y > 3 {
 				self.click_tab(button, window_properties);
@@ -313,9 +318,13 @@ impl Workbench {
 						_ => {}
 					}
 				}
-				if !freehand_mode && self.held_entry.is_empty() && y >= HEADER_SIZE + 16 && x >= self.left_margin() + 16 && button == MouseButton::Left {
-					if self.steal() {
-						break 'a;
+				if button == MouseButton::Left {
+					if self.try_steal(true) {
+						if self.steal_animation_data.as_ref().is_some_and(|x| x.0.elapsed() >= Duration::from_millis(500)) && self.steal() {
+							break 'a;
+						}
+					} else {
+						self.steal_animation_data = None;
 					}
 				}
 				if (self.window_width - 16..self.window_width).contains(&x) && (26..42).contains(&y) {
@@ -643,6 +652,29 @@ impl Workbench {
 		}
 
 		Ok(())
+	}
+
+	#[inline]
+	fn try_steal(&mut self, initialize: bool) -> bool {
+		let left_margin = self.left_margin();
+		let horizontal_scroll = self.horizontal_scroll();
+		let scroll = self.scroll();
+		let tab = tab_mut!(self);
+
+		if self.mouse_x + horizontal_scroll < left_margin + 16 || self.mouse_y < HEADER_SIZE || !self.held_entry.is_empty() || tab.freehand_mode { return false };
+
+		let y = (self.mouse_y - HEADER_SIZE) / 16 + scroll / 16;
+		if y < tab.value.height() && y > 0 {
+			let target_depth = (self.mouse_x + horizontal_scroll - left_margin - 16) / 16;
+			let (depth, (_, _, _, _)) = Traverse::new(y, &mut tab.value).enumerate().last();
+			if initialize {
+				self.steal_animation_data.get_or_insert((Instant::now(), (target_depth, y).into()));
+			}
+			if let Some((_, Vec2u { x: expected_depth, y: expected_y })) = self.steal_animation_data.clone() {
+				return depth == expected_depth && y == expected_y
+			}
+		}
+		false
 	}
 
 	#[inline]
@@ -2231,6 +2263,8 @@ impl Workbench {
 	#[inline]
 	fn set_tab(&mut self, idx: usize, window_properties: &mut WindowProperties<'_>) {
 		self.tab = idx.min(self.tabs.len().saturating_sub(1));
+		// on any tab switch this should be discarded.
+		self.steal_animation_data = None;
 		window_properties.window_title(format!("{} - NBT Workbench", tab!(self).name).as_str());
 	}
 
@@ -2291,6 +2325,7 @@ impl Workbench {
 			self.scrollbar_offset.is_some(),
 			self.held_entry.element(),
 			self.action_wheel.is_some(),
+			self.steal_animation_data.as_ref().map(|x| x.0.elapsed().min(Duration::from_millis(500)).as_millis() as f32 / 500.0).unwrap_or(0.0)
 		);
 		if let Some(selected_text) = &tab.selected_text {
 			builder.horizontal_scroll = horizontal_scroll;
@@ -2315,6 +2350,13 @@ impl Workbench {
 	pub fn tick(&mut self) {
 		if (!self.held_entry.is_empty() || tab!(self).freehand_mode) && self.action_wheel.is_none() && self.scrollbar_offset.is_none() {
 			self.try_mouse_scroll();
+		}
+		if self.try_steal(false) {
+			if self.steal_animation_data.as_ref().is_some_and(|x| x.0.elapsed() >= Duration::from_millis(500)) {
+				self.steal();
+			}
+		} else {
+			self.steal_animation_data = None;
 		}
 	}
 

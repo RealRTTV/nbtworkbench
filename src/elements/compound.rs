@@ -182,7 +182,9 @@ impl NbtCompound {
 	pub const fn open(&self) -> bool { self.open }
 
 	pub fn update_key(&mut self, idx: usize, key: CompactString) -> Option<CompactString> {
-		if self.entries.has(key.as_ref()) {
+		if self.entries.get_idx(idx).is_some_and(|(k, _)| k == key) {
+			Some(key)
+		} else if self.entries.has(key.as_ref()) {
 			None
 		} else {
 			Some(unsafe { self.entries.update_key_idx_unchecked(idx, key) })
