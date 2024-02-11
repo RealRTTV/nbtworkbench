@@ -15,7 +15,7 @@ use crate::assets::{BASE_Z, BYTE_ARRAY_UV, BYTE_UV, CONNECTION_UV, DOUBLE_UV, FL
 use crate::decoder::Decoder;
 use crate::elements::chunk::{NbtChunk, NbtRegion};
 use crate::elements::compound::{CompoundMap, CompoundMapIter, Entry, NbtCompound};
-use crate::elements::element_action::ElementAction;
+use crate::element_action::ElementAction;
 use crate::elements::list::{NbtList, ValueIterator, ValueMutIterator};
 use crate::elements::string::NbtString;
 use crate::encoder::UncheckedBufWriter;

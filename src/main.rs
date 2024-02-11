@@ -83,6 +83,7 @@ mod vertex_buffer_builder;
 mod window;
 pub mod workbench;
 mod workbench_action;
+mod element_action;
 
 #[macro_export]
 macro_rules! flags {
@@ -360,6 +361,7 @@ impl<'a> WindowProperties<'a> {
 	}
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub struct FileUpdateSubscription {
 	subscription_type: FileUpdateSubscriptionType,
 	indices: Box<[usize]>,
@@ -368,6 +370,7 @@ pub struct FileUpdateSubscription {
 	tab_uuid: Uuid,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub enum FileUpdateSubscriptionType {
 	Snbt,
 	ByteArray,
@@ -1072,7 +1075,6 @@ pub mod elements {
 	pub mod chunk;
 	pub mod compound;
 	pub mod element;
-	pub mod element_action;
 	pub mod list;
 	pub mod primitive;
 	pub mod string;
