@@ -44,8 +44,8 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: nbtworkbench.exe
-          path: /target/x86_64-pc-windows-msvc/release/nbtworkbench.exe
+          name: Executables
+          path: target/x86_64-pc-windows-msvc/release/nbtworkbench.exe
           if-no-files-found: error
           retention-days: 90
           compression-level: 9
