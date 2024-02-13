@@ -20,7 +20,9 @@ jobs:
         uses: actions/checkout@v3
 
       - name: Install Wrangler
-        run: npx --yes wrangler@3
+        run: |
+          node -v
+          npx --yes wrangler@3
 
       - name: Install Rustup using win.rustup.rs
         run: |
