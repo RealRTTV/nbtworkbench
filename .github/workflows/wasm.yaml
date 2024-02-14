@@ -21,6 +21,7 @@ jobs:
 
       - name: Install Rustup using win.rustup.rs
         run: |
+          npx --version
           # Disable the download progress bar which can cause perf issues
           $ProgressPreference = "SilentlyContinue"
           Invoke-WebRequest https://win.rustup.rs/ -OutFile rustup-init.exe
