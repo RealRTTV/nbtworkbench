@@ -53,7 +53,8 @@ pub async fn run() -> ! {
 			.with_transparent(std::env::args().any(|x| x.eq("--transparent")));
 	}
 	let window = builder.build(&event_loop).expect("Window was constructable");
-	#[cfg(target_arch = "wasm32")] {
+	#[cfg(target_arch = "wasm32")]
+	let window_size = {
 		web_sys::window().and_then(|window| {
 			let document = window.document()?;
 			let width = window.inner_width().ok()?.as_f64()?;
@@ -63,10 +64,12 @@ pub async fn run() -> ! {
 			let canvas = web_sys::Element::from(window.canvas()?);
 			document.body()?.append_child(&canvas).ok()?;
 			let _ = window.request_inner_size(size);
-			Some(())
+			Some(size)
 		}).expect("Couldn't append canvas to document body")
-	}
-	let mut state = State::new(&window).await;
+	};
+	#[cfg(not(target_arch = "wasm32"))]
+	let window_size = PhysicalSize::new(WINDOW_WIDTH as u32, WINDOW_HEIGHT as u32);
+	let mut state = State::new(&window, window_size).await;
 	let mut window_properties = WindowProperties::new(&window);
 	let mut workbench = Workbench::new(&mut window_properties);
 	event_loop.run(|event, _| match event {
@@ -124,15 +127,14 @@ pub struct State<'window> {
 
 impl<'window> State<'window> {
 	#[allow(clippy::too_many_lines)] // yeah, but.... what am I supposed to do?
-	async fn new(window: &'window Window) -> Self {
-		let size = window.inner_size();
+	async fn new(window: &'window Window, size: PhysicalSize<u32>) -> Self {
 		let instance = Instance::new(InstanceDescriptor {
 			backends: Backends::all(),
 			flags: Default::default(),
 			dx12_shader_compiler: Dx12Compiler::default(),
 			gles_minor_version: Default::default(),
 		});
-		let surface = unsafe { instance.create_surface(window).ok().panic_unchecked("all safety guarantees are assured") };
+		let surface = instance.create_surface(window).expect("Surface was able to be created");
 		let adapter = instance
 			.request_adapter(&RequestAdapterOptions {
 				power_preference: PowerPreference::None,
@@ -147,7 +149,7 @@ impl<'window> State<'window> {
 					required_features: adapter.features(),
 					required_limits: if cfg!(target_arch = "wasm32") {
 						Limits {
-							max_storage_buffers_per_shader_stage: 1,
+							max_texture_dimension_2d: 8192,
 							..Limits::downlevel_webgl2_defaults()
 						}
 					} else {
@@ -266,7 +268,7 @@ impl<'window> State<'window> {
 			layout: Some(&render_pipeline_layout),
 			vertex: VertexState {
 				module: &shader,
-				entry_point: "v",
+				entry_point: "vertex",
 				buffers: &[VertexBufferLayout {
 					array_stride: 20,
 					step_mode: VertexStepMode::Vertex,
@@ -275,7 +277,7 @@ impl<'window> State<'window> {
 			},
 			fragment: Some(FragmentState {
 				module: &shader,
-				entry_point: "f",
+				entry_point: "fragment",
 				targets: &[Some(ColorTargetState {
 					format: config.format,
 					blend: Some(BlendState::ALPHA_BLENDING),
@@ -305,39 +307,49 @@ impl<'window> State<'window> {
 			},
 			multiview: None,
 		});
-		let unicode_buffer = device.create_buffer_init(&BufferInitDescriptor {
-			label: Some("Unicode Buffer"),
-			contents: &{
-				// ~5ms with --release
-				#[cfg(all(debug_assertions, not(target_arch = "wasm32")))]
-				let start = std::time::Instant::now();
-				let vec = unsafe {
-					zune_inflate::DeflateDecoder::new_with_options(
-						include_bytes!("assets/unicode.hex.zib"),
-						DeflateOptions::default().set_confirm_checksum(false),
-					)
-					.decode_zlib()
-					.ok()
-					.panic_unchecked("there is no way this fails, otherwise i deserve the ub that comes from this.")
-				};
-				#[cfg(all(debug_assertions, not(target_arch = "wasm32")))]
-				log!(
-					"took {}ms to read compressed unicode",
-					start.elapsed().as_nanos() as f64 / 1_000_000.0
-				);
-				vec
+		let unicode_texture = device.create_texture(&TextureDescriptor {
+			label: Some("Unicode Texture Array"),
+			size: Extent3d {
+				width: 256,
+				height: assets::UNICODE_LEN as u32 / 256,
+				depth_or_array_layers: 1,
 			},
-			usage: BufferUsages::STORAGE,
+			mip_level_count: 1,
+			sample_count: 1,
+			dimension: TextureDimension::D2,
+			format: TextureFormat::R8Unorm,
+			usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
+			view_formats: &[],
 		});
+		queue.write_texture(ImageCopyTexture {
+			texture: &unicode_texture,
+			mip_level: 0,
+			origin: Origin3d::ZERO,
+			aspect: TextureAspect::All,
+		}, &unsafe {
+			zune_inflate::DeflateDecoder::new_with_options(
+				include_bytes!("assets/unicode.hex.zib"),
+				DeflateOptions::default().set_confirm_checksum(false),
+			).decode_zlib().ok().panic_unchecked("there is no way this fails, otherwise i deserve the ub that comes from this.")
+		}, ImageDataLayout {
+			offset: 0,
+			bytes_per_row: Some(256),
+			rows_per_image: Some(assets::UNICODE_LEN as u32 / 256),
+		}, Extent3d {
+			width: 256,
+			height: assets::UNICODE_LEN as u32 / 256,
+			depth_or_array_layers: 1,
+		});
+		let unicode_texture_view = unicode_texture.create_view(&TextureViewDescriptor::default());
 		let unicode_bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
 			label: Some("Unicode Bind Group Layout"),
 			entries: &[BindGroupLayoutEntry {
 				binding: 0,
 				visibility: ShaderStages::FRAGMENT,
-				ty: BindingType::Buffer {
-					ty: BufferBindingType::Storage { read_only: true },
-					has_dynamic_offset: false,
-					min_binding_size: NonZeroU64::new(assets::UNICODE_LEN as u64),
+				ty: BindingType::Texture {
+					sample_type: TextureSampleType::Float { filterable: false },
+					view_dimension: TextureViewDimension::D2,
+					multisampled: false,
 				},
 				count: None,
 			}],
@@ -347,11 +359,7 @@ impl<'window> State<'window> {
 			layout: &unicode_bind_group_layout,
 			entries: &[BindGroupEntry {
 				binding: 0,
-				resource: BindingResource::Buffer(BufferBinding {
-					buffer: &unicode_buffer,
-					offset: 0,
-					size: None,
-				}),
+				resource: BindingResource::TextureView(&unicode_texture_view),
 			}],
 		});
 		let text_shader = device.create_shader_module(ShaderModuleDescriptor {
@@ -368,7 +376,7 @@ impl<'window> State<'window> {
 			layout: Some(&text_render_pipeline_payout),
 			vertex: VertexState {
 				module: &text_shader,
-				entry_point: "vt",
+				entry_point: "vertex",
 				buffers: &[VertexBufferLayout {
 					array_stride: 16,
 					step_mode: VertexStepMode::Vertex,
@@ -377,7 +385,7 @@ impl<'window> State<'window> {
 			},
 			fragment: Some(FragmentState {
 				module: &text_shader,
-				entry_point: "ft",
+				entry_point: "fragment",
 				targets: &[Some(ColorTargetState {
 					format: config.format,
 					blend: Some(BlendState::ALPHA_BLENDING),

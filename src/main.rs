@@ -193,7 +193,6 @@ pub fn wasm_main() {
 pub fn main() -> ! { pollster::block_on(window::run()) }
 
 /// # Refactor
-/// * make storage buffer be of type R8Unorm so I can use webgl
 /// * render trees using `RenderLine` struct/enum
 /// * make `Bookmarks` struct a thing and add functionality there
 /// # Long Term Goals

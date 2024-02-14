@@ -53,14 +53,14 @@ winres = "0.1.12"
 zune-inflate = { version = "0.2.54", features = ["gzip", "zlib"] }
 flate2 = "1.0.27"
 winit = "0.29.10"
-wgpu = { version = "0.19.1", features = ["webgpu"] }
+wgpu = { version = "=0.19.1", default-features = false, features = ["webgl", "wgsl", "dx12", "metal"] }
 fxhash = "0.2.1"
 hashbrown = { version = "0.14.0", features = ["raw", "inline-more", "nightly"], default-features = false }
 getrandom = { version = "0.2.12", features = ["js"] }
 notify = "6.0.1"
 uuid = { version = "1.4.1", features = ["v4"] }
 compact_str = "0.7.1"
-wgsl-inline = { version = "0.2.0", features = [ ] }
+wgsl-inline = { version = "0.2.0", features = ["minify"] }
 static_assertions = "1.1.0"
 anyhow = "1.0.79"
 log = { version = "0.4.20", features = [] }

@@ -22,7 +22,7 @@ wgsl! {
 	}
 
 	@vertex
-	fn vt(input: VertexInput, @builtin(vertex_index) index: u32) -> VertexOutput {
+	fn vertex(input: VertexInput, @builtin(vertex_index) index: u32) -> VertexOutput {
 		var output: VertexOutput;
 		output.clip_position = vec4<f32>(input.position, f32(input.z_and_color & 0xFFu) / 256.0, 1.0);
 		output.character = input.character;
@@ -55,18 +55,18 @@ wgsl! {
 
 	@group(0)
 	@binding(0)
-	var<storage> buf: array<u32>;
+	var buf: texture_2d<f32>;
 
 	@fragment
-	fn ft(output: VertexOutput) -> @location(0) vec4<f32> {
-		let x = u32(output.uv[0] * 16.0);
-		let y = u32(output.uv[1] * 16.0);
-		let offset = output.character * 32u;
-		let index = offset + y * 2u + x / 8u;
-		let a = (((buf[index / 4u] >> ((index % 4u) * 8u)) & 0xFFu) >> (7u - x % 8u)) & 1u;
-		if (a == 0u) {
+	fn fragment(input: VertexOutput) -> @location(0) vec4<f32> {
+		let x = u32(input.uv[0] * 16.0);
+		let y = u32(input.uv[1] * 16.0);
+		let bit_index = input.character * 256u + y * 16 + x;
+		let byte = u32(textureLoad(buf, vec2<u32>(bit_index / 8u % 256u, bit_index / 8u / 256u), 0)[0] * 255.0);
+		let bit = (byte >> (7u - bit_index % 8u)) & 1u;
+		if (bit == 0u) {
 			discard;
 		}
-		return output.color;
+		return input.color;
 	}
 }

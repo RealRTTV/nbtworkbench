@@ -16,7 +16,7 @@ wgsl! {
 	}
 
 	@vertex
-	fn v(input: VertexInput) -> VertexOutput {
+	fn vertex(input: VertexInput) -> VertexOutput {
 		var output: VertexOutput;
 		output.tex_coords = input.tex_coords;
 		output.clip_position = vec4<f32>(input.position, 1.0);
@@ -32,7 +32,7 @@ wgsl! {
 	var s_diffuse: sampler;
 
 	@fragment
-	fn f(input: VertexOutput) -> @location(0) vec4<f32> {
+	fn fragment(input: VertexOutput) -> @location(0) vec4<f32> {
 		var out = textureSample(t_diffuse, s_diffuse, input.tex_coords);
 		if (out[3] == 0.0) {
 		    discard;
