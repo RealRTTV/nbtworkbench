@@ -19,9 +19,11 @@ jobs:
       - name: checkout
         uses: actions/checkout@v3
 
+      - name: Install Wrangler
+        run: npx --yes wrangler@2
+
       - name: Install Rustup using win.rustup.rs
         run: |
-          npx --version
           # Disable the download progress bar which can cause perf issues
           $ProgressPreference = "SilentlyContinue"
           Invoke-WebRequest https://win.rustup.rs/ -OutFile rustup-init.exe
