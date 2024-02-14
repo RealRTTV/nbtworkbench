@@ -40,7 +40,7 @@ jobs:
 
       - name: Build
         shell: cmd
-        run: wasm-pack +nightly build --release --target web --out-dir nbtworkbench
+        run: wasm-pack build --release --target web --out-dir nbtworkbench
 
       - name: Publish
         uses: cloudflare/pages-action@v1
