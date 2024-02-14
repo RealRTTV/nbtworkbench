@@ -1,5 +1,5 @@
 use std::mem::ManuallyDrop;
-use std::time::SystemTime;
+use crate::{since_epoch, log};
 
 use crate::vertex_buffer_builder::Vec2u;
 
@@ -151,14 +151,10 @@ pub const TOOLTIP_Z: u8 = 250;
 
 #[allow(clippy::cast_ptr_alignment)]
 pub fn icon() -> Vec<u8> {
-	#[cfg(debug_assertions)]
+	#[cfg(all(debug_assertions, not(target_arch = "wasm32")))]
 	let start = unsafe { core::arch::x86_64::_rdtsc() };
-	let original = match (SystemTime::now()
-		.duration_since(SystemTime::UNIX_EPOCH)
-		.expect("time cant go backwards")
-		.as_micros()
-		& 7) as u8
-	{
+	// error!("Hello, world!");
+	let original = match (since_epoch().as_micros() & 7) as u8 {
 		// its a good random only because its used once
 		0 => OTHERSIDE_MUSIC_DISC_ICON,
 		1 => PIGSTEP_MUSIC_DISC_ICON,
@@ -204,8 +200,8 @@ pub fn icon() -> Vec<u8> {
 		}
 	}
 	let mut scaled = ManuallyDrop::new(core::hint::black_box(scaled));
-	#[cfg(debug_assertions)]
-	println!(
+	#[cfg(all(debug_assertions, not(target_arch = "wasm32")))]
+	log!(
 		"took {} cycles",
 		unsafe { core::arch::x86_64::_rdtsc() } - start
 	);

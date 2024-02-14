@@ -18,6 +18,7 @@
 	clippy::unwrap_used
 )]
 #![allow(
+	semicolon_in_expressions_from_macros,
 	clippy::unreadable_literal,
 	clippy::cast_precision_loss,
 	clippy::cast_lossless,
@@ -41,16 +42,18 @@
 #![feature(optimize_attribute)]
 #![feature(stmt_expr_attributes)]
 #![feature(unchecked_math)]
+#![feature(lazy_cell)]
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 use std::cmp::Ordering;
 use std::convert::identity;
 use std::fmt::Write;
+use std::time::Duration;
 
 use compact_str::{CompactString, ToCompactString};
-use notify::PollWatcher;
 use static_assertions::const_assert_eq;
-use uuid::Uuid;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::prelude::wasm_bindgen;
 use winit::window::Window;
 
 use elements::element::NbtElement;
@@ -138,7 +141,59 @@ macro_rules! tab_mut {
 	};
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+#[macro_export]
+macro_rules! error {
+    ($($arg:tt)*) => {
+		eprintln!($($arg)*);
+	};
+}
+
+#[cfg(target_arch = "wasm32")]
+#[macro_export]
+macro_rules! error {
+    ($($arg:tt)*) => {
+		::web_sys::console::error_1(&wasm_bindgen::JsValue::from(&format!($($arg)*)));
+	};
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[macro_export]
+macro_rules! log {
+    ($($arg:tt)*) => {
+		println!($($arg)*);
+	};
+}
+
+#[cfg(target_arch = "wasm32")]
+#[macro_export]
+macro_rules! log {
+    ($($arg:tt)*) => {
+		::web_sys::console::log_1(&wasm_bindgen::JsValue::from(&format!($($arg)*)));
+	};
+}
+
+#[macro_export]
+macro_rules! debg {
+	() => {
+		$crate::log!("[{}:{}:{}]", file!(), line!(), column!())
+	};
+}
+
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen(start))]
+#[cfg(target_arch = "wasm32")]
+pub fn wasm_main() {
+	::console_error_panic_hook::set_once();
+	wasm_bindgen_futures::spawn_local(async move {
+		window::run().await;
+	});
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn main() -> ! { pollster::block_on(window::run()) }
+
 /// # Refactor
+/// * make storage buffer be of type R8Unorm so I can use webgl
 /// * render trees using `RenderLine` struct/enum
 /// * make `Bookmarks` struct a thing and add functionality there
 /// # Long Term Goals
@@ -147,8 +202,9 @@ macro_rules! tab_mut {
 /// * wiki page for docs on minecraft's format of stuff
 /// * [chunk](NbtChunk) section rendering
 /// # Minor Features
-/// * sort entries on file read config
 /// * gear icon to swap toolbar with settings panel
+///   * sort entries on file read config
+///   * make floats either exact or "exact enough"
 /// * __ctrl + h__, open a playground `nbt` file to help with user interaction (bonus points if I have some way to tell if you haven't used this editor before)
 /// * [`last_modified`](NbtChunk) field actually gets some impl
 /// * autosave
@@ -157,7 +213,6 @@ macro_rules! tab_mut {
 /// * macros
 /// * keyboard-based element dropping (press numbers before to specify count for move operations, right shift to enable mode)
 /// * animations!!!!
-fn main() -> ! { window::run() }
 
 pub enum DropFn {
 	Dropped(usize, usize, Option<CompactString>, usize),
@@ -191,6 +246,30 @@ impl HeldEntry {
 
 	#[must_use]
 	pub const fn is_empty(&self) -> bool { matches!(self, Self::Empty) }
+}
+
+#[must_use]
+pub fn get_clipboard() -> Option<String> {
+	#[cfg(not(target_arch = "wasm32"))]
+	return cli_clipboard::get_contents().ok();
+	#[cfg(target_arch = "wasm32")]
+	// return web_sys::window().map(|window| window.navigator()).and_then(|navigator| navigator.clipboard()).and_then(|clipboard| wasm_bindgen_futures::JsFuture::from(clipboard.read_text()).block_on().ok().and_then(|js| js.as_string()));
+	todo!();
+}
+
+pub fn set_clipboard(value: String) -> bool {
+	#[cfg(not(target_arch = "wasm32"))]
+	return cli_clipboard::set_contents(value).is_ok();
+	#[cfg(target_arch = "wasm32")]
+	return web_sys::window().map(|window| window.navigator()).and_then(|navigator| navigator.clipboard()).map(|clipboard| clipboard.write_text(&value)).is_some();
+}
+
+#[must_use]
+pub fn since_epoch() -> Duration {
+	#[cfg(not(target_arch = "wasm32"))]
+	return unsafe { std::time::SystemTime::UNIX_EPOCH.elapsed().unwrap_unchecked() };
+	#[cfg(target_arch = "wasm32")]
+	return Duration::from_nanos((web_sys::js_sys::Date::now() * 1_000_000.0) as u64);
 }
 
 pub fn sum_indices<I: Iterator<Item = usize>>(indices: I, mut root: &NbtElement) -> usize {
@@ -357,20 +436,22 @@ impl<'a> WindowProperties<'a> {
 
 	pub fn window_title(&mut self, title: &str) -> &mut Self {
 		self.window.set_title(title);
+		#[cfg(target_arch = "wasm32")]
+		if let Some(window) = web_sys::window() {
+			let _ = window.set_name(title);
+		}
 		self
 	}
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 pub struct FileUpdateSubscription {
 	subscription_type: FileUpdateSubscriptionType,
 	indices: Box<[usize]>,
 	rx: std::sync::mpsc::Receiver<Vec<u8>>,
-	watcher: PollWatcher,
-	tab_uuid: Uuid,
+	watcher: notify::PollWatcher,
+	tab_uuid: uuid::Uuid,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 pub enum FileUpdateSubscriptionType {
 	Snbt,
 	ByteArray,
@@ -825,6 +906,9 @@ pub fn smoothstep32(x: f32) -> f32 {
 	3.0 * x * x - 2.0 * x * x * x
 }
 
+#[must_use]
+pub const fn valid_unescaped_char(byte: u8) -> bool { matches!(byte, b'0'..=b'9' | b'A'..=b'Z' | b'a'..=b'z' | b'_' | b'-' | b'.' | b'+') }
+
 pub trait StrExt {
 	fn snbt_string_read(&self) -> Option<(CompactString, &str)>;
 
@@ -832,9 +916,6 @@ pub trait StrExt {
 
 	fn width(&self) -> usize;
 }
-
-#[must_use]
-pub const fn valid_unescaped_char(byte: u8) -> bool { matches!(byte, b'0'..=b'9' | b'A'..=b'Z' | b'a'..=b'z' | b'_' | b'-' | b'.' | b'+') }
 
 impl StrExt for str {
 	#[inline]

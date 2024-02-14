@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::string::String;
 use std::sync::mpsc::TryRecvError;
-use std::time::{Duration, Instant, SystemTime};
+use std::time::Duration;
 
 use compact_str::{format_compact, CompactString, ToCompactString};
 use fxhash::{FxBuildHasher, FxHashSet};
@@ -17,6 +17,7 @@ use winit::dpi::PhysicalPosition;
 use winit::event::{ElementState, KeyEvent, MouseButton, MouseScrollDelta};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use zune_inflate::DeflateDecoder;
+use log::debug;
 
 use crate::alert::Alert;
 use crate::assets::{ACTION_WHEEL_Z, BASE_TEXT_Z, BASE_Z, BOOKMARK_UV, CLOSED_WIDGET_UV, DARK_STRIPE_UV, EDITED_UV, HEADER_SIZE, HELD_ENTRY_Z, HIDDEN_BOOKMARK_UV, HORIZONTAL_SEPARATOR_UV, HOVERED_STRIPE_UV, HOVERED_WIDGET_UV, JUST_OVERLAPPING_BASE_TEXT_Z, LIGHT_STRIPE_UV, SELECTED_ACTION_WHEEL, SELECTED_WIDGET_UV, TRAY_UV, UNEDITED_UV, UNSELECTED_ACTION_WHEEL, UNSELECTED_WIDGET_UV};
@@ -34,7 +35,7 @@ use crate::vertex_buffer_builder::Vec2u;
 use crate::vertex_buffer_builder::VertexBufferBuilder;
 use crate::window::{MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH, WINDOW_HEIGHT, WINDOW_WIDTH};
 use crate::workbench_action::WorkbenchAction;
-use crate::{encompasses, encompasses_or_equal, flags, panic_unchecked, recache_along_indices, sum_indices, Bookmark, DropFn, FileUpdateSubscription, FileUpdateSubscriptionType, HeldEntry, LinkedQueue, OptionExt, Position, RenderContext, StrExt, WindowProperties, tab, tab_mut};
+use crate::{encompasses, encompasses_or_equal, flags, panic_unchecked, recache_along_indices, sum_indices, Bookmark, DropFn, FileUpdateSubscription, FileUpdateSubscriptionType, HeldEntry, LinkedQueue, OptionExt, Position, RenderContext, StrExt, WindowProperties, tab, tab_mut, get_clipboard, set_clipboard, since_epoch, log, debg};
 
 pub struct Workbench {
 	pub tabs: Vec<Tab>,
@@ -59,7 +60,7 @@ pub struct Workbench {
 	pub cursor_visible: bool,
 	alerts: Vec<Alert>,
 	pub scale: usize,
-	steal_animation_data: Option<(Instant, Vec2u)>,
+	steal_animation_data: Option<(Duration, Vec2u)>,
 }
 
 impl Workbench {
@@ -123,7 +124,7 @@ impl Workbench {
 				uuid: Uuid::new_v4(),
 				freehand_mode: false,
 				selected_text: None,
-				last_close_attempt: SystemTime::UNIX_EPOCH,
+				last_close_attempt: Duration::ZERO,
 			});
 		}
 		workbench
@@ -324,7 +325,7 @@ impl Workbench {
 				}
 				if button == MouseButton::Left {
 					if self.try_steal(true) {
-						if self.steal_animation_data.as_ref().is_some_and(|x| x.0.elapsed() >= Duration::from_millis(500)) && self.steal() {
+						if self.steal_animation_data.as_ref().is_some_and(|x| (since_epoch() - x.0) >= Duration::from_millis(500)) && self.steal() {
 							break 'a;
 						}
 					} else {
@@ -672,7 +673,7 @@ impl Workbench {
 			let target_depth = (self.mouse_x + horizontal_scroll - left_margin - 16) / 16;
 			let (depth, (_, _, _, _)) = Traverse::new(y, &mut tab.value).enumerate().last();
 			if initialize {
-				self.steal_animation_data.get_or_insert((Instant::now(), (target_depth, y).into()));
+				self.steal_animation_data.get_or_insert((since_epoch(), (target_depth, y).into()));
 			}
 			if let Some((_, Vec2u { x: expected_depth, y: expected_y })) = self.steal_animation_data.clone() {
 				return depth == expected_depth && y == expected_y
@@ -876,7 +877,7 @@ impl Workbench {
 					return false;
 				}
 			}
-			cli_clipboard::set_contents(buf).is_ok()
+			set_clipboard(buf)
 		} else {
 			false
 		}
@@ -908,7 +909,7 @@ impl Workbench {
 					)
 					.is_ok()
 					{
-						let _ = cli_clipboard::set_contents(buf);
+						set_clipboard(buf);
 					}
 				}
 				(element.height(), element.true_height(), line_number)
@@ -1047,7 +1048,7 @@ impl Workbench {
 		if button == MouseButton::Left {
 			let tab = tab!(self);
 			if self.mouse_x / 16 == 13 {
-				match NbtElement::from_str(&cli_clipboard::get_contents().map_err(|e| anyhow!("{}", e.to_string()))?) {
+				match NbtElement::from_str(&get_clipboard().ok_or_else(|| anyhow!("Failed to get clipboard"))?) {
 					Some((key, element)) => {
 						if element.id() == NbtChunk::ID && tab.value.id() != NbtRegion::ID {
 							return Err(anyhow!("Chunks are not supported for non-region tabs"));
@@ -1098,9 +1099,6 @@ impl Workbench {
 				if x <= width {
 					if button == MouseButton::Middle {
 						self.remove_tab(idx, window_properties);
-						let tab = self.tabs.remove(idx);
-						std::thread::spawn(move || drop(tab));
-						self.set_tab(idx.saturating_sub(1), window_properties);
 					} else if idx == self.tab && x > width - 16 && x < width {
 						if button == MouseButton::Left {
 							tab.compression = tab.compression.cycle();
@@ -1149,7 +1147,7 @@ impl Workbench {
 			uuid: Uuid::new_v4(),
 			freehand_mode: false,
 			selected_text: None,
-			last_close_attempt: SystemTime::UNIX_EPOCH,
+			last_close_attempt: Duration::ZERO,
 		});
 	}
 
@@ -1162,19 +1160,21 @@ impl Workbench {
 	#[inline]
 	pub fn remove_tab(&mut self, idx: usize, window_properties: &mut WindowProperties<'_>) -> bool {
 		let tab = unsafe { self.tabs.get_unchecked_mut(idx) };
-		if tab.history_changed && unsafe { core::mem::replace(&mut tab.last_close_attempt, SystemTime::now()).elapsed().ok().panic_unchecked("Time can't go backwards") }.as_millis() > 3000 {
+		if tab.history_changed && core::mem::replace(&mut tab.last_close_attempt, since_epoch()).as_millis() > 3000 {
 			return false;
 		}
 
 		if idx >= self.tab {
 			self.set_tab(self.tab.saturating_sub(1), window_properties);
 		}
-
 		let tab = self.tabs.remove(idx);
 		if self.tabs.is_empty() {
 			std::process::exit(0);
 		}
+		#[cfg(not(target_arch = "wasm32"))]
 		std::thread::spawn(move || drop(tab));
+		#[cfg(target_arch = "wasm32")]
+		drop(tab);
 		true
 	}
 
@@ -1200,7 +1200,10 @@ impl Workbench {
 		if x > depth && !ignore_depth { return false }
 		let before = element.height();
 		if expand {
+			#[cfg(not(target_arch = "wasm32"))]
 			std::thread::scope(|scope| element.expand(scope));
+			#[cfg(target_arch = "wasm32")]
+			element.expand();
 		} else {
 			let _ = element.toggle();
 		}
@@ -1353,7 +1356,7 @@ impl Workbench {
 					valuefix: Some(value),
 					value: keyfix,
 					editable: true,
-					last_interaction: SystemTime::now(),
+					last_interaction: since_epoch(),
 					undos: LinkedQueue::new(),
 					redos: LinkedQueue::new(),
 				}
@@ -1399,7 +1402,7 @@ impl Workbench {
 					valuefix: None,
 					value: valuefix,
 					editable: true,
-					last_interaction: SystemTime::now(),
+					last_interaction: since_epoch(),
 					undos: LinkedQueue::new(),
 					redos: LinkedQueue::new(),
 				}
@@ -1828,7 +1831,10 @@ impl Workbench {
 			let (_, _, element, line_number) = Navigate::new(indices.iter().copied(), &mut tab.value).last();
 			let true_height = element.true_height();
 			let pred = if shift {
+				#[cfg(not(target_arch = "wasm32"))]
 				std::thread::scope(|scope| element.expand(scope));
+				#[cfg(target_arch = "wasm32")]
+				element.expand();
 				true
 			} else {
 				!element.open() && element.toggle().is_some()
@@ -2017,7 +2023,7 @@ impl Workbench {
 				// 	});
 				// 	return true;
 				// }
-				if key == KeyCode::KeyV && flags == flags!(Ctrl) && let Some(element) = cli_clipboard::get_contents().ok().and_then(|x| NbtElement::from_str(&x)) && (element.1.id() != NbtChunk::ID || tab.value.id() == NbtRegion::ID) {
+				if key == KeyCode::KeyV && flags == flags!(Ctrl) && let Some(element) = get_clipboard().and_then(|x| NbtElement::from_str(&x)) && (element.1.id() != NbtChunk::ID || tab.value.id() == NbtRegion::ID) {
 					let old_held_entry = core::mem::replace(&mut self.held_entry, HeldEntry::FromAether(element));
 					let HeldEntry::FromAether(pair) = core::mem::replace(&mut self.held_entry, old_held_entry) else {
 						unsafe { panic_unchecked("we just set it you, bozo") }
@@ -2121,6 +2127,7 @@ impl Workbench {
 						};
 						let Some(nbt) = nbt else { break 'a };
 						let old = core::mem::replace(&mut tab.value, Box::new(nbt));
+						#[cfg(not(target_arch = "wasm32"))]
 						std::thread::spawn(move || drop(old));
 						tab.compression = compression;
 						tab.bookmarks = vec![];
@@ -2234,14 +2241,18 @@ impl Workbench {
 
 	#[inline]
 	pub fn window_dimensions(&mut self, window_width: usize, window_height: usize) {
+		let width_scaling = window_width as f64 / self.raw_window_width as f64;
+		let height_scaling = window_height as f64 / self.raw_window_height as f64;
 		self.raw_window_width = window_width;
 		self.raw_window_height = window_height;
+		self.raw_mouse_x = (self.raw_mouse_x as f64 * width_scaling).floor() as usize;
+		self.raw_mouse_y = (self.raw_mouse_y as f64 * height_scaling).floor() as usize;
 		self.set_scale(self.scale);
 	}
 
 	#[inline]
 	fn set_scale(&mut self, scale: usize) {
-		let scale = scale.max(1).min(usize::min(self.raw_window_width / MIN_WINDOW_WIDTH, self.raw_window_height / MIN_WINDOW_HEIGHT));
+		let scale = scale.min(usize::min(self.raw_window_width / MIN_WINDOW_WIDTH, self.raw_window_height / MIN_WINDOW_HEIGHT)).max(1);
 
 		self.scale = scale;
 		self.mouse_x = self.raw_mouse_x / self.scale;
@@ -2274,6 +2285,8 @@ impl Workbench {
 
 	#[inline]
 	pub fn render(&mut self, builder: &mut VertexBufferBuilder) {
+		if self.raw_window_width < MIN_WINDOW_WIDTH || self.raw_window_height < MIN_WINDOW_HEIGHT { return; }
+
 		for n in 0..(builder.window_height() - HEADER_SIZE + 15) / 16 {
 			let uv = if n % 2 == 0 {
 				DARK_STRIPE_UV + (1, 1)
@@ -2329,7 +2342,7 @@ impl Workbench {
 			self.scrollbar_offset.is_some(),
 			self.held_entry.element(),
 			self.action_wheel.is_some(),
-			self.steal_animation_data.as_ref().map(|x| x.0.elapsed().min(Duration::from_millis(500)).as_millis() as f32 / 500.0).unwrap_or(0.0)
+			self.steal_animation_data.as_ref().map(|x| (since_epoch() - x.0).min(Duration::from_millis(500)).as_millis() as f32 / 500.0).unwrap_or(0.0)
 		);
 		if let Some(selected_text) = &tab.selected_text {
 			builder.horizontal_scroll = horizontal_scroll;
@@ -2356,7 +2369,7 @@ impl Workbench {
 			self.try_mouse_scroll();
 		}
 		if self.try_steal(false) {
-			if self.steal_animation_data.as_ref().is_some_and(|x| x.0.elapsed() >= Duration::from_millis(500)) {
+			if self.steal_animation_data.as_ref().is_some_and(|x| (since_epoch() - x.0) >= Duration::from_millis(500)) {
 				self.steal();
 			}
 		} else {
@@ -2398,7 +2411,7 @@ impl Workbench {
 		builder.horizontal_scroll = self.tab_scroll;
 		for (idx, tab) in self.tabs.iter().enumerate() {
 			let remaining_width = tab.name.width() + 48 + 3;
-			let uv = if unsafe { tab.last_close_attempt.elapsed().ok().panic_unchecked("Time can't go backwards").as_millis() <= 3000 } {
+			let uv = if (since_epoch() - tab.last_close_attempt).as_millis() <= 3000 {
 				CLOSED_WIDGET_UV
 			} else if idx == self.tab {
 				SELECTED_WIDGET_UV
@@ -2647,3 +2660,4 @@ impl Workbench {
 		})
 	}
 }
+

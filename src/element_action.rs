@@ -1,5 +1,6 @@
 use std::cmp::Ordering;
 use std::convert::identity;
+#[cfg(not(target_arch = "wasm32"))]
 use std::fs::OpenOptions;
 use std::process::Command;
 
@@ -7,8 +8,9 @@ use compact_str::CompactString;
 use notify::{EventKind, PollWatcher, RecursiveMode, Watcher};
 use uuid::Uuid;
 
-use crate::{Bookmark, FileUpdateSubscription, FileUpdateSubscriptionType, panic_unchecked};
-use crate::assets::{ACTION_WHEEL_Z, COPY_FORMATTED_UV, COPY_RAW_UV, OPEN_ARRAY_IN_HEX_UV, OPEN_IN_TXT, SORT_COMPOUND_BY_NAME, SORT_COMPOUND_BY_TYPE};
+use crate::{Bookmark, panic_unchecked, set_clipboard};
+use crate::{FileUpdateSubscription, FileUpdateSubscriptionType, assets::{OPEN_ARRAY_IN_HEX_UV, OPEN_IN_TXT}};
+use crate::assets::{ACTION_WHEEL_Z, COPY_FORMATTED_UV, COPY_RAW_UV, SORT_COMPOUND_BY_NAME, SORT_COMPOUND_BY_TYPE};
 use crate::elements::chunk::NbtChunk;
 use crate::elements::compound::NbtCompound;
 use crate::elements::element::{NbtByte, NbtByteArray, NbtDouble, NbtElement, NbtFloat, NbtInt, NbtIntArray, NbtLong, NbtLongArray, NbtShort};
@@ -126,14 +128,14 @@ impl ElementAction {
 
 					let mut buffer = key.map_or(String::new(), |x| x.into_string() + ":");
 					if write!(&mut buffer, "{element}").is_err() { break 'm }
-					let _ = cli_clipboard::set_contents(buffer);
+					set_clipboard(buffer);
 				}
 				Self::CopyFormatted => {
 					use core::fmt::Write;
 
 					let mut buffer = key.map_or(String::new(), |x| x.into_string() + ": ");
 					if write!(&mut buffer, "{element:#?}").is_err() { break 'm }
-					let _ = cli_clipboard::set_contents(buffer);
+					set_clipboard(buffer);
 				}
 				#[cfg(not(target_arch = "wasm32"))]
 				Self::OpenArrayInHex => {

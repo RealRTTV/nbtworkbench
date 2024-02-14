@@ -3,7 +3,7 @@ use std::fs::write;
 use std::io::Read;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
-use std::time::SystemTime;
+use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
 use compact_str::{CompactString, ToCompactString};
@@ -37,7 +37,7 @@ pub struct Tab {
 	pub uuid: Uuid,
 	pub freehand_mode: bool,
 	pub selected_text: Option<SelectedText>,
-	pub last_close_attempt: SystemTime,
+	pub last_close_attempt: Duration,
 }
 
 impl Tab {
@@ -65,7 +65,7 @@ impl Tab {
 			uuid: Uuid::new_v4(),
 			freehand_mode: false,
 			selected_text: None,
-			last_close_attempt: SystemTime::UNIX_EPOCH,
+			last_close_attempt: Duration::ZERO,
 		})
 	}
 

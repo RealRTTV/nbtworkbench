@@ -5,7 +5,6 @@ use std::intrinsics::likely;
 use std::mem::{ManuallyDrop, MaybeUninit};
 use std::ops::Deref;
 use std::thread::Scope;
-use std::time::SystemTime;
 use std::{fmt, fmt::Write};
 
 use compact_str::{format_compact, CompactString, ToCompactString};
@@ -19,7 +18,7 @@ use crate::element_action::ElementAction;
 use crate::elements::list::{NbtList, ValueIterator, ValueMutIterator};
 use crate::elements::string::NbtString;
 use crate::encoder::UncheckedBufWriter;
-use crate::panic_unchecked;
+use crate::{panic_unchecked, since_epoch};
 use crate::tab::FileFormat;
 use crate::{array, primitive, DropFn, RenderContext, StrExt, VertexBufferBuilder};
 
@@ -431,17 +430,14 @@ impl NbtElement {
 							inner,
 							(x, z),
 							FileFormat::Zlib,
-							SystemTime::UNIX_EPOCH
-								.elapsed()
-								.unwrap_or_else(|e| e.duration())
-								.as_secs() as u32,
+							since_epoch().as_secs() as u32,
 						)),
 					)
 				}),
 				_ => Some((
 					&s[digit_end_idx..],
 					Self::Int(NbtInt {
-						value: (s[..digit_end_idx]).parse().ok()?,
+						value: s[..digit_end_idx].parse().ok()?,
 					}),
 				)),
 			};
@@ -519,10 +515,7 @@ impl NbtElement {
 				NbtCompound::new(),
 				(0, 0),
 				FileFormat::Zlib,
-				SystemTime::UNIX_EPOCH
-					.elapsed()
-					.unwrap_or_else(|e| e.duration())
-					.as_secs() as u32,
+				since_epoch().as_secs() as u32,
 			)),
 			_ => return None,
 		})
@@ -531,8 +524,6 @@ impl NbtElement {
 	#[inline]
 	#[must_use]
 	pub fn from_file(bytes: &[u8]) -> Option<Self> {
-		// #[cfg(debug_assertions)]
-		// let start = std::time::Instant::now();
 		let mut decoder = Decoder::new(bytes);
 		decoder.assert_len(3)?;
 		unsafe {
@@ -541,38 +532,23 @@ impl NbtElement {
 			decoder.skip(skip);
 		}
 		let nbt = Self::Compound(NbtCompound::from_bytes(&mut decoder)?);
-		// #[cfg(debug_assertions)]
-		// println!("{}ms for file read", start.elapsed().as_nanos() as f64 / 1_000_000.0);
 		Some(nbt)
 	}
 
 	#[inline]
 	#[must_use]
 	pub fn to_file(&self) -> Vec<u8> {
-		// #[cfg(debug_assertions)]
-		let start = std::time::Instant::now();
 		let mut writer = UncheckedBufWriter::new();
 		if self.id() == NbtCompound::ID {
 			writer.write(&[0x0A, 0x00, 0x00]);
 		}
 		self.to_bytes(&mut writer);
-
-		// #[cfg(debug_assertions)]
-		println!(
-			"{}ms for file write",
-			start.elapsed().as_nanos() as f64 / 1_000_000.0
-		);
 		writer.finish()
 	}
 
 	#[inline]
 	#[must_use]
 	pub fn from_mca(bytes: &[u8]) -> Option<Self> {
-		// #[cfg(debug_assertions)]
-		// let start = std::time::Instant::now();
-
-		// #[cfg(debug_assertions)]
-		// println!("{}ms for file read", start.elapsed().as_nanos() as f64 / 1_000_000.0);
 		NbtRegion::from_bytes(bytes).map(Self::Region)
 	}
 
@@ -916,6 +892,7 @@ impl NbtElement {
 		}
 	}
 
+	#[cfg(not(target_arch = "wasm32"))]
 	#[inline]
 	pub fn expand<'a, 'b>(&'b mut self, scope: &'a Scope<'a, 'b>) {
 		unsafe {
@@ -925,6 +902,21 @@ impl NbtElement {
 				NbtCompound::ID => self.compound.expand(scope),
 				NbtChunk::ID => self.chunk.expand(scope),
 				NbtRegion::ID => self.region.expand(scope),
+				_ => {}
+			}
+		}
+	}
+
+	#[cfg(target_arch = "wasm32")]
+	#[inline]
+	pub fn expand(&mut self) {
+		unsafe {
+			match self.id() {
+				NbtByteArray::ID | NbtIntArray::ID | NbtLongArray::ID => self.byte_array.expand(),
+				NbtList::ID => self.list.expand(),
+				NbtCompound::ID => self.compound.expand(),
+				NbtChunk::ID => self.chunk.expand(),
+				NbtRegion::ID => self.region.expand(),
 				_ => {}
 			}
 		}
@@ -1027,52 +1019,63 @@ impl NbtElement {
 				NbtByte::ID => &[
 					ElementAction::CopyRaw,
 					ElementAction::CopyFormatted,
+					#[cfg(not(target_arch = "wasm32"))]
 					ElementAction::OpenInTxt,
 				],
 				NbtShort::ID => &[
 					ElementAction::CopyRaw,
 					ElementAction::CopyFormatted,
+					#[cfg(not(target_arch = "wasm32"))]
 					ElementAction::OpenInTxt,
 				],
 				NbtInt::ID => &[
 					ElementAction::CopyRaw,
 					ElementAction::CopyFormatted,
+					#[cfg(not(target_arch = "wasm32"))]
 					ElementAction::OpenInTxt,
 				],
 				NbtLong::ID => &[
 					ElementAction::CopyRaw,
 					ElementAction::CopyFormatted,
+					#[cfg(not(target_arch = "wasm32"))]
 					ElementAction::OpenInTxt,
 				],
 				NbtFloat::ID => &[
 					ElementAction::CopyRaw,
 					ElementAction::CopyFormatted,
+					#[cfg(not(target_arch = "wasm32"))]
 					ElementAction::OpenInTxt,
 				],
 				NbtDouble::ID => &[
 					ElementAction::CopyRaw,
 					ElementAction::CopyFormatted,
+					#[cfg(not(target_arch = "wasm32"))]
 					ElementAction::OpenInTxt,
 				],
 				NbtByteArray::ID => &[
 					ElementAction::CopyRaw,
 					ElementAction::CopyFormatted,
+					#[cfg(not(target_arch = "wasm32"))]
 					ElementAction::OpenInTxt,
+					#[cfg(not(target_arch = "wasm32"))]
 					ElementAction::OpenArrayInHex,
 				],
 				NbtString::ID => &[
 					ElementAction::CopyRaw,
 					ElementAction::CopyFormatted,
+					#[cfg(not(target_arch = "wasm32"))]
 					ElementAction::OpenInTxt,
 				],
 				NbtList::ID => &[
 					ElementAction::CopyRaw,
 					ElementAction::CopyFormatted,
+					#[cfg(not(target_arch = "wasm32"))]
 					ElementAction::OpenInTxt,
 				],
 				NbtCompound::ID => &[
 					ElementAction::CopyRaw,
 					ElementAction::CopyFormatted,
+					#[cfg(not(target_arch = "wasm32"))]
 					ElementAction::OpenInTxt,
 					ElementAction::SortCompoundByName,
 					ElementAction::SortCompoundByType,
@@ -1080,18 +1083,23 @@ impl NbtElement {
 				NbtIntArray::ID => &[
 					ElementAction::CopyRaw,
 					ElementAction::CopyFormatted,
+					#[cfg(not(target_arch = "wasm32"))]
 					ElementAction::OpenInTxt,
+					#[cfg(not(target_arch = "wasm32"))]
 					ElementAction::OpenArrayInHex,
 				],
 				NbtLongArray::ID => &[
 					ElementAction::CopyRaw,
 					ElementAction::CopyFormatted,
+					#[cfg(not(target_arch = "wasm32"))]
 					ElementAction::OpenInTxt,
+					#[cfg(not(target_arch = "wasm32"))]
 					ElementAction::OpenArrayInHex,
 				],
 				NbtChunk::ID => &[
 					ElementAction::CopyRaw,
 					ElementAction::CopyFormatted,
+					#[cfg(not(target_arch = "wasm32"))]
 					ElementAction::OpenInTxt,
 					ElementAction::SortCompoundByName,
 					ElementAction::SortCompoundByType,
@@ -1099,6 +1107,7 @@ impl NbtElement {
 				NbtRegion::ID => &[
 					ElementAction::CopyRaw,
 					ElementAction::CopyFormatted,
+					#[cfg(not(target_arch = "wasm32"))]
 					ElementAction::OpenInTxt,
 				],
 				_ => core::hint::unreachable_unchecked(),

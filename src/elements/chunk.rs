@@ -140,7 +140,7 @@ impl NbtRegion {
 						pos,
 						region.len(),
 						NbtElement::Chunk(NbtChunk::from_compound(
-							core::mem::transmute(element),
+							element.into_compound_unchecked(),
 							((pos >> 5) as u8 & 31, pos as u8 & 31),
 							format,
 							timestamp,
@@ -643,6 +643,7 @@ impl NbtRegion {
 	}
 
 	#[inline]
+	#[cfg(not(target_arch = "wasm32"))]
 	pub fn expand<'a, 'b>(&'b mut self, scope: &'a Scope<'a, 'b>) {
 		self.open = !self.is_empty();
 		self.height = self.true_height;
@@ -662,6 +663,16 @@ impl NbtRegion {
 					element.expand(scope);
 				}
 			});
+		}
+	}
+
+	#[inline]
+	#[cfg(target_arch = "wasm32")]
+	pub fn expand(&mut self) {
+		self.open = !self.is_empty();
+		self.height = self.true_height;
+		for element in self.children_mut() {
+			element.expand();
 		}
 	}
 

@@ -16,7 +16,7 @@ wgsl! {
 	}
 
 	@vertex
-	fn vs_main(input: VertexInput) -> VertexOutput {
+	fn v(input: VertexInput) -> VertexOutput {
 		var output: VertexOutput;
 		output.tex_coords = input.tex_coords;
 		output.clip_position = vec4<f32>(input.position, 1.0);
@@ -32,12 +32,39 @@ wgsl! {
 	var s_diffuse: sampler;
 
 	@fragment
-	fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
+	fn f(input: VertexOutput) -> @location(0) vec4<f32> {
 		var out = textureSample(t_diffuse, s_diffuse, input.tex_coords);
 		if (out[3] == 0.0) {
-		   discard;
-		} else {
-			return out;
+		    discard;
 		}
+
+		// to srgb
+		var x: f32 = out.x;
+		if (x <= 0.0031308) {
+			x = x * 12.92;
+		} else {
+			x = 1.055 * pow(x, 0.416666667) - 0.055;
+		}
+
+		var y: f32 = out.y;
+		if (y <= 0.0031308) {
+			y = y * 12.92;
+		} else {
+			y = 1.055 * pow(y, 0.416666667) - 0.055;
+		}
+
+		var z: f32 = out.z;
+		if (z <= 0.0031308) {
+			z = z * 12.92;
+		} else {
+			z = 1.055 * pow(z, 0.416666667) - 0.055;
+		}
+
+		return vec4<f32>(
+			x,
+			y,
+			z,
+			out.w,
+		);
 	}
 }

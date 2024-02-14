@@ -1,14 +1,13 @@
-use std::convert::identity;
 use std::fmt::Write;
 use std::intrinsics::{likely, unlikely};
-use std::time::{Duration, SystemTime, SystemTimeError};
+use std::time::Duration;
 
 use winit::keyboard::KeyCode;
 
 use crate::assets::{BASE_TEXT_Z, ELEMENT_HIGHLIGHT_Z, HEADER_SIZE, SELECTED_TEXT_Z, SELECTION_UV};
 use crate::selected_text::KeyResult::{Down, Failed, Finish, ForceClose, ForceOpen, Keyfix, NothingSpecial, Revert, ShiftDown, ShiftUp, Up, Valuefix};
 use crate::vertex_buffer_builder::VertexBufferBuilder;
-use crate::{flags, is_jump_char_boundary, is_utf8_char_boundary, LinkedQueue, OptionExt, StrExt};
+use crate::{flags, get_clipboard, is_jump_char_boundary, is_utf8_char_boundary, LinkedQueue, OptionExt, set_clipboard, since_epoch, StrExt};
 
 #[derive(Clone, Debug)]
 #[allow(clippy::module_name_repetitions)] // yeah no it's better like this
@@ -38,7 +37,7 @@ pub struct SelectedText {
 	pub suffix: String,
 	pub valuefix: Option<String>,
 	pub editable: bool,
-	pub last_interaction: SystemTime,
+	pub last_interaction: Duration,
 	pub undos: LinkedQueue<SelectedTextCache>,
 	pub redos: LinkedQueue<SelectedTextCache>,
 }
@@ -94,7 +93,7 @@ impl SelectedText {
 							suffix,
 							valuefix,
 							editable: true,
-							last_interaction: SystemTime::now(),
+							last_interaction: since_epoch(),
 							undos: LinkedQueue::new(),
 							redos: LinkedQueue::new(),
 						}
@@ -124,7 +123,7 @@ impl SelectedText {
 							suffix,
 							valuefix,
 							editable: true,
-							last_interaction: SystemTime::now(),
+							last_interaction: since_epoch(),
 							undos: LinkedQueue::new(),
 							redos: LinkedQueue::new(),
 						}
@@ -155,7 +154,7 @@ impl SelectedText {
 								suffix,
 								valuefix,
 								editable: true,
-								last_interaction: SystemTime::now(),
+								last_interaction: since_epoch(),
 								undos: LinkedQueue::new(),
 								redos: LinkedQueue::new(),
 							}
@@ -198,7 +197,7 @@ impl SelectedText {
 							suffix: String::new(),
 							valuefix: None,
 							editable: true,
-							last_interaction: SystemTime::now(),
+							last_interaction: since_epoch(),
 							undos: LinkedQueue::new(),
 							redos: LinkedQueue::new(),
 						}
@@ -231,7 +230,7 @@ impl SelectedText {
 							suffix: String::new(),
 							valuefix: None,
 							editable: true,
-							last_interaction: SystemTime::now(),
+							last_interaction: since_epoch(),
 							undos: LinkedQueue::new(),
 							redos: LinkedQueue::new(),
 						}
@@ -262,7 +261,7 @@ impl SelectedText {
 								suffix: String::new(),
 								valuefix: None,
 								editable: true,
-								last_interaction: SystemTime::now(),
+								last_interaction: since_epoch(),
 								undos: LinkedQueue::new(),
 								redos: LinkedQueue::new(),
 							}
@@ -297,7 +296,7 @@ impl SelectedText {
 					suffix: String::new(),
 					valuefix: value.map(|(x, _)| x.into_string()),
 					editable: false,
-					last_interaction: SystemTime::now(),
+					last_interaction: since_epoch(),
 					undos: LinkedQueue::new(),
 					redos: LinkedQueue::new(),
 				}
@@ -325,11 +324,7 @@ impl SelectedText {
 	}
 
 	pub fn handle_history(&mut self) {
-		let should_cache = core::mem::replace(&mut self.last_interaction, SystemTime::now())
-			.elapsed()
-			.map_err(|e| e.duration())
-			.unwrap_or_else(identity)
-			.as_millis() >= 1_500;
+		let should_cache = core::mem::replace(&mut self.last_interaction, since_epoch()).as_millis() >= 1_500;
 		if should_cache && self.editable && self.undos.get().is_none_or(|x| x.ne(self)) {
 			if self.redos.pop().is_none_or(|x| x.ne(self)) {
 				self.redos = LinkedQueue::new();
@@ -384,7 +379,7 @@ impl SelectedText {
 				cursor: core::mem::replace(&mut self.cursor, cursor),
 				selection: core::mem::replace(&mut self.selection, selection),
 			});
-			self.last_interaction = SystemTime::UNIX_EPOCH;
+			self.last_interaction = Duration::ZERO;
 			return NothingSpecial;
 		}
 
@@ -411,7 +406,7 @@ impl SelectedText {
 				cursor: core::mem::replace(&mut self.cursor, cursor),
 				selection: core::mem::replace(&mut self.selection, selection),
 			});
-			self.last_interaction = SystemTime::UNIX_EPOCH;
+			self.last_interaction = Duration::ZERO;
 			return NothingSpecial;
 		}
 
@@ -450,7 +445,7 @@ impl SelectedText {
 				};
 				let (low, right) = self.value.split_at(start);
 				let (cut, high) = right.split_at(end - start);
-				if cli_clipboard::set_contents(cut.to_owned()).is_ok() {
+				if set_clipboard(cut.to_owned()) {
 					self.value = format!("{low}{high}");
 					self.selection = None;
 				}
@@ -467,13 +462,13 @@ impl SelectedText {
 				};
 				let (_, right) = self.value.split_at(start);
 				let (cut, _) = right.split_at(end - start);
-				let _ = cli_clipboard::set_contents(cut.to_owned()).is_ok();
+				set_clipboard(cut.to_owned());
 				return NothingSpecial;
 			}
 		}
 
 		if key == KeyCode::KeyV && flags == flags!(Ctrl) && self.editable {
-			if let Ok(clipboard) = cli_clipboard::get_contents() {
+			if let Some(clipboard) = get_clipboard() {
 				if let Some(selection) = self.selection.take() {
 					let (start, end) = if self.cursor < selection {
 						(self.cursor, selection)
@@ -813,13 +808,7 @@ impl SelectedText {
 
 		if self.editable {
 			let cursor_prefixing = self.value.split_at(self.cursor).0;
-			let duration_from_last_interaction = self
-				.last_interaction
-				.elapsed()
-				.as_ref()
-				.map_err(SystemTimeError::duration)
-				.cloned()
-				.unwrap_or_else(identity);
+			let duration_from_last_interaction = since_epoch() - self.last_interaction;
 			if let Some(selection) = self.selection
 				&& self.editable
 			{

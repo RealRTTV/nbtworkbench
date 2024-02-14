@@ -1,8 +1,9 @@
 use std::borrow::Cow;
 use std::num::NonZeroU64;
-use std::time::SystemTime;
+use std::time::Duration;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::JsValue;
 
-use pollster::FutureExt;
 use wgpu::util::{BufferInitDescriptor, DeviceExt};
 #[allow(clippy::wildcard_imports)]
 use wgpu::*;
@@ -10,7 +11,10 @@ use winit::dpi::PhysicalSize;
 #[allow(clippy::wildcard_imports)]
 use winit::event::*;
 use winit::event_loop::EventLoop;
+#[cfg(target_os = "windows")]
 use winit::platform::windows::WindowBuilderExtWindows;
+#[cfg(target_arch = "wasm32")]
+use winit::platform::web::WindowExtWebSys;
 use winit::window::{Icon, Window, WindowBuilder};
 use zune_inflate::DeflateOptions;
 
@@ -19,18 +23,17 @@ use crate::assets::HEADER_SIZE;
 use crate::color::TextColor;
 use crate::vertex_buffer_builder::VertexBufferBuilder;
 use crate::workbench::Workbench;
-use crate::{assets, OptionExt, WindowProperties};
+use crate::{assets, log, error, OptionExt, since_epoch, WindowProperties};
 
 pub const WINDOW_HEIGHT: usize = 420;
 pub const WINDOW_WIDTH: usize = 620;
 pub const MIN_WINDOW_HEIGHT: usize = HEADER_SIZE + 16;
 pub const MIN_WINDOW_WIDTH: usize = 520;
 
-pub fn run() -> ! {
+pub async fn run() -> ! {
 	let event_loop = EventLoop::new().expect("Event loop was unconstructable");
-	let window = WindowBuilder::new()
+	let mut builder = WindowBuilder::new()
 		.with_title("NBT Workbench")
-		.with_transparent(std::env::args().any(|x| x.eq("--transparent")))
 		.with_inner_size(PhysicalSize::new(WINDOW_WIDTH as u32, WINDOW_HEIGHT as u32))
 		.with_min_inner_size(PhysicalSize::new(
 			MIN_WINDOW_WIDTH as u32,
@@ -43,14 +46,29 @@ pub fn run() -> ! {
 				assets::ICON_HEIGHT as u32,
 			)
 			.expect("valid format"),
-		))
-		.with_drag_and_drop(true)
-		.build(&event_loop)
-		.expect("Window was constructable");
-	let mut state = State::new(&window);
+		));
+	#[cfg(not(target_arch = "wasm32"))] {
+		builder = builder
+			.with_drag_and_drop(true)
+			.with_transparent(std::env::args().any(|x| x.eq("--transparent")));
+	}
+	let window = builder.build(&event_loop).expect("Window was constructable");
+	#[cfg(target_arch = "wasm32")] {
+		web_sys::window().and_then(|window| {
+			let document = window.document()?;
+			let width = window.inner_width().ok()?.as_f64()?;
+			let height = window.inner_height().ok()?.as_f64()?;
+			Some((document, PhysicalSize::new(width as u32, height as u32)))
+		}).and_then(|(document, size)| {
+			let canvas = web_sys::Element::from(window.canvas()?);
+			document.body()?.append_child(&canvas).ok()?;
+			let _ = window.request_inner_size(size);
+			Some(())
+		}).expect("Couldn't append canvas to document body")
+	}
+	let mut state = State::new(&window).await;
 	let mut window_properties = WindowProperties::new(&window);
 	let mut workbench = Workbench::new(&mut window_properties);
-
 	event_loop.run(|event, _| match event {
 		Event::WindowEvent { event, window_id } if window_id == window.id() => {
 			if !State::input(&event, &mut workbench, &window) {
@@ -60,9 +78,9 @@ pub fn run() -> ! {
 							Ok(()) => {}
 							Err(SurfaceError::Lost) => state.surface.configure(&state.device, &state.config),
 							Err(SurfaceError::OutOfMemory) => std::process::exit(1),
-							Err(SurfaceError::Timeout) => eprintln!("Frame took too long to process"),
+							Err(SurfaceError::Timeout) => error!("Frame took too long to process"),
 							Err(SurfaceError::Outdated) => {
-								eprintln!("Surface changed unexpectedly");
+								error!("Surface changed unexpectedly");
 								std::process::exit(1);
 							}
 						}
@@ -74,14 +92,23 @@ pub fn run() -> ! {
 			}
 		}
 		Event::AboutToWait => {
+			#[cfg(target_arch = "wasm32")] {
+				let old_size = window.inner_size();
+				let new_size: PhysicalSize<u32> = web_sys::window().map(|window| PhysicalSize::new(window.inner_width().ok().as_ref().and_then(JsValue::as_f64).expect("Width must exist") as u32, window.inner_height().ok().as_ref().and_then(JsValue::as_f64).expect("Height must exist") as u32)).expect("Window has dimension properties");
+				if new_size != old_size {
+					let _ = window.request_inner_size(new_size);
+					state.resize(&mut workbench, new_size);
+				}
+			}
+
 			window.request_redraw();
 		}
 		_ => {}
 	}).expect("Event loop failed");
-	std::process::exit(0)
+	loop {}
 }
 
-struct State<'window> {
+pub struct State<'window> {
 	surface: Surface<'window>,
 	device: Device,
 	queue: Queue,
@@ -92,12 +119,12 @@ struct State<'window> {
 	text_render_pipeline: RenderPipeline,
 	unicode_bind_group: BindGroup,
 	load_op: LoadOp<Color>,
-	last_tick: SystemTime,
+	last_tick: Duration,
 }
 
 impl<'window> State<'window> {
 	#[allow(clippy::too_many_lines)] // yeah, but.... what am I supposed to do?
-	fn new(window: &'window Window) -> Self {
+	async fn new(window: &'window Window) -> Self {
 		let size = window.inner_size();
 		let instance = Instance::new(InstanceDescriptor {
 			backends: Backends::all(),
@@ -105,26 +132,24 @@ impl<'window> State<'window> {
 			dx12_shader_compiler: Dx12Compiler::default(),
 			gles_minor_version: Default::default(),
 		});
-		let surface = unsafe {
-			instance
-				.create_surface(window)
-				.ok()
-				.panic_unchecked("all safety guarantees are assured")
-		};
+		let surface = unsafe { instance.create_surface(window).ok().panic_unchecked("all safety guarantees are assured") };
 		let adapter = instance
 			.request_adapter(&RequestAdapterOptions {
 				power_preference: PowerPreference::None,
 				force_fallback_adapter: false,
 				compatible_surface: Some(&surface),
 			})
-			.block_on()
-			.expect("Could obtain adapter");
+			.await
+			.expect("Could not obtain adapter");
 		let (device, queue) = adapter
 			.request_device(
 				&DeviceDescriptor {
 					required_features: adapter.features(),
 					required_limits: if cfg!(target_arch = "wasm32") {
-						Limits::downlevel_webgl2_defaults()
+						Limits {
+							max_storage_buffers_per_shader_stage: 1,
+							..Limits::downlevel_webgl2_defaults()
+						}
 					} else {
 						Limits::default()
 					},
@@ -132,16 +157,17 @@ impl<'window> State<'window> {
 				},
 				None,
 			)
-			.block_on()
+			.await
 			.expect("Could obtain device");
+		let format = dbg!(surface
+			.get_capabilities(&adapter)
+			.formats)
+			.into_iter()
+			.find(|format| !format.is_srgb())
+			.expect("An SRGB format exists");
 		let config = SurfaceConfiguration {
 			usage: TextureUsages::RENDER_ATTACHMENT,
-			format: surface
-				.get_capabilities(&adapter)
-				.formats
-				.into_iter()
-				.find(TextureFormat::is_srgb)
-				.expect("An SRGB format exists"),
+			format,
 			width: size.width,
 			height: size.height,
 			present_mode: PresentMode::AutoVsync,
@@ -240,7 +266,7 @@ impl<'window> State<'window> {
 			layout: Some(&render_pipeline_layout),
 			vertex: VertexState {
 				module: &shader,
-				entry_point: "vs_main",
+				entry_point: "v",
 				buffers: &[VertexBufferLayout {
 					array_stride: 20,
 					step_mode: VertexStepMode::Vertex,
@@ -249,7 +275,7 @@ impl<'window> State<'window> {
 			},
 			fragment: Some(FragmentState {
 				module: &shader,
-				entry_point: "fs_main",
+				entry_point: "f",
 				targets: &[Some(ColorTargetState {
 					format: config.format,
 					blend: Some(BlendState::ALPHA_BLENDING),
@@ -283,7 +309,7 @@ impl<'window> State<'window> {
 			label: Some("Unicode Buffer"),
 			contents: &{
 				// ~5ms with --release
-				#[cfg(debug_assertions)]
+				#[cfg(all(debug_assertions, not(target_arch = "wasm32")))]
 				let start = std::time::Instant::now();
 				let vec = unsafe {
 					zune_inflate::DeflateDecoder::new_with_options(
@@ -294,8 +320,8 @@ impl<'window> State<'window> {
 					.ok()
 					.panic_unchecked("there is no way this fails, otherwise i deserve the ub that comes from this.")
 				};
-				#[cfg(debug_assertions)]
-				println!(
+				#[cfg(all(debug_assertions, not(target_arch = "wasm32")))]
+				log!(
 					"took {}ms to read compressed unicode",
 					start.elapsed().as_nanos() as f64 / 1_000_000.0
 				);
@@ -342,7 +368,7 @@ impl<'window> State<'window> {
 			layout: Some(&text_render_pipeline_payout),
 			vertex: VertexState {
 				module: &text_shader,
-				entry_point: "vs_main",
+				entry_point: "vt",
 				buffers: &[VertexBufferLayout {
 					array_stride: 16,
 					step_mode: VertexStepMode::Vertex,
@@ -351,7 +377,7 @@ impl<'window> State<'window> {
 			},
 			fragment: Some(FragmentState {
 				module: &text_shader,
-				entry_point: "fs_main",
+				entry_point: "ft",
 				targets: &[Some(ColorTargetState {
 					format: config.format,
 					blend: Some(BlendState::ALPHA_BLENDING),
@@ -385,9 +411,9 @@ impl<'window> State<'window> {
 			LoadOp::Load
 		} else {
 			LoadOp::Clear(Color {
-				r: 0.013,
-				g: 0.013,
-				b: 0.013,
+				r: 0.11774103726,
+				g: 0.11774103726,
+				b: 0.11774103726,
 				a: 1.0,
 			})
 		};
@@ -403,7 +429,7 @@ impl<'window> State<'window> {
 			text_render_pipeline,
 			unicode_bind_group,
 			load_op,
-			last_tick: SystemTime::UNIX_EPOCH,
+			last_tick: Duration::ZERO,
 		}
 	}
 
@@ -467,14 +493,10 @@ impl<'window> State<'window> {
 	}
 
 	fn render(&mut self, workbench: &mut Workbench, window: &Window) -> Result<(), SurfaceError> {
-		if self
-			.last_tick
-			.elapsed()
-			.unwrap_or_else(|x| x.duration())
-			.as_millis() >= 25
+		if (since_epoch() - self.last_tick).as_millis() >= 25
 		{
 			workbench.tick();
-			self.last_tick = SystemTime::now();
+			self.last_tick = since_epoch();
 		}
 		if let Err(e) = workbench.try_subscription() {
 			workbench.alert(Alert::new("Error!", TextColor::Red, e.to_string()))
@@ -522,7 +544,7 @@ impl<'window> State<'window> {
 				depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
 					view: &depth_texture_view,
 					depth_ops: Some(Operations {
-						load: LoadOp::Clear(f32::MAX),
+						load: LoadOp::Clear(1.0),
 						store: StoreOp::Store,
 					}),
 					stencil_ops: None,

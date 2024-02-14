@@ -6,7 +6,8 @@ use std::path::PathBuf;
 use crate::assets::{ADD_TAIL_UV, ADD_UV, MOVE_TAIL_UV, MOVE_UV, REMOVE_TAIL_UV, REMOVE_UV, RENAME_TAIL_UV, RENAME_UV, REORDER_TAIL_UV, REORDER_UV, REPLACE_TAIL_UV, REPLACE_UV};
 use crate::elements::element::NbtElement;
 use crate::vertex_buffer_builder::VertexBufferBuilder;
-use crate::{encompasses, encompasses_or_equal, panic_unchecked, Bookmark, FileUpdateSubscription, Position, sum_indices};
+use crate::{encompasses, encompasses_or_equal, FileUpdateSubscription};
+use crate::{panic_unchecked, Bookmark, Position, sum_indices};
 use crate::{Navigate, OptionExt};
 use crate::elements::compound::{CompoundMap, Entry};
 
@@ -83,7 +84,7 @@ impl WorkbenchAction {
 							line_number += 1;
 							let start = bookmarks
 								.binary_search(&Bookmark::new(line_number, 0))
-								.map_or_else(|x| x + 1, std::convert::identity);
+								.map_or_else(|x| x + 1, identity);
 							for bookmark in bookmarks.iter_mut().skip(start) {
 								bookmark.true_line_number += true_height;
 								bookmark.line_number += height;
@@ -120,7 +121,7 @@ impl WorkbenchAction {
 
 				let mut idx = bookmarks
 					.binary_search(&Bookmark::new(line_number, 0))
-					.unwrap_or_else(std::convert::identity);
+					.unwrap_or_else(identity);
 				while let Some(bookmark) = bookmarks.get_mut(idx) {
 					if bookmark.true_line_number - line_number < true_height {
 						let _ = bookmarks.remove(idx);
@@ -232,7 +233,7 @@ impl WorkbenchAction {
 					}
 					let mut idx = bookmarks
 						.binary_search(&Bookmark::new(line_number, 0))
-						.unwrap_or_else(std::convert::identity);
+						.unwrap_or_else(identity);
 					while let Some(bookmark) = bookmarks.get_mut(idx) {
 						if bookmark.true_line_number - line_number < true_height {
 							let _ = bookmarks.remove(idx);
@@ -344,7 +345,7 @@ impl WorkbenchAction {
 
 							let mut idx = bookmarks
 								.binary_search(&Bookmark::new(line_number, 0))
-								.unwrap_or_else(std::convert::identity);
+								.unwrap_or_else(identity);
 							while let Some(bookmark) = bookmarks.get_mut(idx) {
 								if bookmark.line_number < old_true_height + line_number {
 									bookmarks.remove(idx);

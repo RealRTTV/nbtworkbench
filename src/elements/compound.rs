@@ -759,11 +759,22 @@ impl NbtCompound {
 	}
 
 	#[inline]
+	#[cfg(not(target_arch = "wasm32"))]
 	pub fn expand<'a, 'b>(&'b mut self, scope: &'a Scope<'a, 'b>) {
 		self.open = !self.is_empty();
 		self.height = self.true_height;
 		for (_, element) in self.children_mut() {
 			element.expand(scope);
+		}
+	}
+
+	#[inline]
+	#[cfg(target_arch = "wasm32")]
+	pub fn expand(&mut self) {
+		self.open = !self.is_empty();
+		self.height = self.true_height;
+		for (_, element) in self.children_mut() {
+			element.expand();
 		}
 	}
 

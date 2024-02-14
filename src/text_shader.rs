@@ -22,7 +22,7 @@ wgsl! {
 	}
 
 	@vertex
-	fn vs_main(input: VertexInput, @builtin(vertex_index) index: u32) -> VertexOutput {
+	fn vt(input: VertexInput, @builtin(vertex_index) index: u32) -> VertexOutput {
 		var output: VertexOutput;
 		output.clip_position = vec4<f32>(input.position, f32(input.z_and_color & 0xFFu) / 256.0, 1.0);
 		output.character = input.character;
@@ -58,7 +58,7 @@ wgsl! {
 	var<storage> buf: array<u32>;
 
 	@fragment
-	fn fs_main(output: VertexOutput) -> @location(0) vec4<f32> {
+	fn ft(output: VertexOutput) -> @location(0) vec4<f32> {
 		let x = u32(output.uv[0] * 16.0);
 		let y = u32(output.uv[1] * 16.0);
 		let offset = output.character * 32u;
@@ -66,8 +66,7 @@ wgsl! {
 		let a = (((buf[index / 4u] >> ((index % 4u) * 8u)) & 0xFFu) >> (7u - x % 8u)) & 1u;
 		if (a == 0u) {
 			discard;
-		} else {
-			return output.color;
 		}
+		return output.color;
 	}
 }
