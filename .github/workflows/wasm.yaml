@@ -55,5 +55,5 @@ jobs:
           gitHubToken: ${{ secrets.GITHUB_TOKEN }}
           projectName: 'nbtworkbench'
           directory: .
-          workingDirectory: './web'
+          workingDirectory: './nbtworkbench'
           wranglerVersion: 3.28.2
