@@ -22,7 +22,7 @@ jobs:
       - name: Install Wrangler
         run: |
           node -v
-          npx --yes wrangler@3
+          npx --yes wrangler@3.28.2
 
       - name: Install Rustup using win.rustup.rs
         run: |
@@ -54,5 +54,6 @@ jobs:
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           gitHubToken: ${{ secrets.GITHUB_TOKEN }}
           projectName: 'nbtworkbench'
-          directory: './web'
-          wranglerVersion: 3
+          directory: .
+          workingDirectory: './web'
+          wranglerVersion: 3.28.2
