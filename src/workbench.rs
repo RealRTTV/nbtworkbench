@@ -2311,7 +2311,6 @@ impl Workbench {
 					x.id(),
 					((self.mouse_x + horizontal_scroll - left_margin) & !0b1111) + left_margin,
 					((self.mouse_y - HEADER_SIZE) & !0b0111) + HEADER_SIZE,
-					x.true_height(),
 				)
 			})
 		} else {

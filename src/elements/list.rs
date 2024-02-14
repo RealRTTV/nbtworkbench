@@ -255,34 +255,7 @@ impl NbtList {
 			}
 
 			let pos = ctx.pos();
-			if ctx.ghost(
-				ctx.pos() + (16, 16),
-				builder,
-				|x, y| pos + (16, 8) == (x, y),
-				|id| (id != NbtChunk::ID) && (id == self.element || self.is_empty()),
-			) {
-				builder.draw_texture(
-					ctx.pos() + (0, 16),
-					CONNECTION_UV,
-					(16, (self.height() != 1) as usize * 7 + 9),
-				);
-				if !tail {
-					builder.draw_texture(ctx.pos() - (16, 0) + (0, 16), CONNECTION_UV, (8, 16));
-				}
-				ctx.y_offset += 16;
-			} else if self.height() == 1
-				&& ctx.ghost(
-					ctx.pos() + (16, 16),
-					builder,
-					|x, y| pos + (16, 16) == (x, y),
-					|id| (id != NbtChunk::ID) && (id == self.element || self.is_empty()),
-				) {
-				builder.draw_texture(ctx.pos() + (0, 16), CONNECTION_UV, (16, 9));
-				if !tail {
-					builder.draw_texture(ctx.pos() - (16, 0) + (0, 16), CONNECTION_UV, (8, 16));
-				}
-				ctx.y_offset += 16;
-			}
+			if ctx.ghost(ctx.pos() + (16, 16), builder, |x, y| pos + (16, 8) == (x, y), |id| (id != NbtChunk::ID) && (id == self.element || self.is_empty())) {} else if self.height() == 1 && ctx.ghost(ctx.pos() + (16, 16), builder, |x, y| pos + (16, 16) == (x, y), |id| (id != NbtChunk::ID) && (id == self.element || self.is_empty()), ) {}
 
 			ctx.y_offset += 16;
 			y_before += 16;
@@ -306,25 +279,7 @@ impl NbtList {
 				}
 
 				let pos = ctx.pos();
-				if ctx.ghost(
-					ctx.pos(),
-					builder,
-					|x, y| pos == (x, y),
-					|id| (id != NbtChunk::ID) && (id == self.element || self.is_empty()),
-				) {
-					builder.draw_texture(ctx.pos() - (16, 0), CONNECTION_UV, (16, 16));
-					ctx.y_offset += 16;
-				}
-
-				let ghost_tail_mod = if let Some((id, x, y, _)) = ctx.ghost
-					&& (id == self.element || self.is_empty())
-					&& id != NbtChunk::ID
-					&& ctx.pos() + (0, height * 16 - *remaining_scroll * 16 - 8) == (x, y)
-				{
-					false
-				} else {
-					true
-				};
+				ctx.ghost(ctx.pos(), builder, |x, y| pos == (x, y), |id| (id != NbtChunk::ID) && (id == self.element || self.is_empty()));
 
 				if *remaining_scroll == 0 {
 					builder.draw_texture(
@@ -332,7 +287,7 @@ impl NbtList {
 						CONNECTION_UV,
 						(
 							16,
-							(!(idx == self.len() - 1 && ghost_tail_mod)) as usize * 7 + 9,
+							(idx != self.len() - 1) as usize * 7 + 9,
 						),
 					);
 				}
@@ -341,24 +296,12 @@ impl NbtList {
 					remaining_scroll,
 					builder,
 					None,
-					tail && idx == self.len() - 1 && ghost_tail_mod,
+					tail && idx == self.len() - 1,
 					ctx,
 				);
 
 				let pos = ctx.pos();
-				if ctx.ghost(
-					ctx.pos(),
-					builder,
-					|x, y| pos == (x, y + 8),
-					|id| (id != NbtChunk::ID) && (id == self.element || self.is_empty()),
-				) {
-					builder.draw_texture(
-						ctx.pos() - (16, 0),
-						CONNECTION_UV,
-						(16, (idx != self.len() - 1) as usize * 7 + 9),
-					);
-					ctx.y_offset += 16;
-				}
+				ctx.ghost(ctx.pos(), builder, |x, y| pos == (x, y + 8), |id| (id != NbtChunk::ID) && (id == self.element || self.is_empty()));
 			}
 
 			let difference = ctx.y_offset - y_before;

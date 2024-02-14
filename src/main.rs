@@ -43,6 +43,7 @@
 #![feature(stmt_expr_attributes)]
 #![feature(unchecked_math)]
 #![feature(lazy_cell)]
+#![feature(slice_first_last_chunk)]
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 use std::cmp::Ordering;
@@ -59,10 +60,7 @@ use winit::window::Window;
 use elements::element::NbtElement;
 use vertex_buffer_builder::VertexBufferBuilder;
 
-use crate::assets::{
-	BASE_TEXT_Z, BASE_Z, BOOKMARK_UV, BOOKMARK_Z, BYTE_ARRAY_GHOST_UV, BYTE_GHOST_UV, CHUNK_GHOST_UV, COMPOUND_GHOST_UV, DOUBLE_GHOST_UV, END_LINE_NUMBER_SEPARATOR_UV, FLOAT_GHOST_UV, HEADER_SIZE, HIDDEN_BOOKMARK_UV, INT_ARRAY_GHOST_UV, INT_GHOST_UV, INVALID_STRIPE_UV, LINE_NUMBER_SEPARATOR_UV, LINE_NUMBER_Z, LIST_GHOST_UV, LONG_ARRAY_GHOST_UV, LONG_GHOST_UV, REGION_GHOST_UV, SCROLLBAR_BOOKMARK_Z, SELECTED_TOGGLE_OFF_UV, SELECTED_TOGGLE_ON_UV, SHORT_GHOST_UV, STRING_GHOST_UV, TEXT_UNDERLINE_UV,
-	TOGGLE_Z, UNSELECTED_TOGGLE_OFF_UV, UNSELECTED_TOGGLE_ON_UV,
-};
+use crate::assets::{BASE_TEXT_Z, BASE_Z, BOOKMARK_UV, BOOKMARK_Z, BYTE_ARRAY_GHOST_UV, BYTE_GRAYSCALE_UV, CHUNK_GHOST_UV, COMPOUND_GHOST_UV, DOUBLE_GRAYSCALE_UV, END_LINE_NUMBER_SEPARATOR_UV, FLOAT_GRAYSCALE_UV, HEADER_SIZE, HIDDEN_BOOKMARK_UV, INSERTION_UV, INT_ARRAY_GHOST_UV, INT_GRAYSCALE_UV, INVALID_STRIPE_UV, LINE_NUMBER_SEPARATOR_UV, LINE_NUMBER_Z, LIST_GHOST_UV, LONG_ARRAY_GHOST_UV, LONG_GRAYSCALE_UV, REGION_GHOST_UV, SCROLLBAR_BOOKMARK_Z, SELECTED_TOGGLE_OFF_UV, SELECTED_TOGGLE_ON_UV, SHORT_GRAYSCALE_UV, STRING_GHOST_UV, TEXT_UNDERLINE_UV, TOGGLE_Z, UNSELECTED_TOGGLE_OFF_UV, UNSELECTED_TOGGLE_ON_UV};
 use crate::color::TextColor;
 use crate::elements::chunk::{NbtChunk, NbtRegion};
 use crate::elements::compound::NbtCompound;
@@ -466,8 +464,7 @@ pub struct RenderContext {
 	extend_error: bool,
 	invalid_value_error: bool,
 	key_duplicate_error: bool,
-	ghost: Option<(u8, usize, usize, usize)>,
-	ghost_line_number: Option<(usize, usize)>,
+	ghost: Option<(u8, usize, usize)>,
 	left_margin: usize,
 	mouse_x: usize,
 	mouse_y: usize,
@@ -482,7 +479,7 @@ pub struct RenderContext {
 impl RenderContext {
 	#[must_use]
 	#[allow(clippy::type_complexity)] // forbidden is fine to be like that, c'mon
-	pub fn new(selected_y: usize, selected_key: Option<Box<str>>, selected_value: Option<Box<str>>, selecting_key: bool, ghost: Option<(u8, usize, usize, usize)>, left_margin: usize, mouse: (usize, usize)) -> Self {
+	pub fn new(selected_y: usize, selected_key: Option<Box<str>>, selected_value: Option<Box<str>>, selecting_key: bool, ghost: Option<(u8, usize, usize)>, left_margin: usize, mouse: (usize, usize)) -> Self {
 		Self {
 			selecting_key,
 			selected_y,
@@ -500,7 +497,6 @@ impl RenderContext {
 			x_offset: 16 + left_margin,
 			y_offset: HEADER_SIZE,
 			line_numbers: vec![],
-			ghost_line_number: None,
 		}
 	}
 
@@ -626,26 +622,7 @@ impl RenderContext {
 		}
 		let mut y = HEADER_SIZE;
 		for (idx, &render_line_number) in self.line_numbers.iter().enumerate() {
-			let actual_line_number = if let Some((offset, height)) = self.ghost_line_number
-				&& render_line_number > offset
-			{
-				render_line_number - height
-			} else {
-				render_line_number
-			};
-			let next_line_number = self
-				.line_numbers
-				.get(idx + 1)
-				.copied()
-				.map(|next_line_number| {
-					if let Some((offset, height)) = self.ghost_line_number
-						&& next_line_number > offset
-					{
-						next_line_number - height
-					} else {
-						next_line_number
-					}
-				});
+			let next_line_number = self.line_numbers.get(idx + 1).copied();
 
 			let color = if (self.red_line_numbers[0] == y) | (self.red_line_numbers[1] == y) {
 				if idx % 2 == 0 {
@@ -672,12 +649,7 @@ impl RenderContext {
 			let _ = write!(builder, "{render_line_number}");
 			builder.color = color;
 
-			if let Some((&first, rest)) = bookmarks.split_first()
-				&& self
-					.ghost_line_number
-					.is_none_or(|(offset, _)| render_line_number != offset)
-				&& actual_line_number == first.true_line_number
-			{
+			if let Some((&first, rest)) = bookmarks.split_first() && render_line_number == first.true_line_number {
 				bookmarks = rest;
 				builder.draw_texture_region_z(
 					(2, y + 2),
@@ -687,13 +659,7 @@ impl RenderContext {
 					(16, 16),
 				);
 			}
-			while let Some((&first, rest)) = bookmarks.split_first()
-				&& next_line_number.is_none_or(|next_line_number| {
-					self.ghost_line_number
-						.is_none_or(|(offset, _)| next_line_number != offset)
-						&& actual_line_number <= first.true_line_number
-						&& first.true_line_number < next_line_number
-				}) {
+			while let Some((&first, rest)) = bookmarks.split_first() && next_line_number.is_none_or(|next_line_number| render_line_number <= first.true_line_number && first.true_line_number < next_line_number) {
 				bookmarks = rest;
 				builder.draw_texture_region_z(
 					(2, y + 15),
@@ -750,37 +716,12 @@ impl RenderContext {
 		}
 	}
 
-	#[must_use]
 	pub fn ghost<F: FnOnce(usize, usize) -> bool, G: FnOnce(u8) -> bool>(&mut self, pos: impl Into<(usize, usize)>, builder: &mut VertexBufferBuilder, f: F, g: G) -> bool {
 		let (x_offset, y_offset) = pos.into();
-		if self.ghost_line_number.is_none()
-			&& let Some((id, x, y, true_height)) = self.ghost
-			&& f(x, y) && g(id)
-		{
-			builder.draw_texture(
-				(x_offset, y_offset),
-				match id {
-					NbtByte::ID => BYTE_GHOST_UV,
-					NbtShort::ID => SHORT_GHOST_UV,
-					NbtInt::ID => INT_GHOST_UV,
-					NbtLong::ID => LONG_GHOST_UV,
-					NbtFloat::ID => FLOAT_GHOST_UV,
-					NbtDouble::ID => DOUBLE_GHOST_UV,
-					NbtByteArray::ID => BYTE_ARRAY_GHOST_UV,
-					NbtString::ID => STRING_GHOST_UV,
-					NbtList::ID => LIST_GHOST_UV,
-					NbtCompound::ID => COMPOUND_GHOST_UV,
-					NbtIntArray::ID => INT_ARRAY_GHOST_UV,
-					NbtLongArray::ID => LONG_ARRAY_GHOST_UV,
-					NbtChunk::ID => CHUNK_GHOST_UV,
-					NbtRegion::ID => REGION_GHOST_UV,
-					_ => unsafe { panic_unchecked("Invalid element id") },
-				},
-				(16, 16),
-			);
-			self.ghost_line_number = Some((self.line_number, true_height));
-			self.line_number();
-			self.skip_line_numbers(true_height - 1);
+		if let Some((id, x, y)) = self.ghost && f(x, y) && g(id) {
+			let horizontal_scorll_before = core::mem::replace(&mut builder.horizontal_scroll, 0);
+			builder.draw_texture_region_z((self.left_margin, y_offset - 1), BASE_Z, INSERTION_UV, (x_offset + 16 - self.left_margin, 2), (16, 2));
+			builder.horizontal_scroll = horizontal_scorll_before;
 			true
 		} else {
 			false

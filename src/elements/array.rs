@@ -194,34 +194,7 @@ macro_rules! array {
 					}
 
 					let pos = ctx.pos();
-					if ctx.ghost(
-						ctx.pos() + (16, 16),
-						builder,
-						|x, y| pos == (x - 16, y - 8),
-						|id| id == $id,
-					) {
-						builder.draw_texture(
-							ctx.pos() + (0, 16),
-							CONNECTION_UV,
-							(16, (self.height() != 1) as usize * 7 + 9),
-						);
-						if !tail {
-							builder.draw_texture(ctx.pos() - (16, 0) + (0, 16), CONNECTION_UV, (8, 16));
-						}
-						ctx.y_offset += 16;
-					} else if self.height() == 1
-						&& ctx.ghost(
-							ctx.pos() + (16, 16),
-							builder,
-							|x, y| pos == (x - 16, y - 16),
-							|id| id == $id,
-						) {
-						builder.draw_texture(ctx.pos() + (0, 16), CONNECTION_UV, (16, 9));
-						if !tail {
-							builder.draw_texture(ctx.pos() - (16, 0) + (0, 16), CONNECTION_UV, (8, 16));
-						}
-						ctx.y_offset += 16;
-					}
+					if ctx.ghost(ctx.pos() + (16, 16), builder, |x, y| pos == (x - 16, y - 8), |id| id == $id) {} else if self.height() == 1 && ctx.ghost(ctx.pos() + (16, 16), builder, |x, y| pos == (x - 16, y - 16), |id| id == $id) {}
 
 					ctx.y_offset += 16;
 				}
@@ -241,29 +214,14 @@ macro_rules! array {
 						}
 
 						let pos = ctx.pos();
-						if ctx.ghost(ctx.pos(), builder, |x, y| pos == (x, y), |id| id == $id) {
-							builder.draw_texture(ctx.pos() - (16, 0), CONNECTION_UV, (16, 16));
-							if !tail {
-								builder.draw_texture(ctx.pos() - (32, 0), CONNECTION_UV, (8, 16));
-							}
-							ctx.y_offset += 16;
-						}
-
-						let ghost_tail_mod = if let Some((id, x, y, _)) = ctx.ghost
-							&& ctx.pos() + (0, 16 - *remaining_scroll * 16 - 8) == (x, y)
-							&& id == $id
-						{
-							false
-						} else {
-							true
-						};
+						ctx.ghost(ctx.pos(), builder, |x, y| pos == (x, y), |id| id == $id);
 
 						builder.draw_texture(
 							ctx.pos() - (16, 0),
 							CONNECTION_UV,
 							(
 								16,
-								(!(idx == self.len() - 1 && ghost_tail_mod)) as usize * 7 + 9,
+								(idx != self.len() - 1) as usize * 7 + 9,
 							),
 						);
 						if !tail {
@@ -283,17 +241,7 @@ macro_rules! array {
 						ctx.y_offset += 16;
 
 						let pos = ctx.pos();
-						if ctx.ghost(ctx.pos(), builder, |x, y| pos == (x, y + 8), |id| id == $id) {
-							builder.draw_texture(
-								ctx.pos() - (16, 0),
-								CONNECTION_UV,
-								(16, (idx != self.len() - 1) as usize * 7 + 9),
-							);
-							if !tail {
-								builder.draw_texture(ctx.pos() - (32, 0), CONNECTION_UV, (8, 16));
-							}
-							ctx.y_offset += 16;
-						}
+						ctx.ghost(ctx.pos(), builder, |x, y| pos == (x, y + 8), |id| id == $id);
 					}
 
 					ctx.x_offset -= 16;

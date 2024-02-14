@@ -250,30 +250,7 @@ impl NbtCompound {
 			}
 
 			let pos = ctx.pos();
-			if ctx.ghost(
-				ctx.pos() + (16, 16),
-				builder,
-				|x, y| pos + (16, 8) == (x, y),
-				|id| id != NbtChunk::ID,
-			) {
-				builder.draw_texture(
-					ctx.pos() + (0, 16),
-					CONNECTION_UV,
-					(16, (self.height() != 1) as usize * 7 + 9),
-				);
-				ctx.y_offset += 16;
-			}
-
-			if self.height() == 1
-				&& ctx.ghost(
-					ctx.pos() + (16, 16),
-					builder,
-					|x, y| pos + (16, 16) == (x, y),
-					|id| id != NbtChunk::ID,
-				) {
-				builder.draw_texture(ctx.pos() + (0, 16), CONNECTION_UV, (16, 9));
-				ctx.y_offset += 16;
-			}
+			if ctx.ghost(ctx.pos() + (16, 16), builder, |x, y| pos + (16, 8) == (x, y), |id| id != NbtChunk::ID) {} else if self.height() == 1 && ctx.ghost(ctx.pos() + (16, 16), builder, |x, y| pos + (16, 16) == (x, y), |id| id != NbtChunk::ID) {}
 
 			ctx.y_offset += 16;
 		}
@@ -323,24 +300,8 @@ impl NbtCompound {
 					continue;
 				}
 
-				let (gx, gy): (usize, usize) = ctx.pos().into();
-				if ctx.ghost(
-					ctx.pos(),
-					builder,
-					|x, y| x == gx && y == gy,
-					|id| id != NbtChunk::ID,
-				) {
-					builder.draw_texture(ctx.pos() - (16, 0), CONNECTION_UV, (16, 16));
-					ctx.y_offset += 16;
-				}
-
-				let ghost_tail_mod = if let Some((_, x, y, _)) = ctx.ghost
-					&& ctx.pos() + (0, height * 16 - remaining_scroll * 16 - 8) == (x, y)
-				{
-					false
-				} else {
-					true
-				};
+				let pos = ctx.pos();
+				ctx.ghost(ctx.pos(), builder, |x, y| pos == (x, y), |id| id != NbtChunk::ID);
 
 				if remaining_scroll == 0 {
 					builder.draw_texture(
@@ -348,7 +309,7 @@ impl NbtCompound {
 						CONNECTION_UV,
 						(
 							16,
-							(idx != self.len() - 1 || !ghost_tail_mod) as usize * 7 + 9,
+							(idx != self.len() - 1) as usize * 7 + 9,
 						),
 					);
 				}
@@ -360,24 +321,12 @@ impl NbtCompound {
 					&mut remaining_scroll,
 					builder,
 					Some(name),
-					idx == self.len() - 1 && ghost_tail_mod,
+					idx == self.len() - 1,
 					ctx,
 				);
 
 				let pos = ctx.pos();
-				if ctx.ghost(
-					ctx.pos(),
-					builder,
-					|x, y| pos == (x, y + 8),
-					|id| id != NbtChunk::ID,
-				) {
-					builder.draw_texture(
-						ctx.pos() - (16, 0),
-						CONNECTION_UV,
-						(16, (idx != self.len() - 1) as usize * 7 + 9),
-					);
-					ctx.y_offset += 16;
-				}
+				ctx.ghost(ctx.pos(), builder, |x, y| pos == (x, y + 8), |id| id != NbtChunk::ID);
 			}
 		}
 	}
@@ -466,34 +415,7 @@ impl NbtCompound {
 			}
 
 			let pos = ctx.pos();
-			if ctx.ghost(
-				ctx.pos() + (16, 16),
-				builder,
-				|x, y| pos + (16, 8) == (x, y),
-				|id| id != NbtChunk::ID,
-			) {
-				builder.draw_texture(
-					ctx.pos() + (0, 16),
-					CONNECTION_UV,
-					(16, (self.height() != 1) as usize * 7 + 9),
-				);
-				if !tail {
-					builder.draw_texture(ctx.pos() - (16, 0) + (0, 16), CONNECTION_UV, (8, 16));
-				}
-				ctx.y_offset += 16;
-			} else if self.height() == 1
-				&& ctx.ghost(
-					ctx.pos() + (16, 16),
-					builder,
-					|x, y| pos + (16, 16) == (x, y),
-					|id| id != NbtChunk::ID,
-				) {
-				builder.draw_texture(ctx.pos() + (0, 16), CONNECTION_UV, (16, 9));
-				if !tail {
-					builder.draw_texture(ctx.pos() - (16, 0) + (0, 16), CONNECTION_UV, (8, 16));
-				}
-				ctx.y_offset += 16;
-			}
+			if ctx.ghost(ctx.pos() + (16, 16), builder, |x, y| pos + (16, 8) == (x, y), |id| id != NbtChunk::ID) {} else if self.height() == 1 && ctx.ghost(ctx.pos() + (16, 16), builder, |x, y| pos + (16, 16) == (x, y), |id| id != NbtChunk::ID) {}
 
 			ctx.y_offset += 16;
 			y_before += 16;
@@ -547,23 +469,7 @@ impl NbtCompound {
 				}
 
 				let pos = ctx.pos();
-				if ctx.ghost(
-					ctx.pos(),
-					builder,
-					|x, y| pos == (x, y),
-					|id| id != NbtChunk::ID,
-				) {
-					builder.draw_texture(ctx.pos() - (16, 0), CONNECTION_UV, (16, 16));
-					ctx.y_offset += 16;
-				}
-
-				let ghost_tail_mod = if let Some((_, x, y, _)) = ctx.ghost
-					&& ctx.pos() + (0, height * 16 - *remaining_scroll * 16 - 8) == (x, y)
-				{
-					false
-				} else {
-					true
-				};
+				ctx.ghost(ctx.pos(), builder, |x, y| pos == (x, y), |id| id != NbtChunk::ID);
 
 				if *remaining_scroll == 0 {
 					builder.draw_texture(
@@ -571,7 +477,7 @@ impl NbtCompound {
 						CONNECTION_UV,
 						(
 							16,
-							(idx != self.len() - 1 || !ghost_tail_mod) as usize * 7 + 9,
+							(idx != self.len() - 1) as usize * 7 + 9,
 						),
 					);
 				}
@@ -583,24 +489,12 @@ impl NbtCompound {
 					remaining_scroll,
 					builder,
 					Some(key),
-					tail && idx == self.len() - 1 && ghost_tail_mod,
+					tail && idx == self.len() - 1,
 					ctx,
 				);
 
 				let pos = ctx.pos();
-				if ctx.ghost(
-					ctx.pos(),
-					builder,
-					|x, y| pos == (x, y + 8),
-					|id| id != NbtChunk::ID,
-				) {
-					builder.draw_texture(
-						ctx.pos() - (16, 0),
-						CONNECTION_UV,
-						(16, (idx != self.len() - 1) as usize * 7 + 9),
-					);
-					ctx.y_offset += 16;
-				}
+				ctx.ghost(ctx.pos(), builder, |x, y| pos == (x, y + 8), |id| id != NbtChunk::ID);
 			}
 
 			if !tail {
