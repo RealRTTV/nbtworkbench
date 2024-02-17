@@ -6,10 +6,11 @@ use std::ptr::NonNull;
 
 use compact_str::CompactString;
 
-use crate::assets::{BASE_TEXT_Z, BASE_Z, STRING_UV};
+use crate::assets::{BASE_Z, JUST_OVERLAPPING_BASE_TEXT_Z, STRING_UV};
 use crate::decoder::Decoder;
 use crate::encoder::UncheckedBufWriter;
 use crate::{RenderContext, StrExt, VertexBufferBuilder};
+use crate::color::TextColor;
 
 #[repr(transparent)]
 #[allow(clippy::module_name_repetitions)]
@@ -75,11 +76,13 @@ impl NbtString {
 
 		ctx.render_errors(ctx.pos(), builder);
 		if ctx.forbid(ctx.pos()) {
-			builder.settings(ctx.pos() + (20, 0), false, BASE_TEXT_Z);
-			let _ = match name {
-				Some(x) => write!(builder, "{x}: {}", self.str.as_str()),
-				None => write!(builder, "{}", self.str.as_str()),
-			};
+			builder.settings(ctx.pos() + (20, 0), false, JUST_OVERLAPPING_BASE_TEXT_Z);
+			if let Some(name) = name {
+				builder.color = TextColor::TreeKey.to_raw();
+				let _ = write!(builder, "{name}: ");
+			}
+			builder.color = TextColor::TreeString.to_raw();
+			let _ = write!(builder, "{}", self.str.as_str());
 		}
 
 		ctx.y_offset += 16;

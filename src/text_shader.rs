@@ -28,14 +28,7 @@ wgsl! {
 		output.character = input.character;
 		let raw_color = input.z_and_color >> 8u;
 		var color: vec4<f32> = vec4<f32>(f32((raw_color >> 16u) & 0xFFu) / 255.0, f32((raw_color >> 8u) & 0xFFu) / 255.0, f32((raw_color) & 0xFFu) / 255.0, 1.0);
-		color += 0.055;
-		color /= 1.055;
-		output.color = vec4<f32>(
-			pow(color.x, 2.4),
-			pow(color.y, 2.4),
-			pow(color.z, 2.4),
-			pow(color.w, 2.4),
-		);
+		output.color = color;
 		switch (index % 4u) {
 			case 0u: {
 				output.uv = vec2<f32>(1.0, 0.0);

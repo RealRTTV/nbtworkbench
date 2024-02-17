@@ -186,15 +186,18 @@ macro_rules! array {
 					}
 					ctx.render_errors(ctx.pos(), builder);
 					if ctx.forbid(ctx.pos()) {
-						builder.settings(ctx.pos() + (20, 0), false, 1);
-						let _ = match key {
-							Some(x) => write!(builder, "{x}: {}", self.value()),
-							None => write!(builder, "{}", self.value()),
+						builder.settings(ctx.pos() + (20, 0), false, JUST_OVERLAPPING_BASE_TEXT_Z);
+						if let Some(key) = key {
+							builder.color = TextColor::TreeKey.to_raw();
+							let _ = write!(builder, "{key}: ");
 						};
+
+						builder.color = TextColor::TreeKey.to_raw();
+						let _ = write!(builder, "{}", self.value());
 					}
 
 					let pos = ctx.pos();
-					if ctx.ghost(ctx.pos() + (16, 16), builder, |x, y| pos == (x - 16, y - 8), |id| id == $id) {} else if self.height() == 1 && ctx.ghost(ctx.pos() + (16, 16), builder, |x, y| pos == (x - 16, y - 16), |id| id == $id) {}
+					if ctx.draw_held_entry_bar(ctx.pos() + (16, 16), builder, |x, y| pos == (x - 16, y - 8), |id| id == $id) {} else if self.height() == 1 && ctx.draw_held_entry_bar(ctx.pos() + (16, 16), builder, |x, y| pos == (x - 16, y - 16), |id| id == $id) {}
 
 					ctx.y_offset += 16;
 				}
@@ -214,7 +217,7 @@ macro_rules! array {
 						}
 
 						let pos = ctx.pos();
-						ctx.ghost(ctx.pos(), builder, |x, y| pos == (x, y), |id| id == $id);
+						ctx.draw_held_entry_bar(ctx.pos(), builder, |x, y| pos == (x, y), |id| id == $id);
 
 						builder.draw_texture(
 							ctx.pos() - (16, 0),
@@ -235,13 +238,14 @@ macro_rules! array {
 						let str = Self::transmute(element).to_compact_string();
 						if ctx.forbid(ctx.pos()) {
 							builder.settings(ctx.pos() + (20, 0), false, 1);
+							builder.color = TextColor::TreePrimitive.to_raw();
 							let _ = write!(builder, "{str}");
 						}
 
 						ctx.y_offset += 16;
 
 						let pos = ctx.pos();
-						ctx.ghost(ctx.pos(), builder, |x, y| pos == (x, y + 8), |id| id == $id);
+						ctx.draw_held_entry_bar(ctx.pos(), builder, |x, y| pos == (x, y + 8), |id| id == $id);
 					}
 
 					ctx.x_offset -= 16;

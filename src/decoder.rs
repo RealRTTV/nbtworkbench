@@ -22,7 +22,8 @@ impl Decoder {
 	#[optimize(speed)]
 	#[must_use]
 	pub fn assert_len(&self, remaining_len: usize) -> Option<()> {
-		if unsafe { likely((self.data.add(remaining_len) as usize) < self.end as usize) } {
+		// <= end because it will read *until* that byte
+		if unsafe { likely((self.data.add(remaining_len) as usize) <= self.end as usize) } {
 			Some(())
 		} else {
 			None

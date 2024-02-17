@@ -34,11 +34,14 @@ macro_rules! primitive {
 				ctx.render_errors(ctx.pos(), builder);
 				let str = $compact_format(self.value);
 				if ctx.forbid(ctx.pos()) {
-					builder.settings(ctx.pos() + (20, 0), false, 1);
-					let _ = match name {
-						Some(x) => write!(builder, "{x}: {str}"),
-						None => write!(builder, "{str}"),
+					builder.settings(ctx.pos() + (20, 0), false, JUST_OVERLAPPING_BASE_TEXT_Z);
+					if let Some(key) = name {
+						builder.color = TextColor::TreeKey.to_raw();
+						let _ = write!(builder, "{key}: ");
 					};
+
+					builder.color = TextColor::TreePrimitive.to_raw();
+					let _ = write!(builder, "{str}");
 				}
 
 				ctx.y_offset += 16;

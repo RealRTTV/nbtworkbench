@@ -11,12 +11,13 @@ use compact_str::{format_compact, CompactString, ToCompactString};
 use fxhash::FxHasher;
 use hashbrown::raw::RawTable;
 
-use crate::assets::{BASE_TEXT_Z, BASE_Z, COMPOUND_ROOT_UV, COMPOUND_UV, CONNECTION_UV, HEADER_SIZE, LINE_NUMBER_CONNECTOR_Z, LINE_NUMBER_SEPARATOR_UV};
+use crate::assets::{JUST_OVERLAPPING_BASE_TEXT_Z, BASE_Z, COMPOUND_ROOT_UV, COMPOUND_UV, CONNECTION_UV, HEADER_SIZE, LINE_NUMBER_CONNECTOR_Z, LINE_NUMBER_SEPARATOR_UV};
 use crate::decoder::Decoder;
 use crate::elements::chunk::NbtChunk;
 use crate::elements::element::NbtElement;
 use crate::encoder::UncheckedBufWriter;
 use crate::{Bookmark, DropFn, OptionExt, RenderContext, StrExt, VertexBufferBuilder};
+use crate::color::TextColor;
 
 #[allow(clippy::module_name_repetitions)]
 #[repr(C)]
@@ -245,12 +246,15 @@ impl NbtCompound {
 			}
 			ctx.render_errors(ctx.pos(), builder);
 			if ctx.forbid(ctx.pos()) {
-				builder.settings(ctx.pos() + (20, 0), false, BASE_TEXT_Z);
-				let _ = write!(builder, "{} [{}]", str, self.value());
+				builder.settings(ctx.pos() + (20, 0), false, JUST_OVERLAPPING_BASE_TEXT_Z);
+				builder.color = TextColor::TreeKey.to_raw();
+				let _ = write!(builder, "{str} ");
+				builder.color = TextColor::TreeKey.to_raw();
+				let _ = write!(builder, "[{}]", self.value());
 			}
 
 			let pos = ctx.pos();
-			if ctx.ghost(ctx.pos() + (16, 16), builder, |x, y| pos + (16, 8) == (x, y), |id| id != NbtChunk::ID) {} else if self.height() == 1 && ctx.ghost(ctx.pos() + (16, 16), builder, |x, y| pos + (16, 16) == (x, y), |id| id != NbtChunk::ID) {}
+			if ctx.draw_held_entry_bar(ctx.pos() + (16, 16), builder, |x, y| pos + (16, 8) == (x, y), |id| id != NbtChunk::ID) {} else if self.height() == 1 && ctx.draw_held_entry_bar(ctx.pos() + (16, 16), builder, |x, y| pos + (16, 16) == (x, y), |id| id != NbtChunk::ID) {}
 
 			ctx.y_offset += 16;
 		}
@@ -301,7 +305,7 @@ impl NbtCompound {
 				}
 
 				let pos = ctx.pos();
-				ctx.ghost(ctx.pos(), builder, |x, y| pos == (x, y), |id| id != NbtChunk::ID);
+				ctx.draw_held_entry_bar(ctx.pos(), builder, |x, y| pos == (x, y), |id| id != NbtChunk::ID);
 
 				if remaining_scroll == 0 {
 					builder.draw_texture(
@@ -326,7 +330,7 @@ impl NbtCompound {
 				);
 
 				let pos = ctx.pos();
-				ctx.ghost(ctx.pos(), builder, |x, y| pos == (x, y + 8), |id| id != NbtChunk::ID);
+				ctx.draw_held_entry_bar(ctx.pos(), builder, |x, y| pos == (x, y + 8), |id| id != NbtChunk::ID);
 			}
 		}
 	}
@@ -407,15 +411,18 @@ impl NbtCompound {
 			}
 			ctx.render_errors(ctx.pos(), builder);
 			if ctx.forbid(ctx.pos()) {
-				builder.settings(ctx.pos() + (20, 0), false, BASE_TEXT_Z);
-				let _ = match name {
-					Some(x) => write!(builder, "{x}: {}", self.value()),
-					None => write!(builder, "{}", self.value()),
+				builder.settings(ctx.pos() + (20, 0), false, JUST_OVERLAPPING_BASE_TEXT_Z);
+				if let Some(key) = name {
+					builder.color = TextColor::TreeKey.to_raw();
+					let _ = write!(builder, "{key}: ");
 				};
+
+				builder.color = TextColor::TreeKey.to_raw();
+				let _ = write!(builder, "{}", self.value());
 			}
 
 			let pos = ctx.pos();
-			if ctx.ghost(ctx.pos() + (16, 16), builder, |x, y| pos + (16, 8) == (x, y), |id| id != NbtChunk::ID) {} else if self.height() == 1 && ctx.ghost(ctx.pos() + (16, 16), builder, |x, y| pos + (16, 16) == (x, y), |id| id != NbtChunk::ID) {}
+			if ctx.draw_held_entry_bar(ctx.pos() + (16, 16), builder, |x, y| pos + (16, 8) == (x, y), |id| id != NbtChunk::ID) {} else if self.height() == 1 && ctx.draw_held_entry_bar(ctx.pos() + (16, 16), builder, |x, y| pos + (16, 16) == (x, y), |id| id != NbtChunk::ID) {}
 
 			ctx.y_offset += 16;
 			y_before += 16;
@@ -469,7 +476,7 @@ impl NbtCompound {
 				}
 
 				let pos = ctx.pos();
-				ctx.ghost(ctx.pos(), builder, |x, y| pos == (x, y), |id| id != NbtChunk::ID);
+				ctx.draw_held_entry_bar(ctx.pos(), builder, |x, y| pos == (x, y), |id| id != NbtChunk::ID);
 
 				if *remaining_scroll == 0 {
 					builder.draw_texture(
@@ -494,7 +501,7 @@ impl NbtCompound {
 				);
 
 				let pos = ctx.pos();
-				ctx.ghost(ctx.pos(), builder, |x, y| pos == (x, y + 8), |id| id != NbtChunk::ID);
+				ctx.draw_held_entry_bar(ctx.pos(), builder, |x, y| pos == (x, y + 8), |id| id != NbtChunk::ID);
 			}
 
 			if !tail {
@@ -766,7 +773,7 @@ impl CompoundMap {
 				}
 				Err(slot) => {
 					let len = self.entries.len();
-					self.entries.try_reserve_exact(1).unwrap_unchecked();
+					self.entries.try_reserve(1).unwrap_unchecked();
 					self.entries.as_mut_ptr().add(len).write(Entry {
 						key,
 						value: element,
@@ -909,10 +916,11 @@ impl CompoundMap {
 	}
 
 	pub fn swap(&mut self, a: usize, b: usize) {
-		if a < self.entries.len() && b < self.entries.len() { return }
+		if a >= self.entries.len() || b >= self.entries.len() { return; }
 		unsafe {
 			let a_hash = self.entries.get_unchecked(a).hash;
 			let b_hash = self.entries.get_unchecked(b).hash;
+			self.entries.swap(a, b);
 			let a = self
 				.indices
 				.get_mut(a_hash, |&idx| idx == a)

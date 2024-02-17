@@ -127,6 +127,7 @@ impl VertexBufferBuilder {
 		use core::fmt::Write;
 
 		let (mut x, y) = pos.into();
+		let y = y + 16;
 		let text_width = text.iter().map(|x| x.width()).max().unwrap_or(0);
 		if x + text_width + 3 >= self.window_width() {
 			x = self.window_width().saturating_sub(text_width + 3);

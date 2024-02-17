@@ -1,4 +1,4 @@
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum TextColor {
 	Black,
 	DarkBlue,
@@ -16,6 +16,9 @@ pub enum TextColor {
 	LightPurple,
 	Yellow,
 	White,
+	TreeString,
+	TreeKey,
+	TreePrimitive,
 }
 
 impl TextColor {
@@ -37,6 +40,9 @@ impl TextColor {
 			Self::LightPurple => 0xFF55FF,
 			Self::Yellow => 0xFFFF55,
 			Self::White => 0xFFFFFF,
+			Self::TreeString => 0x7FE9AC,
+			Self::TreeKey => 0x6EADE2,
+			Self::TreePrimitive => 0xD19A66,
 		}
 	}
 }

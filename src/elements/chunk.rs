@@ -8,7 +8,7 @@ use std::thread::Scope;
 use compact_str::{format_compact, CompactString, ToCompactString};
 use zune_inflate::{DeflateDecoder, DeflateOptions};
 
-use crate::assets::{BASE_TEXT_Z, BASE_Z, CHUNK_UV, CONNECTION_UV, HEADER_SIZE, LINE_NUMBER_CONNECTOR_Z, LINE_NUMBER_SEPARATOR_UV, REGION_UV};
+use crate::assets::{JUST_OVERLAPPING_BASE_TEXT_Z, BASE_Z, CHUNK_UV, CONNECTION_UV, HEADER_SIZE, LINE_NUMBER_CONNECTOR_Z, LINE_NUMBER_SEPARATOR_UV, REGION_UV};
 use crate::elements::compound::NbtCompound;
 use crate::elements::element::NbtElement;
 use crate::elements::list::{ValueIterator, ValueMutIterator};
@@ -16,6 +16,7 @@ use crate::encoder::UncheckedBufWriter;
 use crate::tab::FileFormat;
 use crate::vertex_buffer_builder::VertexBufferBuilder;
 use crate::{DropFn, RenderContext, StrExt};
+use crate::color::TextColor;
 
 #[repr(C)]
 pub struct NbtRegion {
@@ -76,11 +77,11 @@ impl NbtRegion {
 
 	#[must_use]
 	pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
-		fn parse(offset: u32, bytes: &[u8]) -> Option<(FileFormat, NbtElement)> {
-			if offset < 512 { return Some((FileFormat::Zlib, unsafe { core::mem::zeroed() })) }
+		fn parse(raw: u32, bytes: &[u8]) -> Option<(FileFormat, NbtElement)> {
+			if raw < 512 { return Some((FileFormat::Zlib, unsafe { core::mem::zeroed() })) }
 
-			let len = (offset as usize & 0xFF) * 4096;
-			let offset = ((offset >> 8) - 2) as usize * 4096;
+			let len = (raw as usize & 0xFF) * 4096;
+			let offset = ((raw >> 8) - 2) as usize * 4096;
 			if bytes.len() < offset + len { return None }
 			let data = &bytes[offset..(offset + len)];
 
@@ -106,6 +107,7 @@ impl NbtRegion {
 						)?,
 					),
 					3 => (FileFormat::Nbt, NbtElement::from_file(data)?),
+					4 => (FileFormat::ChunkLz4, NbtElement::from_file(&lz4_flex::decompress(data, data.len()).ok()?)?),
 					_ => return None,
 				};
 				if element.id() != NbtCompound::ID { return None }
@@ -117,12 +119,14 @@ impl NbtRegion {
 
 		if bytes.len() < 8192 { return None }
 
-		std::thread::scope(move |s| {
+		#[cfg(not(target_arch = "wasm32"))]
+		return std::thread::scope(|s| {
 			let mut region = Self::new();
 
 			let (&offsets, bytes) = bytes.split_first_chunk::<4096>()?;
 			let (&timestamps, bytes) = bytes.split_first_chunk::<4096>()?;
-			let mut threads = Vec::new();
+			let mut threads = Vec::with_capacity(1024);
+
 
 			for (&offset, &timestamp) in offsets
 				.array_chunks::<4>()
@@ -133,24 +137,68 @@ impl NbtRegion {
 				threads.push((timestamp, s.spawn(move || parse(offset, bytes))));
 			}
 
-			unsafe {
-				for (pos, (timestamp, thread)) in threads.into_iter().enumerate() {
-					let (format, element) = thread.join().ok()??;
-					region.insert_unchecked(
-						pos,
-						region.len(),
-						NbtElement::Chunk(NbtChunk::from_compound(
-							element.into_compound_unchecked(),
-							((pos >> 5) as u8 & 31, pos as u8 & 31),
-							format,
-							timestamp,
-						)),
-					);
+
+			for (pos, (timestamp, thread)) in threads.into_iter().enumerate() {
+				let (format, element) = thread.join().ok()??;
+				if element.id() == NbtCompound::ID {
+					unsafe {
+						region.insert_unchecked(
+							pos,
+							region.len(),
+							NbtElement::Chunk(NbtChunk::from_compound(
+								core::mem::transmute(element),
+								((pos >> 5) as u8 & 31, pos as u8 & 31),
+								format,
+								timestamp,
+							)),
+						);
+					}
 				}
 			}
 
 			Some(region)
-		})
+		});
+
+		#[cfg(target_arch = "wasm32")]
+		return {
+			let mut region = Self::new();
+
+			let (&offsets, bytes) = bytes.split_first_chunk::<4096>()?;
+			let (&timestamps, bytes) = bytes.split_first_chunk::<4096>()?;
+			let mut threads = Vec::with_capacity(1024);
+
+
+			for (&offset, &timestamp) in offsets
+				.array_chunks::<4>()
+				.zip(timestamps.array_chunks::<4>())
+			{
+				let timestamp = u32::from_be_bytes(timestamp);
+				let offset = u32::from_be_bytes(offset);
+				threads.push((timestamp, parse(offset, bytes)));
+			}
+
+
+			for (pos, (timestamp, thread)) in threads.into_iter().enumerate() {
+				let (format, element) = thread?;
+				if element.id() == NbtCompound::ID {
+					unsafe {
+						region.insert_unchecked(
+							pos,
+							region.len(),
+							NbtElement::Chunk(NbtChunk::from_compound(
+								core::mem::transmute_copy(&element),
+								((pos >> 5) as u8 & 31, pos as u8 & 31),
+								format,
+								timestamp,
+							)),
+						);
+					}
+					core::mem::forget(element);
+				}
+			}
+
+			Some(region)
+		};
 	}
 	pub fn to_bytes(&self, writer: &mut UncheckedBufWriter) {
 		unsafe {
@@ -258,7 +306,7 @@ impl NbtRegion {
 		if let Some(chunk) = value.as_chunk_mut() {
 			let mut pos = ((chunk.x as u16) << 5) | (chunk.z as u16);
 			let (map, chunks) = &mut *self.chunks;
-			while !chunks[pos as usize].is_null() && pos < chunks.len() as u16 {
+			while pos < chunks.len() as u16 && !chunks[pos as usize].is_null() {
 				pos += 1;
 			}
 			chunk.x = (pos >> 5) as u8 & 31;
@@ -287,13 +335,7 @@ impl NbtRegion {
 		self.increment(value.height(), value.true_height());
 		let (map, chunks) = &mut *self.chunks;
 		map.insert(idx, pos as u16);
-		unsafe {
-			chunks
-				.as_mut_ptr()
-				.cast::<NbtElement>()
-				.add(pos)
-				.write(value);
-		}
+		unsafe { chunks.as_mut_ptr().cast::<NbtElement>().add(pos).write(value); }
 	}
 
 	#[inline]
@@ -360,12 +402,15 @@ impl NbtRegion {
 			}
 			ctx.render_errors(ctx.pos(), builder);
 			if ctx.forbid(ctx.pos()) {
-				builder.settings(ctx.pos() + (20, 0), false, BASE_TEXT_Z);
-				let _ = write!(builder, "{str} [{}]", self.value());
+				builder.settings(ctx.pos() + (20, 0), false, JUST_OVERLAPPING_BASE_TEXT_Z);
+				builder.color = TextColor::TreeKey.to_raw();
+				let _ = write!(builder, "{str} ");
+				builder.color = TextColor::TreeKey.to_raw();
+				let _ = write!(builder, "[{}]", self.value());
 			}
 
 			let pos = ctx.pos();
-			if ctx.ghost(ctx.pos() + (16, 16), builder, |x, y| pos == (x - 16, y - 8), |id| id == NbtChunk::ID) {} else if self.height() == 1 && ctx.ghost(ctx.pos() + (16, 16), builder, |x, y| pos == (x - 16, y - 16), |id| id == NbtChunk::ID) {}
+			if ctx.draw_held_entry_bar(ctx.pos() + (16, 16), builder, |x, y| pos == (x - 16, y - 8), |id| id == NbtChunk::ID) {} else if self.height() == 1 && ctx.draw_held_entry_bar(ctx.pos() + (16, 16), builder, |x, y| pos == (x - 16, y - 16), |id| id == NbtChunk::ID) {}
 
 			ctx.y_offset += 16;
 		}
@@ -430,7 +475,7 @@ impl NbtRegion {
 				}
 
 				let pos = ctx.pos();
-				ctx.ghost(ctx.pos(), builder, |x, y| pos == (x, y), |id| id == NbtChunk::ID);
+				ctx.draw_held_entry_bar(ctx.pos(), builder, |x, y| pos == (x, y), |id| id == NbtChunk::ID);
 
 				if remaining_scroll == 0 {
 					builder.draw_texture(
@@ -456,7 +501,7 @@ impl NbtRegion {
 				);
 
 				let pos = ctx.pos();
-				ctx.ghost(ctx.pos(), builder, |x, y| pos == (x, y + 8), |id| id == NbtChunk::ID);
+				ctx.draw_held_entry_bar(ctx.pos(), builder, |x, y| pos == (x, y + 8), |id| id == NbtChunk::ID);
 			}
 		}
 	}
@@ -713,6 +758,7 @@ impl NbtChunk {
 					FileFormat::Gzip => 1_u8,
 					FileFormat::Zlib => 2_u8,
 					FileFormat::Nbt => 3_u8,
+					FileFormat::ChunkLz4 => 4_u8,
 					_ => core::hint::unreachable_unchecked(),
 				}
 				.to_be_bytes(),
@@ -743,7 +789,6 @@ impl NbtChunk {
 				break 'head;
 			}
 
-			let name = self.value();
 			ctx.line_number();
 			Self::render_icon(ctx.pos(), BASE_Z, builder);
 			if !self.is_empty() {
@@ -751,8 +796,13 @@ impl NbtChunk {
 			}
 			ctx.render_errors(ctx.pos(), builder);
 			if ctx.forbid(ctx.pos()) {
-				builder.settings(ctx.pos() + (20, 0), false, BASE_TEXT_Z);
-				let _ = write!(builder, "{name}");
+				builder.settings(ctx.pos() + (20, 0), false, JUST_OVERLAPPING_BASE_TEXT_Z);
+				builder.color = TextColor::TreePrimitive.to_raw();
+				let _ = write!(builder, "{}", self.x);
+				builder.color = TextColor::TreeKey.to_raw();
+				let _ = write!(builder, ", ");
+				builder.color = TextColor::TreePrimitive.to_raw();
+				let _ = write!(builder, "{}", self.z);
 			}
 
 			ctx.y_offset += 16;

@@ -43,24 +43,28 @@
 #![feature(stmt_expr_attributes)]
 #![feature(unchecked_math)]
 #![feature(lazy_cell)]
-#![feature(slice_first_last_chunk)]
+#![feature(const_collections_with_hasher)]
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
+use std::cell::UnsafeCell;
 use std::cmp::Ordering;
 use std::convert::identity;
 use std::fmt::Write;
+use std::rc::Rc;
+use std::sync::Weak;
 use std::time::Duration;
 
 use compact_str::{CompactString, ToCompactString};
-use static_assertions::const_assert_eq;
+use static_assertions::{const_assert, const_assert_eq};
 #[cfg(target_arch = "wasm32")]
-use wasm_bindgen::prelude::wasm_bindgen;
+use wasm_bindgen::{JsCast, prelude::wasm_bindgen};
 use winit::window::Window;
 
 use elements::element::NbtElement;
 use vertex_buffer_builder::VertexBufferBuilder;
+use crate::alert::Alert;
 
-use crate::assets::{BASE_TEXT_Z, BASE_Z, BOOKMARK_UV, BOOKMARK_Z, BYTE_ARRAY_GHOST_UV, BYTE_GRAYSCALE_UV, CHUNK_GHOST_UV, COMPOUND_GHOST_UV, DOUBLE_GRAYSCALE_UV, END_LINE_NUMBER_SEPARATOR_UV, FLOAT_GRAYSCALE_UV, HEADER_SIZE, HIDDEN_BOOKMARK_UV, INSERTION_UV, INT_ARRAY_GHOST_UV, INT_GRAYSCALE_UV, INVALID_STRIPE_UV, LINE_NUMBER_SEPARATOR_UV, LINE_NUMBER_Z, LIST_GHOST_UV, LONG_ARRAY_GHOST_UV, LONG_GRAYSCALE_UV, REGION_GHOST_UV, SCROLLBAR_BOOKMARK_Z, SELECTED_TOGGLE_OFF_UV, SELECTED_TOGGLE_ON_UV, SHORT_GRAYSCALE_UV, STRING_GHOST_UV, TEXT_UNDERLINE_UV, TOGGLE_Z, UNSELECTED_TOGGLE_OFF_UV, UNSELECTED_TOGGLE_ON_UV};
+use crate::assets::{BASE_TEXT_Z, BASE_Z, BOOKMARK_UV, BOOKMARK_Z, END_LINE_NUMBER_SEPARATOR_UV, HEADER_SIZE, HIDDEN_BOOKMARK_UV, INSERTION_UV, INVALID_STRIPE_UV, LINE_NUMBER_SEPARATOR_UV, LINE_NUMBER_Z, SCROLLBAR_BOOKMARK_Z, SELECTED_TOGGLE_OFF_UV, SELECTED_TOGGLE_ON_UV, TEXT_UNDERLINE_UV, TOGGLE_Z, UNSELECTED_TOGGLE_OFF_UV, UNSELECTED_TOGGLE_ON_UV};
 use crate::color::TextColor;
 use crate::elements::chunk::{NbtChunk, NbtRegion};
 use crate::elements::compound::NbtCompound;
@@ -69,6 +73,7 @@ use crate::elements::list::NbtList;
 use crate::elements::string::NbtString;
 use crate::tree_travel::Navigate;
 use crate::vertex_buffer_builder::Vec2u;
+use crate::workbench::Workbench;
 
 mod alert;
 mod assets;
@@ -178,6 +183,35 @@ macro_rules! debg {
 	};
 }
 
+#[wasm_bindgen(module = "/clipboard.js")]
+#[cfg(target_arch = "wasm32")]
+extern "C" {
+	#[wasm_bindgen(js_name = "getClipboard")]
+	fn get_clipboard() -> Option<String>;
+
+	#[wasm_bindgen(js_name = "onInput")]
+	fn on_input();
+
+	#[wasm_bindgen(js_name = "tryOpenDialog")]
+	fn try_open_dialog();
+
+	#[wasm_bindgen(js_name = "save")]
+	fn save(name: &str, bytes: Vec<u8>);
+}
+
+pub static mut WORKBENCH: UnsafeCell<Workbench> = UnsafeCell::new(Workbench::uninit());
+pub static mut WINDOW_PROPERTIES: UnsafeCell<WindowProperties> = UnsafeCell::new(WindowProperties::new(unsafe { core::mem::transmute::<_, Rc<Window>>(1_usize) }));
+
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn handle_dialog(name: String, bytes: Vec<u8>) {
+	let workbench = unsafe { WORKBENCH.get_mut() };
+
+	if let Err(e) = workbench.on_open_file(name.as_str().as_ref(), bytes, unsafe { WINDOW_PROPERTIES.get_mut() }) {
+		workbench.alert(Alert::new("Error!", TextColor::Red, e.to_string()));
+	}
+}
+
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen(start))]
 #[cfg(target_arch = "wasm32")]
 pub fn wasm_main() {
@@ -194,11 +228,11 @@ pub fn main() -> ! { pollster::block_on(window::run()) }
 /// * render trees using `RenderLine` struct/enum
 /// * make `Bookmarks` struct a thing and add functionality there
 /// # Long Term Goals
-/// * web assembly ver
 /// * smart screen
 /// * wiki page for docs on minecraft's format of stuff
 /// * [chunk](NbtChunk) section rendering
 /// # Minor Features
+/// * save & load for web assembly (and open icon for exe ver)
 /// * gear icon to swap toolbar with settings panel
 ///   * sort entries on file read config
 ///   * make floats either exact or "exact enough"
@@ -246,12 +280,9 @@ impl HeldEntry {
 }
 
 #[must_use]
+#[cfg(not(target_arch = "wasm32"))]
 pub fn get_clipboard() -> Option<String> {
-	#[cfg(not(target_arch = "wasm32"))]
 	return cli_clipboard::get_contents().ok();
-	#[cfg(target_arch = "wasm32")]
-	// return web_sys::window().map(|window| window.navigator()).and_then(|navigator| navigator.clipboard()).and_then(|clipboard| wasm_bindgen_futures::JsFuture::from(clipboard.read_text()).block_on().ok().and_then(|js| js.as_string()));
-	todo!();
 }
 
 pub fn set_clipboard(value: String) -> bool {
@@ -260,6 +291,43 @@ pub fn set_clipboard(value: String) -> bool {
 	#[cfg(target_arch = "wasm32")]
 	return web_sys::window().map(|window| window.navigator()).and_then(|navigator| navigator.clipboard()).map(|clipboard| clipboard.write_text(&value)).is_some();
 }
+
+#[must_use]
+pub fn encode(bytes: &[u8]) -> Vec<u8> {
+	let len = bytes.len();
+	let mut encoded = Vec::with_capacity(((len + 2) / 3) * 4);
+	let mut data = 0_u32;
+	let mut bits = 0_u32;
+	let mut iter = bytes.iter();
+	loop {
+		while bits >= 6 {
+			encoded.push(match (data >> 26_u32) as u8 & 63 {
+				x @ 0..=25 => x + b'A',
+				x @ 26..=51 => x + (b'a' - 26),
+				x @ 52..=61 => x.wrapping_add(b'0'.wrapping_sub(52)),
+				62 => b'+',
+				63 => b'/',
+				// SAFETY: do not change the & 63 without consulting the unsafe assurance
+				_ => unsafe { std::hint::unreachable_unchecked() },
+			});
+			bits -= 6;
+			data <<= 6_u32;
+		}
+		if let Some(&byte) = iter.next() {
+			data |= u32::from(byte) << (24 - bits);
+			bits += 8;
+		} else if bits > 0 {
+			bits = 6;
+		} else {
+			break;
+		}
+	}
+	while encoded.len() % 3 != 0 {
+		encoded.push(b'=');
+	}
+	encoded
+}
+
 
 #[must_use]
 pub fn since_epoch() -> Duration {
@@ -420,12 +488,12 @@ pub const fn is_utf8_char_boundary(x: u8) -> bool { (x as i8) >= -0x40 }
 #[must_use]
 pub fn is_jump_char_boundary(x: u8) -> bool { b" \t\r\n/\\()\"'-.,:;<>~!@#$%^&*|+=[]{}~?|".contains(&x) }
 
-pub struct WindowProperties<'a> {
-	window: &'a Window,
+pub struct WindowProperties {
+	window: Rc<Window>,
 }
 
-impl<'a> WindowProperties<'a> {
-	pub fn new(window: &'a Window) -> Self {
+impl WindowProperties {
+	pub const fn new(window: Rc<Window>) -> Self {
 		Self {
 			window,
 		}
@@ -434,8 +502,18 @@ impl<'a> WindowProperties<'a> {
 	pub fn window_title(&mut self, title: &str) -> &mut Self {
 		self.window.set_title(title);
 		#[cfg(target_arch = "wasm32")]
-		if let Some(window) = web_sys::window() {
-			let _ = window.set_name(title);
+		if let Some(document) = web_sys::window().and_then(|window| window.document()) {
+			let _ = document.set_title(title);
+		}
+		self
+	}
+
+	#[cfg(target_arch = "wasm32")]
+	pub fn focus(&mut self) -> &mut Self {
+		use winit::platform::web::WindowExtWebSys;
+
+		if let Some(canvas) = self.window.canvas() {
+			let _ = canvas.focus();
 		}
 		self
 	}
@@ -683,7 +761,7 @@ impl RenderContext {
 	#[inline]
 	pub fn render_key_value_errors(&mut self, builder: &mut VertexBufferBuilder) {
 		if self.mouse_y < HEADER_SIZE { return }
-		let y = ((self.mouse_y - HEADER_SIZE) & !0b1111) + HEADER_SIZE;
+		let y = ((self.mouse_y - HEADER_SIZE) & !15) + HEADER_SIZE;
 		if self
 			.red_line_numbers
 			.into_iter()
@@ -716,12 +794,10 @@ impl RenderContext {
 		}
 	}
 
-	pub fn ghost<F: FnOnce(usize, usize) -> bool, G: FnOnce(u8) -> bool>(&mut self, pos: impl Into<(usize, usize)>, builder: &mut VertexBufferBuilder, f: F, g: G) -> bool {
+	pub fn draw_held_entry_bar<F: FnOnce(usize, usize) -> bool, G: FnOnce(u8) -> bool>(&mut self, pos: impl Into<(usize, usize)>, builder: &mut VertexBufferBuilder, f: F, g: G) -> bool {
 		let (x_offset, y_offset) = pos.into();
 		if let Some((id, x, y)) = self.ghost && f(x, y) && g(id) {
-			let horizontal_scorll_before = core::mem::replace(&mut builder.horizontal_scroll, 0);
-			builder.draw_texture_region_z((self.left_margin, y_offset - 1), BASE_Z, INSERTION_UV, (x_offset + 16 - self.left_margin, 2), (16, 2));
-			builder.horizontal_scroll = horizontal_scorll_before;
+			builder.draw_texture_region_z((self.left_margin - 2, y_offset - 1), BASE_Z, INSERTION_UV, (x_offset + 18 - self.left_margin, 2), (16, 2));
 			true
 		} else {
 			false
@@ -734,21 +810,22 @@ pub struct LinkedQueue<T> {
 	len: usize,
 }
 
-impl<T: Clone> Clone for LinkedQueue<T> {
-	fn clone(&self) -> Self {
-		Self {
-			tail: self.tail.clone(),
-			len: self.len,
-		}
-	}
-}
-
 // perf enhancement
 impl<T> Drop for LinkedQueue<T> {
 	fn drop(&mut self) {
 		while let Some(box SinglyLinkedNode { value: _, prev }) = self.tail.take() {
 			self.tail = prev;
 		}
+	}
+}
+
+impl<T: Clone> Clone for LinkedQueue<T> {
+	fn clone(&self) -> Self {
+		let mut new = Self::new();
+		for t in self.iter().cloned().collect::<Vec<_>>() {
+			new.push(t);
+		}
+		new
 	}
 }
 
@@ -790,20 +867,35 @@ impl<T> LinkedQueue<T> {
 		}
 		self.len = 0;
 	}
+
+	#[must_use]
+	pub fn iter(&self) -> LinkedQueueIterator<'_, T> {
+		LinkedQueueIterator {
+			tail: &self.tail,
+		}
+	}
+}
+
+pub struct LinkedQueueIterator<'a, T> {
+	tail: &'a Option<Box<SinglyLinkedNode<T>>>,
+}
+
+impl<'a, T> Iterator for LinkedQueueIterator<'a, T> {
+	type Item = &'a T;
+
+	fn next(&mut self) -> Option<Self::Item> {
+		if let Some(SinglyLinkedNode { value, prev }) = self.tail.as_deref() {
+			self.tail = prev;
+			Some(value)
+		} else {
+			None
+		}
+	}
 }
 
 pub struct SinglyLinkedNode<T> {
 	value: T,
 	prev: Option<Box<SinglyLinkedNode<T>>>,
-}
-
-impl<T: Clone> Clone for SinglyLinkedNode<T> {
-	fn clone(&self) -> Self {
-		Self {
-			value: self.value.clone(),
-			prev: self.prev.clone(),
-		}
-	}
 }
 
 #[derive(Copy, Clone, Debug)]
@@ -1105,3 +1197,18 @@ const_assert_eq!(
 	VertexBufferBuilder::CHAR_WIDTH[b':' as usize],
 	VertexBufferBuilder::CHAR_WIDTH[b',' as usize]
 );
+
+const_assert!(core::mem::size_of::<NbtByte>() <= core::mem::size_of::<NbtElement>());
+const_assert!(core::mem::size_of::<NbtShort>() <= core::mem::size_of::<NbtElement>());
+const_assert!(core::mem::size_of::<NbtInt>() <= core::mem::size_of::<NbtElement>());
+const_assert!(core::mem::size_of::<NbtLong>() <= core::mem::size_of::<NbtElement>());
+const_assert!(core::mem::size_of::<NbtFloat>() <= core::mem::size_of::<NbtElement>());
+const_assert!(core::mem::size_of::<NbtDouble>() <= core::mem::size_of::<NbtElement>());
+const_assert!(core::mem::size_of::<NbtString>() <= core::mem::size_of::<NbtElement>());
+const_assert!(core::mem::size_of::<NbtByteArray>() <= core::mem::size_of::<NbtElement>());
+const_assert!(core::mem::size_of::<NbtList>() <= core::mem::size_of::<NbtElement>());
+const_assert!(core::mem::size_of::<NbtCompound>() <= core::mem::size_of::<NbtElement>());
+const_assert!(core::mem::size_of::<NbtIntArray>() <= core::mem::size_of::<NbtElement>());
+const_assert!(core::mem::size_of::<NbtLongArray>() <= core::mem::size_of::<NbtElement>());
+const_assert!(core::mem::size_of::<NbtChunk>() <= core::mem::size_of::<NbtElement>());
+const_assert!(core::mem::size_of::<NbtRegion>() <= core::mem::size_of::<NbtElement>());

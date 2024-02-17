@@ -1,5 +1,7 @@
 use std::borrow::Cow;
+use std::cell::UnsafeCell;
 use std::num::NonZeroU64;
+use std::rc::Rc;
 use std::time::Duration;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::JsValue;
@@ -23,7 +25,7 @@ use crate::assets::HEADER_SIZE;
 use crate::color::TextColor;
 use crate::vertex_buffer_builder::VertexBufferBuilder;
 use crate::workbench::Workbench;
-use crate::{assets, log, error, OptionExt, since_epoch, WindowProperties};
+use crate::{assets, WORKBENCH, WINDOW_PROPERTIES, debg, error, OptionExt, since_epoch, WindowProperties};
 
 pub const WINDOW_HEIGHT: usize = 420;
 pub const WINDOW_WIDTH: usize = 620;
@@ -52,7 +54,7 @@ pub async fn run() -> ! {
 			.with_drag_and_drop(true)
 			.with_transparent(std::env::args().any(|x| x.eq("--transparent")));
 	}
-	let window = builder.build(&event_loop).expect("Window was constructable");
+	let window = Rc::new(builder.build(&event_loop).expect("Window was constructable"));
 	#[cfg(target_arch = "wasm32")]
 	let window_size = {
 		web_sys::window().and_then(|window| {
@@ -70,26 +72,26 @@ pub async fn run() -> ! {
 	#[cfg(not(target_arch = "wasm32"))]
 	let window_size = PhysicalSize::new(WINDOW_WIDTH as u32, WINDOW_HEIGHT as u32);
 	let mut state = State::new(&window, window_size).await;
-	let mut window_properties = WindowProperties::new(&window);
-	let mut workbench = Workbench::new(&mut window_properties);
+	unsafe { std::ptr::write(std::ptr::addr_of_mut!(WINDOW_PROPERTIES), UnsafeCell::new(WindowProperties::new(Rc::clone(&window)))); }
+	let window_properties = unsafe { WINDOW_PROPERTIES.get_mut() };
+	unsafe { *WORKBENCH.get_mut() = Workbench::new(window_properties); }
+	let workbench = unsafe { WORKBENCH.get_mut() };
 	event_loop.run(|event, _| match event {
 		Event::WindowEvent { event, window_id } if window_id == window.id() => {
-			if !State::input(&event, &mut workbench, &window) {
+			#[cfg(target_arch = "wasm32")]
+			crate::on_input();
+			if !State::input(&event, workbench, window_properties) {
 				match event {
 					WindowEvent::RedrawRequested => {
-						match state.render(&mut workbench, &window) {
+						match state.render(workbench, window.as_ref()) {
 							Ok(()) => {}
-							Err(SurfaceError::Lost) => state.surface.configure(&state.device, &state.config),
+							Err(SurfaceError::Lost | SurfaceError::Outdated) => state.surface.configure(&state.device, &state.config),
 							Err(SurfaceError::OutOfMemory) => std::process::exit(1),
 							Err(SurfaceError::Timeout) => error!("Frame took too long to process"),
-							Err(SurfaceError::Outdated) => {
-								error!("Surface changed unexpectedly");
-								std::process::exit(1);
-							}
 						}
 					}
 					WindowEvent::CloseRequested => std::process::exit(0),
-					WindowEvent::Resized(new_size) => state.resize(&mut workbench, new_size),
+					WindowEvent::Resized(new_size) => state.resize(workbench, new_size),
 					_ => {}
 				}
 			}
@@ -100,10 +102,9 @@ pub async fn run() -> ! {
 				let new_size: PhysicalSize<u32> = web_sys::window().map(|window| PhysicalSize::new(window.inner_width().ok().as_ref().and_then(JsValue::as_f64).expect("Width must exist") as u32, window.inner_height().ok().as_ref().and_then(JsValue::as_f64).expect("Height must exist") as u32)).expect("Window has dimension properties");
 				if new_size != old_size {
 					let _ = window.request_inner_size(new_size);
-					state.resize(&mut workbench, new_size);
+					state.resize(workbench, new_size);
 				}
 			}
-
 			window.request_redraw();
 		}
 		_ => {}
@@ -456,7 +457,7 @@ impl<'window> State<'window> {
 	}
 
 	#[allow(clippy::match_same_arms)] // it's cool to be reminded more often how many things I can have events for to make nbt workbench more reactive
-	fn input(event: &WindowEvent, workbench: &mut Workbench, window: &Window) -> bool {
+	fn input(event: &WindowEvent, workbench: &mut Workbench, window_properties: &mut WindowProperties) -> bool {
 		match event {
 			WindowEvent::Resized(size) => {
 				workbench.window_height = size.height as usize;
@@ -470,7 +471,7 @@ impl<'window> State<'window> {
 			WindowEvent::CloseRequested => false,
 			WindowEvent::Destroyed => false,
 			WindowEvent::DroppedFile(file) => {
-				if let Err(e) = workbench.on_open_file(file, &mut WindowProperties::new(&window)) {
+				if let Err(e) = workbench.on_open_file(file, std::fs::read(file).unwrap_or(vec![]), window_properties) {
 					workbench.alert(Alert::new("Error!", TextColor::Red, e.to_string()))
 				}
 				true
@@ -478,13 +479,13 @@ impl<'window> State<'window> {
 			WindowEvent::HoveredFile(_) => false,
 			WindowEvent::HoveredFileCancelled => false,
 			WindowEvent::Focused(_) => false,
-			WindowEvent::KeyboardInput { event, .. } => workbench.on_key_input(event, &mut WindowProperties::new(&window)),
+			WindowEvent::KeyboardInput { event, .. } => workbench.on_key_input(event, window_properties),
 			WindowEvent::ModifiersChanged(_) => false,
 			WindowEvent::CursorMoved { position, .. } => workbench.on_mouse_move(*position),
 			WindowEvent::CursorEntered { .. } => false,
 			WindowEvent::CursorLeft { .. } => false,
 			WindowEvent::MouseWheel { delta, .. } => workbench.on_scroll(*delta),
-			WindowEvent::MouseInput { state, button, .. } => workbench.on_mouse_input(*state, *button, &mut WindowProperties::new(&window)),
+			WindowEvent::MouseInput { state, button, .. } => workbench.on_mouse_input(*state, *button, window_properties),
 			WindowEvent::TouchpadPressure { .. } => false,
 			WindowEvent::AxisMotion { .. } => false,
 			WindowEvent::Touch(_) => false,
@@ -570,7 +571,7 @@ impl<'window> State<'window> {
 			);
 			workbench.render(&mut builder);
 
-			let show_cursor = !builder.drew_tooltip();
+			let show_cursor = true;
 			if show_cursor != workbench.cursor_visible {
 				window.set_cursor_visible(show_cursor);
 				workbench.cursor_visible = show_cursor;

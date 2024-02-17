@@ -1,5 +1,6 @@
 use std::mem::ManuallyDrop;
 use crate::{since_epoch, log};
+use crate::color::TextColor;
 
 use crate::vertex_buffer_builder::Vec2u;
 
@@ -58,6 +59,7 @@ pub const GZIP_FILE_TYPE_UV: Vec2u = Vec2u::new(48, 80);
 pub const ZLIB_FILE_TYPE_UV: Vec2u = Vec2u::new(64, 80);
 pub const SNBT_FILE_TYPE_UV: Vec2u = Vec2u::new(80, 80);
 pub const MCA_FILE_TYPE_UV: Vec2u = Vec2u::new(96, 80);
+pub const OPEN_FOLDER_UV: Vec2u = Vec2u::new(112, 80);
 pub const UNSELECTED_TOGGLE_OFF_UV: Vec2u = Vec2u::new(0, 64);
 pub const UNSELECTED_TOGGLE_ON_UV: Vec2u = Vec2u::new(8, 64);
 pub const SELECTED_TOGGLE_OFF_UV: Vec2u = Vec2u::new(0, 72);
@@ -156,7 +158,7 @@ pub fn icon() -> Vec<u8> {
 	let start = unsafe { core::arch::x86_64::_rdtsc() };
 	// error!("Hello, world!");
 	let original = match (since_epoch().as_micros() & 7) as u8 {
-		// its a good random only because its used once
+		// it's a good random only because its used once
 		0 => OTHERSIDE_MUSIC_DISC_ICON,
 		1 => PIGSTEP_MUSIC_DISC_ICON,
 		2 => MELLOHI_MUSIC_DISC_ICON,

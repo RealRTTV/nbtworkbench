@@ -21,6 +21,7 @@ use crate::encoder::UncheckedBufWriter;
 use crate::{panic_unchecked, since_epoch};
 use crate::tab::FileFormat;
 use crate::{array, primitive, DropFn, RenderContext, StrExt, VertexBufferBuilder};
+use crate::{TextColor, assets::JUST_OVERLAPPING_BASE_TEXT_Z};
 
 primitive!(BYTE_UV, { Some('b') }, NbtByte, i8, 1);
 primitive!(SHORT_UV, { Some('s') }, NbtShort, i16, 2);
@@ -811,23 +812,23 @@ impl NbtElement {
 
 	#[inline]
 	#[must_use]
-	pub fn value(&self) -> (CompactString, bool) {
+	pub fn value(&self) -> (CompactString, TextColor) {
 		unsafe {
 			match self.id() {
-				NbtByte::ID => (self.byte.value(), true),
-				NbtShort::ID => (self.short.value(), true),
-				NbtInt::ID => (self.int.value(), true),
-				NbtLong::ID => (self.long.value(), true),
-				NbtFloat::ID => (self.float.value(), true),
-				NbtDouble::ID => (self.double.value(), true),
-				NbtByteArray::ID => (self.byte_array.value(), false),
-				NbtString::ID => (self.string.str.as_str().to_compact_string(), true),
-				NbtList::ID => (self.list.value(), false),
-				NbtCompound::ID => (self.compound.value(), false),
-				NbtIntArray::ID => (self.int_array.value(), false),
-				NbtLongArray::ID => (self.long_array.value(), false),
-				NbtChunk::ID => (self.chunk.z.to_compact_string(), true),
-				NbtRegion::ID => (self.region.value(), false),
+				NbtByte::ID => (self.byte.value(), TextColor::TreePrimitive),
+				NbtShort::ID => (self.short.value(), TextColor::TreePrimitive),
+				NbtInt::ID => (self.int.value(), TextColor::TreePrimitive),
+				NbtLong::ID => (self.long.value(), TextColor::TreePrimitive),
+				NbtFloat::ID => (self.float.value(), TextColor::TreePrimitive),
+				NbtDouble::ID => (self.double.value(), TextColor::TreePrimitive),
+				NbtByteArray::ID => (self.byte_array.value(), TextColor::TreeKey),
+				NbtString::ID => (self.string.str.as_str().to_compact_string(), TextColor::TreeString),
+				NbtList::ID => (self.list.value(), TextColor::TreeKey),
+				NbtCompound::ID => (self.compound.value(), TextColor::TreeKey),
+				NbtIntArray::ID => (self.int_array.value(), TextColor::TreeKey),
+				NbtLongArray::ID => (self.long_array.value(), TextColor::TreeKey),
+				NbtChunk::ID => (self.chunk.z.to_compact_string(), TextColor::TreePrimitive),
+				NbtRegion::ID => (self.region.value(), TextColor::TreeKey),
 				_ => core::hint::unreachable_unchecked(),
 			}
 		}

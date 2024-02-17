@@ -37,18 +37,18 @@ fn main() {
 		write(r"src/assets/unicode.hex.zib", &buf).unwrap();
 	}
 
-	// #[cfg(target_os = "windows")] {
-	// 	if let Err(e) = winres::WindowsResource::new()
-	// 		.set_icon_with_id("src/assets/icon_16.ico", "16")
-	// 		.set_icon_with_id("src/assets/icon_32.ico", "32")
-	// 		.set_icon_with_id("src/assets/icon_48.ico", "48")
-	// 		.set_icon_with_id("src/assets/icon_64.ico", "64")
-	// 		.set_icon_with_id("src/assets/icon_128.ico", "128")
-	// 		.set_icon_with_id("src/assets/icon_256.ico", "!")
-	// 		.compile()
-	// 	{
-	// 		eprintln!("Error! {e}");
-	// 		std::process::exit(1);
-	// 	}
-	// }
+	if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
+		if let Err(e) = winres::WindowsResource::new()
+			.set_icon_with_id("src/assets/icon_16.ico", "16")
+			.set_icon_with_id("src/assets/icon_32.ico", "32")
+			.set_icon_with_id("src/assets/icon_48.ico", "48")
+			.set_icon_with_id("src/assets/icon_64.ico", "64")
+			.set_icon_with_id("src/assets/icon_128.ico", "128")
+			.set_icon_with_id("src/assets/icon_256.ico", "!")
+			.compile()
+		{
+			eprintln!("Error! {e}");
+			std::process::exit(1);
+		}
+	}
 }

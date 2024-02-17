@@ -7,7 +7,8 @@ use winit::keyboard::KeyCode;
 use crate::assets::{BASE_TEXT_Z, ELEMENT_HIGHLIGHT_Z, HEADER_SIZE, SELECTED_TEXT_Z, SELECTION_UV};
 use crate::selected_text::KeyResult::{Down, Failed, Finish, ForceClose, ForceOpen, Keyfix, NothingSpecial, Revert, ShiftDown, ShiftUp, Up, Valuefix};
 use crate::vertex_buffer_builder::VertexBufferBuilder;
-use crate::{flags, get_clipboard, is_jump_char_boundary, is_utf8_char_boundary, LinkedQueue, OptionExt, set_clipboard, since_epoch, StrExt};
+use crate::{flags, get_clipboard, is_jump_char_boundary, is_utf8_char_boundary, LinkedQueue, OptionExt, set_clipboard, since_epoch, StrExt, WindowProperties};
+use crate::color::TextColor;
 
 #[derive(Clone, Debug)]
 #[allow(clippy::module_name_repetitions)] // yeah no it's better like this
@@ -20,9 +21,9 @@ pub struct SelectedTextCache {
 }
 
 impl SelectedTextCache {
-	pub fn eq(&self, text: &SelectedText) -> bool { (self.value.as_ref() == text.value.as_str()) & (self.keyfix.as_ref().map(Box::as_ref) == text.keyfix.as_deref()) & (self.valuefix.as_ref().map(Box::as_ref) == text.valuefix.as_deref()) }
+	pub fn eq(&self, text: &SelectedText) -> bool { (self.value.as_ref() == text.value.as_str()) & (self.keyfix.as_ref().map(Box::as_ref) == text.keyfix.as_ref().map(|x| x.0.as_str())) & (self.valuefix.as_ref().map(Box::as_ref) == text.valuefix.as_ref().map(|x| x.0.as_str())) }
 
-	pub fn ne(&self, text: &SelectedText) -> bool { (self.value.as_ref() != text.value.as_str()) | (self.keyfix.as_ref().map(Box::as_ref) != text.keyfix.as_deref()) | (self.valuefix.as_ref().map(Box::as_ref) != text.valuefix.as_deref()) }
+	pub fn ne(&self, text: &SelectedText) -> bool { (self.value.as_ref() != text.value.as_str()) | (self.keyfix.as_ref().map(Box::as_ref) != text.keyfix.as_ref().map(|x| x.0.as_str())) | (self.valuefix.as_ref().map(Box::as_ref) != text.valuefix.as_ref().map(|x| x.0.as_str())) }
 }
 
 #[derive(Clone)]
@@ -31,11 +32,12 @@ pub struct SelectedText {
 	pub indices: Box<[usize]>,
 	pub cursor: usize,
 	pub value: String,
+	pub value_color: TextColor,
 	pub selection: Option<usize>,
-	pub keyfix: Option<String>,
-	pub prefix: String,
-	pub suffix: String,
-	pub valuefix: Option<String>,
+	pub keyfix: Option<(String, TextColor)>,
+	pub prefix: (String, TextColor),
+	pub suffix: (String, TextColor),
+	pub valuefix: Option<(String, TextColor)>,
 	pub editable: bool,
 	pub last_interaction: Duration,
 	pub undos: LinkedQueue<SelectedTextCache>,
@@ -62,22 +64,22 @@ impl SelectedText {
 	#[inline]
 	#[must_use]
 	#[allow(clippy::too_many_lines)]
-	pub fn new(target_x: usize, mouse_x: usize, y: usize, key: Option<(Box<str>, bool)>, value: Option<(Box<str>, bool)>, chunk: bool, indices: Vec<usize>) -> Option<Self> {
-		let key_width = if let Some((key, true)) = key.clone() {
+	pub fn new(target_x: usize, mouse_x: usize, y: usize, key: Option<(Box<str>, TextColor, bool)>, value: Option<(Box<str>, TextColor, bool)>, chunk: bool, indices: Vec<usize>) -> Option<Self> {
+		let key_width = if let Some((key, key_color, true)) = key.clone() {
 			let key_width = key.width();
 
 			if mouse_x + 4 >= target_x {
-				let (suffix, valuefix) = if let Some((v, b)) = &value {
+				let (suffix, valuefix) = if let Some((v, valuefix_color, b)) = &value {
 					if *b {
 						(
-							if chunk { ", " } else { ": " }.to_owned(),
-							Some(v.clone().into_string()),
+							(if chunk { ", " } else { ": " }.to_owned(), TextColor::TreeKey),
+							Some((v.clone().into_string(), *valuefix_color)),
 						)
 					} else {
-						(format!("{} {v}", if chunk { ',' } else { ':' }), None)
+						((format!("{}{v}", if chunk { ", " } else { ": " }), TextColor::TreeKey), None)
 					}
 				} else {
-					(String::new(), None)
+					((String::new(), TextColor::White), None)
 				};
 
 				if mouse_x <= target_x {
@@ -87,9 +89,10 @@ impl SelectedText {
 							indices: indices.into_boxed_slice(),
 							cursor: 0,
 							value: key.into_string(),
+							value_color: key_color,
 							selection: None,
 							keyfix: None,
-							prefix: String::new(),
+							prefix: (String::new(), TextColor::White),
 							suffix,
 							valuefix,
 							editable: true,
@@ -117,9 +120,10 @@ impl SelectedText {
 							indices: indices.into_boxed_slice(),
 							cursor: key.len(),
 							value: key.into_string(),
+							value_color: key_color,
 							selection: None,
 							keyfix: None,
-							prefix: String::new(),
+							prefix: (String::new(), TextColor::White),
 							suffix,
 							valuefix,
 							editable: true,
@@ -148,9 +152,10 @@ impl SelectedText {
 								indices: indices.into_boxed_slice(),
 								cursor,
 								value: key.into_string(),
+								value_color: key_color,
 								selection: None,
 								keyfix: None,
-								prefix: String::new(),
+								prefix: (String::new(), TextColor::White),
 								suffix,
 								valuefix,
 								editable: true,
@@ -168,20 +173,20 @@ impl SelectedText {
 			0
 		};
 
-		if let Some((value, true)) = value.as_ref() {
+		if let Some((value, value_color, true)) = value.as_ref() {
 			let value_x = target_x + key_width;
 			if mouse_x + 4 >= value_x {
-				let (keyfix, prefix) = if let Some((k, b)) = key.as_ref() {
+				let (keyfix, prefix) = if let Some((k, key_color, b)) = key.as_ref() {
 					if *b {
 						(
-							Some(k.as_ref().to_owned()),
-							if chunk { ", " } else { ": " }.to_owned(),
+							Some((k.as_ref().to_owned(), *key_color)),
+							(if chunk { ", " } else { ": " }.to_owned(), TextColor::TreeKey),
 						)
 					} else {
-						(None, format!("{} {k}", if chunk { ',' } else { ':' }))
+						(None, (format!("{k}{}", if chunk { ", " } else { ": " }), TextColor::TreeKey))
 					}
 				} else {
-					(None, String::new())
+					(None, (String::new(), TextColor::White))
 				};
 
 				if mouse_x <= value_x {
@@ -191,10 +196,11 @@ impl SelectedText {
 							indices: indices.into_boxed_slice(),
 							cursor: 0,
 							value: value.as_ref().to_owned(),
+							value_color: *value_color,
 							selection: None,
 							keyfix,
 							prefix,
-							suffix: String::new(),
+							suffix: (String::new(), TextColor::White),
 							valuefix: None,
 							editable: true,
 							last_interaction: since_epoch(),
@@ -224,10 +230,11 @@ impl SelectedText {
 							indices: indices.into_boxed_slice(),
 							cursor: value.len(),
 							value: value.as_ref().to_owned(),
+							value_color: *value_color,
 							selection: None,
 							keyfix,
 							prefix,
-							suffix: String::new(),
+							suffix: (String::new(), TextColor::White),
 							valuefix: None,
 							editable: true,
 							last_interaction: since_epoch(),
@@ -255,10 +262,11 @@ impl SelectedText {
 								indices: indices.into_boxed_slice(),
 								cursor,
 								value: value.as_ref().to_owned(),
+								value_color: *value_color,
 								selection: None,
 								keyfix,
 								prefix,
-								suffix: String::new(),
+								suffix: (String::new(), TextColor::White),
 								valuefix: None,
 								editable: true,
 								last_interaction: since_epoch(),
@@ -272,14 +280,14 @@ impl SelectedText {
 			}
 		}
 
-		let full_width = key.as_ref().map_or(0, |(x, _)| x.width())
-			+ value.as_ref().map_or(0, |(x, _)| x.width())
+		let full_width = key.as_ref().map_or(0, |(x, _, _)| x.width())
+			+ value.as_ref().map_or(0, |(x, _, _)| x.width())
 			+ if key.is_some() && value.is_some() {
 				": ".width()
 			} else {
 				0
 			};
-		if key.as_ref().is_none_or(|(_, display)| !*display) && value.as_ref().is_none_or(|(_, display)| !*display) && mouse_x <= target_x + full_width && mouse_x + 16 >= target_x {
+		if key.as_ref().is_none_or(|(_, _, display)| !*display) && value.as_ref().is_none_or(|(_, _, display)| !*display) && mouse_x <= target_x + full_width && mouse_x + 16 >= target_x {
 			Some(
 				Self {
 					y,
@@ -290,11 +298,12 @@ impl SelectedText {
 					} else {
 						String::new()
 					},
+					value_color: TextColor::TreeKey,
 					selection: None,
-					keyfix: key.map(|(x, _)| x.into_string()),
-					prefix: String::new(),
-					suffix: String::new(),
-					valuefix: value.map(|(x, _)| x.into_string()),
+					keyfix: key.map(|(x, color, _)| (x.into_string(), color)),
+					prefix: (String::new(), TextColor::White),
+					suffix: (String::new(), TextColor::White),
+					valuefix: value.map(|(x, color, _)| (x.into_string(), color)),
 					editable: false,
 					last_interaction: since_epoch(),
 					undos: LinkedQueue::new(),
@@ -315,9 +324,9 @@ impl SelectedText {
 
 	pub fn save_state_in_history(&mut self) {
 		self.undos.push(SelectedTextCache {
-			keyfix: self.keyfix.clone().map(String::into_boxed_str),
+			keyfix: self.keyfix.clone().map(|(x, _)| x.into_boxed_str()),
 			value: self.value.clone().into_boxed_str(),
-			valuefix: self.valuefix.clone().map(String::into_boxed_str),
+			valuefix: self.valuefix.clone().map(|(x, _)| x.into_boxed_str()),
 			cursor: self.cursor,
 			selection: self.selection,
 		});
@@ -341,7 +350,7 @@ impl SelectedText {
 		}
 	}
 
-	pub fn width(&self) -> usize { self.prefix.width() + self.keyfix.as_deref().map(str::width).unwrap_or(0) + self.value.width() + self.valuefix.as_deref().map(str::width).unwrap_or(0) + self.suffix.width() }
+	pub fn width(&self) -> usize { self.prefix.0.width() + self.keyfix.as_ref().map(|x| x.0.width()).unwrap_or(0) + self.value.width() + self.valuefix.as_ref().map(|x| x.0.width()).unwrap_or(0) + self.suffix.0.width() }
 
 	#[cfg_attr(not(debug_assertions), inline)]
 	#[allow(clippy::cognitive_complexity, clippy::too_many_lines)] // i handled this fn well
@@ -372,10 +381,13 @@ impl SelectedText {
 				return Failed;
 			};
 
+			let new_keyfix = keyfix.map(|keyfix| (keyfix.into_string(), self.keyfix.as_ref().map_or(TextColor::White, |(_, x)| *x)));
+			let new_valuefix = valuefix.map(|valuefix| (valuefix.into_string(), self.valuefix.as_ref().map_or(TextColor::White, |(_, x)| *x)));
+
 			self.redos.push(SelectedTextCache {
-				keyfix: core::mem::replace(&mut self.keyfix, keyfix.map(str::into_string)).map(String::into_boxed_str),
+				keyfix: core::mem::replace(&mut self.keyfix, new_keyfix).map(|x| x.0.into_boxed_str()),
 				value: core::mem::replace(&mut self.value, value.into_string()).into_boxed_str(),
-				valuefix: core::mem::replace(&mut self.valuefix, valuefix.map(str::into_string)).map(String::into_boxed_str),
+				valuefix: core::mem::replace(&mut self.valuefix, new_valuefix).map(|x| x.0.into_boxed_str()),
 				cursor: core::mem::replace(&mut self.cursor, cursor),
 				selection: core::mem::replace(&mut self.selection, selection),
 			});
@@ -399,10 +411,14 @@ impl SelectedText {
 				}
 				return Failed;
 			};
+
+			let new_keyfix = keyfix.map(|keyfix| (keyfix.into_string(), self.keyfix.as_ref().map_or(TextColor::White, |(_, x)| *x)));
+			let new_valuefix = valuefix.map(|valuefix| (valuefix.into_string(), self.valuefix.as_ref().map_or(TextColor::White, |(_, x)| *x)));
+
 			self.undos.push(SelectedTextCache {
-				keyfix: core::mem::replace(&mut self.keyfix, keyfix.map(str::into_string)).map(String::into_boxed_str),
+				keyfix: core::mem::replace(&mut self.keyfix, new_keyfix).map(|x| x.0.into_boxed_str()),
 				value: core::mem::replace(&mut self.value, value.into_string()).into_boxed_str(),
-				valuefix: core::mem::replace(&mut self.valuefix, valuefix.map(str::into_string)).map(String::into_boxed_str),
+				valuefix: core::mem::replace(&mut self.valuefix, new_valuefix).map(|x| x.0.into_boxed_str()),
 				cursor: core::mem::replace(&mut self.cursor, cursor),
 				selection: core::mem::replace(&mut self.selection, selection),
 			});
@@ -793,18 +809,27 @@ impl SelectedText {
 
 		if y < HEADER_SIZE { return }
 
-		let prefix_width = self.prefix.as_str().width() + self.keyfix.as_deref().map_or(0, StrExt::width);
+		let prefix_width = self.prefix.0.as_str().width() + self.keyfix.as_ref().map_or(0, |x| x.0.width());
 		builder.draw_texture_z((x - 4 - 16, y), ELEMENT_HIGHLIGHT_Z, SELECTION_UV, (16, 16));
 		builder.settings((x, y), false, BASE_TEXT_Z);
-		let _ = write!(
-			builder,
-			"{}{}{}{}{}",
-			self.keyfix.as_ref().map_or("", String::as_str),
-			self.prefix,
-			self.value,
-			self.suffix,
-			self.valuefix.as_ref().map_or("", String::as_str),
-		);
+		if let Some((keyfix, keyfix_color)) = self.keyfix.as_ref() {
+			builder.color = keyfix_color.to_raw();
+			let _ = write!(builder, "{keyfix}");
+		}
+
+		builder.color = self.prefix.1.to_raw();
+		let _ = write!(builder, "{}", self.prefix.0);
+
+		builder.color = self.value_color.to_raw();
+		let _ = write!(builder, "{}", self.value);
+
+		builder.color = self.suffix.1.to_raw();
+		let _ = write!(builder, "{}", self.suffix.0);
+
+		if let Some((valuefix, valuefix_color)) = self.valuefix.as_ref() {
+			builder.color = valuefix_color.to_raw();
+			let _ = write!(builder, "{valuefix}");
+		}
 
 		if self.editable {
 			let cursor_prefixing = self.value.split_at(self.cursor).0;
