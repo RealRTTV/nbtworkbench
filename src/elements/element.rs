@@ -4,6 +4,7 @@ use std::fmt::{Debug, Display, Error, Formatter};
 use std::intrinsics::likely;
 use std::mem::{ManuallyDrop, MaybeUninit};
 use std::ops::Deref;
+#[cfg(not(target_arch = "wasm32"))]
 use std::thread::Scope;
 use std::{fmt, fmt::Write};
 
@@ -18,10 +19,8 @@ use crate::element_action::ElementAction;
 use crate::elements::list::{NbtList, ValueIterator, ValueMutIterator};
 use crate::elements::string::NbtString;
 use crate::encoder::UncheckedBufWriter;
-use crate::{panic_unchecked, since_epoch};
+use crate::{panic_unchecked, since_epoch, SortAlgorithm, array, primitive, DropFn, RenderContext, StrExt, VertexBufferBuilder, TextColor, assets::JUST_OVERLAPPING_BASE_TEXT_Z};
 use crate::tab::FileFormat;
-use crate::{array, primitive, DropFn, RenderContext, StrExt, VertexBufferBuilder};
-use crate::{TextColor, assets::JUST_OVERLAPPING_BASE_TEXT_Z};
 
 primitive!(BYTE_UV, { Some('b') }, NbtByte, i8, 1);
 primitive!(SHORT_UV, { Some('s') }, NbtShort, i16, 2);
@@ -259,7 +258,7 @@ impl NbtElement {
 impl NbtElement {
 	#[must_use]
 	#[allow(clippy::should_implement_trait)] // i can't, sorry :(
-	pub fn from_str(mut s: &str) -> Option<(Option<CompactString>, Self)> {
+	pub fn from_str(mut s: &str, sort: SortAlgorithm) -> Option<(Option<CompactString>, Self)> {
 		s = s.trim_start();
 
 		if s.is_empty() { return None }
@@ -270,20 +269,20 @@ impl NbtElement {
 				prefix
 			})
 		});
-		let (s, element) = Self::from_str0(s).map(|(s, x)| (s.trim_start(), x))?;
+		let (s, element) = Self::from_str0(s, sort).map(|(s, x)| (s.trim_start(), x))?;
 		if !s.is_empty() { return None }
 		Some((prefix, element))
 	}
 
 	#[allow(clippy::too_many_lines)]
-	pub(in crate::elements) fn from_str0(mut s: &str) -> Option<(&str, Self)> {
+	pub(in crate::elements) fn from_str0(mut s: &str, sort: SortAlgorithm) -> Option<(&str, Self)> {
 		if let Some(s2) = s.strip_prefix("false") { return Some((s2, Self::Byte(NbtByte { value: 0 }))) }
 		if let Some(s2) = s.strip_prefix("true") { return Some((s2, Self::Byte(NbtByte { value: 1 }))) }
-		if s.starts_with("[B;") { return NbtByteArray::from_str0(s).map(|(s, x)| (s, Self::ByteArray(x))) }
-		if s.starts_with("[I;") { return NbtIntArray::from_str0(s).map(|(s, x)| (s, Self::IntArray(x))) }
-		if s.starts_with("[L;") { return NbtLongArray::from_str0(s).map(|(s, x)| (s, Self::LongArray(x))) }
-		if s.starts_with('[') { return NbtList::from_str0(s).map(|(s, x)| (s, Self::List(x))) }
-		if s.starts_with('{') { return NbtCompound::from_str0(s).map(|(s, x)| (s, Self::Compound(x))) }
+		if s.starts_with("[B;") { return NbtByteArray::from_str0(s, sort).map(|(s, x)| (s, Self::ByteArray(x))) }
+		if s.starts_with("[I;") { return NbtIntArray::from_str0(s, sort).map(|(s, x)| (s, Self::IntArray(x))) }
+		if s.starts_with("[L;") { return NbtLongArray::from_str0(s, sort).map(|(s, x)| (s, Self::LongArray(x))) }
+		if s.starts_with('[') { return NbtList::from_str0(s, sort).map(|(s, x)| (s, Self::List(x))) }
+		if s.starts_with('{') { return NbtCompound::from_str0(s, sort).map(|(s, x)| (s, Self::Compound(x))) }
 		if s.starts_with('"') { return NbtString::from_str0(s).map(|(s, x)| (s, Self::String(x))) }
 
 		if let Some(s2) = s.strip_prefix("NaN") {
@@ -424,7 +423,7 @@ impl NbtElement {
 						return None;
 					};
 					s = s[digit_end_idx..].trim_start();
-					let (s, inner) = NbtCompound::from_str0(s)?;
+					let (s, inner) = NbtCompound::from_str0(s, sort)?;
 					(
 						s,
 						Self::Chunk(NbtChunk::from_compound(
@@ -524,8 +523,8 @@ impl NbtElement {
 
 	#[inline]
 	#[must_use]
-	pub fn from_file(bytes: &[u8]) -> Option<Self> {
-		let mut decoder = Decoder::new(bytes);
+	pub fn from_file(bytes: &[u8], sort: SortAlgorithm) -> Option<Self> {
+		let mut decoder = Decoder::new(bytes, sort);
 		decoder.assert_len(3)?;
 		unsafe {
 			if decoder.u8() != 0x0A { return None }
@@ -549,8 +548,8 @@ impl NbtElement {
 
 	#[inline]
 	#[must_use]
-	pub fn from_mca(bytes: &[u8]) -> Option<Self> {
-		NbtRegion::from_bytes(bytes).map(Self::Region)
+	pub fn from_mca(bytes: &[u8], sort: SortAlgorithm) -> Option<Self> {
+		NbtRegion::from_bytes(bytes, sort).map(Self::Region)
 	}
 
 	#[inline]

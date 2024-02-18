@@ -1,5 +1,4 @@
 use std::ffi::OsStr;
-use std::fs::write;
 use std::io::Read;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
@@ -11,7 +10,7 @@ use flate2::Compression;
 use uuid::Uuid;
 
 use crate::{Bookmark, LinkedQueue, OptionExt, panic_unchecked, RenderContext, StrExt, WindowProperties};
-use crate::assets::{BYTE_ARRAY_GHOST_UV, BYTE_ARRAY_UV, BYTE_GRAYSCALE_UV, BYTE_UV, CHUNK_GHOST_UV, CHUNK_UV, COMPOUND_GHOST_UV, COMPOUND_ROOT_UV, COMPOUND_UV, DOUBLE_GRAYSCALE_UV, DOUBLE_UV, ENABLED_FREEHAND_MODE_UV, FLOAT_GRAYSCALE_UV, FLOAT_UV, FREEHAND_MODE_UV, GZIP_FILE_TYPE_UV, HEADER_SIZE, HELD_SCROLLBAR_UV, INT_ARRAY_GHOST_UV, INT_ARRAY_UV, INT_GRAYSCALE_UV, INT_UV, JUST_OVERLAPPING_BASE_Z, LINE_NUMBER_SEPARATOR_UV, LIST_GHOST_UV, LIST_UV, LONG_ARRAY_GHOST_UV, LONG_ARRAY_UV, LONG_GRAYSCALE_UV, LONG_UV, MCA_FILE_TYPE_UV, NBT_FILE_TYPE_UV, REDO_UV, REGION_UV, SCROLLBAR_Z, SHORT_GRAYSCALE_UV, SHORT_UV, SNBT_FILE_TYPE_UV, STEAL_ANIMATION_OVERLAY, STRING_GHOST_UV, STRING_UV, UNDO_UV, UNHELD_SCROLLBAR_UV, UNKNOWN_NBT_GHOST_UV, UNKNOWN_NBT_UV, ZLIB_FILE_TYPE_UV};
+use crate::assets::{BASE_Z, BYTE_ARRAY_GHOST_UV, BYTE_ARRAY_UV, BYTE_GRAYSCALE_UV, BYTE_UV, CHUNK_GHOST_UV, CHUNK_UV, COMPOUND_GHOST_UV, COMPOUND_ROOT_UV, COMPOUND_UV, DOUBLE_GRAYSCALE_UV, DOUBLE_UV, ENABLED_FREEHAND_MODE_UV, FLOAT_GRAYSCALE_UV, FLOAT_UV, FREEHAND_MODE_UV, GZIP_FILE_TYPE_UV, HEADER_SIZE, HELD_SCROLLBAR_UV, INT_ARRAY_GHOST_UV, INT_ARRAY_UV, INT_GRAYSCALE_UV, INT_UV, JUST_OVERLAPPING_BASE_Z, LINE_NUMBER_SEPARATOR_UV, LIST_GHOST_UV, LIST_UV, LONG_ARRAY_GHOST_UV, LONG_ARRAY_UV, LONG_GRAYSCALE_UV, LONG_UV, MCA_FILE_TYPE_UV, NBT_FILE_TYPE_UV, REDO_UV, REGION_UV, SCROLLBAR_Z, SHORT_GRAYSCALE_UV, SHORT_UV, SNBT_FILE_TYPE_UV, STEAL_ANIMATION_OVERLAY_UV, STRING_GHOST_UV, STRING_UV, UNDO_UV, UNHELD_SCROLLBAR_UV, UNKNOWN_NBT_GHOST_UV, UNKNOWN_NBT_UV, ZLIB_FILE_TYPE_UV};
 use crate::color::TextColor;
 use crate::elements::chunk::NbtRegion;
 use crate::elements::compound::NbtCompound;
@@ -66,8 +65,8 @@ impl Tab {
 	}
 
 	pub fn save(&mut self, force_dialog: bool) -> Result<()> {
-		let path = self.path.as_deref().unwrap_or(self.name.as_ref().as_ref());
 		#[cfg(target_os = "windows")] {
+			let path = self.path.as_deref().unwrap_or(self.name.as_ref().as_ref());
 			if !path.exists() || force_dialog {
 				let mut builder = native_dialog::FileDialog::new();
 				if self.value.id() == NbtRegion::ID {
@@ -77,12 +76,12 @@ impl Tab {
 				}
 				let path = builder.show_save_single_file()?.ok_or_else(|| anyhow!("Save cancelled"))?;
 				self.name = path.file_name().and_then(|x| x.to_str()).expect("Path has a filename").to_string().into_boxed_str();
-				write(&path, self.compression.encode(&self.value))?;
+				std::fs::write(&path, self.compression.encode(&self.value))?;
 				self.path = Some(path);
 				self.history_changed = false;
 				Ok(())
 			} else {
-				write(path, self.compression.encode(&self.value))?;
+				std::fs::write(path, self.compression.encode(&self.value))?;
 				self.history_changed = false;
 				Ok(())
 			}
@@ -155,18 +154,15 @@ impl Tab {
 
 		{
 			let mut tail = self.undos.tail.as_deref();
-			builder.draw_texture(
-				(builder.window_width() - 107, 26),
+			builder.draw_texture_region_z(
+				(builder.window_width() - 109, 22),
+				BASE_Z,
 				LINE_NUMBER_SEPARATOR_UV,
+				(2, 23),
 				(2, 16),
 			);
-			builder.draw_texture(
-				(builder.window_width() - 129, 26),
-				LINE_NUMBER_SEPARATOR_UV,
-				(2, 16),
-			);
-			builder.draw_texture((builder.window_width() - 125, 26), UNDO_UV, (16, 16));
-			let mut x = builder.window_width() - 104;
+			builder.draw_texture((builder.window_width() - 105, 26), UNDO_UV, (16, 16));
+			let mut x = builder.window_width() - 84;
 			for _ in 0..5_usize {
 				if let Some(t) = tail {
 					t.value.render((x, 26), builder, t.prev.is_none());
@@ -180,18 +176,15 @@ impl Tab {
 
 		{
 			let mut tail = self.redos.tail.as_deref();
-			builder.draw_texture(
-				(builder.window_width() - 213, 26),
+			builder.draw_texture_region_z(
+				(builder.window_width() - 215, 22),
+				BASE_Z,
 				LINE_NUMBER_SEPARATOR_UV,
+				(2, 23),
 				(2, 16),
 			);
-			builder.draw_texture(
-				(builder.window_width() - 235, 26),
-				LINE_NUMBER_SEPARATOR_UV,
-				(2, 16),
-			);
-			builder.draw_texture((builder.window_width() - 231, 26), REDO_UV, (16, 16));
-			let mut x = builder.window_width() - 210;
+			builder.draw_texture((builder.window_width() - 211, 26), REDO_UV, (16, 16));
+			let mut x = builder.window_width() - 190;
 			for _ in 0..5_usize {
 				if let Some(t) = tail {
 					t.value.render((x, 26), builder, t.prev.is_none());
@@ -204,13 +197,16 @@ impl Tab {
 		}
 
 		{
-			builder.draw_texture(
-				(builder.window_width() - 22, 26),
+			// shifted one left to center between clipboard and freehand
+			builder.draw_texture_region_z(
+				(244, 22),
+				BASE_Z,
 				LINE_NUMBER_SEPARATOR_UV,
+				(2, 23),
 				(2, 16),
 			);
 			let freehand_uv = {
-				let hovering = (builder.window_width() - 16..builder.window_width()).contains(&mouse_x) && (26..42).contains(&mouse_y);
+				let hovering = (248..264).contains(&mouse_x) && (26..42).contains(&mouse_y);
 				if hovering {
 					builder.draw_tooltip(&["Freehand Mode (Alt + F)"], (mouse_x, mouse_y));
 				}
@@ -225,7 +221,7 @@ impl Tab {
 					}
 				}
 			};
-			builder.draw_texture((builder.window_width() - 18, 26), freehand_uv, (16, 16));
+			builder.draw_texture((248, 26), freehand_uv, (16, 16));
 		}
 
 		{
@@ -285,7 +281,7 @@ impl Tab {
 		if steal_delta > 0.0 {
 			let y = ((mouse_y - HEADER_SIZE) & !15) + HEADER_SIZE;
 			let height = (16.0 * steal_delta).round() as usize;
-			builder.draw_texture_region_z((ctx.left_margin - 2, y + (16 - height)), JUST_OVERLAPPING_BASE_Z, STEAL_ANIMATION_OVERLAY, (builder.window_width() + 2 - ctx.left_margin, height), (16, 16));
+			builder.draw_texture_region_z((ctx.left_margin - 2, y + (16 - height)), JUST_OVERLAPPING_BASE_Z, STEAL_ANIMATION_OVERLAY_UV, (builder.window_width() + 2 - ctx.left_margin, height), (16, 16));
 		}
 	}
 

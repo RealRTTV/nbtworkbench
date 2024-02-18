@@ -3,6 +3,7 @@ use std::fmt::{Debug, Display, Formatter};
 use std::intrinsics::likely;
 use std::mem::{ManuallyDrop, MaybeUninit};
 use std::ops::{Deref, DerefMut};
+#[cfg(not(target_arch = "wasm32"))]
 use std::thread::Scope;
 
 use compact_str::{format_compact, CompactString, ToCompactString};
@@ -15,7 +16,7 @@ use crate::elements::list::{ValueIterator, ValueMutIterator};
 use crate::encoder::UncheckedBufWriter;
 use crate::tab::FileFormat;
 use crate::vertex_buffer_builder::VertexBufferBuilder;
-use crate::{DropFn, RenderContext, StrExt};
+use crate::{DropFn, RenderContext, SortAlgorithm, StrExt};
 use crate::color::TextColor;
 
 #[repr(C)]
@@ -76,8 +77,8 @@ impl NbtRegion {
 	pub fn new() -> Self { Self::default() }
 
 	#[must_use]
-	pub fn from_bytes(bytes: &[u8]) -> Option<Self> {
-		fn parse(raw: u32, bytes: &[u8]) -> Option<(FileFormat, NbtElement)> {
+	pub fn from_bytes(bytes: &[u8], sort: SortAlgorithm) -> Option<Self> {
+		fn parse(raw: u32, bytes: &[u8], sort: SortAlgorithm) -> Option<(FileFormat, NbtElement)> {
 			if raw < 512 { return Some((FileFormat::Zlib, unsafe { core::mem::zeroed() })) }
 
 			let len = (raw as usize & 0xFF) * 4096;
@@ -96,6 +97,7 @@ impl NbtRegion {
 							&DeflateDecoder::new_with_options(data, DeflateOptions::default().set_confirm_checksum(false))
 								.decode_gzip()
 								.ok()?,
+							sort,
 						)?,
 					),
 					2 => (
@@ -104,10 +106,11 @@ impl NbtRegion {
 							&DeflateDecoder::new_with_options(data, DeflateOptions::default().set_confirm_checksum(false))
 								.decode_zlib()
 								.ok()?,
+							sort,
 						)?,
 					),
-					3 => (FileFormat::Nbt, NbtElement::from_file(data)?),
-					4 => (FileFormat::ChunkLz4, NbtElement::from_file(&lz4_flex::decompress(data, data.len()).ok()?)?),
+					3 => (FileFormat::Nbt, NbtElement::from_file(data, sort)?),
+					4 => (FileFormat::ChunkLz4, NbtElement::from_file(&lz4_flex::decompress(data, data.len()).ok()?, sort)?),
 					_ => return None,
 				};
 				if element.id() != NbtCompound::ID { return None }
@@ -134,7 +137,7 @@ impl NbtRegion {
 			{
 				let timestamp = u32::from_be_bytes(timestamp);
 				let offset = u32::from_be_bytes(offset);
-				threads.push((timestamp, s.spawn(move || parse(offset, bytes))));
+				threads.push((timestamp, s.spawn(move || parse(offset, bytes, sort))));
 			}
 
 
@@ -174,7 +177,7 @@ impl NbtRegion {
 			{
 				let timestamp = u32::from_be_bytes(timestamp);
 				let offset = u32::from_be_bytes(offset);
-				threads.push((timestamp, parse(offset, bytes)));
+				threads.push((timestamp, parse(offset, bytes, sort)));
 			}
 
 

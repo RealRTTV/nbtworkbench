@@ -29,9 +29,8 @@ export function getClipboard() {
 }
 
 export function onInput() {
-    // is not firefox
-    if (typeof InstallTrigger === 'undefined') {
-        window.navigator.clipboard.readText().then((str) => clipboard = str)
+    if (!navigator.userAgent.toLowerCase().includes("firefox")) {
+        window.navigator.clipboard.readText().then((str) => clipboard = str).catch(x => x)
     }
 }
 

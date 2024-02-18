@@ -2,7 +2,7 @@ use crate::assets::{ALERT_TEXT_Z, ALERT_UV, ALERT_Z, HEADER_SIZE};
 use crate::color::TextColor;
 use crate::vertex_buffer_builder::{Vec2u, VertexBufferBuilder};
 use crate::{since_epoch, smoothstep64, StrExt};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 pub struct Alert {
 	timestamp: Option<Duration>,
@@ -71,15 +71,15 @@ impl Alert {
 	}
 
 	pub fn is_invisible(&mut self) -> bool {
-		let ms = (since_epoch() - *self.timestamp.get_or_insert(since_epoch())).as_millis() as usize;
-		let display_time = (self.message.len() + self.title.len()) * 200 / 3 + 5000;
+		let ms = since_epoch().saturating_sub(*self.timestamp.get_or_insert(since_epoch())).as_millis() as usize;
+		let display_time = (self.message.len() + self.title.len()) * 60 + 3000;
 		ms > 500 + display_time
 	}
 
 	fn get_inset(&mut self) -> usize {
-		let mut ms = (since_epoch() - *self.timestamp.get_or_insert(since_epoch())).as_millis() as usize;
+		let mut ms = since_epoch().saturating_sub(*self.timestamp.get_or_insert(since_epoch())).as_millis() as usize;
 		let width = self.width + 24;
-		let display_time = (self.message.len() + self.title.len()) * 200 / 3 + 5000;
+		let display_time = (self.message.len() + self.title.len()) * 60 + 3000;
 		if ms < 250 { return (smoothstep64((250 - ms) as f64 / 250.0) * width as f64) as usize }
 		ms -= 250;
 		if ms < display_time {

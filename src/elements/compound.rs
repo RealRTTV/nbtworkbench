@@ -5,6 +5,7 @@ use std::fmt::{Debug, Display, Formatter, Write};
 use std::hash::Hasher;
 use std::intrinsics::likely;
 use std::ops::Deref;
+#[cfg(not(target_arch = "wasm32"))]
 use std::thread::Scope;
 
 use compact_str::{format_compact, CompactString, ToCompactString};
@@ -16,7 +17,7 @@ use crate::decoder::Decoder;
 use crate::elements::chunk::NbtChunk;
 use crate::elements::element::NbtElement;
 use crate::encoder::UncheckedBufWriter;
-use crate::{Bookmark, DropFn, OptionExt, RenderContext, StrExt, VertexBufferBuilder};
+use crate::{Bookmark, DropFn, OptionExt, RenderContext, SortAlgorithm, StrExt, VertexBufferBuilder};
 use crate::color::TextColor;
 
 #[allow(clippy::module_name_repetitions)]
@@ -49,13 +50,13 @@ impl Clone for NbtCompound {
 impl NbtCompound {
 	pub const ID: u8 = 10;
 	#[optimize(speed)]
-	pub(in crate::elements) fn from_str0(mut s: &str) -> Option<(&str, Self)> {
+	pub(in crate::elements) fn from_str0(mut s: &str, sort: SortAlgorithm) -> Option<(&str, Self)> {
 		s = s.strip_prefix('{')?.trim_start();
 		let mut compound = Self::new();
 		while !s.starts_with('}') {
 			let (key, s2) = s.snbt_string_read()?;
 			s = s2.trim_start().strip_prefix(':')?.trim_start();
-			let (s2, value) = NbtElement::from_str0(s)?;
+			let (s2, value) = NbtElement::from_str0(s, sort)?;
 			compound.insert_replacing(key, value);
 			s = s2.trim_start();
 			if let Some(s2) = s.strip_prefix(',') {
@@ -65,6 +66,7 @@ impl NbtCompound {
 			}
 		}
 		let s = s.strip_prefix('}')?;
+		sort.sort(&mut compound.entries);
 		Some((s, compound))
 	}
 
@@ -85,6 +87,7 @@ impl NbtCompound {
 				};
 				current_element = decoder.u8();
 			}
+			decoder.sort(&mut compound.entries);
 			Some(compound)
 		}
 	}

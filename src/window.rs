@@ -1,6 +1,5 @@
 use std::borrow::Cow;
 use std::cell::UnsafeCell;
-use std::num::NonZeroU64;
 use std::rc::Rc;
 use std::time::Duration;
 #[cfg(target_arch = "wasm32")]
@@ -25,7 +24,7 @@ use crate::assets::HEADER_SIZE;
 use crate::color::TextColor;
 use crate::vertex_buffer_builder::VertexBufferBuilder;
 use crate::workbench::Workbench;
-use crate::{assets, WORKBENCH, WINDOW_PROPERTIES, debg, error, OptionExt, since_epoch, WindowProperties};
+use crate::{assets, WORKBENCH, WINDOW_PROPERTIES, error, OptionExt, since_epoch, WindowProperties};
 
 pub const WINDOW_HEIGHT: usize = 420;
 pub const WINDOW_WIDTH: usize = 620;
@@ -63,9 +62,10 @@ pub async fn run() -> ! {
 			let height = window.inner_height().ok()?.as_f64()?;
 			Some((document, PhysicalSize::new(width as u32, height as u32)))
 		}).and_then(|(document, size)| {
-			let canvas = web_sys::Element::from(window.canvas()?);
+			let canvas = web_sys::HtmlElement::from(window.canvas()?);
 			document.body()?.append_child(&canvas).ok()?;
 			let _ = window.request_inner_size(size);
+			let _ = canvas.focus();
 			Some(size)
 		}).expect("Couldn't append canvas to document body")
 	};
@@ -99,7 +99,8 @@ pub async fn run() -> ! {
 		Event::AboutToWait => {
 			#[cfg(target_arch = "wasm32")] {
 				let old_size = window.inner_size();
-				let new_size: PhysicalSize<u32> = web_sys::window().map(|window| PhysicalSize::new(window.inner_width().ok().as_ref().and_then(JsValue::as_f64).expect("Width must exist") as u32, window.inner_height().ok().as_ref().and_then(JsValue::as_f64).expect("Height must exist") as u32)).expect("Window has dimension properties");
+				let scaling_factor = web_sys::window().map_or(1.0, |window| window.device_pixel_ratio());
+				let new_size: PhysicalSize<u32> = web_sys::window().map(|window| PhysicalSize::new((window.inner_width().ok().as_ref().and_then(JsValue::as_f64).expect("Width must exist") * scaling_factor).ceil() as u32, (window.inner_height().ok().as_ref().and_then(JsValue::as_f64).expect("Height must exist") * scaling_factor).ceil() as u32)).expect("Window has dimension properties");
 				if new_size != old_size {
 					let _ = window.request_inner_size(new_size);
 					state.resize(workbench, new_size);

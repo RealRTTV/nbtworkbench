@@ -2,14 +2,17 @@ use std::cmp::Ordering;
 use std::convert::identity;
 #[cfg(not(target_arch = "wasm32"))]
 use std::fs::OpenOptions;
+#[cfg(not(target_arch = "wasm32"))]
 use std::process::Command;
 
 use compact_str::CompactString;
+#[cfg(not(target_arch = "wasm32"))]
 use notify::{EventKind, PollWatcher, RecursiveMode, Watcher};
 use uuid::Uuid;
 
-use crate::{Bookmark, panic_unchecked, set_clipboard};
-use crate::{FileUpdateSubscription, FileUpdateSubscriptionType, assets::{OPEN_ARRAY_IN_HEX_UV, OPEN_IN_TXT}};
+use crate::{Bookmark, panic_unchecked, set_clipboard, FileUpdateSubscription};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::{FileUpdateSubscriptionType, assets::{OPEN_ARRAY_IN_HEX_UV, OPEN_IN_TXT}};
 use crate::assets::{ACTION_WHEEL_Z, COPY_FORMATTED_UV, COPY_RAW_UV, SORT_COMPOUND_BY_NAME, SORT_COMPOUND_BY_TYPE};
 use crate::elements::chunk::NbtChunk;
 use crate::elements::compound::NbtCompound;
@@ -76,9 +79,42 @@ impl ElementAction {
 		}
 	}
 
+	#[must_use]
+	pub fn by_name(a: (&str, &NbtElement), b: (&str, &NbtElement)) -> Ordering {
+		let (a_str, _) = a;
+		let (b_str, _) = b;
+		a_str.cmp(b_str)
+	}
+
+	#[must_use]
+	pub fn by_type(a: (&str, &NbtElement), b: (&str, &NbtElement)) -> Ordering {
+		const ORDERING: [usize; 256] = {
+			let mut array = [usize::MAX; 256];
+			array[NbtChunk::ID as usize] = 0;
+			array[NbtCompound::ID as usize] = 1;
+			array[NbtList::ID as usize] = 2;
+			array[NbtLongArray::ID as usize] = 3;
+			array[NbtIntArray::ID as usize] = 4;
+			array[NbtByteArray::ID as usize] = 5;
+			array[NbtString::ID as usize] = 6;
+			array[NbtDouble::ID as usize] = 7;
+			array[NbtFloat::ID as usize] = 8;
+			array[NbtLong::ID as usize] = 9;
+			array[NbtInt::ID as usize] = 10;
+			array[NbtShort::ID as usize] = 11;
+			array[NbtByte::ID as usize] = 12;
+			array
+		};
+
+		let (a_str, a_nbt) = a;
+		let (b_str, b_nbt) = b;
+		ORDERING[a_nbt.id() as usize].cmp(&ORDERING[b_nbt.id() as usize]).then_with(|| a_str.cmp(b_str))
+	}
+
 	#[allow(clippy::too_many_lines)]
 	pub fn apply(self, key: Option<CompactString>, indices: Box<[usize]>, tab_uuid: Uuid, true_line_number: usize, line_number: usize, element: &mut NbtElement, bookmarks: &mut Vec<Bookmark>, subscription: &mut Option<FileUpdateSubscription>) -> Option<WorkbenchAction> {
 		#[must_use]
+		#[cfg(not(target_arch = "wasm32"))]
 		fn open_file(str: &str) -> bool {
 			if cfg!(target_os = "windows") {
 				Command::new("cmd").args(["/c", "start", str]).status()
@@ -87,38 +123,6 @@ impl ElementAction {
 			} else {
 				Command::new("xdg-open").arg(str).status()
 			}.is_ok()
-		}
-
-		#[must_use]
-		fn by_name(a: (&str, &NbtElement), b: (&str, &NbtElement)) -> Ordering {
-			let (a_str, _) = a;
-			let (b_str, _) = b;
-			a_str.cmp(b_str)
-		}
-
-		#[must_use]
-		fn by_type(a: (&str, &NbtElement), b: (&str, &NbtElement)) -> Ordering {
-			const ORDERING: [usize; 256] = {
-				let mut array = [usize::MAX; 256];
-				array[NbtChunk::ID as usize] = 0;
-				array[NbtCompound::ID as usize] = 1;
-				array[NbtList::ID as usize] = 2;
-				array[NbtLongArray::ID as usize] = 3;
-				array[NbtIntArray::ID as usize] = 4;
-				array[NbtByteArray::ID as usize] = 5;
-				array[NbtString::ID as usize] = 6;
-				array[NbtDouble::ID as usize] = 7;
-				array[NbtFloat::ID as usize] = 8;
-				array[NbtLong::ID as usize] = 9;
-				array[NbtInt::ID as usize] = 10;
-				array[NbtShort::ID as usize] = 11;
-				array[NbtByte::ID as usize] = 12;
-				array
-			};
-
-			let (a_str, a_nbt) = a;
-			let (b_str, b_nbt) = b;
-			ORDERING[a_nbt.id() as usize].cmp(&ORDERING[b_nbt.id() as usize]).then_with(|| a_str.cmp(b_str))
 		}
 
 		'm: {
@@ -270,9 +274,9 @@ impl ElementAction {
 					let bookmark_end = bookmarks.binary_search(&Bookmark::new(true_line_number + element.true_height() - 1, 0)).map_or_else(identity, |x| x + 1);
 					let bookmark_slice = if bookmark_end > bookmark_start || bookmark_end > bookmarks.len() { &mut [] } else { &mut bookmarks[bookmark_start..bookmark_end] };
 					let reordering_indices = if let Some(compound) = element.as_compound_mut() {
-						compound.entries.sort_by(by_name, line_number, true_line_number, true_height, open, bookmark_slice)
+						compound.entries.sort_by(Self::by_name, line_number, true_line_number, true_height, open, bookmark_slice)
 					} else if let Some(chunk) = element.as_chunk_mut() {
-						chunk.entries.sort_by(by_name, line_number, true_line_number, true_height, open, bookmark_slice)
+						chunk.entries.sort_by(Self::by_name, line_number, true_line_number, true_height, open, bookmark_slice)
 					} else {
 						unsafe { panic_unchecked("Unknown element kind for compound sorting") }
 					};
@@ -286,9 +290,9 @@ impl ElementAction {
 					let bookmark_end = bookmarks.binary_search(&Bookmark::new(true_line_number + element.true_height() - 1, 0)).map_or_else(identity, |x| x + 1);
 					let bookmark_slice = if bookmark_end < bookmark_start || bookmark_end > bookmarks.len() { &mut [] } else { &mut bookmarks[bookmark_start..bookmark_end] };
 					let reordering_indices = if let Some(compound) = element.as_compound_mut() {
-						compound.entries.sort_by(by_type, line_number, true_line_number, true_height, open, bookmark_slice)
+						compound.entries.sort_by(Self::by_type, line_number, true_line_number, true_height, open, bookmark_slice)
 					} else if let Some(chunk) = element.as_chunk_mut() {
-						chunk.entries.sort_by(by_type, line_number, true_line_number, true_height, open, bookmark_slice)
+						chunk.entries.sort_by(Self::by_type, line_number, true_line_number, true_height, open, bookmark_slice)
 					} else {
 						unsafe { panic_unchecked("Unknown element kind for compound sorting") }
 					};

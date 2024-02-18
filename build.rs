@@ -6,8 +6,8 @@ use std::fs::write;
 use std::io::Read;
 use std::mem::MaybeUninit;
 
-const UNICODE: &[u8] = include_bytes!("src/assets/unicode.hex");
-const ATLAS: &[u8] = include_bytes!(r"src/assets/atlas.png");
+const UNICODE: &[u8] = include_bytes!("src/assets/build/unicode.hex");
+const ATLAS: &[u8] = include_bytes!(r"src/assets/build/atlas.png");
 
 fn main() {
 	{ write(r"src\assets\atlas.hex", zune_png::PngDecoder::new(ATLAS).decode_raw().unwrap()).unwrap(); }
@@ -37,14 +37,14 @@ fn main() {
 		write(r"src/assets/unicode.hex.zib", &buf).unwrap();
 	}
 
-	if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
+	if std::env::var("CARGO_CFG_TARGET_OS").unwrap() == "windows" {
 		if let Err(e) = winres::WindowsResource::new()
-			.set_icon_with_id("src/assets/icon_16.ico", "16")
-			.set_icon_with_id("src/assets/icon_32.ico", "32")
-			.set_icon_with_id("src/assets/icon_48.ico", "48")
-			.set_icon_with_id("src/assets/icon_64.ico", "64")
-			.set_icon_with_id("src/assets/icon_128.ico", "128")
-			.set_icon_with_id("src/assets/icon_256.ico", "!")
+			.set_icon_with_id(r"src/assets/build/icon_256.ico", "1")
+			.set_icon_with_id(r"src/assets/build/icon_128.ico", "2")
+			.set_icon_with_id(r"src/assets/build/icon_64.ico", "3")
+			.set_icon_with_id(r"src/assets/build/icon_48.ico", "4")
+			.set_icon_with_id(r"src/assets/build/icon_32.ico", "5")
+			.set_icon_with_id(r"src/assets/build/icon_16.ico", "6")
 			.compile()
 		{
 			eprintln!("Error! {e}");

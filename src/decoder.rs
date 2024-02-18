@@ -1,21 +1,30 @@
 use std::intrinsics::likely;
 
 use compact_str::CompactString;
+use crate::elements::compound::CompoundMap;
+use crate::SortAlgorithm;
 
 pub struct Decoder {
 	pub data: *const u8,
 	end: *const u8,
+	sort: SortAlgorithm,
 }
 
 #[allow(improper_ctypes_definitions)]
 impl Decoder {
 	#[inline]
 	#[optimize(speed)]
-	pub const fn new(data: &[u8]) -> Self {
+	pub const fn new(data: &[u8], sort: SortAlgorithm) -> Self {
 		Self {
 			end: unsafe { data.as_ptr().add(data.len()) },
 			data: data.as_ptr(),
+			sort,
 		}
+	}
+
+	#[inline]
+	pub fn sort(&self, map: &mut CompoundMap) {
+		self.sort.sort(map)
 	}
 
 	#[inline]

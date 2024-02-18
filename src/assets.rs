@@ -1,6 +1,5 @@
 use std::mem::ManuallyDrop;
-use crate::{since_epoch, log};
-use crate::color::TextColor;
+use crate::since_epoch;
 
 use crate::vertex_buffer_builder::Vec2u;
 
@@ -14,14 +13,14 @@ pub const UNICODE_LEN: usize = 1_818_624;
 pub const ICON_WIDTH: usize = 64;
 pub const ICON_HEIGHT: usize = 64;
 
-const OTHERSIDE_MUSIC_DISC_ICON: &[u8] = include_bytes!("assets/otherside.hex");
-const PIGSTEP_MUSIC_DISC_ICON: &[u8] = include_bytes!("assets/pigstep.hex");
-const MELLOHI_MUSIC_DISC_ICON: &[u8] = include_bytes!("assets/mellohi.hex");
-const FIVE_MUSIC_DISC_ICON: &[u8] = include_bytes!("assets/5.hex");
-const WARD_MUSIC_DISC_ICON: &[u8] = include_bytes!("assets/ward.hex");
-const ELEVEN_MUSIC_DISC_ICON: &[u8] = include_bytes!("assets/11.hex");
-const RELIC_MUSIC_DISC_ICON: &[u8] = include_bytes!("assets/relic.hex");
-const STAL_MUSIC_DISC_ICON: &[u8] = include_bytes!("assets/stal.hex");
+const OTHERSIDE_MUSIC_DISC_ICON: &[u8] = include_bytes!("assets/discs/otherside.hex");
+const PIGSTEP_MUSIC_DISC_ICON: &[u8] = include_bytes!("assets/discs/pigstep.hex");
+const MELLOHI_MUSIC_DISC_ICON: &[u8] = include_bytes!("assets/discs/mellohi.hex");
+const FIVE_MUSIC_DISC_ICON: &[u8] = include_bytes!("assets/discs/5.hex");
+const WARD_MUSIC_DISC_ICON: &[u8] = include_bytes!("assets/discs/ward.hex");
+const ELEVEN_MUSIC_DISC_ICON: &[u8] = include_bytes!("assets/discs/11.hex");
+const RELIC_MUSIC_DISC_ICON: &[u8] = include_bytes!("assets/discs/relic.hex");
+const STAL_MUSIC_DISC_ICON: &[u8] = include_bytes!("assets/discs/stal.hex");
 
 pub const CONNECTION_UV: Vec2u = Vec2u::new(64, 64);
 pub const UNKNOWN_NBT_UV: Vec2u = Vec2u::new(112, 32);
@@ -60,10 +59,10 @@ pub const ZLIB_FILE_TYPE_UV: Vec2u = Vec2u::new(64, 80);
 pub const SNBT_FILE_TYPE_UV: Vec2u = Vec2u::new(80, 80);
 pub const MCA_FILE_TYPE_UV: Vec2u = Vec2u::new(96, 80);
 pub const OPEN_FOLDER_UV: Vec2u = Vec2u::new(112, 80);
-pub const UNSELECTED_TOGGLE_OFF_UV: Vec2u = Vec2u::new(0, 64);
-pub const UNSELECTED_TOGGLE_ON_UV: Vec2u = Vec2u::new(8, 64);
-pub const SELECTED_TOGGLE_OFF_UV: Vec2u = Vec2u::new(0, 72);
-pub const SELECTED_TOGGLE_ON_UV: Vec2u = Vec2u::new(8, 72);
+pub const UNSELECTED_TOGGLE_ON_UV: Vec2u = Vec2u::new(0, 64);
+pub const UNSELECTED_TOGGLE_OFF_UV: Vec2u = Vec2u::new(8, 64);
+pub const SELECTED_TOGGLE_ON_UV: Vec2u = Vec2u::new(0, 72);
+pub const SELECTED_TOGGLE_OFF_UV: Vec2u = Vec2u::new(8, 72);
 pub const UNHELD_SCROLLBAR_UV: Vec2u = Vec2u::new(48, 64);
 pub const HELD_SCROLLBAR_UV: Vec2u = Vec2u::new(54, 64);
 pub const REMOVE_UV: Vec2u = Vec2u::new(0, 96);
@@ -94,13 +93,17 @@ pub const HOVERED_STRIPE_UV: Vec2u = Vec2u::new(112, 128);
 pub const INVALID_STRIPE_UV: Vec2u = Vec2u::new(112, 112);
 pub const COPY_RAW_UV: Vec2u = Vec2u::new(3, 131);
 pub const COPY_FORMATTED_UV: Vec2u = Vec2u::new(19, 131);
+#[cfg(not(target_arch = "wasm32"))]
 pub const OPEN_ARRAY_IN_HEX_UV: Vec2u = Vec2u::new(35, 131);
+#[cfg(not(target_arch = "wasm32"))]
 pub const OPEN_IN_TXT: Vec2u = Vec2u::new(51, 131);
 pub const SORT_COMPOUND_BY_NAME: Vec2u = Vec2u::new(67, 131);
 pub const SORT_COMPOUND_BY_TYPE: Vec2u = Vec2u::new(83, 131);
+pub const SORT_COMPOUND_BY_NOTHING: Vec2u = Vec2u::new(0, 160);
 pub const FREEHAND_MODE_UV: Vec2u = Vec2u::new(0, 144);
 pub const ENABLED_FREEHAND_MODE_UV: Vec2u = Vec2u::new(16, 144);
-pub const STEAL_ANIMATION_OVERLAY: Vec2u = Vec2u::new(64, 144);
+pub const STEAL_ANIMATION_OVERLAY_UV: Vec2u = Vec2u::new(64, 144);
+pub const STAMP_BACKDROP_UV: Vec2u = Vec2u::new(16, 160);
 
 pub const BYTE_UV: Vec2u = Vec2u::new(0, 0);
 pub const SHORT_UV: Vec2u = Vec2u::new(16, 0);
@@ -130,7 +133,6 @@ pub const LIST_GHOST_UV: Vec2u = Vec2u::new(32, 48);
 pub const COMPOUND_GHOST_UV: Vec2u = Vec2u::new(48, 48);
 pub const INT_ARRAY_GHOST_UV: Vec2u = Vec2u::new(112, 16);
 pub const LONG_ARRAY_GHOST_UV: Vec2u = Vec2u::new(0, 48);
-pub const REGION_GHOST_UV: Vec2u = Vec2u::new(96, 48);
 pub const CHUNK_GHOST_UV: Vec2u = Vec2u::new(64, 48);
 pub const ALERT_UV: Vec2u = Vec2u::new(112, 144);
 
@@ -204,7 +206,7 @@ pub fn icon() -> Vec<u8> {
 	}
 	let mut scaled = ManuallyDrop::new(core::hint::black_box(scaled));
 	#[cfg(all(debug_assertions, not(target_arch = "wasm32")))]
-	log!(
+	crate::log!(
 		"took {} cycles",
 		unsafe { core::arch::x86_64::_rdtsc() } - start
 	);

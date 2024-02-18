@@ -42,7 +42,7 @@ macro_rules! array {
 			pub const ID: u8 = $my_id;
 
 			#[inline]
-			pub(in $crate::elements) fn from_str0(mut s: &str) -> Option<(&str, Self)> {
+			pub(in $crate::elements) fn from_str0(mut s: &str, sort: SortAlgorithm) -> Option<(&str, Self)> {
 				s = s
 					.strip_prefix('[')?
 					.trim_start()
@@ -50,7 +50,7 @@ macro_rules! array {
 					.trim_start();
 				let mut array = Self::new();
 				while !s.starts_with(']') {
-					let (s2, element) = NbtElement::from_str0(s)?;
+					let (s2, element) = NbtElement::from_str0(s, sort)?;
 					array.insert(array.len(), element).ok()?;
 					s = s2.trim_start();
 					if let Some(s2) = s.strip_prefix(',') {

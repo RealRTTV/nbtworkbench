@@ -34,7 +34,7 @@ use crate::vertex_buffer_builder::Vec2u;
 use crate::vertex_buffer_builder::VertexBufferBuilder;
 use crate::window::{MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH, WINDOW_HEIGHT, WINDOW_WIDTH};
 use crate::workbench_action::WorkbenchAction;
-use crate::{encompasses, encompasses_or_equal, flags, panic_unchecked, recache_along_indices, sum_indices, Bookmark, DropFn, FileUpdateSubscription, FileUpdateSubscriptionType, HeldEntry, LinkedQueue, OptionExt, Position, RenderContext, StrExt, WindowProperties, tab, tab_mut, get_clipboard, set_clipboard, since_epoch};
+use crate::{encompasses, encompasses_or_equal, flags, panic_unchecked, recache_along_indices, sum_indices, Bookmark, DropFn, FileUpdateSubscription, FileUpdateSubscriptionType, HeldEntry, LinkedQueue, OptionExt, Position, RenderContext, StrExt, WindowProperties, tab, tab_mut, get_clipboard, set_clipboard, since_epoch, SortAlgorithm};
 
 pub struct Workbench {
 	pub tabs: Vec<Tab>,
@@ -59,6 +59,7 @@ pub struct Workbench {
 	alerts: Vec<Alert>,
 	pub scale: usize,
 	steal_animation_data: Option<(Duration, Vec2u)>,
+	sort_algorithm: SortAlgorithm,
 }
 
 impl Workbench {
@@ -86,6 +87,7 @@ impl Workbench {
 			alerts: vec![],
 			scale: 0,
 			steal_animation_data: None,
+			sort_algorithm: SortAlgorithm::Type,
 		}
 	}
 
@@ -115,6 +117,7 @@ impl Workbench {
 			alerts: vec![],
 			scale: 1,
 			steal_animation_data: None,
+			sort_algorithm: SortAlgorithm::Type,
 		};
 		'create_tab: {
 			if let Some(path) = &std::env::args()
@@ -129,7 +132,7 @@ impl Workbench {
 			}
 			workbench.new_custom_tab(window_properties, Tab {
 				#[cfg(debug_assertions)]
-				value: Box::new(NbtElement::from_file(include_bytes!("assets/test.nbt")).expect("Included debug nbt contains valid data")),
+				value: Box::new(NbtElement::from_file(include_bytes!("assets/test.nbt"), SortAlgorithm::None).expect("Included debug nbt contains valid data")),
 				#[cfg(debug_assertions)]
 				name: "test.nbt".into(),
 				#[cfg(not(debug_assertions))]
@@ -164,7 +167,7 @@ impl Workbench {
 		let (nbt, compressed) = {
 			if path.extension().and_then(OsStr::to_str) == Some("mca") {
 				(
-					NbtElement::from_mca(buf.as_slice()).context("Failed to parse MCA file")?,
+					NbtElement::from_mca(buf.as_slice(), self.sort_algorithm).context("Failed to parse MCA file")?,
 					FileFormat::Mca,
 				)
 			} else if let Some(0x1F8B) = buf.first_chunk::<2>().copied().map(u16::from_be_bytes) {
@@ -173,6 +176,7 @@ impl Workbench {
 						&DeflateDecoder::new(buf.as_slice())
 							.decode_gzip()
 							.context("Failed to decode gzip compressed NBT")?,
+						self.sort_algorithm,
 					)
 					.context("Failed to parse NBT")?,
 					FileFormat::Gzip,
@@ -183,17 +187,18 @@ impl Workbench {
 						&DeflateDecoder::new(buf.as_slice())
 							.decode_zlib()
 							.context("Failed to decode zlib compressed NBT")?,
+						self.sort_algorithm,
 					)
 					.context("Failed to parse NBT")?,
 					FileFormat::Zlib,
 				)
-			} else if let Some(nbt) = NbtElement::from_file(buf.as_slice()) {
+			} else if let Some(nbt) = NbtElement::from_file(buf.as_slice(), self.sort_algorithm) {
 				(nbt, FileFormat::Nbt)
 			} else {
 				(
 					core::str::from_utf8(&buf)
 						.ok()
-						.and_then(NbtElement::from_str)
+						.and_then(|s| NbtElement::from_str(s, self.sort_algorithm))
 						.context(anyhow!(
 							"Failed to find file type for file {}",
 							path.file_name()
@@ -329,12 +334,12 @@ impl Workbench {
 			'a: {
 				let freehand_mode = tab!(self).freehand_mode;
 
-				if self.mouse_x >= left_margin && self.mouse_y >= HEADER_SIZE {
+				if x >= left_margin && y >= HEADER_SIZE {
 					match self.action_wheel.take() {
 						Some(_) => {},
 						None => {
 							if button == MouseButton::Right {
-								self.action_wheel = Some((((self.mouse_x - left_margin) & !15) + left_margin + 6, ((self.mouse_y - HEADER_SIZE) & !15) + HEADER_SIZE + 7));
+								self.action_wheel = Some((((x - left_margin) & !15) + left_margin + 6, ((y - HEADER_SIZE) & !15) + HEADER_SIZE + 7));
 								break 'a;
 							}
 						}
@@ -357,16 +362,20 @@ impl Workbench {
 						self.steal_animation_data = None;
 					}
 				}
-				if (self.window_width - 16..self.window_width).contains(&x) && (26..42).contains(&y) {
+				if let MouseButton::Left | MouseButton::Right = button && (248..264).contains(&x) && (26..42).contains(&y) {
 					let tab = tab_mut!(self);
 					tab.freehand_mode = !tab.freehand_mode;
+					break 'a;
+				}
+				if let MouseButton::Left | MouseButton::Right = button && (264..280).contains(&x) && (26..42).contains(&y) {
+					self.sort_algorithm = if button == MouseButton::Left { self.sort_algorithm.cycle() } else { self.sort_algorithm.rev_cycle() };
 					break 'a;
 				}
 				if ((self.window_width - 7)..self.window_width).contains(&x) {
 					let tab = tab_mut!(self);
 					let height = tab.value.height() * 16 + 48;
 					let total = self.window_height - HEADER_SIZE;
-					if height > total {
+					if height - 48 > total {
 						let start = total * self.scroll() / height + HEADER_SIZE;
 						let end = start + total * total / height;
 						if (start..=end).contains(&y) {
@@ -442,10 +451,10 @@ impl Workbench {
 	#[inline]
 	#[allow(clippy::too_many_lines)]
 	pub fn try_subscription(&mut self) -> Result<()> {
-		fn write_snbt(subscription: &FileUpdateSubscription, data: &[u8], tab: &mut Tab) -> Result<()> {
+		fn write_snbt(subscription: &FileUpdateSubscription, data: &[u8], tab: &mut Tab, sort: SortAlgorithm) -> Result<()> {
 			let Some((key, value)) = core::str::from_utf8(data)
 				.ok()
-				.and_then(NbtElement::from_str)
+				.and_then(|s| NbtElement::from_str(s, sort))
 			else {
 				return Err(anyhow!("SNBT failed to parse."));
 			};
@@ -630,7 +639,7 @@ impl Workbench {
 				};
 				match subscription.rx.try_recv() {
 					Ok(data) => match subscription.subscription_type {
-						FileUpdateSubscriptionType::Snbt => write_snbt(subscription, &data, tab)?,
+						FileUpdateSubscriptionType::Snbt => write_snbt(subscription, &data, tab, self.sort_algorithm)?,
 						FileUpdateSubscriptionType::ByteArray => write_array(subscription, tab, {
 							let mut array = NbtByteArray::new();
 							for (idx, byte) in data.into_iter().enumerate() {
@@ -1079,7 +1088,7 @@ impl Workbench {
 			let tab = tab!(self);
 			let x = self.mouse_x - (16 + 4);
 			if x / 16 == 13 {
-				match NbtElement::from_str(&get_clipboard().ok_or_else(|| anyhow!("Failed to get clipboard"))?) {
+				match NbtElement::from_str(&get_clipboard().ok_or_else(|| anyhow!("Failed to get clipboard"))?, self.sort_algorithm) {
 					Some((key, element)) => {
 						if element.id() == NbtChunk::ID && tab.value.id() != NbtRegion::ID {
 							return Err(anyhow!("Chunks are not supported for non-region tabs"));
@@ -2076,7 +2085,7 @@ impl Workbench {
 				// 	});
 				// 	return true;
 				// }
-				if key == KeyCode::KeyV && flags == flags!(Ctrl) && let Some(element) = get_clipboard().and_then(|x| NbtElement::from_str(&x)) && (element.1.id() != NbtChunk::ID || tab.value.id() == NbtRegion::ID) {
+				if key == KeyCode::KeyV && flags == flags!(Ctrl) && let Some(element) = get_clipboard().and_then(|x| NbtElement::from_str(&x, self.sort_algorithm)) && (element.1.id() != NbtChunk::ID || tab.value.id() == NbtRegion::ID) {
 					let old_held_entry = core::mem::replace(&mut self.held_entry, HeldEntry::FromAether(element));
 					let HeldEntry::FromAether(pair) = core::mem::replace(&mut self.held_entry, old_held_entry) else {
 						unsafe { panic_unchecked("we just set it you, bozo") }
@@ -2147,13 +2156,13 @@ impl Workbench {
 						let Ok(buf) = read(path) else { break 'a };
 						let (nbt, compression) = {
 							if path.extension().and_then(OsStr::to_str) == Some("mca") {
-								(NbtElement::from_mca(buf.as_slice()), FileFormat::Mca)
+								(NbtElement::from_mca(buf.as_slice(), self.sort_algorithm), FileFormat::Mca)
 							} else if buf.first_chunk::<2>().copied().map(u16::from_be_bytes) == Some(0x1F8B) {
 								(
 									DeflateDecoder::new(buf.as_slice())
 										.decode_gzip()
 										.ok()
-										.and_then(|x| NbtElement::from_file(&x)),
+										.and_then(|x| NbtElement::from_file(&x, self.sort_algorithm)),
 									FileFormat::Zlib,
 								)
 							} else if let Some(0x7801 | 0x789C | 0x78DA) = buf.first_chunk::<2>().copied().map(u16::from_be_bytes) {
@@ -2161,15 +2170,15 @@ impl Workbench {
 									DeflateDecoder::new(buf.as_slice())
 										.decode_zlib()
 										.ok()
-										.and_then(|x| NbtElement::from_file(&x)),
+										.and_then(|x| NbtElement::from_file(&x, self.sort_algorithm)),
 									FileFormat::Zlib,
 								)
-							} else if let Some(nbt) = NbtElement::from_file(&buf) {
+							} else if let Some(nbt) = NbtElement::from_file(&buf, self.sort_algorithm) {
 								(Some(nbt), FileFormat::Nbt)
 							} else {
 								let nbt = core::str::from_utf8(&buf)
 									.ok()
-									.and_then(NbtElement::from_str)
+									.and_then(|s| NbtElement::from_str(s, self.sort_algorithm))
 									.map(|x| x.1);
 								if let Some(NbtCompound::ID | NbtRegion::ID) = nbt.as_ref().map(NbtElement::id) {
 									(nbt, FileFormat::Snbt)
@@ -2397,7 +2406,7 @@ impl Workbench {
 		} else {
 			(None, None, false)
 		};
-		let mut ctx = RenderContext::new(selected_y, selected_key, selected_value, selecting_key, ghost, left_margin, (self.mouse_x, self.mouse_y));
+		let mut ctx = RenderContext::new(selected_y, selected_key, selected_value, selecting_key, ghost, left_margin, (self.mouse_x, self.mouse_y), tab.freehand_mode);
 		if self.mouse_y >= HEADER_SIZE && self.action_wheel.is_none() {
 			builder.draw_texture_region_z(
 				(0, (self.mouse_y & !15) + 1),
@@ -2413,7 +2422,29 @@ impl Workbench {
 				builder.draw_texture((0, 26), SELECTION_UV, (16, 16));
 				builder.draw_tooltip(&["Open File"], (self.mouse_x, self.mouse_y));
 			}
-			builder.draw_texture((17, 26), LINE_NUMBER_SEPARATOR_UV, (2, 16));
+			builder.draw_texture_region_z(
+				(17, 22),
+				BASE_Z,
+				LINE_NUMBER_SEPARATOR_UV,
+				(2, 23),
+				(2, 16),
+			);
+		}
+		{
+			builder.draw_texture_region_z(
+				(281, 22),
+				BASE_Z,
+				LINE_NUMBER_SEPARATOR_UV,
+				(2, 23),
+				(2, 16),
+			);
+			builder.draw_texture_region_z(
+				(283, 23),
+				BASE_Z,
+				DARK_STRIPE_UV,
+				(self.window_width - 215 - 283, 22),
+				(16, 16),
+			);
 		}
 		tab.render(
 			builder,
@@ -2423,6 +2454,7 @@ impl Workbench {
 			self.action_wheel.is_some(),
 			self.steal_animation_data.as_ref().map(|x| (since_epoch() - x.0).min(Duration::from_millis(500)).as_millis() as f32 / 500.0).unwrap_or(0.0)
 		);
+		self.sort_algorithm.render(builder, &mut ctx);
 		if let Some(selected_text) = &tab.selected_text {
 			builder.horizontal_scroll = horizontal_scroll;
 			selected_text.render(builder, left_margin);

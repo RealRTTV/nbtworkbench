@@ -49,25 +49,23 @@
 use std::cell::UnsafeCell;
 use std::cmp::Ordering;
 use std::convert::identity;
-use std::fmt::Write;
+use std::fmt::{Display, Formatter, Write};
 use std::rc::Rc;
-use std::sync::Weak;
 use std::time::Duration;
 
 use compact_str::{CompactString, ToCompactString};
 use static_assertions::{const_assert, const_assert_eq};
 #[cfg(target_arch = "wasm32")]
-use wasm_bindgen::{JsCast, prelude::wasm_bindgen};
+use wasm_bindgen::prelude::wasm_bindgen;
 use winit::window::Window;
 
 use elements::element::NbtElement;
 use vertex_buffer_builder::VertexBufferBuilder;
-use crate::alert::Alert;
 
-use crate::assets::{BASE_TEXT_Z, BASE_Z, BOOKMARK_UV, BOOKMARK_Z, END_LINE_NUMBER_SEPARATOR_UV, HEADER_SIZE, HIDDEN_BOOKMARK_UV, INSERTION_UV, INVALID_STRIPE_UV, LINE_NUMBER_SEPARATOR_UV, LINE_NUMBER_Z, SCROLLBAR_BOOKMARK_Z, SELECTED_TOGGLE_OFF_UV, SELECTED_TOGGLE_ON_UV, TEXT_UNDERLINE_UV, TOGGLE_Z, UNSELECTED_TOGGLE_OFF_UV, UNSELECTED_TOGGLE_ON_UV};
+use crate::assets::{BASE_TEXT_Z, BASE_Z, BOOKMARK_UV, BOOKMARK_Z, END_LINE_NUMBER_SEPARATOR_UV, HEADER_SIZE, HIDDEN_BOOKMARK_UV, INSERTION_UV, INVALID_STRIPE_UV, LINE_NUMBER_SEPARATOR_UV, LINE_NUMBER_Z, SCROLLBAR_BOOKMARK_Z, SELECTED_TOGGLE_OFF_UV, SELECTED_TOGGLE_ON_UV, SELECTION_UV, SORT_COMPOUND_BY_NAME, SORT_COMPOUND_BY_NOTHING, SORT_COMPOUND_BY_TYPE, STAMP_BACKDROP_UV, TEXT_UNDERLINE_UV, TOGGLE_Z, UNSELECTED_TOGGLE_OFF_UV, UNSELECTED_TOGGLE_ON_UV};
 use crate::color::TextColor;
 use crate::elements::chunk::{NbtChunk, NbtRegion};
-use crate::elements::compound::NbtCompound;
+use crate::elements::compound::{CompoundMap, NbtCompound};
 use crate::elements::element::{NbtByte, NbtByteArray, NbtDouble, NbtFloat, NbtInt, NbtIntArray, NbtLong, NbtLongArray, NbtShort};
 use crate::elements::list::NbtList;
 use crate::elements::string::NbtString;
@@ -179,6 +177,7 @@ macro_rules! log {
 #[macro_export]
 macro_rules! debg {
 	() => {
+		#[cfg(debug_assertions)]
 		$crate::log!("[{}:{}:{}]", file!(), line!(), column!())
 	};
 }
@@ -205,6 +204,8 @@ pub static mut WINDOW_PROPERTIES: UnsafeCell<WindowProperties> = UnsafeCell::new
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
 pub fn handle_dialog(name: String, bytes: Vec<u8>) {
+	use crate::alert::Alert;
+
 	let workbench = unsafe { WORKBENCH.get_mut() };
 
 	if let Err(e) = workbench.on_open_file(name.as_str().as_ref(), bytes, unsafe { WINDOW_PROPERTIES.get_mut() }) {
@@ -232,7 +233,7 @@ pub fn main() -> ! { pollster::block_on(window::run()) }
 /// * wiki page for docs on minecraft's format of stuff
 /// * [chunk](NbtChunk) section rendering
 /// # Minor Features
-/// * save & load for web assembly (and open icon for exe ver)
+/// * open icon for exe ver
 /// * gear icon to swap toolbar with settings panel
 ///   * sort entries on file read config
 ///   * make floats either exact or "exact enough"
@@ -291,43 +292,6 @@ pub fn set_clipboard(value: String) -> bool {
 	#[cfg(target_arch = "wasm32")]
 	return web_sys::window().map(|window| window.navigator()).and_then(|navigator| navigator.clipboard()).map(|clipboard| clipboard.write_text(&value)).is_some();
 }
-
-#[must_use]
-pub fn encode(bytes: &[u8]) -> Vec<u8> {
-	let len = bytes.len();
-	let mut encoded = Vec::with_capacity(((len + 2) / 3) * 4);
-	let mut data = 0_u32;
-	let mut bits = 0_u32;
-	let mut iter = bytes.iter();
-	loop {
-		while bits >= 6 {
-			encoded.push(match (data >> 26_u32) as u8 & 63 {
-				x @ 0..=25 => x + b'A',
-				x @ 26..=51 => x + (b'a' - 26),
-				x @ 52..=61 => x.wrapping_add(b'0'.wrapping_sub(52)),
-				62 => b'+',
-				63 => b'/',
-				// SAFETY: do not change the & 63 without consulting the unsafe assurance
-				_ => unsafe { std::hint::unreachable_unchecked() },
-			});
-			bits -= 6;
-			data <<= 6_u32;
-		}
-		if let Some(&byte) = iter.next() {
-			data |= u32::from(byte) << (24 - bits);
-			bits += 8;
-		} else if bits > 0 {
-			bits = 6;
-		} else {
-			break;
-		}
-	}
-	while encoded.len() % 3 != 0 {
-		encoded.push(b'=');
-	}
-	encoded
-}
-
 
 #[must_use]
 pub fn since_epoch() -> Duration {
@@ -534,6 +498,81 @@ pub enum FileUpdateSubscriptionType {
 	LongArray,
 }
 
+#[derive(Copy, Clone)]
+pub enum SortAlgorithm {
+	None,
+	Name,
+	Type,
+}
+
+impl SortAlgorithm {
+	pub fn render(self, builder: &mut VertexBufferBuilder, ctx: &mut RenderContext) {
+		let uv = match self {
+			Self::None => SORT_COMPOUND_BY_NOTHING,
+			Self::Name => SORT_COMPOUND_BY_NAME,
+			Self::Type => SORT_COMPOUND_BY_TYPE,
+		};
+
+		builder.draw_texture((264, 26), STAMP_BACKDROP_UV, (16, 16));
+		builder.draw_texture((267, 29), uv, (10, 10));
+
+		let hovering = (264..280).contains(&ctx.mouse_x) && (26..42).contains(&ctx.mouse_y);
+		if hovering {
+			builder.draw_texture((264, 26), SELECTION_UV, (16, 16));
+			builder.draw_tooltip(&[&format!("Compound Sorting Algorithm ({self})")], (ctx.mouse_x, ctx.mouse_y));
+		}
+	}
+
+	pub fn cycle(self) -> Self {
+		match self {
+			Self::None => Self::Name,
+			Self::Name => Self::Type,
+			Self::Type => Self::None,
+		}
+	}
+
+	pub fn rev_cycle(self) -> Self {
+		match self {
+			Self::None => Self::Type,
+			Self::Name => Self::None,
+			Self::Type => Self::Name,
+		}
+	}
+
+	pub fn sort(self, map: &mut CompoundMap) {
+		if let Self::None = self { return; }
+		let hashes = map.entries.iter().map(|entry| entry.hash).collect::<Vec<_>>();
+		// yeah, it's hacky but there's not much else I *can* do. plus: it works extremely well.
+		for (idx, entry) in map.entries.iter_mut().enumerate() {
+			entry.hash = idx as u64;
+		}
+		match self {
+			Self::Name => map.entries.sort_by(|a, b| element_action::ElementAction::by_name((&a.key, &a.value), (&b.key, &b.value))),
+			_ => map.entries.sort_by(|a, b| element_action::ElementAction::by_type((&a.key, &a.value), (&b.key, &b.value))),
+		}
+		let indices = map.entries.iter().map(|entry| entry.hash as usize).collect::<Vec<_>>();
+		for (new_idx, &idx) in indices.iter().enumerate() {
+			// SAFETY: these indices are valid since the length did not change and since the values written were indexes
+			unsafe {
+				let hash = *hashes.get_unchecked(idx);
+				let entry = map.entries.get_unchecked_mut(new_idx);
+				entry.hash = hash;
+				*map.indices.find(hash, |&x| x == idx).panic_unchecked("index obviously exists").as_mut() = new_idx;
+			}
+		}
+	}
+}
+
+impl Display for SortAlgorithm {
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+		write!(f, "{}", match self {
+			Self::None => "None",
+			Self::Name => "Name-Based",
+			Self::Type => "Type-Based",
+		})
+	}
+}
+
 pub struct RenderContext {
 	selecting_key: bool,
 	selected_y: usize,
@@ -552,12 +591,13 @@ pub struct RenderContext {
 	pub y_offset: usize,
 	// must be sorted least to greatest
 	line_numbers: Vec<usize>,
+	freehand: bool
 }
 
 impl RenderContext {
 	#[must_use]
 	#[allow(clippy::type_complexity)] // forbidden is fine to be like that, c'mon
-	pub fn new(selected_y: usize, selected_key: Option<Box<str>>, selected_value: Option<Box<str>>, selecting_key: bool, ghost: Option<(u8, usize, usize)>, left_margin: usize, mouse: (usize, usize)) -> Self {
+	pub fn new(selected_y: usize, selected_key: Option<Box<str>>, selected_value: Option<Box<str>>, selecting_key: bool, ghost: Option<(u8, usize, usize)>, left_margin: usize, mouse: (usize, usize), freehand: bool) -> Self {
 		Self {
 			selecting_key,
 			selected_y,
@@ -575,6 +615,7 @@ impl RenderContext {
 			x_offset: 16 + left_margin,
 			y_offset: HEADER_SIZE,
 			line_numbers: vec![],
+			freehand,
 		}
 	}
 
@@ -608,7 +649,7 @@ impl RenderContext {
 		let x = (pos.0 - self.left_margin) / 16;
 		let y = (pos.1 - HEADER_SIZE) / 16;
 		let hovered = if (self.mouse_x >= self.left_margin) & (self.mouse_y >= HEADER_SIZE) {
-			(x >= (self.mouse_x - self.left_margin) / 16) & (y == (self.mouse_y - HEADER_SIZE) / 16)
+			((x >= (self.mouse_x - self.left_margin) / 16) || self.freehand) & (y == (self.mouse_y - HEADER_SIZE) / 16)
 		} else {
 			false
 		};
@@ -869,18 +910,18 @@ impl<T> LinkedQueue<T> {
 	}
 
 	#[must_use]
-	pub fn iter(&self) -> LinkedQueueIterator<'_, T> {
-		LinkedQueueIterator {
+	pub fn iter(&self) -> LinkedQueueIter<'_, T> {
+		LinkedQueueIter {
 			tail: &self.tail,
 		}
 	}
 }
 
-pub struct LinkedQueueIterator<'a, T> {
+pub struct LinkedQueueIter<'a, T> {
 	tail: &'a Option<Box<SinglyLinkedNode<T>>>,
 }
 
-impl<'a, T> Iterator for LinkedQueueIterator<'a, T> {
+impl<'a, T> Iterator for LinkedQueueIter<'a, T> {
 	type Item = &'a T;
 
 	fn next(&mut self) -> Option<Self::Item> {
@@ -1154,7 +1195,7 @@ impl StrExt for str {
 pub trait OptionExt<T> {
 	/// # Safety
 	///
-	/// * This code better be unreachable otherwise it's UB without `debug_assertions`, just a panic with them however.
+	/// * This code better be unreachable otherwise it's UB without `debug_assertions`, just a panic with them, however.
 	unsafe fn panic_unchecked(self, msg: &str) -> T;
 
 	#[allow(clippy::wrong_self_convention)] // then why is is_some_and like that, huh?
@@ -1169,7 +1210,7 @@ impl<T> OptionExt<T> for Option<T> {
 
 /// # Safety
 ///
-/// * This code better be unreachable otherwise it's UB without `debug_assertions`, just a panic with them however.
+/// * This code better be unreachable otherwise it's UB without `debug_assertions`, just a panic with them, however.
 ///
 /// # Panics
 ///
@@ -1197,18 +1238,3 @@ const_assert_eq!(
 	VertexBufferBuilder::CHAR_WIDTH[b':' as usize],
 	VertexBufferBuilder::CHAR_WIDTH[b',' as usize]
 );
-
-const_assert!(core::mem::size_of::<NbtByte>() <= core::mem::size_of::<NbtElement>());
-const_assert!(core::mem::size_of::<NbtShort>() <= core::mem::size_of::<NbtElement>());
-const_assert!(core::mem::size_of::<NbtInt>() <= core::mem::size_of::<NbtElement>());
-const_assert!(core::mem::size_of::<NbtLong>() <= core::mem::size_of::<NbtElement>());
-const_assert!(core::mem::size_of::<NbtFloat>() <= core::mem::size_of::<NbtElement>());
-const_assert!(core::mem::size_of::<NbtDouble>() <= core::mem::size_of::<NbtElement>());
-const_assert!(core::mem::size_of::<NbtString>() <= core::mem::size_of::<NbtElement>());
-const_assert!(core::mem::size_of::<NbtByteArray>() <= core::mem::size_of::<NbtElement>());
-const_assert!(core::mem::size_of::<NbtList>() <= core::mem::size_of::<NbtElement>());
-const_assert!(core::mem::size_of::<NbtCompound>() <= core::mem::size_of::<NbtElement>());
-const_assert!(core::mem::size_of::<NbtIntArray>() <= core::mem::size_of::<NbtElement>());
-const_assert!(core::mem::size_of::<NbtLongArray>() <= core::mem::size_of::<NbtElement>());
-const_assert!(core::mem::size_of::<NbtChunk>() <= core::mem::size_of::<NbtElement>());
-const_assert!(core::mem::size_of::<NbtRegion>() <= core::mem::size_of::<NbtElement>());
