@@ -19,7 +19,7 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 use zune_inflate::DeflateDecoder;
 
 use crate::alert::Alert;
-use crate::assets::{ACTION_WHEEL_Z, BASE_TEXT_Z, BASE_Z, BOOKMARK_UV, CLOSED_WIDGET_UV, DARK_STRIPE_UV, EDITED_UV, HEADER_SIZE, HELD_ENTRY_Z, HIDDEN_BOOKMARK_UV, HORIZONTAL_SEPARATOR_UV, HOVERED_STRIPE_UV, HOVERED_WIDGET_UV, JUST_OVERLAPPING_BASE_TEXT_Z, LIGHT_STRIPE_UV, LINE_NUMBER_SEPARATOR_UV, OPEN_FOLDER_UV, SELECTED_ACTION_WHEEL, SELECTED_WIDGET_UV, SELECTION_UV, TRAY_UV, UNEDITED_UV, UNSELECTED_ACTION_WHEEL, UNSELECTED_WIDGET_UV};
+use crate::assets::{ACTION_WHEEL_Z, BACKDROP_UV, BASE_TEXT_Z, BASE_Z, BOOKMARK_UV, CLOSED_WIDGET_UV, DARK_STRIPE_UV, EDITED_UV, HEADER_SIZE, HELD_ENTRY_Z, HIDDEN_BOOKMARK_UV, HORIZONTAL_SEPARATOR_UV, HOVERED_STRIPE_UV, HOVERED_WIDGET_UV, JUST_OVERLAPPING_BASE_TEXT_Z, LIGHT_STRIPE_UV, LINE_NUMBER_SEPARATOR_UV, OPEN_FOLDER_UV, SELECTED_ACTION_WHEEL, SELECTED_WIDGET_UV, SELECTION_UV, TRAY_UV, UNEDITED_UV, UNSELECTED_ACTION_WHEEL, UNSELECTED_WIDGET_UV};
 use crate::color::TextColor;
 use crate::elements::chunk::{NbtChunk, NbtRegion};
 use crate::elements::compound::NbtCompound;
@@ -27,7 +27,8 @@ use crate::elements::element::NbtElement;
 use crate::elements::element::{NbtByte, NbtByteArray, NbtDouble, NbtFloat, NbtInt, NbtIntArray, NbtLong, NbtLongArray, NbtShort};
 use crate::elements::list::{NbtList, ValueIterator};
 use crate::elements::string::NbtString;
-use crate::selected_text::{KeyResult, SelectedText};
+use crate::selected_text::{SelectedText, SelectedTextAdditional};
+use crate::text::{KeyResult, SelectedTextKeyResult, Text};
 use crate::tab::{FileFormat, Tab};
 use crate::tree_travel::{Navigate, Traverse, TraverseParents};
 use crate::vertex_buffer_builder::Vec2u;
@@ -35,6 +36,7 @@ use crate::vertex_buffer_builder::VertexBufferBuilder;
 use crate::window::{MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH, WINDOW_HEIGHT, WINDOW_WIDTH};
 use crate::workbench_action::WorkbenchAction;
 use crate::{encompasses, encompasses_or_equal, flags, panic_unchecked, recache_along_indices, sum_indices, Bookmark, DropFn, FileUpdateSubscription, FileUpdateSubscriptionType, HeldEntry, LinkedQueue, OptionExt, Position, RenderContext, StrExt, WindowProperties, tab, tab_mut, get_clipboard, set_clipboard, since_epoch, SortAlgorithm};
+use crate::search_box::SearchBox;
 
 pub struct Workbench {
 	pub tabs: Vec<Tab>,
@@ -60,10 +62,13 @@ pub struct Workbench {
 	pub scale: usize,
 	steal_animation_data: Option<(Duration, Vec2u)>,
 	sort_algorithm: SortAlgorithm,
+	search_box: SearchBox,
 }
 
 impl Workbench {
-	pub const fn uninit() -> Self {
+	#[inline]
+	#[must_use]
+	pub const unsafe fn uninit() -> Self {
 		Self {
 			tabs: vec![],
 			tab: 0,
@@ -87,7 +92,8 @@ impl Workbench {
 			alerts: vec![],
 			scale: 0,
 			steal_animation_data: None,
-			sort_algorithm: SortAlgorithm::Type,
+			sort_algorithm: SortAlgorithm::None,
+			search_box: SearchBox::uninit(),
 		}
 	}
 
@@ -118,6 +124,7 @@ impl Workbench {
 			scale: 1,
 			steal_animation_data: None,
 			sort_algorithm: SortAlgorithm::Type,
+			search_box: SearchBox::new(),
 		};
 		'create_tab: {
 			if let Some(path) = &std::env::args()
@@ -274,6 +281,13 @@ impl Workbench {
 			if button == MouseButton::Left {
 				self.steal_animation_data = None;
 			}
+			if button == MouseButton::Left {
+				if self.try_select_search_box() {
+					return true;
+				} else {
+					self.search_box.deselect();
+				}
+			}
 			self.held_mouse_keys.remove(&button);
 			if y < 19 && x > 2 && y > 3 {
 				self.click_tab(button, window_properties);
@@ -311,11 +325,13 @@ impl Workbench {
 							break 'a;
 						}
 					}
+
 					if button == MouseButton::Left {
 						if self.try_select_text() {
 							break 'a;
 						}
 					}
+
 					if button == MouseButton::Left {
 						if self.bookmark_line() {
 							break 'a;
@@ -1329,6 +1345,16 @@ impl Workbench {
 	}
 
 	#[inline]
+	fn try_select_search_box(&mut self) -> bool {
+		if (283..self.window_width - 215).contains(&self.mouse_x) && (23..45).contains(&self.mouse_y) {
+			self.search_box.select(self.mouse_x - 283);
+			true
+		} else {
+			false
+		}
+	}
+
+	#[inline]
 	fn try_select_text(&mut self) -> bool {
 		let left_margin = self.left_margin();
 		let horizontal_scroll = self.horizontal_scroll();
@@ -1387,69 +1413,29 @@ impl Workbench {
 	#[inline]
 	pub fn keyfix(&mut self, window_properties: &mut WindowProperties) {
 		let tab = tab_mut!(self);
-		if let Some(SelectedText {
-			y,
-			indices,
-			cursor,
-			value,
-			selection,
-			keyfix,
-			prefix,
-			suffix,
-			valuefix,
-			editable: true,
-			last_interaction: _,
-			undos: _,
-			redos: _,
-			value_color,
-		}) = tab.selected_text.clone()
+		if let Some(SelectedText(Text { value, cursor, editable: true, additional: SelectedTextAdditional { y, indices, value_color, keyfix, prefix, suffix, valuefix }, .. })) = tab.selected_text.clone()
 			&& let Some((keyfix, keyfix_color)) = keyfix
 			&& valuefix.is_none()
 			&& suffix.0.is_empty()
 			&& cursor == 0
 		{
 			if !tab.close_selected_text(false, window_properties) { return }
-			tab.selected_text = Some(
-				SelectedText {
-					y,
-					indices,
-					cursor: keyfix.len(),
-					selection,
-					keyfix: None,
-					prefix: (String::new(), TextColor::White),
-					suffix: prefix,
-					valuefix: Some((value, value_color)),
-					value: keyfix,
-					editable: true,
-					last_interaction: since_epoch(),
-					undos: LinkedQueue::new(),
-					redos: LinkedQueue::new(),
-					value_color: keyfix_color,
-				}
-				.post_process(),
-			);
+			tab.selected_text = Some(SelectedText(Text::new(keyfix.clone(), keyfix.len(), true, SelectedTextAdditional {
+				y,
+				indices,
+				value_color: keyfix_color,
+				keyfix: None,
+				prefix: (String::new(), TextColor::White),
+				suffix: prefix,
+				valuefix: Some((value, value_color)),
+			})));
 		}
 	}
 
 	#[inline]
 	pub fn valuefix(&mut self, window_properties: &mut WindowProperties) {
 		let tab = tab_mut!(self);
-		if let Some(SelectedText {
-			y,
-			indices,
-			cursor,
-			value,
-			selection,
-			keyfix,
-			prefix,
-			suffix,
-			valuefix,
-			editable: true,
-			last_interaction: _,
-			undos: _,
-			redos: _,
-			value_color,
-		}) = tab.selected_text.clone()
+		if let Some(SelectedText(Text { value, cursor, editable: true, additional: SelectedTextAdditional { y, indices, value_color, keyfix, prefix, suffix, valuefix }, .. })) = tab.selected_text.clone()
 			&& let Some((valuefix, valuefix_color)) = valuefix
 			&& keyfix.is_none()
 			&& prefix.0.is_empty()
@@ -1457,32 +1443,22 @@ impl Workbench {
 		{
 			// normally won't occur, but im future proofing
 			if !tab.close_selected_text(false, window_properties) { return }
-			tab.selected_text = Some(
-				SelectedText {
-					y,
-					indices,
-					cursor: 0,
-					selection,
-					keyfix: Some((value, value_color)),
-					prefix: suffix,
-					suffix: (String::new(), TextColor::White),
-					valuefix: None,
-					value: valuefix,
-					value_color: valuefix_color,
-					editable: true,
-					last_interaction: since_epoch(),
-					undos: LinkedQueue::new(),
-					redos: LinkedQueue::new(),
-				}
-				.post_process(),
-			);
+			tab.selected_text = Some(SelectedText(Text::new(valuefix, 0, true, SelectedTextAdditional {
+				y,
+				indices,
+				value_color: valuefix_color,
+				keyfix: Some((value, value_color)),
+				prefix: suffix,
+				suffix: (String::new(), TextColor::White),
+				valuefix: None,
+			})));
 		}
 	}
 
 	#[inline]
 	pub fn shift_selected_text_up(&mut self) {
 		let tab = tab_mut!(self);
-		if let Some(SelectedText { y, indices, .. }) = &mut tab.selected_text {
+		if let Some(SelectedText(Text { additional: SelectedTextAdditional { y, indices, .. }, .. })) = &mut tab.selected_text {
 			if indices.is_empty() { return } // well it could be empty
 			let child_idx = unsafe {
 				indices
@@ -1539,7 +1515,7 @@ impl Workbench {
 	#[inline]
 	pub fn shift_selected_text_down(&mut self) {
 		let tab = tab_mut!(self);
-		if let Some(SelectedText { y, indices, .. }) = &mut tab.selected_text {
+		if let Some(SelectedText(Text { additional: SelectedTextAdditional { y, indices, .. }, .. })) = &mut tab.selected_text {
 			// well it could be empty
 			if indices.is_empty() { return }
 			let child_idx = unsafe {
@@ -1600,16 +1576,7 @@ impl Workbench {
 	pub unsafe fn selected_text_up(&mut self, ctrl: bool, window_properties: &mut WindowProperties) {
 		let left_margin = self.left_margin();
 		let tab = tab_mut!(self);
-		if let Some(SelectedText {
-			y,
-			indices,
-			cursor,
-			keyfix,
-			prefix,
-			value: str_value,
-			..
-		}) = tab.selected_text.clone()
-		{
+		if let Some(SelectedText(Text { value: str_value, cursor, additional: SelectedTextAdditional { y, indices, keyfix, prefix, .. }, .. })) = tab.selected_text.clone() {
 			let Some(&last_index) = indices.last() else {
 				return;
 			};
@@ -1727,7 +1694,7 @@ impl Workbench {
 		let left_margin = self.left_margin();
 
 		let tab = tab_mut!(self);
-		let total = if let Some(SelectedText { indices, .. }) = tab.selected_text.as_ref() {
+		let total = if let Some(SelectedText(Text { additional: SelectedTextAdditional { indices, .. }, .. })) = tab.selected_text.as_ref() {
 			let mut total = sum_indices(indices.iter().copied(), &tab.value);
 			total += 1; // move down
 			// down needs a check that it doesn't surpass the end
@@ -1737,16 +1704,7 @@ impl Workbench {
 			return;
 		};
 
-		if let Some(SelectedText {
-			y,
-			indices,
-			cursor,
-			keyfix,
-			prefix,
-			value: str_value,
-			..
-		}) = tab.selected_text.clone()
-		{
+		if let Some(SelectedText(Text { value: str_value, cursor, additional: SelectedTextAdditional { y, indices, keyfix, prefix, .. }, .. })) = tab.selected_text.clone() {
 			if !tab.close_selected_text(false, window_properties) { return }
 			let cache_cursor_x = self.cache_cursor_x;
 			let original_indices_len = indices.len();
@@ -1860,7 +1818,7 @@ impl Workbench {
 	#[inline]
 	pub fn force_close(&mut self) {
 		let tab = tab_mut!(self);
-		if let Some(SelectedText { indices, y, .. }) = tab.selected_text.as_ref() {
+		if let Some(SelectedText(Text { additional: SelectedTextAdditional { y, indices, .. }, .. })) = tab.selected_text.as_ref() {
 			let indices = indices.clone();
 			let (_, _, element, line_number) = Navigate::new(indices.iter().copied(), &mut tab.value).last();
 			let decrement = element.height() - 1;
@@ -1887,7 +1845,7 @@ impl Workbench {
 	#[inline]
 	pub fn force_open(&mut self) {
 		let tab = tab_mut!(self);
-		if let Some(SelectedText { indices, y, .. }) = tab.selected_text.as_ref() {
+		if let Some(SelectedText(Text { additional: SelectedTextAdditional { y, indices, .. }, .. })) = tab.selected_text.as_ref() {
 			let indices = indices.clone();
 			let shift = self.held_keys.contains(&KeyCode::ShiftLeft) | self.held_keys.contains(&KeyCode::ShiftRight);
 			let (_, _, element, line_number) = Navigate::new(indices.iter().copied(), &mut tab.value).last();
@@ -1993,72 +1951,90 @@ impl Workbench {
 				let flags = (self.held_keys.contains(&KeyCode::ControlLeft) as u8 | self.held_keys.contains(&KeyCode::ControlRight) as u8) | ((self.held_keys.contains(&KeyCode::ShiftLeft) as u8 | self.held_keys.contains(&KeyCode::ShiftRight) as u8) << 1) | ((self.held_keys.contains(&KeyCode::AltLeft) as u8 | self.held_keys.contains(&KeyCode::AltRight) as u8) << 2);
 				let left_margin = self.left_margin();
 				let tab = tab_mut!(self);
+				if self.search_box.is_selected() {
+					match self.search_box.on_key_press(key, char, flags) {
+						KeyResult::Failed => {} // next thing please
+						KeyResult::NothingSpecial => {
+							self.search_box.post_input((self.window_width, self.window_height));
+							return true;
+						}
+						KeyResult::Revert => {
+							self.search_box.post_input((self.window_width, self.window_height));
+							return true;
+						}
+						KeyResult::Finish => {
+							self.search_box.post_input((self.window_width, self.window_height));
+							self.search_box.search();
+							return true;
+						}
+					}
+				}
 				if let Some(selected_text) = &mut tab.selected_text {
 					match selected_text.on_key_press(key, char, flags) {
-						KeyResult::NothingSpecial => {
-							selected_text.handle_history();
+						SelectedTextKeyResult::NothingSpecial => {
+							selected_text.post_input();
 							self.cache_cursor_x = None;
 							self.refresh_selected_text_horizontal_scroll();
 							return true;
 						}
-						KeyResult::Revert => {
+						SelectedTextKeyResult::Revert => {
 							tab.selected_text = None;
 							self.cache_cursor_x = None;
 							return true;
 						}
-						KeyResult::Finish => {
+						SelectedTextKeyResult::Finish => {
 							// we just won't let you leave if you didn't fix it ;)
 							let _ = tab.close_selected_text(true, window_properties);
 							self.cache_cursor_x = None;
 							return true;
 						}
-						KeyResult::Keyfix => {
+						SelectedTextKeyResult::Keyfix => {
 							self.keyfix(window_properties);
 							self.refresh_selected_text_horizontal_scroll();
 							self.cache_cursor_x = None;
 							return true;
 						}
-						KeyResult::Valuefix => {
+						SelectedTextKeyResult::Valuefix => {
 							self.valuefix(window_properties);
 							self.refresh_selected_text_horizontal_scroll();
 							self.cache_cursor_x = None;
 							return true;
 						}
-						KeyResult::Up(ctrl) => {
+						SelectedTextKeyResult::Up(ctrl) => {
 							unsafe {
 								self.selected_text_up(ctrl, window_properties);
 							}
 							self.refresh_selected_text_horizontal_scroll();
 							return true;
 						}
-						KeyResult::Down(ctrl) => {
+						SelectedTextKeyResult::Down(ctrl) => {
 							unsafe {
 								self.selected_text_down(ctrl, window_properties);
 							}
 							self.refresh_selected_text_horizontal_scroll();
 							return true;
 						}
-						KeyResult::ForceClose => {
-							selected_text.handle_history();
+						SelectedTextKeyResult::ForceClose => {
+							selected_text.post_input();
 							self.force_close();
 							return true;
 						}
-						KeyResult::ForceOpen => {
-							selected_text.handle_history();
+						SelectedTextKeyResult::ForceOpen => {
+							selected_text.post_input();
 							self.force_open();
 							return true;
 						}
-						KeyResult::ShiftUp => {
-							selected_text.handle_history();
+						SelectedTextKeyResult::ShiftUp => {
+							selected_text.post_input();
 							self.shift_selected_text_up();
 							return true;
 						}
-						KeyResult::ShiftDown => {
-							selected_text.handle_history();
+						SelectedTextKeyResult::ShiftDown => {
+							selected_text.post_input();
 							self.shift_selected_text_down();
 							return true;
 						}
-						KeyResult::Failed => {} // next thing pls
+						SelectedTextKeyResult::Failed => {} // next thing pls
 					}
 				}
 				// todo, custom help file
@@ -2359,6 +2335,33 @@ impl Workbench {
 	pub fn render(&mut self, builder: &mut VertexBufferBuilder) {
 		if self.raw_window_width < MIN_WINDOW_WIDTH || self.raw_window_height < MIN_WINDOW_HEIGHT { return; }
 
+		{
+			builder.draw_texture_region_z(
+				(281, 22),
+				BASE_Z,
+				LINE_NUMBER_SEPARATOR_UV,
+				(2, 23),
+				(2, 16),
+			);
+			self.search_box.render(builder);
+		}
+
+		builder.draw_texture_region_z(
+			(0, 23),
+			BASE_Z - 1,
+			BACKDROP_UV,
+			(283, 22),
+			(16, 16),
+		);
+
+		builder.draw_texture_region_z(
+			(self.window_width - 215, 23),
+			BASE_Z - 1,
+			BACKDROP_UV,
+			(215, 22),
+			(16, 16),
+		);
+
 		for n in 0..(builder.window_height() - HEADER_SIZE + 15) / 16 {
 			let uv = if n % 2 == 0 {
 				DARK_STRIPE_UV + (1, 1)
@@ -2393,7 +2396,7 @@ impl Workbench {
 			.map(|x| x.y)
 			.and_then(|x| x.checked_sub(builder.scroll()))
 			.unwrap_or(0);
-		let (selected_key, selected_value, selecting_key) = if let Some(selected) = tab.selected_text.as_ref() && selected.editable {
+		let (selected_key, selected_value, selecting_key) = if let Some(SelectedText(selected)) = tab.selected_text.as_ref() && selected.editable {
 			if selected.keyfix.is_some() { // Health: __20.0__
 				(selected.keyfix.clone().map(|x| x.0.clone().into_boxed_str()), Some(selected.value.clone().into_boxed_str()), false)
 			} else if selected.valuefix.is_some() { // __Health__: 20.0
@@ -2428,22 +2431,6 @@ impl Workbench {
 				LINE_NUMBER_SEPARATOR_UV,
 				(2, 23),
 				(2, 16),
-			);
-		}
-		{
-			builder.draw_texture_region_z(
-				(281, 22),
-				BASE_Z,
-				LINE_NUMBER_SEPARATOR_UV,
-				(2, 23),
-				(2, 16),
-			);
-			builder.draw_texture_region_z(
-				(283, 23),
-				BASE_Z,
-				DARK_STRIPE_UV,
-				(self.window_width - 215 - 283, 22),
-				(16, 16),
 			);
 		}
 		tab.render(

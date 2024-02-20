@@ -27,9 +27,9 @@ use crate::workbench::Workbench;
 use crate::{assets, WORKBENCH, WINDOW_PROPERTIES, error, OptionExt, since_epoch, WindowProperties};
 
 pub const WINDOW_HEIGHT: usize = 420;
-pub const WINDOW_WIDTH: usize = 620;
+pub const WINDOW_WIDTH: usize = 720;
 pub const MIN_WINDOW_HEIGHT: usize = HEADER_SIZE + 16;
-pub const MIN_WINDOW_WIDTH: usize = 520;
+pub const MIN_WINDOW_WIDTH: usize = 620;
 
 pub async fn run() -> ! {
 	let event_loop = EventLoop::new().expect("Event loop was unconstructable");
@@ -74,7 +74,7 @@ pub async fn run() -> ! {
 	let mut state = State::new(&window, window_size).await;
 	unsafe { std::ptr::write(std::ptr::addr_of_mut!(WINDOW_PROPERTIES), UnsafeCell::new(WindowProperties::new(Rc::clone(&window)))); }
 	let window_properties = unsafe { WINDOW_PROPERTIES.get_mut() };
-	unsafe { *WORKBENCH.get_mut() = Workbench::new(window_properties); }
+	unsafe { std::ptr::write(std::ptr::addr_of_mut!(WORKBENCH), UnsafeCell::new(Workbench::new(window_properties))); }
 	let workbench = unsafe { WORKBENCH.get_mut() };
 	event_loop.run(|event, _| match event {
 		Event::WindowEvent { event, window_id } if window_id == window.id() => {

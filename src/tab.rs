@@ -15,7 +15,8 @@ use crate::color::TextColor;
 use crate::elements::chunk::NbtRegion;
 use crate::elements::compound::NbtCompound;
 use crate::elements::element::NbtElement;
-use crate::selected_text::SelectedText;
+use crate::selected_text::{SelectedText, SelectedTextAdditional};
+use crate::text::Text;
 use crate::tree_travel::Navigate;
 use crate::vertex_buffer_builder::{Vec2u, VertexBufferBuilder};
 use crate::workbench_action::WorkbenchAction;
@@ -361,17 +362,7 @@ impl Tab {
 	#[allow(clippy::too_many_lines)]
 	pub fn close_selected_text(&mut self, ignore_invalid_format: bool, window_properties: &mut WindowProperties) -> bool {
 		unsafe {
-			if let Some(SelectedText {
-				indices,
-				value,
-				prefix,
-				suffix,
-				keyfix,
-				valuefix,
-				editable: true,
-				..
-			}) = self.selected_text.clone()
-			{
+			if let Some(SelectedText(Text { value, editable: true, additional: SelectedTextAdditional { indices, keyfix, prefix, suffix, valuefix, .. }, .. })) = self.selected_text.clone() {
 				if let Some((&last, rem)) = indices.split_last() {
 					let value = CompactString::from(value);
 					let key = prefix.0.is_empty() && !suffix.0.is_empty();

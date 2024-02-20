@@ -32,9 +32,11 @@
 )]
 #![feature(array_chunks)]
 #![feature(box_patterns)]
+#![feature(const_black_box)]
 #![feature(core_intrinsics)]
 #![feature(iter_array_chunks)]
 #![feature(iter_next_chunk)]
+#![feature(lazy_cell)]
 #![feature(let_chains)]
 #![feature(maybe_uninit_array_assume_init)]
 #![feature(maybe_uninit_uninit_array)]
@@ -42,7 +44,6 @@
 #![feature(optimize_attribute)]
 #![feature(stmt_expr_attributes)]
 #![feature(unchecked_math)]
-#![feature(lazy_cell)]
 #![feature(const_collections_with_hasher)]
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
@@ -54,7 +55,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use compact_str::{CompactString, ToCompactString};
-use static_assertions::{const_assert, const_assert_eq};
+use static_assertions::const_assert_eq;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::wasm_bindgen;
 use winit::window::Window;
@@ -64,11 +65,8 @@ use vertex_buffer_builder::VertexBufferBuilder;
 
 use crate::assets::{BASE_TEXT_Z, BASE_Z, BOOKMARK_UV, BOOKMARK_Z, END_LINE_NUMBER_SEPARATOR_UV, HEADER_SIZE, HIDDEN_BOOKMARK_UV, INSERTION_UV, INVALID_STRIPE_UV, LINE_NUMBER_SEPARATOR_UV, LINE_NUMBER_Z, SCROLLBAR_BOOKMARK_Z, SELECTED_TOGGLE_OFF_UV, SELECTED_TOGGLE_ON_UV, SELECTION_UV, SORT_COMPOUND_BY_NAME, SORT_COMPOUND_BY_NOTHING, SORT_COMPOUND_BY_TYPE, STAMP_BACKDROP_UV, TEXT_UNDERLINE_UV, TOGGLE_Z, UNSELECTED_TOGGLE_OFF_UV, UNSELECTED_TOGGLE_ON_UV};
 use crate::color::TextColor;
-use crate::elements::chunk::{NbtChunk, NbtRegion};
-use crate::elements::compound::{CompoundMap, NbtCompound};
-use crate::elements::element::{NbtByte, NbtByteArray, NbtDouble, NbtFloat, NbtInt, NbtIntArray, NbtLong, NbtLongArray, NbtShort};
-use crate::elements::list::NbtList;
-use crate::elements::string::NbtString;
+use crate::elements::compound::{CompoundMap};
+use crate::elements::element::{NbtByteArray, NbtIntArray, NbtLongArray};
 use crate::tree_travel::Navigate;
 use crate::vertex_buffer_builder::Vec2u;
 use crate::workbench::Workbench;
@@ -88,6 +86,8 @@ mod window;
 pub mod workbench;
 mod workbench_action;
 mod element_action;
+mod search_box;
+mod text;
 
 #[macro_export]
 macro_rules! flags {
@@ -198,7 +198,7 @@ extern "C" {
 	fn save(name: &str, bytes: Vec<u8>);
 }
 
-pub static mut WORKBENCH: UnsafeCell<Workbench> = UnsafeCell::new(Workbench::uninit());
+pub static mut WORKBENCH: UnsafeCell<Workbench> = UnsafeCell::new(unsafe { Workbench::uninit() });
 pub static mut WINDOW_PROPERTIES: UnsafeCell<WindowProperties> = UnsafeCell::new(WindowProperties::new(unsafe { core::mem::transmute::<_, Rc<Window>>(1_usize) }));
 
 #[cfg(target_arch = "wasm32")]
