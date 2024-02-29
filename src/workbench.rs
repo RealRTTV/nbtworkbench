@@ -80,8 +80,8 @@ impl Workbench {
 			raw_window_height: 0,
 			window_width: 0,
 			raw_window_width: 0,
-			held_mouse_keys: FxHashSet::with_hasher(unsafe { core::mem::zeroed() }),
-			held_keys: FxHashSet::with_hasher(unsafe { core::mem::zeroed() }),
+			held_mouse_keys: FxHashSet::with_hasher(unsafe { core::mem::MaybeUninit::zeroed().assume_init() }),
+			held_keys: FxHashSet::with_hasher(unsafe { core::mem::MaybeUninit::zeroed().assume_init() }),
 			held_entry: HeldEntry::Empty,
 			cache_cursor_x: None,
 			tab_scroll: 0,
@@ -1346,7 +1346,7 @@ impl Workbench {
 
 	#[inline]
 	fn try_select_search_box(&mut self) -> bool {
-		if (283..self.window_width - 215).contains(&self.mouse_x) && (23..45).contains(&self.mouse_y) {
+		if (283..self.window_width - 215 - 16).contains(&self.mouse_x) && (23..45).contains(&self.mouse_y) {
 			self.search_box.select(self.mouse_x - 283);
 			true
 		} else {
@@ -1964,7 +1964,7 @@ impl Workbench {
 						}
 						KeyResult::Finish => {
 							self.search_box.post_input((self.window_width, self.window_height));
-							self.search_box.search();
+							self.search_box.search(&mut tab.value);
 							return true;
 						}
 					}
@@ -2343,7 +2343,7 @@ impl Workbench {
 				(2, 23),
 				(2, 16),
 			);
-			self.search_box.render(builder);
+			self.search_box.render(builder, self.held_keys.contains(&KeyCode::ShiftLeft) || self.held_keys.contains(&KeyCode::ShiftRight), (self.mouse_x, self.mouse_y));
 		}
 
 		builder.draw_texture_region_z(

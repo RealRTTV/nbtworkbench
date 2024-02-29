@@ -102,7 +102,7 @@ impl<Additional: Clone, Cache: Cachelike<Additional>> Text<Additional, Cache> {
             editable: true,
             undos: LinkedQueue::new(),
             redos: LinkedQueue::new(),
-            additional: unsafe { core::mem::zeroed() },
+            additional: unsafe { core::mem::MaybeUninit::zeroed().assume_init() },
         }
     }
 

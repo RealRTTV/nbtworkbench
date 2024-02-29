@@ -1,10 +1,11 @@
 use std::ops::{Deref, DerefMut};
 
 use winit::keyboard::KeyCode;
-use crate::assets::DARK_STRIPE_UV;
+use crate::assets::{ADD_SEARCH_BOOKMARKS, DARK_STRIPE_UV, HOVERED_WIDGET_UV, REMOVE_SEARCH_BOOKMARKS, SELECTED_WIDGET_UV, UNSELECTED_WIDGET_UV};
 
 use crate::color::TextColor;
-use crate::StrExt;
+use crate::{Bookmark, RenderContext, StrExt};
+use crate::elements::element::NbtElement;
 use crate::text::{Cachelike, KeyResult, Text};
 use crate::vertex_buffer_builder::{Vec2u, VertexBufferBuilder};
 
@@ -68,16 +69,17 @@ impl SearchBox {
         Self(Text::uninit())
     }
 
-    pub fn render(&self, builder: &mut VertexBufferBuilder) {
+    pub fn render(&self, builder: &mut VertexBufferBuilder, shift: bool, pos: (usize, usize)) {
         use std::fmt::Write;
 
+        let (mouse_x, mouse_y) = pos;
         let pos = Vec2u::new(284, 23);
 
         builder.draw_texture_region_z(
             pos,
             0,
             DARK_STRIPE_UV,
-            (builder.window_width() - 215 - pos.x, 22),
+            (builder.window_width() - 215 - pos.x - 16, 22),
             (16, 16),
         );
 
@@ -95,6 +97,12 @@ impl SearchBox {
             let _ = write!(builder, "{}", self.value);
         }
         builder.horizontal_scroll = 0;
+
+        let bookmark_uv = if shift { REMOVE_SEARCH_BOOKMARKS } else { ADD_SEARCH_BOOKMARKS };
+        let widget_uv = if (builder.window_width() - 215 - 16..builder.window_width() - 215).contains(&mouse_x) && (26..42).contains(&mouse_y) { HOVERED_WIDGET_UV } else { UNSELECTED_WIDGET_UV };
+
+        builder.draw_texture_z((builder.window_width() - 215 - 16, 26), 0, widget_uv, (16, 16));
+        builder.draw_texture_z((builder.window_width() - 215 - 16, 26), 0, bookmark_uv, (16, 16));
     }
 
     #[inline]
@@ -125,8 +133,11 @@ impl SearchBox {
     }
 
     #[inline]
-    pub fn search(&mut self) {
-        todo!()
+    pub fn search(&mut self, root: &NbtElement) -> Vec<Bookmark> {
+        let mut bookmarks = Vec::new();
+        let target = &*self.value;
+        root.search(|k, v| k.is_some_and(|k| k == target) || v.is_some_and(|v| v == target), 1, 0, &mut bookmarks);
+        bookmarks
     }
 
     #[inline]

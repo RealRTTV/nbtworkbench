@@ -45,6 +45,8 @@
 #![feature(stmt_expr_attributes)]
 #![feature(unchecked_math)]
 #![feature(const_collections_with_hasher)]
+#![feature(slice_first_last_chunk)]
+#![feature(const_maybe_uninit_zeroed)]
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 use std::cell::UnsafeCell;

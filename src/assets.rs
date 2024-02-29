@@ -137,6 +137,8 @@ pub const LONG_ARRAY_GHOST_UV: Vec2u = Vec2u::new(0, 48);
 pub const CHUNK_GHOST_UV: Vec2u = Vec2u::new(64, 48);
 pub const ALERT_UV: Vec2u = Vec2u::new(112, 144);
 pub const BACKDROP_UV: Vec2u = Vec2u::new(32, 160);
+pub const ADD_SEARCH_BOOKMARKS: Vec2u = Vec2u::new(48, 160);
+pub const REMOVE_SEARCH_BOOKMARKS: Vec2u = Vec2u::new(64, 160);
 
 pub const BASE_Z: u8 = 5;
 pub const JUST_OVERLAPPING_BASE_Z: u8 = BASE_Z + 1;
