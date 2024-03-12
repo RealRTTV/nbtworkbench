@@ -2,7 +2,7 @@ use std::ops::{Deref, DerefMut};
 use std::time::Duration;
 
 use winit::keyboard::KeyCode;
-use crate::assets::{ADD_SEARCH_BOOKMARKS, BOOKMARK_UV, DARK_STRIPE_UV, HIDDEN_BOOKMARK_UV, HOVERED_WIDGET_UV, REMOVE_SEARCH_BOOKMARKS, UNSELECTED_WIDGET_UV};
+use crate::assets::{ADD_SEARCH_BOOKMARKS, BASE_Z, BOOKMARK_UV, DARK_STRIPE_UV, HIDDEN_BOOKMARK_UV, HOVERED_WIDGET_UV, REMOVE_SEARCH_BOOKMARKS, UNSELECTED_WIDGET_UV};
 
 use crate::color::TextColor;
 use crate::{Bookmark, combined_two_sorted, flags, since_epoch, StrExt};
@@ -84,7 +84,7 @@ impl SearchBox {
             pos,
             0,
             DARK_STRIPE_UV,
-            (builder.window_width() - 215 - pos.x - 17, 22),
+            (builder.window_width() - 215 - pos.x, 22),
             (16, 16),
         );
 
@@ -119,8 +119,8 @@ impl SearchBox {
             UNSELECTED_WIDGET_UV
         };
 
-        builder.draw_texture_z((builder.window_width() - 215 - 17, 26), 0, widget_uv, (16, 16));
-        builder.draw_texture_z((builder.window_width() - 215 - 17, 26), 0, bookmark_uv, (16, 16));
+        builder.draw_texture_z((builder.window_width() - 215 - 17, 26), BASE_Z, widget_uv, (16, 16));
+        builder.draw_texture_z((builder.window_width() - 215 - 17, 26), BASE_Z, bookmark_uv, (16, 16));
     }
 
     #[inline]

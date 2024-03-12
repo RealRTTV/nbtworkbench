@@ -87,7 +87,7 @@ pub async fn run() -> ! {
 							Ok(()) => {}
 							Err(SurfaceError::Lost | SurfaceError::Outdated) => state.surface.configure(&state.device, &state.config),
 							Err(SurfaceError::OutOfMemory) => std::process::exit(1),
-							Err(SurfaceError::Timeout) => error!("Frame took too long to process"),
+							Err(SurfaceError::Timeout) => { error!("Frame took too long to process") },
 						}
 					}
 					WindowEvent::CloseRequested => std::process::exit(0),
