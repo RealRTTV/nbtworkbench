@@ -233,9 +233,7 @@ impl NbtCompound {
 			}
 
 			ctx.line_number();
-			// fun hack for connection
-			// doesn't work on most platforms in the same way, but it adds a little detail nonetheless.
-			// the intended behaviour is to connect without any new pixel changes except making the darker toned one tucked in the corner to be slightly lighter
+			// fun texture hack for connection
 			builder.draw_texture_z(
 				ctx.pos() - (20, 2),
 				LINE_NUMBER_CONNECTOR_Z,

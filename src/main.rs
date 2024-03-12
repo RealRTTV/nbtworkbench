@@ -19,6 +19,7 @@
 )]
 #![allow(
 	semicolon_in_expressions_from_macros,
+	internal_features,
 	clippy::unreadable_literal,
 	clippy::cast_precision_loss,
 	clippy::cast_lossless,
@@ -53,6 +54,7 @@ use std::cell::UnsafeCell;
 use std::cmp::Ordering;
 use std::convert::identity;
 use std::fmt::{Display, Formatter, Write};
+use std::mem::MaybeUninit;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -780,15 +782,19 @@ impl RenderContext {
 					(16, 16),
 				);
 			}
+			let mut hidden_bookmarks = 0_usize;
 			while let Some((&first, rest)) = bookmarks.split_first() && next_line_number.is_none_or(|next_line_number| render_line_number <= first.true_line_number && first.true_line_number < next_line_number) {
 				bookmarks = rest;
-				builder.draw_texture_region_z(
-					(2, y + 15),
-					BOOKMARK_Z,
-					HIDDEN_BOOKMARK_UV,
-					(builder.text_coords.0, 2),
-					(16, 16),
-				);
+				if hidden_bookmarks < 5 {
+					builder.draw_texture_region_z(
+						(2, y + 15),
+						BOOKMARK_Z,
+						HIDDEN_BOOKMARK_UV,
+						(builder.text_coords.0, 2),
+						(16, 16),
+					);
+				}
+				hidden_bookmarks += 1;
 			}
 
 			let uv = if idx + 1 == self.line_numbers.len() {
@@ -826,14 +832,45 @@ impl RenderContext {
 	#[inline]
 	pub fn render_scrollbar_bookmarks(&self, builder: &mut VertexBufferBuilder, bookmarks: &[Bookmark], root: &NbtElement) {
 		let height = root.height();
+		let mut hidden_bookmarks_at_y = 0_usize;
+		let mut hidden_bookmark_y = 0;
+		let mut bookmarks_at_y = 0_usize;
+		let mut bookmark_y = 0;
 		for bookmark in bookmarks {
 			let y = HEADER_SIZE + (bookmark.line_number * (builder.window_height() - HEADER_SIZE)) / height;
-			builder.draw_texture_z(
-				(builder.window_width() - 8, y),
-				SCROLLBAR_BOOKMARK_Z,
-				bookmark.uv,
-				(8, 2),
-			);
+			if bookmark.uv == BOOKMARK_UV {
+				if bookmarks_at_y < 5 {
+					builder.draw_texture_z(
+						(builder.window_width() - 8, y),
+						SCROLLBAR_BOOKMARK_Z,
+						BOOKMARK_UV,
+						(8, 2),
+					);
+				}
+
+				if y == bookmark_y {
+					bookmarks_at_y += 1;
+				} else {
+					bookmark_y = y;
+					bookmarks_at_y = 1;
+				}
+			} else {
+				if hidden_bookmarks_at_y < 5 {
+					builder.draw_texture_z(
+						(builder.window_width() - 8, y),
+						SCROLLBAR_BOOKMARK_Z,
+						HIDDEN_BOOKMARK_UV,
+						(8, 2),
+					);
+				}
+
+				if y == hidden_bookmark_y {
+					hidden_bookmarks_at_y += 1;
+				} else {
+					hidden_bookmark_y = y;
+					hidden_bookmarks_at_y = 1;
+				}
+			}
 		}
 	}
 
@@ -983,6 +1020,56 @@ pub fn smoothstep32(x: f32) -> f32 {
 
 #[must_use]
 pub const fn valid_unescaped_char(byte: u8) -> bool { matches!(byte, b'0'..=b'9' | b'A'..=b'Z' | b'a'..=b'z' | b'_' | b'-' | b'.' | b'+') }
+
+#[must_use]
+pub fn combined_two_sorted<T: Ord>(a: Box<[T]>, b: Box<[T]>) -> Vec<T> {
+	let mut a = unsafe { core::mem::transmute::<_, Box<[MaybeUninit<T>]>>(a) };
+	let mut a_idx = 0;
+	let mut b = unsafe { core::mem::transmute::<_, Box<[MaybeUninit<T>]>>(b) };
+	let mut b_idx = 0;
+	let mut out = Vec::with_capacity(a.len() + b.len());
+	let spare = out.spare_capacity_mut();
+	let mut idx = 0;
+
+	while a_idx < a.len() && b_idx < b.len() {
+		let a = &mut a[a_idx];
+		let b = &mut b[b_idx];
+
+		// SAFETY: the values are all initialized initially, once this is uninit memory, we go to the next `idx` so we never read it again
+		match unsafe { a.assume_init_ref().cmp(b.assume_init_ref()) } {
+			Ordering::Less => {
+				spare[idx].write(unsafe { core::mem::replace(a, MaybeUninit::uninit()).assume_init() });
+				a_idx += 1;
+				idx += 1;
+			}
+			Ordering::Equal => {
+				spare[idx].write(unsafe { core::mem::replace(a, MaybeUninit::uninit()).assume_init() });
+				drop(unsafe { core::mem::replace(b, MaybeUninit::uninit()).assume_init() });
+				a_idx += 1;
+				b_idx += 1;
+				idx += 1;
+			}
+			Ordering::Greater => {
+				spare[idx].write(unsafe { core::mem::replace(b, MaybeUninit::uninit()).assume_init() });
+				b_idx += 1;
+				idx += 1;
+			}
+		}
+	}
+
+	unsafe { spare.as_mut_ptr().add(idx).copy_from_nonoverlapping(a.as_ptr().add(a_idx), a.len() - a_idx) }
+	idx += a.len() - a_idx;
+	unsafe { spare.as_mut_ptr().add(idx).copy_from_nonoverlapping(b.as_ptr().add(b_idx), b.len() - b_idx) }
+	idx += b.len() - b_idx;
+
+	// SAFETY: all the values used have been copied over, all the unused values have been dropped.
+	drop(a);
+	drop(b);
+
+	// we have written `idx` times
+	unsafe { out.set_len(idx); }
+	out
+}
 
 pub trait StrExt {
 	fn snbt_string_read(&self) -> Option<(CompactString, &str)>;

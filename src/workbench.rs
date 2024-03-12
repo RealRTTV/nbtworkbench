@@ -28,7 +28,7 @@ use crate::elements::element::{NbtByte, NbtByteArray, NbtDouble, NbtFloat, NbtIn
 use crate::elements::list::{NbtList, ValueIterator};
 use crate::elements::string::NbtString;
 use crate::selected_text::{SelectedText, SelectedTextAdditional};
-use crate::text::{KeyResult, SelectedTextKeyResult, Text};
+use crate::text::{SearchBoxKeyResult, SelectedTextKeyResult, Text};
 use crate::tab::{FileFormat, Tab};
 use crate::tree_travel::{Navigate, Traverse, TraverseParents};
 use crate::vertex_buffer_builder::Vec2u;
@@ -80,8 +80,8 @@ impl Workbench {
 			raw_window_height: 0,
 			window_width: 0,
 			raw_window_width: 0,
-			held_mouse_keys: FxHashSet::with_hasher(unsafe { core::mem::MaybeUninit::zeroed().assume_init() }),
-			held_keys: FxHashSet::with_hasher(unsafe { core::mem::MaybeUninit::zeroed().assume_init() }),
+			held_mouse_keys: FxHashSet::with_hasher(unsafe { core::mem::zeroed() }),
+			held_keys: FxHashSet::with_hasher(unsafe { core::mem::zeroed() }),
 			held_entry: HeldEntry::Empty,
 			cache_cursor_x: None,
 			tab_scroll: 0,
@@ -286,6 +286,12 @@ impl Workbench {
 					return true;
 				} else {
 					self.search_box.deselect();
+				}
+
+				if (self.window_width - 215 - 17..self.window_width - 215 - 1).contains(&self.mouse_x) && (23..45).contains(&self.mouse_y) {
+					let tab = tab_mut!(self);
+					self.search_box.on_widget(self.held_keys.contains(&KeyCode::ShiftLeft) || self.held_keys.contains(&KeyCode::ShiftRight), &mut tab.bookmarks, &mut tab.value);
+					return true;
 				}
 			}
 			self.held_mouse_keys.remove(&button);
@@ -1346,7 +1352,7 @@ impl Workbench {
 
 	#[inline]
 	fn try_select_search_box(&mut self) -> bool {
-		if (283..self.window_width - 215 - 16).contains(&self.mouse_x) && (23..45).contains(&self.mouse_y) {
+		if (283..self.window_width - 215 - 17).contains(&self.mouse_x) && (23..45).contains(&self.mouse_y) {
 			self.search_box.select(self.mouse_x - 283);
 			true
 		} else {
@@ -1953,18 +1959,18 @@ impl Workbench {
 				let tab = tab_mut!(self);
 				if self.search_box.is_selected() {
 					match self.search_box.on_key_press(key, char, flags) {
-						KeyResult::Failed => {} // next thing please
-						KeyResult::NothingSpecial => {
+						SearchBoxKeyResult::Failed => {} // next thing, please
+						SearchBoxKeyResult::NothingSpecial => {
 							self.search_box.post_input((self.window_width, self.window_height));
 							return true;
 						}
-						KeyResult::Revert => {
+						SearchBoxKeyResult::Escape => {
 							self.search_box.post_input((self.window_width, self.window_height));
 							return true;
 						}
-						KeyResult::Finish => {
+						result @ (SearchBoxKeyResult::Finish | SearchBoxKeyResult::FinishCountOnly) => {
+							self.search_box.search(&mut tab.bookmarks, &mut tab.value, result == SearchBoxKeyResult::FinishCountOnly);
 							self.search_box.post_input((self.window_width, self.window_height));
-							self.search_box.search(&mut tab.value);
 							return true;
 						}
 					}
@@ -1977,7 +1983,7 @@ impl Workbench {
 							self.refresh_selected_text_horizontal_scroll();
 							return true;
 						}
-						SelectedTextKeyResult::Revert => {
+						SelectedTextKeyResult::Escape => {
 							tab.selected_text = None;
 							self.cache_cursor_x = None;
 							return true;

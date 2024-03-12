@@ -5,16 +5,17 @@ use std::time::Duration;
 use winit::keyboard::KeyCode;
 
 use crate::{flags, get_clipboard, is_jump_char_boundary, is_utf8_char_boundary, LinkedQueue, OptionExt, set_clipboard, since_epoch, StrExt};
-use crate::assets::{BASE_TEXT_Z, SELECTED_TEXT_Z, SELECTION_UV};
+use crate::assets::SELECTION_UV;
 use crate::color::TextColor;
-use crate::text::KeyResult::{Failed, Finish, NothingSpecial, Revert};
+use crate::text::KeyResult::{Failed, Finish, NothingSpecial, Escape};
 use crate::vertex_buffer_builder::{Vec2u, VertexBufferBuilder};
 
 #[repr(u8)]
+#[derive(PartialEq, Eq)]
 pub enum SelectedTextKeyResult {
     Failed,
     NothingSpecial,
-    Revert,
+    Escape,
     Finish,
     Keyfix,
     Valuefix,
@@ -26,11 +27,22 @@ pub enum SelectedTextKeyResult {
     ShiftDown,
 }
 
+#[derive(PartialEq, Eq)]
 #[repr(u8)]
+pub enum SearchBoxKeyResult {
+    Failed,
+    NothingSpecial,
+    Escape,
+    Finish,
+    FinishCountOnly,
+}
+
+#[repr(u8)]
+#[derive(PartialEq, Eq)]
 pub enum KeyResult {
     Failed,
     NothingSpecial,
-    Revert,
+    Escape,
     Finish,
 }
 
@@ -39,7 +51,18 @@ impl From<KeyResult> for SelectedTextKeyResult {
         match value {
             Failed => Self::Failed,
             NothingSpecial => Self::NothingSpecial,
-            Revert => Self::Revert,
+            Escape => Self::Escape,
+            Finish => Self::Finish,
+        }
+    }
+}
+
+impl From<KeyResult> for SearchBoxKeyResult {
+    fn from(value: KeyResult) -> Self {
+        match value {
+            Failed => Self::Failed,
+            NothingSpecial => Self::NothingSpecial,
+            Escape => Self::Escape,
             Finish => Self::Finish,
         }
     }
@@ -113,7 +136,7 @@ impl<Additional: Clone, Cache: Cachelike<Additional>> Text<Additional, Cache> {
 
     #[must_use]
     pub fn on_key_press(&mut self, key: KeyCode, mut char: Option<char>, flags: u8) -> KeyResult {
-        if key == KeyCode::Escape && flags == flags!() { return Revert }
+        if key == KeyCode::Escape && flags == flags!() { return Escape }
 
         if let KeyCode::Enter | KeyCode::NumpadEnter = key && flags == flags!() {
             return Finish;
@@ -561,6 +584,11 @@ impl<Additional: Clone, Cache: Cachelike<Additional>> Text<Additional, Cache> {
 
     #[inline]
     pub fn post_input(&mut self) {
+        self.cache();
+    }
+
+    #[inline]
+    pub fn cache(&mut self) {
         let current = Cache::new(self);
 
         let should_cache = core::mem::replace(&mut self.last_interaction, since_epoch()).as_millis() >= 1_500;
