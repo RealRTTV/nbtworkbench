@@ -281,13 +281,14 @@ impl Workbench {
 			if button == MouseButton::Left {
 				self.steal_animation_data = None;
 			}
-			if button == MouseButton::Left {
-				if self.try_select_search_box() {
+			if let MouseButton::Left | MouseButton::Right = button {
+				if self.try_select_search_box(button) {
 					return true;
 				} else {
 					self.search_box.deselect();
 				}
-
+			}
+			if button == MouseButton::Left {
 				if (self.window_width - 215 - 17..self.window_width - 215 - 1).contains(&self.mouse_x) && (23..45).contains(&self.mouse_y) {
 					let tab = tab_mut!(self);
 					self.search_box.on_widget(self.held_keys.contains(&KeyCode::ShiftLeft) || self.held_keys.contains(&KeyCode::ShiftRight), &mut tab.bookmarks, &mut tab.value);
@@ -1351,9 +1352,9 @@ impl Workbench {
 	}
 
 	#[inline]
-	fn try_select_search_box(&mut self) -> bool {
+	fn try_select_search_box(&mut self, button: MouseButton) -> bool {
 		if (283..self.window_width - 215 - 17).contains(&self.mouse_x) && (23..45).contains(&self.mouse_y) {
-			self.search_box.select(self.mouse_x - 283);
+			self.search_box.select(self.mouse_x - 283, button);
 			true
 		} else {
 			false

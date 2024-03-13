@@ -1,5 +1,6 @@
 use std::ops::{Deref, DerefMut};
 use std::time::Duration;
+use winit::event::MouseButton;
 
 use winit::keyboard::KeyCode;
 use crate::assets::{ADD_SEARCH_BOOKMARKS, BASE_Z, BOOKMARK_UV, DARK_STRIPE_UV, HIDDEN_BOOKMARK_UV, HOVERED_WIDGET_UV, REMOVE_SEARCH_BOOKMARKS, UNSELECTED_WIDGET_UV};
@@ -131,19 +132,28 @@ impl SearchBox {
     }
 
     #[inline]
-    pub fn select(&mut self, x: usize) {
-        let x = x + self.horizontal_scroll;
-        self.cursor = 'a: {
-            let mut current_x = 0;
-            for (idx, char) in self.value.char_indices() {
-                let width = if (x as u32) < 56832 { VertexBufferBuilder::CHAR_WIDTH[char as usize] as usize } else { 0 };
-                if current_x + width / 2 >= x {
-                    break 'a idx;
+    pub fn select(&mut self, x: usize, button: MouseButton) {
+        if button == MouseButton::Right {
+            self.value.clear();
+            self.cursor = 0;
+            self.selection = None;
+            self.hits = None;
+            self.horizontal_scroll = 0;
+            self.0.post_input();
+        } else {
+            let x = x + self.horizontal_scroll;
+            self.cursor = 'a: {
+                let mut current_x = 0;
+                for (idx, char) in self.value.char_indices() {
+                    let width = if (x as u32) < 56832 { VertexBufferBuilder::CHAR_WIDTH[char as usize] as usize } else { 0 };
+                    if current_x + width / 2 >= x {
+                        break 'a idx;
+                    }
+                    current_x += width;
                 }
-                current_x += width;
-            }
-            self.value.len()
-        };
+                self.value.len()
+            };
+        }
         self.selected = true;
         self.interact();
     }

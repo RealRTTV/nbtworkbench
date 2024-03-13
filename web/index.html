@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta http-equiv="X-UA-Compatible" content="IE=edge">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>NBT Workbench</title>
+        <style>
+            canvas {
+                background-color: black;
+                margin: 0;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                overflow: hidden;
+            }
+
+            body {
+                margin: 0;
+                position: absolute;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                display: flex;
+                overflow: hidden;
+                background-color: #0F0F0F;
+            }
+        </style>
+    </head>
+    <body>
+        <input type="file" accept=".nbt,.dat,.dat_old,.dat_mcr,.old,.mca,.mcr,.csv" style="display:none" id="file_dialog"/>
+        <a style="display:none" id="download"></a>
+        <div style="display:none" id="upload"></div>
+        <script type="module">
+            const dialog = document.getElementById("file_dialog");
+
+            let clipboard = '';
+            let shouldOpenDialog = false;
+
+            function openDialog(event) {
+                if (!shouldOpenDialog) return;
+                shouldOpenDialog = false;
+                dialog.click();
+            }
+
+            import init, { handle_file } from "./nbtworkbench.js?version=2";
+            await init();
+
+            dialog.onchange = event => {
+                const file = event.target.files.item(0);
+                file.arrayBuffer().then(bytes => {
+                    handle_file(file.name, new Uint8Array(bytes));
+                })
+            };
+
+            const canvas = document.getElementsByTagName("canvas")[0];
+
+            canvas.addEventListener("pointerdown", openDialog);
+            canvas.addEventListener("pointerup", openDialog);
+            canvas.addEventListener("keydown", openDialog);
+            canvas.addEventListener("keyup", openDialog);
+            canvas.addEventListener("keypress", openDialog);
+            canvas.ondragover = event => {
+                event.stopPropagation();
+                event.preventDefault();
+            }
+            canvas.ondrop = event => {
+                event.stopPropagation();
+                event.preventDefault();
+                const file = event.dataTransfer.files.item(0);
+                file.arrayBuffer().then(bytes => {
+                    handle_file(file.name, new Uint8Array(bytes));
+                })
+            }
+        </script>
+    </body>
+</html>

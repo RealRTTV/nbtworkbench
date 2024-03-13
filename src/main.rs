@@ -186,7 +186,7 @@ macro_rules! debg {
 	};
 }
 
-#[wasm_bindgen(module = "/clipboard.js")]
+#[wasm_bindgen(module = "/web/script.js")]
 #[cfg(target_arch = "wasm32")]
 extern "C" {
 	#[wasm_bindgen(js_name = "getClipboard")]
@@ -207,7 +207,7 @@ pub static mut WINDOW_PROPERTIES: UnsafeCell<WindowProperties> = UnsafeCell::new
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
-pub fn handle_dialog(name: String, bytes: Vec<u8>) {
+pub fn handle_file(name: String, bytes: Vec<u8>) {
 	use crate::alert::Alert;
 
 	let workbench = unsafe { WORKBENCH.get_mut() };
