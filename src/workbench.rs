@@ -1,5 +1,3 @@
-use anyhow::{anyhow, Context, Result};
-
 use std::convert::identity;
 use std::ffi::OsStr;
 use std::fmt::Write;
@@ -10,7 +8,8 @@ use std::string::String;
 use std::sync::mpsc::TryRecvError;
 use std::time::Duration;
 
-use compact_str::{format_compact, CompactString, ToCompactString};
+use anyhow::{anyhow, Context, Result};
+use compact_str::{CompactString, format_compact, ToCompactString};
 use fxhash::{FxBuildHasher, FxHashSet};
 use uuid::Uuid;
 use winit::dpi::PhysicalPosition;
@@ -18,32 +17,32 @@ use winit::event::{ElementState, KeyEvent, MouseButton, MouseScrollDelta};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use zune_inflate::DeflateDecoder;
 
+use crate::{Bookmark, DropFn, encompasses, encompasses_or_equal, FileUpdateSubscription, FileUpdateSubscriptionType, flags, get_clipboard, HeldEntry, LinkedQueue, OptionExt, panic_unchecked, Position, recache_along_indices, RenderContext, set_clipboard, since_epoch, SortAlgorithm, StrExt, sum_indices, tab, tab_mut, WindowProperties};
 use crate::alert::Alert;
 use crate::assets::{ACTION_WHEEL_Z, BACKDROP_UV, BASE_TEXT_Z, BASE_Z, BOOKMARK_UV, CLOSED_WIDGET_UV, DARK_STRIPE_UV, EDITED_UV, HEADER_SIZE, HELD_ENTRY_Z, HIDDEN_BOOKMARK_UV, HORIZONTAL_SEPARATOR_UV, HOVERED_STRIPE_UV, HOVERED_WIDGET_UV, JUST_OVERLAPPING_BASE_TEXT_Z, LIGHT_STRIPE_UV, LINE_NUMBER_SEPARATOR_UV, OPEN_FOLDER_UV, SELECTED_ACTION_WHEEL, SELECTED_WIDGET_UV, SELECTION_UV, TRAY_UV, UNEDITED_UV, UNSELECTED_ACTION_WHEEL, UNSELECTED_WIDGET_UV};
 use crate::color::TextColor;
 use crate::elements::chunk::{NbtChunk, NbtRegion};
 use crate::elements::compound::NbtCompound;
-use crate::elements::element::NbtElement;
 use crate::elements::element::{NbtByte, NbtByteArray, NbtDouble, NbtFloat, NbtInt, NbtIntArray, NbtLong, NbtLongArray, NbtShort};
+use crate::elements::element::NbtElement;
 use crate::elements::list::{NbtList, ValueIterator};
 use crate::elements::string::NbtString;
+use crate::search_box::SearchBox;
 use crate::selected_text::{SelectedText, SelectedTextAdditional};
-use crate::text::{SearchBoxKeyResult, SelectedTextKeyResult, Text};
 use crate::tab::{FileFormat, Tab};
+use crate::text::{SearchBoxKeyResult, SelectedTextKeyResult, Text};
 use crate::tree_travel::{Navigate, Traverse, TraverseParents};
 use crate::vertex_buffer_builder::Vec2u;
 use crate::vertex_buffer_builder::VertexBufferBuilder;
 use crate::window::{MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH, WINDOW_HEIGHT, WINDOW_WIDTH};
 use crate::workbench_action::WorkbenchAction;
-use crate::{encompasses, encompasses_or_equal, flags, panic_unchecked, recache_along_indices, sum_indices, Bookmark, DropFn, FileUpdateSubscription, FileUpdateSubscriptionType, HeldEntry, LinkedQueue, OptionExt, Position, RenderContext, StrExt, WindowProperties, tab, tab_mut, get_clipboard, set_clipboard, since_epoch, SortAlgorithm};
-use crate::search_box::SearchBox;
 
 pub struct Workbench {
 	pub tabs: Vec<Tab>,
 	pub tab: usize,
-	raw_mouse_x: usize,
+	raw_mouse_x: f64,
 	mouse_x: usize,
-	raw_mouse_y: usize,
+	raw_mouse_y: f64,
 	mouse_y: usize,
 	pub window_height: usize,
 	raw_window_height: usize,
@@ -72,9 +71,9 @@ impl Workbench {
 		Self {
 			tabs: vec![],
 			tab: 0,
-			raw_mouse_x: 0,
+			raw_mouse_x: 0.0,
 			mouse_x: 0,
-			raw_mouse_y: 0,
+			raw_mouse_y: 0.0,
 			mouse_y: 0,
 			window_height: 0,
 			raw_window_height: 0,
@@ -103,9 +102,9 @@ impl Workbench {
 		let mut workbench = Self {
 			tabs: vec![],
 			tab: 0,
-			raw_mouse_x: 0,
+			raw_mouse_x: 0.0,
 			mouse_x: 0,
-			raw_mouse_y: 0,
+			raw_mouse_y: 0.0,
 			mouse_y: 0,
 			window_height: WINDOW_HEIGHT,
 			raw_window_height: WINDOW_HEIGHT,
@@ -235,7 +234,7 @@ impl Workbench {
 				(pos.x as f32, pos.y as f32)
 			}
 		};
-		let ctrl = self.held_keys.contains(&KeyCode::ControlLeft) | self.held_keys.contains(&KeyCode::ControlRight);
+		let ctrl = self.held_keys.contains(&KeyCode::ControlLeft) | self.held_keys.contains(&KeyCode::ControlRight) | self.held_keys.contains(&KeyCode::SuperLeft) | self.held_keys.contains(&KeyCode::SuperRight);
 		if ctrl {
 			self.set_scale(self.scale.wrapping_add(v.signum() as isize as usize));
 			return true;
@@ -1250,7 +1249,7 @@ impl Workbench {
 	#[inline]
 	fn open_file(&mut self, window_properties: &mut WindowProperties) {
 		#[cfg(target_os = "windows")] {
-			match native_dialog::FileDialog::new().set_location("~/Downloads").add_filter("NBT File", &["nbt", "dat", "dat_old", "dat_mcr", "old"]).add_filter("Region File", &["mca", "mcr"]).show_open_single_file() {
+			match native_dialog::FileDialog::new().set_location("~/Downloads").add_filter("NBT File", &["nbt", "snbt", "dat", "dat_old", "dat_mcr", "old"]).add_filter("Region File", &["mca", "mcr"]).show_open_single_file() {
 				Err(e) => self.alert(Alert::new("Error!", TextColor::Red, e.to_string())),
 				Ok(None) => {},
 				Ok(Some(path)) => match std::fs::read(&path) {
@@ -1955,7 +1954,7 @@ impl Workbench {
 			if let PhysicalKey::Code(key) = key.physical_key {
 				self.held_keys.insert(key);
 				let char = self.char_from_key(key);
-				let flags = (self.held_keys.contains(&KeyCode::ControlLeft) as u8 | self.held_keys.contains(&KeyCode::ControlRight) as u8) | ((self.held_keys.contains(&KeyCode::ShiftLeft) as u8 | self.held_keys.contains(&KeyCode::ShiftRight) as u8) << 1) | ((self.held_keys.contains(&KeyCode::AltLeft) as u8 | self.held_keys.contains(&KeyCode::AltRight) as u8) << 2);
+				let flags = (self.held_keys.contains(&KeyCode::ControlLeft) as u8 | self.held_keys.contains(&KeyCode::ControlRight) as u8 | self.held_keys.contains(&KeyCode::SuperLeft) as u8 | self.held_keys.contains(&KeyCode::SuperRight) as u8) | ((self.held_keys.contains(&KeyCode::ShiftLeft) as u8 | self.held_keys.contains(&KeyCode::ShiftRight) as u8) << 1) | ((self.held_keys.contains(&KeyCode::AltLeft) as u8 | self.held_keys.contains(&KeyCode::AltRight) as u8) << 2);
 				let left_margin = self.left_margin();
 				let tab = tab_mut!(self);
 				if self.search_box.is_selected() {
@@ -2274,10 +2273,10 @@ impl Workbench {
 
 	#[inline]
 	pub fn on_mouse_move(&mut self, pos: PhysicalPosition<f64>) -> bool {
-		self.raw_mouse_x = pos.x as usize;
-		self.raw_mouse_y = pos.y as usize;
-		self.mouse_x = self.raw_mouse_x / self.scale;
-		self.mouse_y = self.raw_mouse_y / self.scale;
+		self.raw_mouse_x = pos.x;
+		self.raw_mouse_y = pos.y;
+		self.mouse_x = (self.raw_mouse_x / self.scale as f64) as usize;
+		self.mouse_y = (self.raw_mouse_y / self.scale as f64) as usize;
 		let mouse_y = self.mouse_y;
 		let tab = tab_mut!(self);
 		if let Some(scrollbar_offset) = self.scrollbar_offset && mouse_y >= HEADER_SIZE {
@@ -2300,8 +2299,8 @@ impl Workbench {
 		let height_scaling = window_height as f64 / self.raw_window_height as f64;
 		self.raw_window_width = window_width;
 		self.raw_window_height = window_height;
-		self.raw_mouse_x = (self.raw_mouse_x as f64 * width_scaling).floor() as usize;
-		self.raw_mouse_y = (self.raw_mouse_y as f64 * height_scaling).floor() as usize;
+		self.raw_mouse_x = self.raw_mouse_x * width_scaling;
+		self.raw_mouse_y = self.raw_mouse_y * height_scaling;
 		self.set_scale(self.scale);
 	}
 
@@ -2310,8 +2309,8 @@ impl Workbench {
 		let scale = scale.min(usize::min(self.raw_window_width / MIN_WINDOW_WIDTH, self.raw_window_height / MIN_WINDOW_HEIGHT)).max(1);
 
 		self.scale = scale;
-		self.mouse_x = self.raw_mouse_x / self.scale;
-		self.mouse_y = self.raw_mouse_y / self.scale;
+		self.mouse_x = (self.raw_mouse_x / self.scale as f64) as usize;
+		self.mouse_y = (self.raw_mouse_y / self.scale as f64) as usize;
 		self.window_width = self.raw_window_width / self.scale;
 		self.window_height = self.raw_window_height / self.scale;
 		for tab in &mut self.tabs {
@@ -2671,7 +2670,7 @@ impl Workbench {
 		clippy::too_many_lines
 	)]
 	fn char_from_key(&self, key: KeyCode) -> Option<char> {
-		if self.held_keys.contains(&KeyCode::ControlLeft) || self.held_keys.contains(&KeyCode::ControlRight) { return None }
+		if self.held_keys.contains(&KeyCode::ControlLeft) | self.held_keys.contains(&KeyCode::ControlRight) | self.held_keys.contains(&KeyCode::SuperLeft) | self.held_keys.contains(&KeyCode::SuperRight) { return None }
 		let shift = self.held_keys.contains(&KeyCode::ShiftLeft) || self.held_keys.contains(&KeyCode::ShiftRight);
 		Some(match key {
 			KeyCode::Digit1 => if shift { '!' } else { '1' },

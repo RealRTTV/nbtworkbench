@@ -16,6 +16,7 @@ use crate::color::TextColor;
 
 #[allow(clippy::module_name_repetitions)]
 #[repr(C)]
+#[derive(PartialEq)]
 pub struct NbtList {
 	pub elements: Box<Vec<NbtElement>>,
 	height: u32,

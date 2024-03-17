@@ -63,6 +63,7 @@ pub async fn run() -> ! {
 			Some((document, PhysicalSize::new(width as u32, height as u32)))
 		}).and_then(|(document, size)| {
 			let canvas = web_sys::HtmlElement::from(window.canvas()?);
+			canvas.set_id("canvas");
 			document.body()?.append_child(&canvas).ok()?;
 			let _ = window.request_inner_size(size);
 			let _ = canvas.focus();
@@ -489,7 +490,17 @@ impl<'window> State<'window> {
 			WindowEvent::MouseInput { state, button, .. } => workbench.on_mouse_input(*state, *button, window_properties),
 			WindowEvent::TouchpadPressure { .. } => false,
 			WindowEvent::AxisMotion { .. } => false,
-			WindowEvent::Touch(_) => false,
+			WindowEvent::Touch(touch) => match touch.phase {
+				TouchPhase::Started => {
+					workbench.on_mouse_move(touch.location);
+					workbench.on_mouse_input(ElementState::Pressed, MouseButton::Left, window_properties)
+				}
+				TouchPhase::Moved => workbench.on_mouse_move(touch.location),
+				TouchPhase::Ended | TouchPhase::Cancelled => {
+					workbench.on_mouse_move(touch.location);
+					workbench.on_mouse_input(ElementState::Released, MouseButton::Left, window_properties)
+				}
+			},
 			WindowEvent::ScaleFactorChanged { .. } => false,
 			WindowEvent::ThemeChanged(_) => false,
 			WindowEvent::Ime(_) => false,

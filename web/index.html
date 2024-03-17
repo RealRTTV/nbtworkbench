@@ -3,11 +3,11 @@
     <head>
         <meta charset="UTF-8">
         <meta http-equiv="X-UA-Compatible" content="IE=edge">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=0">
         <title>NBT Workbench</title>
         <style>
             canvas {
-                background-color: black;
+                background-color: inherit;
                 margin: 0;
                 top: 0;
                 left: 0;
@@ -30,9 +30,8 @@
         </style>
     </head>
     <body>
-        <input type="file" accept=".nbt,.dat,.dat_old,.dat_mcr,.old,.mca,.mcr,.csv" style="display:none" id="file_dialog"/>
+        <input type="file" accept=".nbt,.snbt,.dat,.dat_old,.dat_mcr,.old,.mca,.mcr,.csv" style="display:none" id="file_dialog"/>
         <a style="display:none" id="download"></a>
-        <div style="display:none" id="upload"></div>
         <script type="module">
             const dialog = document.getElementById("file_dialog");
 
@@ -45,17 +44,18 @@
                 dialog.click();
             }
 
-            import init, { handle_file } from "./nbtworkbench.js?version=2";
+            import init, { open_file } from "./nbtworkbench.js?version=2";
             await init();
+
+            const canvas = document.getElementById("canvas")[0];
 
             dialog.onchange = event => {
                 const file = event.target.files.item(0);
                 file.arrayBuffer().then(bytes => {
-                    handle_file(file.name, new Uint8Array(bytes));
+                    open_file(file.name, new Uint8Array(bytes));
                 })
             };
 
-            const canvas = document.getElementsByTagName("canvas")[0];
 
             canvas.addEventListener("pointerdown", openDialog);
             canvas.addEventListener("pointerup", openDialog);
@@ -71,7 +71,7 @@
                 event.preventDefault();
                 const file = event.dataTransfer.files.item(0);
                 file.arrayBuffer().then(bytes => {
-                    handle_file(file.name, new Uint8Array(bytes));
+                    open_file(file.name, new Uint8Array(bytes));
                 })
             }
         </script>

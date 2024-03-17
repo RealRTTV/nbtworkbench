@@ -19,6 +19,12 @@ pub struct NbtString {
 	pub str: TwentyThree,
 }
 
+impl PartialEq for NbtString {
+	fn eq(&self, other: &Self) -> bool {
+		self.str.as_str() == other.str.as_str()
+	}
+}
+
 impl NbtString {
 	pub const ID: u8 = 8;
 	pub(in crate::elements) fn from_str0(s: &str) -> Option<(&str, Self)> {

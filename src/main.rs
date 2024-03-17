@@ -92,6 +92,7 @@ mod workbench_action;
 mod element_action;
 mod search_box;
 mod text;
+mod cli;
 
 #[macro_export]
 macro_rules! flags {
@@ -203,11 +204,11 @@ extern "C" {
 }
 
 pub static mut WORKBENCH: UnsafeCell<Workbench> = UnsafeCell::new(unsafe { Workbench::uninit() });
-pub static mut WINDOW_PROPERTIES: UnsafeCell<WindowProperties> = UnsafeCell::new(WindowProperties::new(unsafe { core::mem::transmute::<_, Rc<Window>>(1_usize) }));
+pub static mut WINDOW_PROPERTIES: UnsafeCell<WindowProperties> = UnsafeCell::new(WindowProperties::Fake);
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
-pub fn handle_file(name: String, bytes: Vec<u8>) {
+pub fn open_file(name: String, bytes: Vec<u8>) {
 	use crate::alert::Alert;
 
 	let workbench = unsafe { WORKBENCH.get_mut() };
@@ -227,7 +228,24 @@ pub fn wasm_main() {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub fn main() -> ! { pollster::block_on(window::run()) }
+pub fn main() -> ! {
+	const HELP: &str = "Usage:\n  nbtworkbench -? | /? | --help | -h\n  nbtworkbench --version | -v\n  nbtworkbench find [--snbt | -s] <path> <query>...\n  nbtworkbench reformat [--remap-extension | -re] <path> <format>\n\nOptions:\n  --snbt, -s              Try to parse query as SNBT\n  --remap-extension, -re  Remap file extension on reformat";
+
+	let first_arg = std::env::args().nth(1);
+	if let Some("find") = first_arg.as_deref() {
+		cli::find()
+	} else if let Some("reformat") = first_arg.as_deref() {
+		cli::reformat()
+	} else if let Some("--version" | "-v") = first_arg.as_deref() {
+		println!("{}", env!("CARGO_PKG_VERSION"));
+		std::process::exit(0);
+	} else if let Some("-?" | "/?" | "--help" | "-h") = first_arg.as_deref() {
+		println!("{HELP}");
+		std::process::exit(0);
+	} else {
+		pollster::block_on(window::run())
+	}
+}
 
 /// # Refactor
 /// * render trees using `RenderLine` struct/enum
@@ -239,7 +257,6 @@ pub fn main() -> ! { pollster::block_on(window::run()) }
 /// # Minor Features
 /// * open icon for exe ver
 /// * gear icon to swap toolbar with settings panel
-///   * sort entries on file read config
 ///   * make floats either exact or "exact enough"
 /// * __ctrl + h__, open a playground `nbt` file to help with user interaction (bonus points if I have some way to tell if you haven't used this editor before)
 /// * [`last_modified`](NbtChunk) field actually gets some impl
@@ -456,22 +473,23 @@ pub const fn is_utf8_char_boundary(x: u8) -> bool { (x as i8) >= -0x40 }
 #[must_use]
 pub fn is_jump_char_boundary(x: u8) -> bool { b" \t\r\n/\\()\"'-.,:;<>~!@#$%^&*|+=[]{}~?|".contains(&x) }
 
-pub struct WindowProperties {
-	window: Rc<Window>,
+pub enum WindowProperties {
+	Real(Rc<Window>),
+	Fake,
 }
 
 impl WindowProperties {
 	pub const fn new(window: Rc<Window>) -> Self {
-		Self {
-			window,
-		}
+		Self::Real(window)
 	}
 
 	pub fn window_title(&mut self, title: &str) -> &mut Self {
-		self.window.set_title(title);
-		#[cfg(target_arch = "wasm32")]
-		if let Some(document) = web_sys::window().and_then(|window| window.document()) {
-			let _ = document.set_title(title);
+		if let WindowProperties::Real(window) = self {
+			window.set_title(title);
+			#[cfg(target_arch = "wasm32")]
+			if let Some(document) = web_sys::window().and_then(|window| window.document()) {
+				let _ = document.set_title(title);
+			}
 		}
 		self
 	}
@@ -480,8 +498,10 @@ impl WindowProperties {
 	pub fn focus(&mut self) -> &mut Self {
 		use winit::platform::web::WindowExtWebSys;
 
-		if let Some(canvas) = self.window.canvas() {
-			let _ = canvas.focus();
+		if let WindowProperties::Real(window) = self {
+			if let Some(canvas) = window.canvas() {
+				let _ = canvas.focus();
+			}
 		}
 		self
 	}
@@ -1115,7 +1135,7 @@ impl StrExt for str {
 			let end_idx = self
 				.char_indices()
 				.find(|(_, c)| !valid_unescaped_char(*c as u8))
-				.map(|(idx, _)| idx)?;
+				.map_or(self.len(), |(idx, _)| idx);
 			let (s, s2) = unsafe {
 				(
 					self.get_unchecked(..end_idx),

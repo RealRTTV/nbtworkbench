@@ -73,7 +73,7 @@ impl Tab {
 				if self.value.id() == NbtRegion::ID {
 					builder = builder.add_filter("Region File", &["mca", "mcr"]);
 				} else {
-					builder = builder.add_filter("NBT File", &["nbt", "dat", "dat_old", "dat_mcr", "old"]);
+					builder = builder.add_filter("NBT File", &["nbt", "snbt", "dat", "dat_old", "dat_mcr", "old"]);
 				}
 				let path = builder.show_save_single_file()?.ok_or_else(|| anyhow!("Save cancelled"))?;
 				self.name = path.file_name().and_then(|x| x.to_str()).expect("Path has a filename").to_string().into_boxed_str();
@@ -541,7 +541,7 @@ impl Tab {
 	}
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum FileFormat {
 	Nbt,

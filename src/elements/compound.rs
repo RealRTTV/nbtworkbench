@@ -22,6 +22,7 @@ use crate::color::TextColor;
 
 #[allow(clippy::module_name_repetitions)]
 #[repr(C)]
+#[derive(PartialEq)]
 pub struct NbtCompound {
 	pub entries: Box<CompoundMap>,
 	height: u32,
@@ -689,6 +690,24 @@ impl NbtCompound {
 pub struct CompoundMap {
 	pub indices: RawTable<usize>,
 	pub entries: Vec<Entry>,
+}
+
+impl PartialEq for CompoundMap {
+	fn eq(&self, other: &Self) -> bool {
+		if self.entries.len() != other.entries.len() { return false }
+
+		for entry in &self.entries {
+			if let Some(idx) = other.idx_of(&entry.key) {
+				if other.get_idx(idx) != Some((&entry.key, &entry.value)) {
+					return false
+				}
+			} else {
+				return false
+			}
+		}
+
+		true
+	}
 }
 
 impl Clone for CompoundMap {

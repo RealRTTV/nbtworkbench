@@ -68,6 +68,32 @@ pub union NbtElement {
 	id: NbtElementDiscriminant,
 }
 
+impl PartialEq for NbtElement {
+	fn eq(&self, other: &Self) -> bool {
+		if self.id() != other.id() { return false }
+
+		unsafe {
+			match self.id() {
+				NbtChunk::ID => self.chunk == other.chunk,
+				NbtRegion::ID => self.region == other.region,
+				NbtByte::ID => self.byte == other.byte,
+				NbtShort::ID => self.short == other.short,
+				NbtInt::ID => self.int == other.int,
+				NbtLong::ID => self.long == other.long,
+				NbtFloat::ID => self.float == other.float,
+				NbtDouble::ID => self.double == other.double,
+				NbtByteArray::ID => self.byte_array == other.byte_array,
+				NbtString::ID => self.string == other.string,
+				NbtList::ID => self.list == other.list,
+				NbtCompound::ID => self.compound == other.compound,
+				NbtIntArray::ID => self.int_array == other.int_array,
+				NbtLongArray::ID => self.long_array == other.long_array,
+				_ => core::hint::unreachable_unchecked(),
+			}
+		}
+	}
+}
+
 impl Clone for NbtElement {
 	#[inline(never)]
 	fn clone(&self) -> Self {
@@ -264,7 +290,7 @@ impl NbtElement {
 		if s.is_empty() { return None }
 
 		let prefix = s.snbt_string_read().and_then(|(prefix, s2)| {
-			s2.trim_start().strip_prefix(':').map(|s2| {
+			s2.trim_start().strip_prefix(':').filter(|s| !s.is_empty()).map(|s2| {
 				s = s2.trim_start();
 				prefix
 			})

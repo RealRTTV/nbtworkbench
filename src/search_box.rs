@@ -1,5 +1,6 @@
 use std::ops::{Deref, DerefMut};
 use std::time::Duration;
+use regex::Regex;
 use winit::event::MouseButton;
 
 use winit::keyboard::KeyCode;
@@ -10,6 +11,29 @@ use crate::{Bookmark, combined_two_sorted, flags, since_epoch, StrExt};
 use crate::elements::element::NbtElement;
 use crate::text::{Cachelike, SearchBoxKeyResult, Text};
 use crate::vertex_buffer_builder::{Vec2u, VertexBufferBuilder};
+
+#[derive(Debug)]
+pub enum SearchPredicate {
+    String(String),
+    Regex(Regex),
+    Snbt(Option<String>, NbtElement),
+}
+
+impl SearchPredicate {
+    fn matches(&self, key: Option<&str>, value: &NbtElement) -> bool {
+        match self {
+            Self::String(str) => {
+                let (value, color) = value.value();
+                (color != TextColor::TreeKey && value.contains(str)) || key.is_some_and(|k| k.contains(str))
+            }
+            Self::Regex(regex) => {
+                let (value, color) = value.value();
+                color != TextColor::TreeKey && regex.is_match(&value)
+            }
+            Self::Snbt(k, element) => k.as_ref().is_some_and(|k| key.is_some_and(|key| key == k)) || value == element
+        }
+    }
+}
 
 #[derive(Clone, Eq)]
 pub struct SearchBoxCache {
@@ -168,26 +192,29 @@ impl SearchBox {
     }
 
     #[inline]
-    pub fn search(&mut self, bookmarks: &mut Vec<Bookmark>, root: &mut NbtElement, count_only: bool) {
+    pub fn search(&mut self, bookmarks: &mut Vec<Bookmark>, root: &NbtElement, count_only: bool) {
         if self.value.is_empty() {
             return;
         }
 
+        let predicate = SearchPredicate::String(self.value.clone());
         let start = since_epoch();
+        let new_bookmarks = Self::search0(root, &predicate);
+        self.hits = Some((new_bookmarks.len(), since_epoch() - start));
+        if !count_only {
+            let old_bookmarks = core::mem::replace(bookmarks, vec![]);
+            *bookmarks = combined_two_sorted(new_bookmarks.into_boxed_slice(), old_bookmarks.into_boxed_slice());
+        }
+    }
+
+    pub fn search0(root: &NbtElement, predicate: &SearchPredicate) -> Vec<Bookmark> {
         let mut new_bookmarks = Vec::new();
         let mut queue = Vec::new();
         queue.push((None, &*root, true));
         let mut true_line_number = 1;
         let mut line_number = 0;
         while let Some((key, element, parent_open)) = queue.pop() {
-            let (value, color) = element.value();
-            let value = if color == TextColor::TreeKey {
-                None
-            } else {
-                Some(value)
-            };
-
-            if self.matches(key, value.as_deref()) {
+            if predicate.matches(key, element) {
                 let mut bookmark = Bookmark::new(true_line_number, line_number);
                 bookmark.uv = if parent_open { BOOKMARK_UV } else { HIDDEN_BOOKMARK_UV };
                 new_bookmarks.push(bookmark);
@@ -208,17 +235,7 @@ impl SearchBox {
                 line_number += 1;
             }
         }
-
-        self.hits = Some((new_bookmarks.len(), since_epoch() - start));
-        if !count_only {
-            let old_bookmarks = core::mem::replace(bookmarks, vec![]);
-            *bookmarks = combined_two_sorted(new_bookmarks.into_boxed_slice(), old_bookmarks.into_boxed_slice());
-        }
-    }
-
-    #[inline]
-    pub fn matches(&self, key: Option<&str>, value: Option<&str>) -> bool {
-        key.is_some_and(|key| key.contains(&self.value)) || value.is_some_and(|value| value.contains(&self.value))
+        new_bookmarks
     }
 
     #[inline]
