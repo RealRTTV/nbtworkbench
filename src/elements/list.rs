@@ -16,7 +16,6 @@ use crate::color::TextColor;
 
 #[allow(clippy::module_name_repetitions)]
 #[repr(C)]
-#[derive(PartialEq)]
 pub struct NbtList {
 	pub elements: Box<Vec<NbtElement>>,
 	height: u32,
@@ -24,6 +23,12 @@ pub struct NbtList {
 	max_depth: u32,
 	pub element: u8,
 	open: bool,
+}
+
+impl PartialEq for NbtList {
+	fn eq(&self, other: &Self) -> bool {
+		self.elements == other.elements
+	}
 }
 
 impl Clone for NbtList {

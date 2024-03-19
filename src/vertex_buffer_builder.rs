@@ -123,14 +123,14 @@ impl VertexBufferBuilder {
 	}
 
 	#[inline]
-	pub fn draw_tooltip(&mut self, text: &[&str], pos: impl Into<(usize, usize)>) {
+	pub fn draw_tooltip(&mut self, text: &[&str], pos: impl Into<(usize, usize)>, force_draw_right: bool) {
 		use core::fmt::Write;
 
 		let (mut x, y) = pos.into();
 		let y = y + 16;
 		let text_width = text.iter().map(|x| x.width()).max().unwrap_or(0);
-		if x + text_width + 3 >= self.window_width() {
-			x = self.window_width().saturating_sub(text_width + 3);
+		if x >= self.window_width() / 2 && !force_draw_right {
+			x = x.saturating_sub(text_width + 3);
 		}
 		let old_text_z = core::mem::replace(&mut self.text_z, TOOLTIP_Z);
 		let old_text_coords = core::mem::replace(&mut self.text_coords, (x + 3, y + 3));

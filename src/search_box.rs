@@ -1,19 +1,25 @@
 use std::ops::{Deref, DerefMut};
 use std::time::Duration;
+use compact_str::CompactString;
 use regex::Regex;
 use winit::event::MouseButton;
 
 use winit::keyboard::KeyCode;
-use crate::assets::{ADD_SEARCH_BOOKMARKS, BASE_Z, BOOKMARK_UV, DARK_STRIPE_UV, HIDDEN_BOOKMARK_UV, HOVERED_WIDGET_UV, REMOVE_SEARCH_BOOKMARKS, UNSELECTED_WIDGET_UV};
+use crate::assets::{ADD_SEARCH_BOOKMARKS, BASE_Z, BOOKMARK_UV, DARK_STRIPE_UV, HIDDEN_BOOKMARK_UV, HOVERED_WIDGET_UV, REGEX_SEARCH_MODE, REMOVE_SEARCH_BOOKMARKS, SEARCH_KEYS, SEARCH_KEYS_AND_VALUES, SEARCH_VALUES, SNBT_SEARCH_MODE, STRING_SEARCH_MODE, UNSELECTED_WIDGET_UV};
 
 use crate::color::TextColor;
-use crate::{Bookmark, combined_two_sorted, flags, since_epoch, StrExt};
+use crate::{Bookmark, combined_two_sorted, create_regex, flags, since_epoch, SortAlgorithm, StrExt};
 use crate::elements::element::NbtElement;
 use crate::text::{Cachelike, SearchBoxKeyResult, Text};
 use crate::vertex_buffer_builder::{Vec2u, VertexBufferBuilder};
 
+pub struct SearchPredicate {
+    pub search_flags: u8,
+    pub inner: SearchPredicateInner,
+}
+
 #[derive(Debug)]
-pub enum SearchPredicate {
+pub enum SearchPredicateInner {
     String(String),
     Regex(Regex),
     Snbt(Option<String>, NbtElement),
@@ -21,16 +27,21 @@ pub enum SearchPredicate {
 
 impl SearchPredicate {
     fn matches(&self, key: Option<&str>, value: &NbtElement) -> bool {
-        match self {
-            Self::String(str) => {
+        match &self.inner {
+            SearchPredicateInner::String(str) => {
                 let (value, color) = value.value();
-                (color != TextColor::TreeKey && value.contains(str)) || key.is_some_and(|k| k.contains(str))
+                ((self.search_flags & 0b01) > 0 && color != TextColor::TreeKey && value.contains(str)) || ((self.search_flags & 0b10) > 0 && key.is_some_and(|k| k.contains(str)))
             }
-            Self::Regex(regex) => {
+            SearchPredicateInner::Regex(regex) => {
                 let (value, color) = value.value();
-                color != TextColor::TreeKey && regex.is_match(&value)
+                ((self.search_flags & 0b01) > 0 && color != TextColor::TreeKey && regex.is_match(&value)) || ((self.search_flags & 0b10) > 0 && key.is_some_and(|k| regex.is_match(k)))
             }
-            Self::Snbt(k, element) => k.as_ref().is_some_and(|k| key.is_some_and(|key| key == k)) || value == element
+            SearchPredicateInner::Snbt(k, element) => {
+                // cmp order does matter
+                let a = element == value;
+                let b = k.as_deref() == key;
+                ((self.search_flags == 0b11) & a & b) | ((self.search_flags == 0b01) & a) | ((self.search_flags == 0b10) & b)
+            },
         }
     }
 }
@@ -72,6 +83,8 @@ pub struct SearchBoxAdditional {
     selected: bool,
     horizontal_scroll: usize,
     hits: Option<(usize, Duration)>,
+    flags: u8,
+    mode: u8,
 }
 
 pub struct SearchBox(Text<SearchBoxAdditional, SearchBoxCache>);
@@ -92,7 +105,7 @@ impl DerefMut for SearchBox {
 
 impl SearchBox {
     pub fn new() -> Self {
-        Self(Text::new(String::new(), 0, true, SearchBoxAdditional { selected: false, horizontal_scroll: 0, hits: None }))
+        Self(Text::new(String::new(), 0, true, SearchBoxAdditional { selected: false, horizontal_scroll: 0, hits: None, flags: 0b01, mode: 0 }))
     }
 
     pub const fn uninit() -> Self {
@@ -113,7 +126,7 @@ impl SearchBox {
             (16, 16),
         );
 
-        let hover = (pos.x..builder.window_width() - 215 - 17).contains(&mouse_x) && (23..45).contains(&mouse_y);
+        let hover = (pos.x..builder.window_width() - 215 - 17 - 16 - 16).contains(&mouse_x) && (23..45).contains(&mouse_y);
 
         builder.horizontal_scroll = self.horizontal_scroll;
 
@@ -131,21 +144,49 @@ impl SearchBox {
         }
 
         if let Some((hits, stat)) = self.hits && (self.is_selected() || hover) {
-            builder.draw_tooltip(&[&format!("{hits} hits for \"{arg}\" ({ms}ms)", arg = self.value, ms = stat.as_millis())], if !self.is_selected() && hover { mouse } else { (284, 30) });
+            builder.draw_tooltip(&[&format!("{hits} hit{s} for \"{arg}\" ({ms}ms)", s = if hits == 1 { "" } else { "s" }, arg = self.value, ms = stat.as_millis())], if !self.is_selected() && hover { mouse } else { (284, 30) }, true);
         }
 
         builder.horizontal_scroll = 0;
 
-        let bookmark_uv = if shift { REMOVE_SEARCH_BOOKMARKS } else { ADD_SEARCH_BOOKMARKS };
-        let widget_uv = if (builder.window_width() - 215 - 17..builder.window_width() - 215 - 1).contains(&mouse_x) && (26..42).contains(&mouse_y) {
-            builder.draw_tooltip(&[if shift { "Remove all bookmarks" } else { "Add search bookmarks" }], mouse);
-            HOVERED_WIDGET_UV
-        } else {
-            UNSELECTED_WIDGET_UV
-        };
+        {
+            let bookmark_uv = if shift { REMOVE_SEARCH_BOOKMARKS } else { ADD_SEARCH_BOOKMARKS };
+            let widget_uv = if (builder.window_width() - 215 - 17 - 16 - 16..builder.window_width() - 215 - 1 - 16 - 16).contains(&mouse_x) && (26..42).contains(&mouse_y) {
+                builder.draw_tooltip(&[if shift { "Remove all bookmarks (Shift + Enter)" } else { "Add search bookmarks (Enter)" }], mouse, false);
+                HOVERED_WIDGET_UV
+            } else {
+                UNSELECTED_WIDGET_UV
+            };
 
-        builder.draw_texture_z((builder.window_width() - 215 - 17, 26), BASE_Z, widget_uv, (16, 16));
-        builder.draw_texture_z((builder.window_width() - 215 - 17, 26), BASE_Z, bookmark_uv, (16, 16));
+            builder.draw_texture_z((builder.window_width() - 215 - 17 - 16 - 16, 26), BASE_Z, widget_uv, (16, 16));
+            builder.draw_texture_z((builder.window_width() - 215 - 17 - 16 - 16, 26), BASE_Z, bookmark_uv, (16, 16));
+        }
+
+        {
+            let search_uv = match self.flags { 0b01 => SEARCH_VALUES, 0b10 => SEARCH_KEYS, _ => SEARCH_KEYS_AND_VALUES };
+            let widget_uv = if (builder.window_width() - 215 - 17 - 16..builder.window_width() - 215 - 1 - 16).contains(&mouse_x) && (26..42).contains(&mouse_y) {
+                builder.draw_tooltip(&[match self.flags { 0b01 => "Values only", 0b10 => "Keys only", _ => "Keys + Values" }], mouse, false);
+                HOVERED_WIDGET_UV
+            } else {
+                UNSELECTED_WIDGET_UV
+            };
+
+            builder.draw_texture_z((builder.window_width() - 215 - 17 - 16, 26), BASE_Z, widget_uv, (16, 16));
+            builder.draw_texture_z((builder.window_width() - 215 - 17 - 16, 26), BASE_Z, search_uv, (16, 16));
+        }
+
+        {
+            let mode_uv = match self.mode { 0 => STRING_SEARCH_MODE, 1 => REGEX_SEARCH_MODE, _ => SNBT_SEARCH_MODE };
+            let widget_uv = if (builder.window_width() - 215 - 17..builder.window_width() - 215 - 1).contains(&mouse_x) && (26..42).contains(&mouse_y) {
+                builder.draw_tooltip(&[match self.mode { 0 => "String Mode", 1 => "Regex Mode", _ => "SNBT Mode" }], mouse, false);
+                HOVERED_WIDGET_UV
+            } else {
+                UNSELECTED_WIDGET_UV
+            };
+
+            builder.draw_texture_z((builder.window_width() - 215 - 17, 26), BASE_Z, widget_uv, (16, 16));
+            builder.draw_texture_z((builder.window_width() - 215 - 17, 26), BASE_Z, mode_uv, (16, 16));
+        }
     }
 
     #[inline]
@@ -183,7 +224,7 @@ impl SearchBox {
     }
 
     #[inline]
-    pub fn on_widget(&mut self, shift: bool, bookmarks: &mut Vec<Bookmark>, root: &mut NbtElement) {
+    pub fn on_bookmark_widget(&mut self, shift: bool, bookmarks: &mut Vec<Bookmark>, root: &mut NbtElement) {
         if shift {
             bookmarks.clear();
         } else {
@@ -192,12 +233,26 @@ impl SearchBox {
     }
 
     #[inline]
+    pub fn on_search_widget(&mut self, shift: bool) {
+        self.flags = ((self.flags as i8 - 1).wrapping_add((!shift) as i8 * 2 - 1).rem_euclid(3) + 1) as u8;
+    }
+
+    #[inline]
+    pub fn on_mode_widget(&mut self, shift: bool) {
+        self.mode = (self.mode as i8).wrapping_add((!shift) as i8 * 2 - 1).rem_euclid(3) as u8;
+    }
+
+    #[inline]
     pub fn search(&mut self, bookmarks: &mut Vec<Bookmark>, root: &NbtElement, count_only: bool) {
         if self.value.is_empty() {
             return;
         }
 
-        let predicate = SearchPredicate::String(self.value.clone());
+        let predicate = match self.mode {
+            0 => SearchPredicate { inner: SearchPredicateInner::String(self.value.clone()), search_flags: self.flags },
+            1 => if let Some(regex) = create_regex(self.value.clone()) { SearchPredicate { inner: SearchPredicateInner::Regex(regex), search_flags: self.flags } } else { return },
+            _ => if let Some((key, value)) = NbtElement::from_str(&self.value, SortAlgorithm::None) { SearchPredicate { inner: SearchPredicateInner::Snbt(key.map(CompactString::into_string), value), search_flags: self.flags } } else { return },
+        };
         let start = since_epoch();
         let new_bookmarks = Self::search0(root, &predicate);
         self.hits = Some((new_bookmarks.len(), since_epoch() - start));
@@ -248,7 +303,7 @@ impl SearchBox {
     pub fn post_input(&mut self, window_dims: (usize, usize)) {
         let (window_width, _) = window_dims;
         self.0.post_input();
-        let field_width = window_width - 215 - 284 - 17;
+        let field_width = window_width - 215 - 284 - 17 - 16 - 16;
         let precursor_width = self.value.split_at(self.cursor).0.width();
         // 8px space just to look cleaner
         let horizontal_scroll = (precursor_width + 8).saturating_sub(field_width);
@@ -260,6 +315,10 @@ impl SearchBox {
         let before = self.value.clone();
         let result = 'a: {
             if let KeyCode::Enter | KeyCode::NumpadEnter = key && flags == flags!(Shift) {
+                break 'a SearchBoxKeyResult::ClearAllBookmarks
+            }
+
+            if let KeyCode::Enter | KeyCode::NumpadEnter = key && flags == flags!(Alt) {
                 break 'a SearchBoxKeyResult::FinishCountOnly
             }
 

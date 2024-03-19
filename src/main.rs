@@ -31,9 +31,11 @@
 	clippy::cast_possible_wrap,
 	clippy::multiple_crate_versions
 )]
+#![feature(adt_const_params)]
 #![feature(array_chunks)]
 #![feature(box_patterns)]
 #![feature(const_black_box)]
+#![feature(const_collections_with_hasher)]
 #![feature(core_intrinsics)]
 #![feature(iter_array_chunks)]
 #![feature(iter_next_chunk)]
@@ -45,9 +47,6 @@
 #![feature(optimize_attribute)]
 #![feature(stmt_expr_attributes)]
 #![feature(unchecked_math)]
-#![feature(const_collections_with_hasher)]
-#![feature(slice_first_last_chunk)]
-#![feature(const_maybe_uninit_zeroed)]
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 use std::cell::UnsafeCell;
@@ -59,6 +58,7 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use compact_str::{CompactString, ToCompactString};
+use regex::{Regex, RegexBuilder};
 use static_assertions::const_assert_eq;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::wasm_bindgen;
@@ -67,7 +67,7 @@ use winit::window::Window;
 use elements::element::NbtElement;
 use vertex_buffer_builder::VertexBufferBuilder;
 
-use crate::assets::{BASE_TEXT_Z, BASE_Z, BOOKMARK_UV, BOOKMARK_Z, END_LINE_NUMBER_SEPARATOR_UV, HEADER_SIZE, HIDDEN_BOOKMARK_UV, INSERTION_UV, INVALID_STRIPE_UV, LINE_NUMBER_SEPARATOR_UV, LINE_NUMBER_Z, SCROLLBAR_BOOKMARK_Z, SELECTED_TOGGLE_OFF_UV, SELECTED_TOGGLE_ON_UV, SELECTION_UV, SORT_COMPOUND_BY_NAME, SORT_COMPOUND_BY_NOTHING, SORT_COMPOUND_BY_TYPE, STAMP_BACKDROP_UV, TEXT_UNDERLINE_UV, TOGGLE_Z, UNSELECTED_TOGGLE_OFF_UV, UNSELECTED_TOGGLE_ON_UV};
+use crate::assets::{BASE_TEXT_Z, BASE_Z, BOOKMARK_UV, BOOKMARK_Z, END_LINE_NUMBER_SEPARATOR_UV, HEADER_SIZE, HIDDEN_BOOKMARK_UV, HOVERED_WIDGET_UV, INSERTION_UV, INVALID_STRIPE_UV, LINE_NUMBER_SEPARATOR_UV, LINE_NUMBER_Z, SCROLLBAR_BOOKMARK_Z, SELECTED_TOGGLE_OFF_UV, SELECTED_TOGGLE_ON_UV, SORT_COMPOUND_BY_NAME, SORT_COMPOUND_BY_NOTHING, SORT_COMPOUND_BY_TYPE, TEXT_UNDERLINE_UV, TOGGLE_Z, UNSELECTED_TOGGLE_OFF_UV, UNSELECTED_TOGGLE_ON_UV, UNSELECTED_WIDGET_UV};
 use crate::color::TextColor;
 use crate::elements::compound::{CompoundMap};
 use crate::elements::element::{NbtByteArray, NbtIntArray, NbtLongArray};
@@ -229,7 +229,6 @@ pub fn wasm_main() {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn main() -> ! {
-	const HELP: &str = "Usage:\n  nbtworkbench -? | /? | --help | -h\n  nbtworkbench --version | -v\n  nbtworkbench find [--snbt | -s] <path> <query>...\n  nbtworkbench reformat [--remap-extension | -re] <path> <format>\n\nOptions:\n  --snbt, -s              Try to parse query as SNBT\n  --remap-extension, -re  Remap file extension on reformat";
 
 	let first_arg = std::env::args().nth(1);
 	if let Some("find") = first_arg.as_deref() {
@@ -240,7 +239,22 @@ pub fn main() -> ! {
 		println!("{}", env!("CARGO_PKG_VERSION"));
 		std::process::exit(0);
 	} else if let Some("-?" | "/?" | "--help" | "-h") = first_arg.as_deref() {
-		println!("{HELP}");
+		println!(
+			r#"Usage:
+	          nbtworkbench --version|-v
+	          nbtworkbench -?|-h|--help|/?
+	          nbtworkbench find <path> [(--mode|-m)=normal|regex|snbt] [(--search|-s)=key|value|all] <query>
+	          nbtworkbench reformat (--format|-f)=<format> [(--out-dir|-d)=<out-dir>] [(--out-ext|-e)=<out-ext>] <path>
+
+	        Options:
+	          --version, -v       Displays the version of nbtworkbench you're running.
+	          -?, -h, --help, /?  Displays this dialog.
+	          --mode, -m          Changes the `find` mode to take the <query> field as either, a containing substring, a regex (match whole), or snbt. [default: normal]
+	          --search, -s        Searches for results matching the <query> in either, the key, the value, or both (note that substrings and regex saerch the same pattern in both key and value, while the regex uses it's key field to match equal strings). [default: all]
+	          --format, -f        Specifies the format to be reformatted to; either `nbt`, `snbt`, `dat/dat_old/gzip` or `zlib`.
+	          --out-dir, -d       Specifies the output directory. [default: ./]
+	          --out-ext, -e       Specifies the output file extension (if not specified, it will infer from --format)"#
+		);
 		std::process::exit(0);
 	} else {
 		pollster::block_on(window::run())
@@ -312,6 +326,37 @@ pub fn set_clipboard(value: String) -> bool {
 	return cli_clipboard::set_contents(value).is_ok();
 	#[cfg(target_arch = "wasm32")]
 	return web_sys::window().map(|window| window.navigator()).and_then(|navigator| navigator.clipboard()).map(|clipboard| clipboard.write_text(&value)).is_some();
+}
+
+#[must_use]
+pub fn create_regex(mut str: String) -> Option<Regex> {
+	if !str.starts_with("/") {
+		return None;
+	}
+
+	str = str.split_off(1);
+
+	let mut flags = 0_u8;
+	while let Some(char) = str.pop() {
+		match char {
+			'i' => flags |= 0b000001,
+			'g' => flags |= 0b000010,
+			'm' => flags |= 0b000100,
+			's' => flags |= 0b001000,
+			'u' => flags |= 0b010000,
+			'y' => flags |= 0b100000,
+			'/' => break,
+			_ => return None
+		}
+	}
+
+	RegexBuilder::new(&str)
+		.case_insensitive(flags & 0b1 > 0)
+		.multi_line(flags & 0b100 > 0)
+		.dot_matches_new_line(flags & 0b1000 > 0)
+		.unicode(flags & 0b10000 > 0)
+		.swap_greed(flags & 0b10000 > 0)
+		.build().ok()
 }
 
 #[must_use]
@@ -537,14 +582,16 @@ impl SortAlgorithm {
 			Self::Type => SORT_COMPOUND_BY_TYPE,
 		};
 
-		builder.draw_texture((264, 26), STAMP_BACKDROP_UV, (16, 16));
+		let widget_uv = if (264..280).contains(&ctx.mouse_x) && (26..42).contains(&ctx.mouse_y) {
+			builder.draw_tooltip(&[&format!("Compound Sorting Algorithm ({self})")], (ctx.mouse_x, ctx.mouse_y), false);
+			HOVERED_WIDGET_UV
+		} else {
+			UNSELECTED_WIDGET_UV
+		};
+		builder.draw_texture((264, 26), widget_uv, (16, 16));
 		builder.draw_texture((267, 29), uv, (10, 10));
 
-		let hovering = (264..280).contains(&ctx.mouse_x) && (26..42).contains(&ctx.mouse_y);
-		if hovering {
-			builder.draw_texture((264, 26), SELECTION_UV, (16, 16));
-			builder.draw_tooltip(&[&format!("Compound Sorting Algorithm ({self})")], (ctx.mouse_x, ctx.mouse_y));
-		}
+
 	}
 
 	pub fn cycle(self) -> Self {
@@ -844,7 +891,7 @@ impl RenderContext {
 				errors.push("Error! The current key is a duplicate of another one.");
 			}
 			let color_before = core::mem::replace(&mut builder.color, TextColor::Red.to_raw());
-			builder.draw_tooltip(&errors, (self.mouse_x, self.mouse_y));
+			builder.draw_tooltip(&errors, (self.mouse_x, self.mouse_y), false);
 			builder.color = color_before;
 		}
 	}
@@ -1294,7 +1341,7 @@ impl StrExt for str {
 				if (x as u32) < 56832 {
 					VertexBufferBuilder::CHAR_WIDTH[x as usize] as usize
 				} else {
-					0
+					VertexBufferBuilder::CHAR_WIDTH[56829] as usize
 				}
 			})
 			.sum()

@@ -10,7 +10,7 @@ use compact_str::CompactString;
 use notify::{EventKind, PollWatcher, RecursiveMode, Watcher};
 use uuid::Uuid;
 
-use crate::{Bookmark, panic_unchecked, set_clipboard, FileUpdateSubscription};
+use crate::{Bookmark, panic_unchecked, set_clipboard, FileUpdateSubscription, since_epoch};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::{FileUpdateSubscriptionType, assets::{OPEN_ARRAY_IN_HEX_UV, OPEN_IN_TXT}};
 use crate::assets::{ACTION_WHEEL_Z, COPY_FORMATTED_UV, COPY_RAW_UV, SORT_COMPOUND_BY_NAME, SORT_COMPOUND_BY_TYPE};
@@ -41,39 +41,39 @@ impl ElementAction {
 			Self::CopyRaw => {
 				builder.draw_texture_z(pos, ACTION_WHEEL_Z, COPY_RAW_UV, (10, 10));
 				if hovered {
-					builder.draw_tooltip(&["Copy minified snbt to clipboard"], pos);
+					builder.draw_tooltip(&["Copy minified snbt to clipboard"], pos, false);
 				}
 			}
 			Self::CopyFormatted => {
 				builder.draw_texture_z(pos, ACTION_WHEEL_Z, COPY_FORMATTED_UV, (10, 10));
 				if hovered {
-					builder.draw_tooltip(&["Copy formatted snbt to clipboard"], pos);
+					builder.draw_tooltip(&["Copy formatted snbt to clipboard"], pos, false);
 				}
 			}
 			#[cfg(not(target_arch = "wasm32"))]
 			Self::OpenArrayInHex => {
 				builder.draw_texture_z(pos, ACTION_WHEEL_Z, OPEN_ARRAY_IN_HEX_UV, (10, 10));
 				if hovered {
-					builder.draw_tooltip(&["Open raw contents in hex editor"], pos);
+					builder.draw_tooltip(&["Open raw contents in hex editor"], pos, false);
 				}
 			}
 			#[cfg(not(target_arch = "wasm32"))]
 			Self::OpenInTxt => {
 				builder.draw_texture_z(pos, ACTION_WHEEL_Z, OPEN_IN_TXT, (10, 10));
 				if hovered {
-					builder.draw_tooltip(&["Open formatted snbt in text editor"], pos);
+					builder.draw_tooltip(&["Open formatted snbt in text editor"], pos, false);
 				}
 			}
 			Self::SortCompoundByName => {
 				builder.draw_texture_z(pos, ACTION_WHEEL_Z, SORT_COMPOUND_BY_NAME, (10, 10));
 				if hovered {
-					builder.draw_tooltip(&["Sort compound by name"], pos);
+					builder.draw_tooltip(&["Sort compound by name"], pos, false);
 				}
 			}
 			Self::SortCompoundByType => {
 				builder.draw_texture_z(pos, ACTION_WHEEL_Z, SORT_COMPOUND_BY_TYPE, (10, 10));
 				if hovered {
-					builder.draw_tooltip(&["Sort compound by type"], pos);
+					builder.draw_tooltip(&["Sort compound by type"], pos, false);
 				}
 			}
 		}
@@ -116,12 +116,13 @@ impl ElementAction {
 		#[must_use]
 		#[cfg(not(target_arch = "wasm32"))]
 		fn open_file(str: &str) -> bool {
-			if cfg!(target_os = "windows") {
-				Command::new("cmd").args(["/c", "start", str]).status()
-			} else if cfg!(target_os = "macos") {
-				Command::new("open").arg(str).status()
-			} else {
-				Command::new("xdg-open").arg(str).status()
+			'a: {
+				#[cfg(target_os = "windows")]
+				break 'a Command::new("cmd").args(["/c", "start", str]).status();
+				#[cfg(target_os = "apple")]
+				break 'a Command::new("open").arg(str).status();
+				#[cfg(target_os = "linux")]
+				break 'a Command::new("xdg-open").arg(str).status();
 			}.is_ok()
 		}
 
@@ -145,7 +146,7 @@ impl ElementAction {
 				Self::OpenArrayInHex => {
 					use std::io::Write;
 
-					let hash = (unsafe { core::arch::x86_64::_rdtsc() as usize }).wrapping_mul(element as *mut NbtElement as usize);
+					let hash = (since_epoch().as_millis() as usize).wrapping_mul(element as *mut NbtElement as usize);
 					let path = std::env::temp_dir().join(format!(
 						"nbtworkbench-{hash:0width$x}.hex",
 						width = usize::BITS as usize / 8
@@ -221,7 +222,7 @@ impl ElementAction {
 				Self::OpenInTxt => {
 					use std::io::Write;
 
-					let hash = (unsafe { core::arch::x86_64::_rdtsc() as usize }).wrapping_mul(element as *mut NbtElement as usize);
+					let hash = (since_epoch().as_millis() as usize).wrapping_mul(element as *mut NbtElement as usize);
 					let path = std::env::temp_dir().join(format!(
 						"nbtworkbench-{hash:0width$x}.txt",
 						width = usize::BITS as usize / 8

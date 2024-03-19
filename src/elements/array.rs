@@ -3,11 +3,16 @@ macro_rules! array {
 	($element_field:ident, $name:ident, $t:ty, $my_id:literal, $id:literal, $char:literal, $uv:ident, $element_uv:ident) => {
 		#[derive(Default)]
 		#[repr(C)]
-		#[derive(PartialEq)]
 		pub struct $name {
 			values: Box<Vec<NbtElement>>,
 			max_depth: u32,
 			open: bool,
+		}
+
+		impl PartialEq for $name {
+			fn eq(&self, other: &Self) -> bool {
+				self.values == other.values
+			}
 		}
 
 		impl Clone for $name {

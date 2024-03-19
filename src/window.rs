@@ -48,7 +48,7 @@ pub async fn run() -> ! {
 			)
 			.expect("valid format"),
 		));
-	#[cfg(not(target_arch = "wasm32"))] {
+	#[cfg(target_os = "windows")] {
 		builder = builder
 			.with_drag_and_drop(true)
 			.with_transparent(std::env::args().any(|x| x.eq("--transparent")));

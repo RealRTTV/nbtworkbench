@@ -4,7 +4,6 @@ use std::fmt::Write;
 use std::fs::read;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
-use std::string::String;
 use std::sync::mpsc::TryRecvError;
 use std::time::Duration;
 
@@ -287,10 +286,22 @@ impl Workbench {
 					self.search_box.deselect();
 				}
 			}
-			if button == MouseButton::Left {
-				if (self.window_width - 215 - 17..self.window_width - 215 - 1).contains(&self.mouse_x) && (23..45).contains(&self.mouse_y) {
+			if let MouseButton::Left | MouseButton::Right = button {
+				let shift = (self.held_keys.contains(&KeyCode::ShiftLeft) || self.held_keys.contains(&KeyCode::ShiftRight)) ^ (button == MouseButton::Right);
+
+				if (self.window_width - 215 - 17 - 16 - 16..self.window_width - 215 - 1 - 16 - 16).contains(&self.mouse_x) && (26..42).contains(&self.mouse_y) {
 					let tab = tab_mut!(self);
-					self.search_box.on_widget(self.held_keys.contains(&KeyCode::ShiftLeft) || self.held_keys.contains(&KeyCode::ShiftRight), &mut tab.bookmarks, &mut tab.value);
+					self.search_box.on_bookmark_widget(shift, &mut tab.bookmarks, &mut tab.value);
+					return true;
+				}
+
+				if (self.window_width - 215 - 17 - 16..self.window_width - 215 - 1 - 16).contains(&self.mouse_x) && (26..42).contains(&self.mouse_y) {
+					self.search_box.on_search_widget(shift);
+					return true;
+				}
+
+				if (self.window_width - 215 - 17..self.window_width - 215 - 1).contains(&self.mouse_x) && (26..42).contains(&self.mouse_y) {
+					self.search_box.on_mode_widget(shift);
 					return true;
 				}
 			}
@@ -309,14 +320,14 @@ impl Workbench {
 					}
 
 					match core::mem::replace(&mut self.held_entry, HeldEntry::Empty) {
-						HeldEntry::Empty => {}
+						HeldEntry::Empty => {},
 						HeldEntry::FromAether(x) => {
 							self.drop(x, None, left_margin);
-							break 'a;
+							break 'a
 						}
 						HeldEntry::FromKnown(x, indices) => {
 							self.drop(x, Some(indices), left_margin);
-							break 'a;
+							break 'a
 						}
 					}
 
@@ -361,7 +372,9 @@ impl Workbench {
 						Some(_) => {},
 						None => {
 							if button == MouseButton::Right {
-								self.action_wheel = Some((((x - left_margin) & !15) + left_margin + 6, ((y - HEADER_SIZE) & !15) + HEADER_SIZE + 7));
+								let tab = tab_mut!(self);
+								let depth = Traverse::new(tab.scroll() / 16 + (y - HEADER_SIZE) / 16, &mut tab.value).enumerate().last().0;
+								self.action_wheel = Some((left_margin + depth * 16 + 16 + 6, ((y - HEADER_SIZE) & !15) + HEADER_SIZE + 7));
 								break 'a;
 							}
 						}
@@ -1240,7 +1253,7 @@ impl Workbench {
 			self.set_tab(self.tab.saturating_sub(1), window_properties);
 		}
 		#[cfg(not(target_arch = "wasm32"))]
-		std::thread::spawn(move || drop(tab));
+		std::thread::Builder::new().stack_size(50_331_648 /*48MiB*/).spawn(move || drop(tab)).expect("Failed to spawn thread");
 		#[cfg(target_arch = "wasm32")]
 		drop(tab);
 		true
@@ -1248,7 +1261,7 @@ impl Workbench {
 
 	#[inline]
 	fn open_file(&mut self, window_properties: &mut WindowProperties) {
-		#[cfg(target_os = "windows")] {
+		#[cfg(any(target_os = "windows", target_os = "apple", target_os = "linux"))] {
 			match native_dialog::FileDialog::new().set_location("~/Downloads").add_filter("NBT File", &["nbt", "snbt", "dat", "dat_old", "dat_mcr", "old"]).add_filter("Region File", &["mca", "mcr"]).show_open_single_file() {
 				Err(e) => self.alert(Alert::new("Error!", TextColor::Red, e.to_string())),
 				Ok(None) => {},
@@ -1266,6 +1279,7 @@ impl Workbench {
 	}
 
 	#[inline]
+	#[must_use]
 	fn left_margin(&self) -> usize {
 		tab!(self).left_margin(self.held_entry.element())
 	}
@@ -1352,7 +1366,7 @@ impl Workbench {
 
 	#[inline]
 	fn try_select_search_box(&mut self, button: MouseButton) -> bool {
-		if (283..self.window_width - 215 - 17).contains(&self.mouse_x) && (23..45).contains(&self.mouse_y) {
+		if (283..self.window_width - 215 - 17 - 16 - 16).contains(&self.mouse_x) && (23..45).contains(&self.mouse_y) {
 			self.search_box.select(self.mouse_x - 283, button);
 			true
 		} else {
@@ -1968,6 +1982,11 @@ impl Workbench {
 							self.search_box.post_input((self.window_width, self.window_height));
 							return true;
 						}
+						SearchBoxKeyResult::ClearAllBookmarks => {
+							tab.bookmarks.clear();
+							self.search_box.post_input((self.window_width, self.window_height));
+							return true;
+						}
 						result @ (SearchBoxKeyResult::Finish | SearchBoxKeyResult::FinishCountOnly) => {
 							self.search_box.search(&mut tab.bookmarks, &mut tab.value, result == SearchBoxKeyResult::FinishCountOnly);
 							self.search_box.post_input((self.window_width, self.window_height));
@@ -2067,6 +2086,10 @@ impl Workbench {
 				// 	});
 				// 	return true;
 				// }
+				if key == KeyCode::KeyF && flags == flags!(Ctrl) {
+					self.search_box.select(0, MouseButton::Left);
+					return true;
+				}
 				if key == KeyCode::KeyV && flags == flags!(Ctrl) && let Some(element) = get_clipboard().and_then(|x| NbtElement::from_str(&x, self.sort_algorithm)) && (element.1.id() != NbtChunk::ID || tab.value.id() == NbtRegion::ID) {
 					let old_held_entry = core::mem::replace(&mut self.held_entry, HeldEntry::FromAether(element));
 					let HeldEntry::FromAether(pair) = core::mem::replace(&mut self.held_entry, old_held_entry) else {
@@ -2091,7 +2114,7 @@ impl Workbench {
 					self.held_entry = HeldEntry::Empty;
 					return true;
 				}
-				{
+				if flags == flags!(Ctrl) {
 					if key == KeyCode::Digit1 {
 						self.set_tab(0, window_properties);
 						return true;
@@ -2126,6 +2149,44 @@ impl Workbench {
 					}
 					if key == KeyCode::Digit9 {
 						self.set_tab(usize::MAX, window_properties);
+						return true;
+					}
+				}
+				if flags == flags!(Alt) {
+					let id = if key == KeyCode::Digit1 {
+						NbtByte::ID
+					} else if key == KeyCode::Digit2 {
+						NbtShort::ID
+					} else if key == KeyCode::Digit3 {
+						NbtInt::ID
+					} else if key == KeyCode::Digit4 {
+						NbtLong::ID
+					} else if key == KeyCode::Digit5 {
+						NbtFloat::ID
+					} else if key == KeyCode::Digit6 {
+						NbtDouble::ID
+					} else if key == KeyCode::Digit7 {
+						NbtByteArray::ID
+					} else if key == KeyCode::Digit8 {
+						NbtIntArray::ID
+					} else if key == KeyCode::Digit9 {
+						NbtLongArray::ID
+					} else if key == KeyCode::Digit0 {
+						NbtString::ID
+					} else if key == KeyCode::Minus {
+						NbtList::ID
+					} else if key == KeyCode::Equal {
+						NbtCompound::ID
+					} else {
+						0
+					};
+					if let Some(element) = NbtElement::from_id(id) {
+						if let HeldEntry::FromKnown(element, indices) = core::mem::replace(&mut self.held_entry, HeldEntry::FromAether((None, element))) {
+							tab.append_to_history(WorkbenchAction::Remove {
+								indices,
+								element,
+							});
+						}
 						return true;
 					}
 				}
@@ -2184,7 +2245,7 @@ impl Workbench {
 						tab.horizontal_scroll = tab.horizontal_scroll(self.held_entry.element());
 					}
 				}
-				if key == KeyCode::KeyF && flags == flags!(Alt) {
+				if key == KeyCode::KeyF && flags == flags!(Ctrl + Shift) {
 					tab.freehand_mode = !tab.freehand_mode;
 					return true;
 				}
@@ -2429,7 +2490,7 @@ impl Workbench {
 			builder.draw_texture((0, 26), OPEN_FOLDER_UV, (16, 16));
 			if (0..16).contains(&ctx.mouse_x) && (26..42).contains(&ctx.mouse_y) {
 				builder.draw_texture((0, 26), SELECTION_UV, (16, 16));
-				builder.draw_tooltip(&["Open File"], (self.mouse_x, self.mouse_y));
+				builder.draw_tooltip(&["Open File (Ctrl + O)"], (self.mouse_x, self.mouse_y), false);
 			}
 			builder.draw_texture_region_z(
 				(17, 22),
@@ -2517,10 +2578,10 @@ impl Workbench {
 			};
 			builder.draw_texture((offset, 3), uv, (3, 16));
 			if (offset..offset + 16).contains(&self.mouse_x) && (3..19).contains(&self.mouse_y) {
-				builder.draw_tooltip(&[tab.value.display_name()], (self.mouse_x, self.mouse_y));
+				builder.draw_tooltip(&[tab.value.display_name()], (self.mouse_x, self.mouse_y), false);
 			}
 			offset += 2;
-			tab.draw_icon(builder, (offset, 3), JUST_OVERLAPPING_BASE_TEXT_Z);
+			tab.draw_icon(builder, (offset, 2), JUST_OVERLAPPING_BASE_TEXT_Z);
 			offset += 1;
 			builder.draw_texture_region_z(
 				(offset, 3),
@@ -2543,8 +2604,11 @@ impl Workbench {
 				(16, 16),
 			);
 			builder.draw_texture((offset - 16, 3), tab.compression.uv(), (16, 16));
+			if (offset - 32..offset - 16).contains(&self.mouse_x) && (3..19).contains(&self.mouse_y) {
+				builder.draw_tooltip(&["Save"], (self.mouse_x, self.mouse_y), false);
+			}
 			if (offset - 16..offset).contains(&self.mouse_x) && (3..19).contains(&self.mouse_y) {
-				builder.draw_tooltip(&[tab.compression.into_str()], (self.mouse_x, self.mouse_y));
+				builder.draw_tooltip(&[tab.compression.into_str()], (self.mouse_x, self.mouse_y), false);
 			}
 			offset += 6;
 		}

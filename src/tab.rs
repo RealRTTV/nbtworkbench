@@ -66,7 +66,7 @@ impl Tab {
 	}
 
 	pub fn save(&mut self, force_dialog: bool) -> Result<()> {
-		#[cfg(target_os = "windows")] {
+		#[cfg(any(target_os = "windows", target_os = "apple", target_os = "linux"))] {
 			let path = self.path.as_deref().unwrap_or(self.name.as_ref().as_ref());
 			if !path.exists() || force_dialog {
 				let mut builder = native_dialog::FileDialog::new();
@@ -209,7 +209,7 @@ impl Tab {
 			let freehand_uv = {
 				let hovering = (248..264).contains(&mouse_x) && (26..42).contains(&mouse_y);
 				if hovering {
-					builder.draw_tooltip(&["Freehand Mode (Alt + F)"], (mouse_x, mouse_y));
+					builder.draw_tooltip(&["Freehand Mode (Ctrl + Shift + F)"], (mouse_x, mouse_y), false);
 				}
 
 				if self.freehand_mode {
@@ -232,24 +232,24 @@ impl Tab {
 				None
 			};
 			for (idx, (selected, unselected, name)) in [
-				(BYTE_UV, BYTE_GRAYSCALE_UV, "Byte"),
-				(SHORT_UV, SHORT_GRAYSCALE_UV, "Short"),
-				(INT_UV, INT_GRAYSCALE_UV, "Int"),
-				(LONG_UV, LONG_GRAYSCALE_UV, "Long"),
-				(FLOAT_UV, FLOAT_GRAYSCALE_UV, "Float"),
-				(DOUBLE_UV, DOUBLE_GRAYSCALE_UV, "Double"),
-				(BYTE_ARRAY_UV, BYTE_ARRAY_GHOST_UV, "Byte Array"),
-				(INT_ARRAY_UV, INT_ARRAY_GHOST_UV, "Int Array"),
-				(LONG_ARRAY_UV, LONG_ARRAY_GHOST_UV, "Long Array"),
-				(STRING_UV, STRING_GHOST_UV, "String"),
-				(LIST_UV, LIST_GHOST_UV, "List"),
-				(COMPOUND_UV, COMPOUND_GHOST_UV, "Compound"),
+				(BYTE_UV, BYTE_GRAYSCALE_UV, "Byte (Alt + 1)"),
+				(SHORT_UV, SHORT_GRAYSCALE_UV, "Short (Alt + 2)"),
+				(INT_UV, INT_GRAYSCALE_UV, "Int (Alt + 3)"),
+				(LONG_UV, LONG_GRAYSCALE_UV, "Long (Alt + 4)"),
+				(FLOAT_UV, FLOAT_GRAYSCALE_UV, "Float (Alt + 5)"),
+				(DOUBLE_UV, DOUBLE_GRAYSCALE_UV, "Double (Alt + 6)"),
+				(BYTE_ARRAY_UV, BYTE_ARRAY_GHOST_UV, "Byte Array (Alt + 7)"),
+				(INT_ARRAY_UV, INT_ARRAY_GHOST_UV, "Int Array (Alt + 8)"),
+				(LONG_ARRAY_UV, LONG_ARRAY_GHOST_UV, "Long Array (Alt + 9)"),
+				(STRING_UV, STRING_GHOST_UV, "String (Alt + 0)"),
+				(LIST_UV, LIST_GHOST_UV, "List (Alt + -)"),
+				(COMPOUND_UV, COMPOUND_GHOST_UV, "Compound (Alt + +)"),
 			]
 			.into_iter()
 			.enumerate()
 			{
 				let uv = if mx == Some(idx * 16) && !skip_tooltips {
-					builder.draw_tooltip(&[name], (mouse_x, mouse_y));
+					builder.draw_tooltip(&[name], (mouse_x, mouse_y), false);
 					selected
 				} else {
 					unselected
@@ -260,7 +260,7 @@ impl Tab {
 
 			{
 				let uv = if mx == Some(192) && self.value.id() == NbtRegion::ID && !skip_tooltips {
-					builder.draw_tooltip(&["Chunk"], (mouse_x, mouse_y));
+					builder.draw_tooltip(&["Chunk"], (mouse_x, mouse_y), false);
 					CHUNK_UV
 				} else {
 					CHUNK_GHOST_UV
@@ -270,7 +270,7 @@ impl Tab {
 
 			{
 				let uv = if mx == Some(208) && !skip_tooltips {
-					builder.draw_tooltip(&["Clipboard"], (mouse_x, mouse_y));
+					builder.draw_tooltip(&["Clipboard"], (mouse_x, mouse_y), false);
 					UNKNOWN_NBT_UV
 				} else {
 					UNKNOWN_NBT_GHOST_UV

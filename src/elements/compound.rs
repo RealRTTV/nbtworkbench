@@ -22,13 +22,18 @@ use crate::color::TextColor;
 
 #[allow(clippy::module_name_repetitions)]
 #[repr(C)]
-#[derive(PartialEq)]
 pub struct NbtCompound {
 	pub entries: Box<CompoundMap>,
 	height: u32,
 	true_height: u32,
 	max_depth: u32,
 	open: bool,
+}
+
+impl PartialEq for NbtCompound {
+	fn eq(&self, other: &Self) -> bool {
+		self.entries == other.entries
+	}
 }
 
 impl Clone for NbtCompound {
@@ -694,14 +699,11 @@ pub struct CompoundMap {
 
 impl PartialEq for CompoundMap {
 	fn eq(&self, other: &Self) -> bool {
-		if self.entries.len() != other.entries.len() { return false }
+		// disabled to make the comparison work like the nbt predicate in mc.
+		// if self.entries.len() != other.entries.len() { return false }
 
 		for entry in &self.entries {
-			if let Some(idx) = other.idx_of(&entry.key) {
-				if other.get_idx(idx) != Some((&entry.key, &entry.value)) {
-					return false
-				}
-			} else {
+			if other.idx_of(&entry.key).and_then(|idx| other.get_idx(idx)) != Some((&entry.key, &entry.value)) {
 				return false
 			}
 		}

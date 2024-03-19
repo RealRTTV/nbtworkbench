@@ -99,12 +99,10 @@ pub const OPEN_ARRAY_IN_HEX_UV: Vec2u = Vec2u::new(35, 131);
 pub const OPEN_IN_TXT: Vec2u = Vec2u::new(51, 131);
 pub const SORT_COMPOUND_BY_NAME: Vec2u = Vec2u::new(67, 131);
 pub const SORT_COMPOUND_BY_TYPE: Vec2u = Vec2u::new(83, 131);
-pub const SORT_COMPOUND_BY_NOTHING: Vec2u = Vec2u::new(0, 160);
+pub const SORT_COMPOUND_BY_NOTHING: Vec2u = Vec2u::new(3, 163);
 pub const FREEHAND_MODE_UV: Vec2u = Vec2u::new(0, 144);
 pub const ENABLED_FREEHAND_MODE_UV: Vec2u = Vec2u::new(16, 144);
 pub const STEAL_ANIMATION_OVERLAY_UV: Vec2u = Vec2u::new(64, 144);
-pub const STAMP_BACKDROP_UV: Vec2u = Vec2u::new(16, 160);
-pub const MAGNIFYING_GLASS_UV: Vec2u = Vec2u::new(96, 48);
 
 pub const BYTE_UV: Vec2u = Vec2u::new(0, 0);
 pub const SHORT_UV: Vec2u = Vec2u::new(16, 0);
@@ -139,6 +137,12 @@ pub const ALERT_UV: Vec2u = Vec2u::new(112, 144);
 pub const BACKDROP_UV: Vec2u = Vec2u::new(32, 160);
 pub const ADD_SEARCH_BOOKMARKS: Vec2u = Vec2u::new(48, 160);
 pub const REMOVE_SEARCH_BOOKMARKS: Vec2u = Vec2u::new(64, 160);
+pub const SEARCH_KEYS: Vec2u = Vec2u::new(80, 160);
+pub const SEARCH_VALUES: Vec2u = Vec2u::new(80, 176);
+pub const SEARCH_KEYS_AND_VALUES: Vec2u = Vec2u::new(80, 192);
+pub const STRING_SEARCH_MODE: Vec2u = Vec2u::new(96, 160);
+pub const REGEX_SEARCH_MODE: Vec2u = Vec2u::new(96, 176);
+pub const SNBT_SEARCH_MODE: Vec2u = Vec2u::new(96, 192);
 
 pub const BASE_Z: u8 = 5;
 pub const JUST_OVERLAPPING_BASE_Z: u8 = BASE_Z + 1;
@@ -160,10 +164,8 @@ pub const TOOLTIP_Z: u8 = 250;
 
 #[allow(clippy::cast_ptr_alignment)]
 pub fn icon() -> Vec<u8> {
-	#[cfg(all(debug_assertions, not(target_arch = "wasm32")))]
-	let start = unsafe { core::arch::x86_64::_rdtsc() };
 	// error!("Hello, world!");
-	let original = match (since_epoch().as_micros() & 7) as u8 {
+	let original = match (since_epoch().as_millis() & 7) as u8 {
 		// it's a good random only because its used once
 		0 => OTHERSIDE_MUSIC_DISC_ICON,
 		1 => PIGSTEP_MUSIC_DISC_ICON,
@@ -209,10 +211,5 @@ pub fn icon() -> Vec<u8> {
 		}
 	}
 	let mut scaled = ManuallyDrop::new(core::hint::black_box(scaled));
-	#[cfg(all(debug_assertions, not(target_arch = "wasm32")))]
-	crate::log!(
-		"took {} cycles",
-		unsafe { core::arch::x86_64::_rdtsc() } - start
-	);
 	unsafe { Vec::from_raw_parts(scaled.as_mut_ptr().cast::<u8>(), 16384, 16384) }
 }

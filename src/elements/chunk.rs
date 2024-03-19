@@ -20,13 +20,18 @@ use crate::{DropFn, RenderContext, SortAlgorithm, StrExt};
 use crate::color::TextColor;
 
 #[repr(C)]
-#[derive(PartialEq)]
 pub struct NbtRegion {
 	pub chunks: Box<(Vec<u16>, [NbtElement; 32 * 32])>,
 	height: u32,
 	true_height: u32,
 	max_depth: u32,
 	open: bool,
+}
+
+impl PartialEq for NbtRegion {
+	fn eq(&self, other: &Self) -> bool {
+		self.chunks == other.chunks
+	}
 }
 
 impl Clone for NbtRegion {
@@ -705,7 +710,6 @@ impl Debug for NbtRegion {
 
 #[repr(C)]
 #[allow(clippy::module_name_repetitions)]
-#[derive(PartialEq)]
 pub struct NbtChunk {
 	inner: Box<NbtCompound>,
 	last_modified: u32,
@@ -713,6 +717,12 @@ pub struct NbtChunk {
 	compression: FileFormat,
 	pub x: u8,
 	pub z: u8,
+}
+
+impl PartialEq for NbtChunk {
+	fn eq(&self, other: &Self) -> bool {
+		self.inner == other.inner
+	}
 }
 
 impl Clone for NbtChunk {

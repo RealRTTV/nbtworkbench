@@ -35,6 +35,7 @@ pub enum SearchBoxKeyResult {
     Escape,
     Finish,
     FinishCountOnly,
+    ClearAllBookmarks,
 }
 
 #[repr(u8)]
