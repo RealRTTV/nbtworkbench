@@ -8,7 +8,7 @@ repository = "https://github.com/RealRTTV/nbtworkbench"
 keywords = ["nbt", "window", "unsafe", "editor", "tree"]
 categories = ["graphics", "rendering", "text-editors", "parser-implementations"]
 
-[target.'cfg(target_arch = "wasm32")'.lib]
+[lib]
 crate-type = ["cdylib", "rlib"]
 path = "src/main.rs"
 
