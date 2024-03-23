@@ -1,5 +1,5 @@
 use std::alloc::{alloc, Layout};
-use std::fmt::{Debug, Display, Formatter};
+use std::fmt::{Display, Formatter};
 use std::intrinsics::likely;
 use std::mem::{ManuallyDrop, MaybeUninit};
 use std::ops::{Deref, DerefMut};
@@ -18,6 +18,7 @@ use crate::tab::FileFormat;
 use crate::vertex_buffer_builder::VertexBufferBuilder;
 use crate::{DropFn, RenderContext, SortAlgorithm, StrExt};
 use crate::color::TextColor;
+use crate::formatter::PrettyFormatter;
 
 #[repr(C)]
 pub struct NbtRegion {
@@ -698,13 +699,27 @@ impl NbtRegion {
 	pub const fn max_depth(&self) -> usize { self.max_depth as usize }
 }
 
-impl Debug for NbtRegion {
-	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-		let mut r#struct = f.debug_struct("Region");
-		for chunk in self.children().map(|x| unsafe { x.as_chunk_unchecked() }) {
-			r#struct.field(&format!("x: {:02}, z: {:02}", chunk.x, chunk.z), &chunk);
+impl NbtRegion {
+	pub fn pretty_fmt(&self, f: &mut PrettyFormatter) {
+		if self.is_empty() {
+			f.write_str("Region {}")
+		} else {
+			f.write_str("Region {\n");
+			f.increase();
+			let len = self.len();
+			for (idx, chunk) in self.children().map(|x| unsafe { x.as_chunk_unchecked() }).enumerate() {
+				f.indent();
+				chunk.pretty_fmt(f);
+				if idx + 1 < len {
+					f.write_str(",\n");
+				} else {
+					f.write_str("\n");
+				}
+			}
+			f.decrease();
+			f.indent();
+			f.write_str("}");
 		}
-		r#struct.finish()
 	}
 }
 
@@ -940,21 +955,9 @@ impl Display for NbtChunk {
 }
 
 #[allow(clippy::missing_fields_in_debug)]
-impl Debug for NbtChunk {
-	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-		write!(f, "{} | {}", self.x, self.z)?;
-		if self.is_empty() {
-			write!(f, "{{}}")
-		} else {
-			let mut debug = f.debug_struct("");
-			for (key, element) in self.children() {
-				if key.needs_escape() {
-					debug.field(&format!("{key:?}"), element);
-				} else {
-					debug.field(key, element);
-				}
-			}
-			debug.finish()
-		}
+impl NbtChunk {
+	pub fn pretty_fmt(&self, f: &mut PrettyFormatter) {
+		f.write_str(&format!("{} | {} ", self.x, self.z));
+		self.inner.pretty_fmt(f)
 	}
 }

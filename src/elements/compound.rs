@@ -1,7 +1,7 @@
 use std::alloc::{alloc, Layout};
 use std::cmp::Ordering;
 use std::convert::identity;
-use std::fmt::{Debug, Display, Formatter, Write};
+use std::fmt::{Display, Formatter, Write};
 use std::hash::Hasher;
 use std::intrinsics::likely;
 use std::ops::Deref;
@@ -17,8 +17,10 @@ use crate::decoder::Decoder;
 use crate::elements::chunk::NbtChunk;
 use crate::elements::element::NbtElement;
 use crate::encoder::UncheckedBufWriter;
-use crate::{Bookmark, DropFn, OptionExt, RenderContext, SortAlgorithm, StrExt, VertexBufferBuilder};
+use crate::{DropFn, OptionExt, RenderContext, SortAlgorithm, StrExt, VertexBufferBuilder};
 use crate::color::TextColor;
+use crate::formatter::PrettyFormatter;
+use crate::bookmark::{Bookmark, BookmarkSlice};
 
 #[allow(clippy::module_name_repetitions)]
 #[repr(C)]
@@ -380,23 +382,54 @@ impl Display for NbtCompound {
 	}
 }
 
-impl Debug for NbtCompound {
-	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+impl NbtCompound {
+	pub fn pretty_fmt(&self, f: &mut PrettyFormatter) {
 		if self.is_empty() {
-			write!(f, "{{}}")
+			f.write_str("{}")
 		} else {
-			let mut debug = f.debug_struct("");
-			for (key, element) in self.children() {
+			let len = self.len();
+			f.write_str("{\n");
+			f.increase();
+			for (idx, (key, element)) in self.children().enumerate() {
+				f.indent();
 				if key.needs_escape() {
-					debug.field(&format!("{key:?}"), element);
+					f.write_str(&format!("{key:?}"));
+					f.write_str(": ");
 				} else {
-					debug.field(key, element);
+					f.write_str(key);
+					f.write_str(": ");
+				}
+				element.pretty_fmt(f);
+				if idx + 1 < len {
+					f.write_str(",\n");
+				} else {
+					f.write_str("\n");
 				}
 			}
-			debug.finish()
+			f.decrease();
+			f.indent();
+			f.write_str("}");
 		}
 	}
 }
+
+// impl Debug for NbtCompound {
+// 	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+// 		if self.is_empty() {
+// 			write!(f, "{{}}")
+// 		} else {
+// 			let mut debug = f.debug_struct("");
+// 			for (key, element) in self.children() {
+// 				if key.needs_escape() {
+// 					debug.field(&format!("{key:?}"), element);
+// 				} else {
+// 					debug.field(key, element);
+// 				}
+// 			}
+// 			debug.finish()
+// 		}
+// 	}
+// }
 
 impl NbtCompound {
 	#[inline]
@@ -968,7 +1001,7 @@ impl CompoundMap {
 		Some((entry.key.as_ref(), &mut entry.value))
 	}
 
-	pub fn sort_by<F: FnMut((&str, &NbtElement), (&str, &NbtElement)) -> Ordering>(&mut self, mut f: F, line_number: usize, true_line_number: usize, true_height: usize, open: bool, bookmarks: &mut [Bookmark]) -> Box<[usize]> {
+	pub fn sort_by<F: FnMut((&str, &NbtElement), (&str, &NbtElement)) -> Ordering>(&mut self, mut f: F, line_number: usize, true_line_number: usize, true_height: usize, open: bool, bookmarks: &mut BookmarkSlice) -> Box<[usize]> {
 		let hashes = self.entries.iter().map(|entry| entry.hash).collect::<Vec<_>>();
 		let true_line_numbers = {
 			let mut current_line_number = true_line_number + 1;
@@ -978,9 +1011,7 @@ impl CompoundMap {
 			let mut current_line_number = line_number + 1;
 			self.entries.iter().map(|entry| { let new_line_number = current_line_number; current_line_number += entry.value.height(); new_line_number }).collect::<Vec<_>>()
 		};
-		let bookmarks_start = bookmarks.binary_search(&Bookmark::new(true_line_number, 0)).unwrap_or_else(identity);
-		let bookmarks_end = bookmarks.binary_search(&Bookmark::new(true_line_number + true_height - 1, 0)).map_or_else(identity, |x| x + 1);
-		let mut new_bookmarks = Box::<[Bookmark]>::new_uninit_slice(bookmarks_end - bookmarks_start);
+		let mut new_bookmarks = Box::<[Bookmark]>::new_uninit_slice(bookmarks[true_line_number..true_line_number + true_height].len());
 		let mut new_bookmarks_len = 0;
 		// yeah, it's hacky but there's not much else I *can* do. plus: it works extremely well.
 		for (idx, entry) in self.entries.iter_mut().enumerate() {
@@ -1005,20 +1036,17 @@ impl CompoundMap {
 				let height = entry.value.height();
 				let true_offset = current_true_line_number as isize - true_line_number as isize;
 				let offset = if open { current_line_number as isize - line_number as isize } else { 0 };
-				let bookmark_start = bookmarks.binary_search(&Bookmark::new(true_line_number, 0)).unwrap_or_else(identity);
-				let bookmark_end = bookmarks.binary_search(&Bookmark::new(true_line_number + true_height - 1, 0)).map_or_else(identity, |x| x + 1);
-				for bookmark in bookmarks.iter().skip(bookmark_start).take(bookmark_end - bookmark_start) {
-					let adjusted_bookmark = Bookmark::new(bookmark.true_line_number.wrapping_add(true_offset as usize), bookmark.line_number.wrapping_add(offset as usize));
-					new_bookmarks[new_bookmarks_len].write(adjusted_bookmark);
+				for bookmark in bookmarks[true_line_number..true_line_number + true_height].iter() {
+					new_bookmarks[new_bookmarks_len].write(bookmark.offset(offset as usize, true_offset as usize));
 					new_bookmarks_len += 1;
 				}
-
 				current_true_line_number += true_height;
 				current_line_number += height;
 				inverted_indices[idx].write(new_idx);
 			}
 		}
-		unsafe { core::ptr::copy_nonoverlapping(new_bookmarks.as_ptr().cast::<Bookmark>(), bookmarks.as_mut_ptr().add(bookmarks_start), bookmarks_end - bookmarks_start); }
+		let bookmark_slice = &mut bookmarks[true_line_number..true_line_number + true_height];
+		unsafe { core::ptr::copy_nonoverlapping(new_bookmarks.as_ptr().cast::<Bookmark>(), bookmark_slice.as_mut_ptr(), bookmark_slice.len()); }
 		unsafe { inverted_indices.assume_init() }
 	}
 

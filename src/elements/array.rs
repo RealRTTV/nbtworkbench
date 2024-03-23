@@ -372,13 +372,27 @@ macro_rules! array {
 			}
 		}
 
-		impl Debug for $name {
-			fn fmt<'b, 'a>(&self, f: &'a mut Formatter<'b>) -> fmt::Result {
-				let mut debug = unsafe { core::mem::transmute::<_, DebugList<'static, 'static>>(f.debug_list()) };
-				f.write_str(concat!($char, ";"))?;
-				let result = debug.entries(self.children()).finish();
-				let _ = unsafe { core::mem::transmute::<_, DebugList<'a, 'b>>(debug) };
-				result
+		impl $name {
+			pub fn pretty_fmt(&self, f: &mut PrettyFormatter) {
+				if self.is_empty() {
+					f.write_str(concat!("[", $char, ";]"))
+				} else {
+					let len = self.len();
+					f.write_str(concat!("[", $char, ";\n"));
+					f.increase();
+					for (idx, element) in self.children().enumerate() {
+						f.indent();
+						element.pretty_fmt(f);
+						if idx + 1 < len {
+							f.write_str(",\n");
+						} else {
+							f.write_str("\n");
+						}
+					}
+					f.decrease();
+					f.indent();
+					f.write_str("]");
+				}
 			}
 		}
 	};

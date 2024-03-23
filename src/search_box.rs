@@ -1,3 +1,4 @@
+use std::fmt::Display;
 use std::ops::{Deref, DerefMut};
 use std::time::Duration;
 use compact_str::CompactString;
@@ -5,24 +6,75 @@ use regex::Regex;
 use winit::event::MouseButton;
 
 use winit::keyboard::KeyCode;
-use crate::assets::{ADD_SEARCH_BOOKMARKS, BASE_Z, BOOKMARK_UV, DARK_STRIPE_UV, HIDDEN_BOOKMARK_UV, HOVERED_WIDGET_UV, REGEX_SEARCH_MODE, REMOVE_SEARCH_BOOKMARKS, SEARCH_KEYS, SEARCH_KEYS_AND_VALUES, SEARCH_VALUES, SNBT_SEARCH_MODE, STRING_SEARCH_MODE, UNSELECTED_WIDGET_UV};
+use crate::assets::{ADD_SEARCH_BOOKMARKS_UV, BASE_Z, BOOKMARK_UV, DARK_STRIPE_UV, HIDDEN_BOOKMARK_UV, HOVERED_WIDGET_UV, REGEX_SEARCH_MODE_UV, REMOVE_SEARCH_BOOKMARKS_UV, SEARCH_KEYS_UV, SEARCH_KEYS_AND_VALUES_UV, SEARCH_VALUES_UV, SNBT_SEARCH_MODE_UV, STRING_SEARCH_MODE_UV, UNSELECTED_WIDGET_UV};
 
 use crate::color::TextColor;
-use crate::{Bookmark, combined_two_sorted, create_regex, flags, since_epoch, SortAlgorithm, StrExt};
+use crate::{combined_two_sorted, create_regex, flags, since_epoch, SortAlgorithm, StrExt};
 use crate::elements::element::NbtElement;
 use crate::text::{Cachelike, SearchBoxKeyResult, Text};
 use crate::vertex_buffer_builder::{Vec2u, VertexBufferBuilder};
+use crate::bookmark::{Bookmark, Bookmarks};
 
 pub struct SearchPredicate {
     pub search_flags: u8,
     pub inner: SearchPredicateInner,
 }
 
-#[derive(Debug)]
 pub enum SearchPredicateInner {
     String(String),
     Regex(Regex),
     Snbt(Option<String>, NbtElement),
+}
+
+#[derive(Copy, Clone)]
+pub enum SearchMode {
+    String,
+    Regex,
+    Snbt,
+}
+
+impl Display for SearchMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", match self {
+            Self::String => "String",
+            Self::Regex => "Regex",
+            Self::Snbt => "SNBT",
+        })
+    }
+}
+
+impl SearchMode {
+    pub fn cycle(self) -> Self {
+        match self {
+            Self::String => Self::Regex,
+            Self::Regex => Self::Snbt,
+            Self::Snbt => Self::String,
+        }
+    }
+
+    pub fn rev_cycle(self) -> Self {
+        match self {
+            Self::String => Self::Snbt,
+            Self::Regex => Self::String,
+            Self::Snbt => Self::Regex,
+        }
+    }
+
+    pub fn uv(self) -> Vec2u {
+        match self {
+            Self::String => STRING_SEARCH_MODE_UV,
+            Self::Regex => REGEX_SEARCH_MODE_UV,
+            Self::Snbt => SNBT_SEARCH_MODE_UV
+        }
+    }
+
+    pub fn into_predicate(self, value: String, search_flags: u8) -> Option<SearchPredicate> {
+        Some(match self {
+            Self::String => SearchPredicate { inner: SearchPredicateInner::String(value), search_flags },
+            Self::Regex => if let Some(regex) = create_regex(value) { SearchPredicate { inner: SearchPredicateInner::Regex(regex), search_flags } } else { return None },
+            Self::Snbt => if let Some((key, value)) = NbtElement::from_str(&value, SortAlgorithm::None) { SearchPredicate { inner: SearchPredicateInner::Snbt(key.map(CompactString::into_string), value), search_flags } } else { return None },
+        })
+    }
 }
 
 impl SearchPredicate {
@@ -82,9 +134,9 @@ impl Cachelike<SearchBoxAdditional> for SearchBoxCache {
 pub struct SearchBoxAdditional {
     selected: bool,
     horizontal_scroll: usize,
-    hits: Option<(usize, Duration)>,
-    flags: u8,
-    mode: u8,
+    pub hits: Option<(usize, Duration)>,
+    pub flags: u8,
+    pub mode: SearchMode,
 }
 
 pub struct SearchBox(Text<SearchBoxAdditional, SearchBoxCache>);
@@ -105,7 +157,7 @@ impl DerefMut for SearchBox {
 
 impl SearchBox {
     pub fn new() -> Self {
-        Self(Text::new(String::new(), 0, true, SearchBoxAdditional { selected: false, horizontal_scroll: 0, hits: None, flags: 0b01, mode: 0 }))
+        Self(Text::new(String::new(), 0, true, SearchBoxAdditional { selected: false, horizontal_scroll: 0, hits: None, flags: 0b01, mode: SearchMode::String }))
     }
 
     pub const fn uninit() -> Self {
@@ -115,7 +167,7 @@ impl SearchBox {
     pub fn render(&self, builder: &mut VertexBufferBuilder, shift: bool, mouse: (usize, usize)) {
         use std::fmt::Write;
 
-        let pos = Vec2u::new(284, 23);
+        let pos = Vec2u::new(316, 23);
         let (mouse_x, mouse_y) = mouse;
 
         builder.draw_texture_region_z(
@@ -126,14 +178,18 @@ impl SearchBox {
             (16, 16),
         );
 
-        let hover = (pos.x..builder.window_width() - 215 - 17 - 16 - 16).contains(&mouse_x) && (23..45).contains(&mouse_y);
+        let hover = (pos.x..builder.window_width() - 215 - 17 - 16 - 16).contains(&mouse_x) && (23..46).contains(&mouse_y);
 
         builder.horizontal_scroll = self.horizontal_scroll;
 
         if self.value.is_empty() {
             builder.settings(pos + (0, 3), false, 0);
             builder.color = TextColor::Gray.to_raw();
-            let _ = write!(builder, "Search...");
+            let _ = write!(builder, "{}", match self.mode {
+                SearchMode::String => r#"Search..."#,
+                SearchMode::Regex => r#"/[Ss]earch\.*/g"#,
+                SearchMode::Snbt => r#"{dialog: "search", ...}"#,
+            });
         }
         if self.is_selected() {
             self.0.render(builder, TextColor::White, pos + (0, 3), 0);
@@ -144,13 +200,13 @@ impl SearchBox {
         }
 
         if let Some((hits, stat)) = self.hits && (self.is_selected() || hover) {
-            builder.draw_tooltip(&[&format!("{hits} hit{s} for \"{arg}\" ({ms}ms)", s = if hits == 1 { "" } else { "s" }, arg = self.value, ms = stat.as_millis())], if !self.is_selected() && hover { mouse } else { (284, 30) }, true);
+            builder.draw_tooltip(&[&format!("{hits} hit{s} for \"{arg}\" ({ms}ms)", s = if hits == 1 { "" } else { "s" }, arg = self.value, ms = stat.as_millis())], if !self.is_selected() && hover { mouse } else { (316, 30) }, true);
         }
 
         builder.horizontal_scroll = 0;
 
         {
-            let bookmark_uv = if shift { REMOVE_SEARCH_BOOKMARKS } else { ADD_SEARCH_BOOKMARKS };
+            let bookmark_uv = if shift { REMOVE_SEARCH_BOOKMARKS_UV } else { ADD_SEARCH_BOOKMARKS_UV };
             let widget_uv = if (builder.window_width() - 215 - 17 - 16 - 16..builder.window_width() - 215 - 1 - 16 - 16).contains(&mouse_x) && (26..42).contains(&mouse_y) {
                 builder.draw_tooltip(&[if shift { "Remove all bookmarks (Shift + Enter)" } else { "Add search bookmarks (Enter)" }], mouse, false);
                 HOVERED_WIDGET_UV
@@ -163,7 +219,7 @@ impl SearchBox {
         }
 
         {
-            let search_uv = match self.flags { 0b01 => SEARCH_VALUES, 0b10 => SEARCH_KEYS, _ => SEARCH_KEYS_AND_VALUES };
+            let search_uv = match self.flags { 0b01 => SEARCH_VALUES_UV, 0b10 => SEARCH_KEYS_UV, _ => SEARCH_KEYS_AND_VALUES_UV };
             let widget_uv = if (builder.window_width() - 215 - 17 - 16..builder.window_width() - 215 - 1 - 16).contains(&mouse_x) && (26..42).contains(&mouse_y) {
                 builder.draw_tooltip(&[match self.flags { 0b01 => "Values only", 0b10 => "Keys only", _ => "Keys + Values" }], mouse, false);
                 HOVERED_WIDGET_UV
@@ -176,9 +232,9 @@ impl SearchBox {
         }
 
         {
-            let mode_uv = match self.mode { 0 => STRING_SEARCH_MODE, 1 => REGEX_SEARCH_MODE, _ => SNBT_SEARCH_MODE };
+            let mode_uv = self.mode.uv();
             let widget_uv = if (builder.window_width() - 215 - 17..builder.window_width() - 215 - 1).contains(&mouse_x) && (26..42).contains(&mouse_y) {
-                builder.draw_tooltip(&[match self.mode { 0 => "String Mode", 1 => "Regex Mode", _ => "SNBT Mode" }], mouse, false);
+                builder.draw_tooltip(&[&format!("{mode} Mode", mode = self.mode)], mouse, false);
                 HOVERED_WIDGET_UV
             } else {
                 UNSELECTED_WIDGET_UV
@@ -224,7 +280,7 @@ impl SearchBox {
     }
 
     #[inline]
-    pub fn on_bookmark_widget(&mut self, shift: bool, bookmarks: &mut Vec<Bookmark>, root: &mut NbtElement) {
+    pub fn on_bookmark_widget(&mut self, shift: bool, bookmarks: &mut Bookmarks, root: &mut NbtElement) {
         if shift {
             bookmarks.clear();
         } else {
@@ -239,30 +295,26 @@ impl SearchBox {
 
     #[inline]
     pub fn on_mode_widget(&mut self, shift: bool) {
-        self.mode = (self.mode as i8).wrapping_add((!shift) as i8 * 2 - 1).rem_euclid(3) as u8;
+        self.mode = if shift { self.mode.rev_cycle() } else { self.mode.cycle() };
     }
 
     #[inline]
-    pub fn search(&mut self, bookmarks: &mut Vec<Bookmark>, root: &NbtElement, count_only: bool) {
+    pub fn search(&mut self, bookmarks: &mut Bookmarks, root: &NbtElement, count_only: bool) {
         if self.value.is_empty() {
             return;
         }
 
-        let predicate = match self.mode {
-            0 => SearchPredicate { inner: SearchPredicateInner::String(self.value.clone()), search_flags: self.flags },
-            1 => if let Some(regex) = create_regex(self.value.clone()) { SearchPredicate { inner: SearchPredicateInner::Regex(regex), search_flags: self.flags } } else { return },
-            _ => if let Some((key, value)) = NbtElement::from_str(&self.value, SortAlgorithm::None) { SearchPredicate { inner: SearchPredicateInner::Snbt(key.map(CompactString::into_string), value), search_flags: self.flags } } else { return },
-        };
+        let Some(predicate) = self.mode.into_predicate(self.value.clone(), self.flags) else { return };
         let start = since_epoch();
         let new_bookmarks = Self::search0(root, &predicate);
         self.hits = Some((new_bookmarks.len(), since_epoch() - start));
         if !count_only {
-            let old_bookmarks = core::mem::replace(bookmarks, vec![]);
-            *bookmarks = combined_two_sorted(new_bookmarks.into_boxed_slice(), old_bookmarks.into_boxed_slice());
+            let old_bookmarks = core::mem::replace(bookmarks, Bookmarks::new());
+            *bookmarks = unsafe { Bookmarks::from_raw(combined_two_sorted(new_bookmarks.into_raw(), old_bookmarks.into_raw())) };
         }
     }
 
-    pub fn search0(root: &NbtElement, predicate: &SearchPredicate) -> Vec<Bookmark> {
+    pub fn search0(root: &NbtElement, predicate: &SearchPredicate) -> Bookmarks {
         let mut new_bookmarks = Vec::new();
         let mut queue = Vec::new();
         queue.push((None, &*root, true));
@@ -270,9 +322,7 @@ impl SearchBox {
         let mut line_number = 0;
         while let Some((key, element, parent_open)) = queue.pop() {
             if predicate.matches(key, element) {
-                let mut bookmark = Bookmark::new(true_line_number, line_number);
-                bookmark.uv = if parent_open { BOOKMARK_UV } else { HIDDEN_BOOKMARK_UV };
-                new_bookmarks.push(bookmark);
+                new_bookmarks.push(Bookmark::with_uv(true_line_number, line_number, if parent_open { BOOKMARK_UV } else { HIDDEN_BOOKMARK_UV }));
             }
 
             match element.children() {
@@ -290,7 +340,7 @@ impl SearchBox {
                 line_number += 1;
             }
         }
-        new_bookmarks
+        unsafe { Bookmarks::from_raw(new_bookmarks) }
     }
 
     #[inline]
@@ -303,7 +353,7 @@ impl SearchBox {
     pub fn post_input(&mut self, window_dims: (usize, usize)) {
         let (window_width, _) = window_dims;
         self.0.post_input();
-        let field_width = window_width - 215 - 284 - 17 - 16 - 16;
+        let field_width = window_width - 215 - 316 - 17 - 16 - 16;
         let precursor_width = self.value.split_at(self.cursor).0.width();
         // 8px space just to look cleaner
         let horizontal_scroll = (precursor_width + 8).saturating_sub(field_width);

@@ -1,16 +1,13 @@
 use std::cmp::Ordering;
-use std::convert::identity;
 #[cfg(not(target_arch = "wasm32"))]
-use std::fs::OpenOptions;
-#[cfg(not(target_arch = "wasm32"))]
-use std::process::Command;
+use std::{fs::OpenOptions, process::Command};
 
 use compact_str::CompactString;
 #[cfg(not(target_arch = "wasm32"))]
 use notify::{EventKind, PollWatcher, RecursiveMode, Watcher};
 use uuid::Uuid;
 
-use crate::{Bookmark, panic_unchecked, set_clipboard, FileUpdateSubscription, since_epoch};
+use crate::{panic_unchecked, set_clipboard, FileUpdateSubscription, since_epoch};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::{FileUpdateSubscriptionType, assets::{OPEN_ARRAY_IN_HEX_UV, OPEN_IN_TXT}};
 use crate::assets::{ACTION_WHEEL_Z, COPY_FORMATTED_UV, COPY_RAW_UV, SORT_COMPOUND_BY_NAME, SORT_COMPOUND_BY_TYPE};
@@ -21,6 +18,7 @@ use crate::elements::list::NbtList;
 use crate::elements::string::NbtString;
 use crate::vertex_buffer_builder::VertexBufferBuilder;
 use crate::workbench_action::WorkbenchAction;
+use crate::bookmark::Bookmarks;
 
 #[derive(Copy, Clone)]
 pub enum ElementAction {
@@ -112,7 +110,7 @@ impl ElementAction {
 	}
 
 	#[allow(clippy::too_many_lines)]
-	pub fn apply(self, key: Option<CompactString>, indices: Box<[usize]>, tab_uuid: Uuid, true_line_number: usize, line_number: usize, element: &mut NbtElement, bookmarks: &mut Vec<Bookmark>, subscription: &mut Option<FileUpdateSubscription>) -> Option<WorkbenchAction> {
+	pub fn apply(self, key: Option<CompactString>, indices: Box<[usize]>, tab_uuid: Uuid, true_line_number: usize, line_number: usize, element: &mut NbtElement, bookmarks: &mut Bookmarks, subscription: &mut Option<FileUpdateSubscription>) -> Option<WorkbenchAction> {
 		#[must_use]
 		#[cfg(not(target_arch = "wasm32"))]
 		fn open_file(str: &str) -> bool {
@@ -271,9 +269,7 @@ impl ElementAction {
 				Self::SortCompoundByName => {
 					let open = element.open();
 					let true_height = element.true_height();
-					let bookmark_start = bookmarks.binary_search(&Bookmark::new(true_line_number, 0)).map_or_else(identity, |x| x + 1);
-					let bookmark_end = bookmarks.binary_search(&Bookmark::new(true_line_number + element.true_height() - 1, 0)).map_or_else(identity, |x| x + 1);
-					let bookmark_slice = if bookmark_end > bookmark_start || bookmark_end > bookmarks.len() { &mut [] } else { &mut bookmarks[bookmark_start..bookmark_end] };
+					let bookmark_slice = &mut bookmarks[true_line_number..true_line_number + element.true_height()];
 					let reordering_indices = if let Some(compound) = element.as_compound_mut() {
 						compound.entries.sort_by(Self::by_name, line_number, true_line_number, true_height, open, bookmark_slice)
 					} else if let Some(chunk) = element.as_chunk_mut() {
@@ -287,9 +283,7 @@ impl ElementAction {
 				Self::SortCompoundByType => {
 					let open = element.open();
 					let true_height = element.true_height();
-					let bookmark_start = bookmarks.binary_search(&Bookmark::new(true_line_number, 0)).map_or_else(identity, |x| x + 1);
-					let bookmark_end = bookmarks.binary_search(&Bookmark::new(true_line_number + element.true_height() - 1, 0)).map_or_else(identity, |x| x + 1);
-					let bookmark_slice = if bookmark_end < bookmark_start || bookmark_end > bookmarks.len() { &mut [] } else { &mut bookmarks[bookmark_start..bookmark_end] };
+					let bookmark_slice = &mut bookmarks[true_line_number..true_line_number + element.true_height()];
 					let reordering_indices = if let Some(compound) = element.as_compound_mut() {
 						compound.entries.sort_by(Self::by_type, line_number, true_line_number, true_height, open, bookmark_slice)
 					} else if let Some(chunk) = element.as_chunk_mut() {

@@ -1,6 +1,6 @@
 use compact_str::{format_compact, CompactString};
 use std::alloc::{alloc, Layout};
-use std::fmt::{Debug, Display, Formatter, Write};
+use std::fmt::{Display, Formatter, Write};
 use std::intrinsics::likely;
 use std::slice::{Iter, IterMut};
 #[cfg(not(target_arch = "wasm32"))]
@@ -13,6 +13,7 @@ use crate::elements::element::{id_to_string_name, NbtElement};
 use crate::encoder::UncheckedBufWriter;
 use crate::{DropFn, OptionExt, RenderContext, SortAlgorithm, StrExt, VertexBufferBuilder};
 use crate::color::TextColor;
+use crate::formatter::PrettyFormatter;
 
 #[allow(clippy::module_name_repetitions)]
 #[repr(C)]
@@ -27,7 +28,11 @@ pub struct NbtList {
 
 impl PartialEq for NbtList {
 	fn eq(&self, other: &Self) -> bool {
-		self.elements == other.elements
+		if self.is_empty() {
+			other.is_empty()
+		} else {
+			self.elements.iter().all(|a| other.elements.iter().any(|b| a == b))
+		}
 	}
 }
 
@@ -232,8 +237,28 @@ impl Display for NbtList {
 	}
 }
 
-impl Debug for NbtList {
-	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result { f.debug_list().entries(self.children()).finish() }
+impl NbtList {
+	pub fn pretty_fmt(&self, f: &mut PrettyFormatter) {
+		if self.is_empty() {
+			f.write_str("[]")
+		} else {
+			let len = self.len();
+			f.write_str("[\n");
+			f.increase();
+			for (idx, element) in self.children().enumerate() {
+				f.indent();
+				element.pretty_fmt(f);
+				if idx + 1 < len {
+					f.write_str(",\n");
+				} else {
+					f.write_str("\n");
+				}
+			}
+			f.decrease();
+			f.indent();
+			f.write_str("]");
+		}
+	}
 }
 
 impl NbtList {

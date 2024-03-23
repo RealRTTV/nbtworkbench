@@ -1,4 +1,3 @@
-use core::fmt::DebugList;
 use std::alloc::{alloc, dealloc, Layout};
 use std::fmt::{Debug, Display, Error, Formatter};
 use std::intrinsics::likely;
@@ -20,24 +19,15 @@ use crate::elements::list::{NbtList, ValueIterator, ValueMutIterator};
 use crate::elements::string::NbtString;
 use crate::encoder::UncheckedBufWriter;
 use crate::{panic_unchecked, since_epoch, SortAlgorithm, array, primitive, DropFn, RenderContext, StrExt, VertexBufferBuilder, TextColor, assets::JUST_OVERLAPPING_BASE_TEXT_Z};
+use crate::formatter::PrettyFormatter;
 use crate::tab::FileFormat;
 
 primitive!(BYTE_UV, { Some('b') }, NbtByte, i8, 1);
 primitive!(SHORT_UV, { Some('s') }, NbtShort, i16, 2);
 primitive!(INT_UV, { None::<char> }, NbtInt, i32, 3);
 primitive!(LONG_UV, { Some('L') }, NbtLong, i64, 4);
-primitive!(FLOAT_UV, { Some('f') }, NbtFloat, f32, 5, |x| {
-	format_compact!("{x:.149}")
-		.trim_end_matches('0')
-		.trim_end_matches('.')
-		.to_compact_string()
-});
-primitive!(DOUBLE_UV, { Some('d') }, NbtDouble, f64, 6, |x| {
-	format_compact!("{x:.1076}")
-		.trim_end_matches('0')
-		.trim_end_matches('.')
-		.to_compact_string()
-});
+primitive!(FLOAT_UV, { Some('f') }, NbtFloat, f32, 5);
+primitive!(DOUBLE_UV, { Some('d') }, NbtDouble, f64, 6);
 array!(byte, NbtByteArray, i8, 7, 1, 'B', BYTE_ARRAY_UV, BYTE_UV);
 array!(int, NbtIntArray, i32, 11, 3, 'I', INT_ARRAY_UV, INT_UV);
 array!(long, NbtLongArray, i64, 12, 4, 'L', LONG_ARRAY_UV, LONG_UV);
@@ -523,8 +513,8 @@ impl NbtElement {
 
 	#[inline]
 	#[must_use]
-	pub fn from_id(id: u8) -> Option<Self> {
-		Some(match id {
+	pub fn from_id(id: u8) -> Self {
+		match id {
 			NbtByte::ID => Self::Byte(NbtByte::default()),
 			NbtShort::ID => Self::Short(NbtShort::default()),
 			NbtInt::ID => Self::Int(NbtInt::default()),
@@ -543,8 +533,8 @@ impl NbtElement {
 				FileFormat::Zlib,
 				since_epoch().as_secs() as u32,
 			)),
-			_ => return None,
-		})
+			_ => unsafe { core::mem::zeroed() },
+		}
 	}
 
 	#[inline]
@@ -1166,27 +1156,35 @@ impl Display for NbtElement {
 	}
 }
 
-impl Debug for NbtElement {
-	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+impl NbtElement {
+	pub fn pretty_fmt(&self, f: &mut PrettyFormatter) {
 		unsafe {
 			match self.id() {
-				NbtByte::ID => Debug::fmt(&*self.byte, f),
-				NbtShort::ID => Debug::fmt(&*self.short, f),
-				NbtInt::ID => Debug::fmt(&*self.int, f),
-				NbtLong::ID => Debug::fmt(&*self.long, f),
-				NbtFloat::ID => Debug::fmt(&*self.float, f),
-				NbtDouble::ID => Debug::fmt(&*self.double, f),
-				NbtByteArray::ID => Debug::fmt(&*self.byte_array, f),
-				NbtString::ID => Debug::fmt(&*self.string, f),
-				NbtList::ID => Debug::fmt(&*self.list, f),
-				NbtCompound::ID => Debug::fmt(&*self.compound, f),
-				NbtIntArray::ID => Debug::fmt(&*self.int_array, f),
-				NbtLongArray::ID => Debug::fmt(&*self.long_array, f),
-				NbtChunk::ID => Debug::fmt(&*self.chunk, f),
-				NbtRegion::ID => Err(Error),
+				NbtByte::ID => self.byte.pretty_fmt(f),
+				NbtShort::ID => self.short.pretty_fmt(f),
+				NbtInt::ID => self.int.pretty_fmt(f),
+				NbtLong::ID => self.long.pretty_fmt(f),
+				NbtFloat::ID => self.float.pretty_fmt(f),
+				NbtDouble::ID => self.double.pretty_fmt(f),
+				NbtByteArray::ID => self.byte_array.pretty_fmt(f),
+				NbtString::ID => self.string.pretty_fmt(f),
+				NbtList::ID => self.list.pretty_fmt(f),
+				NbtCompound::ID => self.compound.pretty_fmt(f),
+				NbtIntArray::ID => self.int_array.pretty_fmt(f),
+				NbtLongArray::ID => self.long_array.pretty_fmt(f),
+				NbtChunk::ID => self.chunk.pretty_fmt(f),
+				NbtRegion::ID => self.region.pretty_fmt(f),
 				_ => core::hint::unreachable_unchecked(),
 			}
 		}
+	}
+}
+
+impl Debug for NbtElement {
+	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+		let mut formatter = PrettyFormatter::new();
+		self.pretty_fmt(&mut formatter);
+		write!(f, "{}", formatter.finish())
 	}
 }
 

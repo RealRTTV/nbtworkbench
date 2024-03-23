@@ -160,7 +160,7 @@ pub fn find() -> ! {
                 if !bookmarks.is_empty() {
                     Some(SearchResult {
                         path,
-                        lines: bookmarks.into_iter().map(|x| x.true_line_number).collect(),
+                        lines: bookmarks.into_iter().map(|x| x.true_line_number()).collect(),
                     })
                 } else {
                     None

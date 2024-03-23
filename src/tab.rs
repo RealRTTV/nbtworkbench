@@ -8,15 +8,17 @@ use anyhow::{anyhow, Context, Result};
 use compact_str::{CompactString, ToCompactString};
 use flate2::Compression;
 use uuid::Uuid;
+use zune_inflate::DeflateDecoder;
 
-use crate::{Bookmark, LinkedQueue, OptionExt, panic_unchecked, RenderContext, StrExt, WindowProperties};
-use crate::assets::{BASE_Z, BYTE_ARRAY_GHOST_UV, BYTE_ARRAY_UV, BYTE_GRAYSCALE_UV, BYTE_UV, CHUNK_GHOST_UV, CHUNK_UV, COMPOUND_GHOST_UV, COMPOUND_ROOT_UV, COMPOUND_UV, DOUBLE_GRAYSCALE_UV, DOUBLE_UV, ENABLED_FREEHAND_MODE_UV, FLOAT_GRAYSCALE_UV, FLOAT_UV, FREEHAND_MODE_UV, GZIP_FILE_TYPE_UV, HEADER_SIZE, HELD_SCROLLBAR_UV, INT_ARRAY_GHOST_UV, INT_ARRAY_UV, INT_GRAYSCALE_UV, INT_UV, JUST_OVERLAPPING_BASE_Z, LINE_NUMBER_SEPARATOR_UV, LIST_GHOST_UV, LIST_UV, LONG_ARRAY_GHOST_UV, LONG_ARRAY_UV, LONG_GRAYSCALE_UV, LONG_UV, MCA_FILE_TYPE_UV, NBT_FILE_TYPE_UV, REDO_UV, REGION_UV, SCROLLBAR_Z, SHORT_GRAYSCALE_UV, SHORT_UV, SNBT_FILE_TYPE_UV, STEAL_ANIMATION_OVERLAY_UV, STRING_GHOST_UV, STRING_UV, UNDO_UV, UNHELD_SCROLLBAR_UV, UNKNOWN_NBT_GHOST_UV, UNKNOWN_NBT_UV, ZLIB_FILE_TYPE_UV};
+use crate::{LinkedQueue, OptionExt, panic_unchecked, RenderContext, SortAlgorithm, StrExt, WindowProperties};
+use crate::assets::{BASE_Z, BYTE_ARRAY_GHOST_UV, BYTE_ARRAY_UV, BYTE_GRAYSCALE_UV, BYTE_UV, CHUNK_GHOST_UV, CHUNK_UV, COMPOUND_GHOST_UV, COMPOUND_ROOT_UV, COMPOUND_UV, DISABLED_REFRESH_UV, DOUBLE_GRAYSCALE_UV, DOUBLE_UV, ENABLED_FREEHAND_MODE_UV, FLOAT_GRAYSCALE_UV, FLOAT_UV, FREEHAND_MODE_UV, GZIP_FILE_TYPE_UV, HEADER_SIZE, HELD_SCROLLBAR_UV, HOVERED_WIDGET_UV, INT_ARRAY_GHOST_UV, INT_ARRAY_UV, INT_GRAYSCALE_UV, INT_UV, JUST_OVERLAPPING_BASE_Z, LINE_NUMBER_SEPARATOR_UV, LIST_GHOST_UV, LIST_UV, LONG_ARRAY_GHOST_UV, LONG_ARRAY_UV, LONG_GRAYSCALE_UV, LONG_UV, MCA_FILE_TYPE_UV, NBT_FILE_TYPE_UV, REDO_UV, REFRESH_UV, REGION_UV, SCROLLBAR_Z, SHORT_GRAYSCALE_UV, SHORT_UV, SNBT_FILE_TYPE_UV, STEAL_ANIMATION_OVERLAY_UV, STRING_GHOST_UV, STRING_UV, UNDO_UV, UNHELD_SCROLLBAR_UV, UNKNOWN_NBT_GHOST_UV, UNKNOWN_NBT_UV, UNSELECTED_WIDGET_UV, ZLIB_FILE_TYPE_UV};
 use crate::color::TextColor;
 use crate::elements::chunk::NbtRegion;
 use crate::elements::compound::NbtCompound;
 use crate::elements::element::NbtElement;
 use crate::selected_text::{SelectedText, SelectedTextAdditional};
 use crate::text::Text;
+use crate::bookmark::Bookmarks;
 use crate::tree_travel::Navigate;
 use crate::vertex_buffer_builder::{Vec2u, VertexBufferBuilder};
 use crate::workbench_action::WorkbenchAction;
@@ -33,11 +35,12 @@ pub struct Tab {
 	pub horizontal_scroll: usize,
 	pub window_height: usize,
 	pub window_width: usize,
-	pub bookmarks: Vec<Bookmark>, // must be ordered least to greatest
+	pub bookmarks: Bookmarks,
 	pub uuid: Uuid,
 	pub freehand_mode: bool,
 	pub selected_text: Option<SelectedText>,
 	pub last_close_attempt: Duration,
+	pub last_selected_text_interaction: (usize, usize, Duration),
 }
 
 impl Tab {
@@ -57,11 +60,12 @@ impl Tab {
 			horizontal_scroll: 0,
 			window_height,
 			window_width,
-			bookmarks: vec![],
+			bookmarks: Bookmarks::new(),
 			uuid: Uuid::new_v4(),
 			freehand_mode: false,
 			selected_text: None,
 			last_close_attempt: Duration::ZERO,
+			last_selected_text_interaction: (0, 0, Duration::ZERO)
 		})
 	}
 
@@ -200,14 +204,14 @@ impl Tab {
 		{
 			// shifted one left to center between clipboard and freehand
 			builder.draw_texture_region_z(
-				(244, 22),
+				(260, 22),
 				BASE_Z,
 				LINE_NUMBER_SEPARATOR_UV,
 				(2, 23),
 				(2, 16),
 			);
 			let freehand_uv = {
-				let hovering = (248..264).contains(&mouse_x) && (26..42).contains(&mouse_y);
+				let hovering = (264..280).contains(&mouse_x) && (26..42).contains(&mouse_y);
 				if hovering {
 					builder.draw_tooltip(&["Freehand Mode (Ctrl + Shift + F)"], (mouse_x, mouse_y), false);
 				}
@@ -222,28 +226,41 @@ impl Tab {
 					}
 				}
 			};
-			builder.draw_texture((248, 26), freehand_uv, (16, 16));
+			builder.draw_texture((264, 26), freehand_uv, (16, 16));
 		}
 
 		{
-			let mx = if (24..46).contains(&mouse_y) && mouse_x >= 16 + 4 {
-				Some((mouse_x - (16 + 4)) & !15)
+			let enabled = self.path.is_some();
+			let widget_uv = if enabled && (296..312).contains(&ctx.mouse_x) && (26..42).contains(&ctx.mouse_y) {
+				builder.draw_tooltip(&["Refresh Tab (Ctrl + R)"], (ctx.mouse_x, ctx.mouse_y), false);
+				HOVERED_WIDGET_UV
+			} else {
+				UNSELECTED_WIDGET_UV
+			};
+
+			builder.draw_texture((296, 26), widget_uv, (16, 16));
+			builder.draw_texture((296, 26), if enabled { REFRESH_UV } else { DISABLED_REFRESH_UV }, (16, 16));
+		}
+
+		{
+			let mx = if (24..46).contains(&mouse_y) && mouse_x >= 16 + 16 + 4 {
+				Some((mouse_x - (16 + 16 + 4)) & !15)
 			} else {
 				None
 			};
 			for (idx, (selected, unselected, name)) in [
-				(BYTE_UV, BYTE_GRAYSCALE_UV, "Byte (Alt + 1)"),
-				(SHORT_UV, SHORT_GRAYSCALE_UV, "Short (Alt + 2)"),
-				(INT_UV, INT_GRAYSCALE_UV, "Int (Alt + 3)"),
-				(LONG_UV, LONG_GRAYSCALE_UV, "Long (Alt + 4)"),
-				(FLOAT_UV, FLOAT_GRAYSCALE_UV, "Float (Alt + 5)"),
-				(DOUBLE_UV, DOUBLE_GRAYSCALE_UV, "Double (Alt + 6)"),
-				(BYTE_ARRAY_UV, BYTE_ARRAY_GHOST_UV, "Byte Array (Alt + 7)"),
-				(INT_ARRAY_UV, INT_ARRAY_GHOST_UV, "Int Array (Alt + 8)"),
-				(LONG_ARRAY_UV, LONG_ARRAY_GHOST_UV, "Long Array (Alt + 9)"),
-				(STRING_UV, STRING_GHOST_UV, "String (Alt + 0)"),
-				(LIST_UV, LIST_GHOST_UV, "List (Alt + -)"),
-				(COMPOUND_UV, COMPOUND_GHOST_UV, "Compound (Alt + +)"),
+				(BYTE_UV, BYTE_GRAYSCALE_UV, "Byte (1)"),
+				(SHORT_UV, SHORT_GRAYSCALE_UV, "Short (2)"),
+				(INT_UV, INT_GRAYSCALE_UV, "Int (3)"),
+				(LONG_UV, LONG_GRAYSCALE_UV, "Long (4)"),
+				(FLOAT_UV, FLOAT_GRAYSCALE_UV, "Float (5)"),
+				(DOUBLE_UV, DOUBLE_GRAYSCALE_UV, "Double (6)"),
+				(BYTE_ARRAY_UV, BYTE_ARRAY_GHOST_UV, "Byte Array (7)"),
+				(INT_ARRAY_UV, INT_ARRAY_GHOST_UV, "Int Array (8)"),
+				(LONG_ARRAY_UV, LONG_ARRAY_GHOST_UV, "Long Array (9)"),
+				(STRING_UV, STRING_GHOST_UV, "String (0)"),
+				(LIST_UV, LIST_GHOST_UV, "List (-)"),
+				(COMPOUND_UV, COMPOUND_GHOST_UV, "Compound (=)"),
 			]
 			.into_iter()
 			.enumerate()
@@ -255,27 +272,27 @@ impl Tab {
 					unselected
 				};
 
-				builder.draw_texture((idx * 16 + 16 + 4, 26), uv, (16, 16));
+				builder.draw_texture((idx * 16 + 16 + 16 + 4, 26), uv, (16, 16));
 			}
 
 			{
 				let uv = if mx == Some(192) && self.value.id() == NbtRegion::ID && !skip_tooltips {
-					builder.draw_tooltip(&["Chunk"], (mouse_x, mouse_y), false);
+					builder.draw_tooltip(&["Chunk (`)"], (mouse_x, mouse_y), false);
 					CHUNK_UV
 				} else {
 					CHUNK_GHOST_UV
 				};
-				builder.draw_texture((192 + 16 + 4, 26), uv, (16, 16));
+				builder.draw_texture((192 + 16 + 16 + 4, 26), uv, (16, 16));
 			}
 
 			{
 				let uv = if mx == Some(208) && !skip_tooltips {
-					builder.draw_tooltip(&["Clipboard"], (mouse_x, mouse_y), false);
+					builder.draw_tooltip(&["Clipboard (C)"], (mouse_x, mouse_y), false);
 					UNKNOWN_NBT_UV
 				} else {
 					UNKNOWN_NBT_GHOST_UV
 				};
-				builder.draw_texture((208 + 16 + 4, 26), uv, (16, 16));
+				builder.draw_texture((208 + 16 + 16 + 4, 26), uv, (16, 16));
 			}
 		}
 
@@ -508,6 +525,9 @@ impl Tab {
 					});
 					self.selected_text = None;
 				} else {
+					if self.path.as_ref().map(|path| path.as_os_str().to_string_lossy()).as_deref().unwrap_or(&self.name) == value {
+						return true;
+					}
 					let buf = PathBuf::from(value);
 					return if let Some(name) = buf
 						.file_name()
@@ -538,6 +558,79 @@ impl Tab {
 			}
 		}
 		true
+	}
+
+	#[inline]
+	pub fn parse_raw(path: &Path, buf: Vec<u8>, sort_algorithm: SortAlgorithm) -> Result<(NbtElement, FileFormat)> {
+		Ok(if path.extension().and_then(OsStr::to_str) == Some("mca") {
+			(
+				NbtElement::from_mca(buf.as_slice(), sort_algorithm).context("Failed to parse MCA file")?,
+				FileFormat::Mca,
+			)
+		} else if let Some(0x1F8B) = buf.first_chunk::<2>().copied().map(u16::from_be_bytes) {
+			(
+				NbtElement::from_file(
+					&DeflateDecoder::new(buf.as_slice())
+						.decode_gzip()
+						.context("Failed to decode gzip compressed NBT")?,
+					sort_algorithm,
+				)
+					.context("Failed to parse NBT")?,
+				FileFormat::Gzip,
+			)
+		} else if let Some(0x7801 | 0x789C | 0x78DA) = buf.first_chunk::<2>().copied().map(u16::from_be_bytes) {
+			(
+				NbtElement::from_file(
+					&DeflateDecoder::new(buf.as_slice())
+						.decode_zlib()
+						.context("Failed to decode zlib compressed NBT")?,
+					sort_algorithm,
+				)
+					.context("Failed to parse NBT")?,
+				FileFormat::Zlib,
+			)
+		} else if let Some(nbt) = NbtElement::from_file(buf.as_slice(), sort_algorithm) {
+			(nbt, FileFormat::Nbt)
+		} else {
+			(
+				core::str::from_utf8(&buf)
+					.ok()
+					.and_then(|s| NbtElement::from_str(s, sort_algorithm))
+					.context(anyhow!(
+							"Failed to find file type for file {}",
+							path.file_name()
+								.unwrap_or(&OsStr::new(""))
+								.to_string_lossy()
+						))?
+					.1,
+				FileFormat::Snbt,
+			)
+		})
+	}
+
+	#[cfg(not(target_os = "wasm32"))]
+	pub fn refresh(&mut self, sort_algorithm: SortAlgorithm) -> Result<()> {
+		let Some(path) = self.path.as_deref() else { return Err(anyhow!("File path was not present in tab")) };
+		let bytes = std::fs::read(path)?;
+		let (value, format) = Tab::parse_raw(path, bytes, sort_algorithm)?;
+
+		self.bookmarks.clear();
+		self.scroll = 0;
+		self.compression = format;
+		self.history_changed = false;
+		self.undos.clear();
+		self.redos.clear();
+		self.uuid = Uuid::new_v4();
+		self.selected_text = None;
+		let old = core::mem::replace(&mut self.value, Box::new(value));
+		std::thread::Builder::new().stack_size(50_331_648 /*48MiB*/).spawn(move || drop(old)).expect("Failed to spawn thread");
+
+		Ok(())
+	}
+
+	#[cfg(target_os = "wasm32")]
+	pub fn refresh(&mut self) -> Result<()> {
+		Err(anyhow!("File refresh not supported on web"))
 	}
 }
 

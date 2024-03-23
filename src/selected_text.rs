@@ -4,7 +4,7 @@ use std::ops::{Deref, DerefMut};
 use winit::keyboard::KeyCode;
 
 use crate::{flags, OptionExt, StrExt};
-use crate::assets::{BASE_TEXT_Z, ELEMENT_HIGHLIGHT_Z, HEADER_SIZE, SELECTED_TEXT_Z, SELECTION_UV};
+use crate::assets::{BASE_TEXT_Z, HEADER_SIZE, SELECTED_TEXT_Z, SELECTION_UV};
 use crate::color::TextColor;
 use crate::selected_text::SelectedTextKeyResult::{Down, ForceClose, ForceOpen, Keyfix, ShiftDown, ShiftUp, Up, Valuefix};
 use crate::text::{Cachelike, SelectedTextKeyResult, Text};
@@ -315,7 +315,7 @@ impl SelectedText {
 		let prefix_width = self.prefix.0.as_str().width() + self.keyfix.as_ref().map_or(0, |x| x.0.width());
 		self.0.render(builder, self.value_color, (x + prefix_width, y).into(), SELECTED_TEXT_Z);
 
-		builder.draw_texture_z((x - 4 - 16, y), ELEMENT_HIGHLIGHT_Z, SELECTION_UV, (16, 16));
+		builder.draw_texture_z((x - 4 - 16, y), SELECTED_TEXT_Z, SELECTION_UV, (16, 16));
 		builder.settings((x, y), false, BASE_TEXT_Z);
 		if let Some((keyfix, keyfix_color)) = self.keyfix.as_ref() {
 			builder.color = keyfix_color.to_raw();

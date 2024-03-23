@@ -1,5 +1,5 @@
 use std::alloc::{alloc, dealloc, Layout};
-use std::fmt::{Debug, Display, Formatter};
+use std::fmt::{Display, Formatter};
 use std::mem::{ManuallyDrop, MaybeUninit};
 use std::ops::Deref;
 use std::ptr::NonNull;
@@ -11,6 +11,7 @@ use crate::decoder::Decoder;
 use crate::encoder::UncheckedBufWriter;
 use crate::{RenderContext, StrExt, VertexBufferBuilder};
 use crate::color::TextColor;
+use crate::formatter::PrettyFormatter;
 
 #[repr(transparent)]
 #[allow(clippy::module_name_repetitions)]
@@ -68,8 +69,8 @@ impl Display for NbtString {
 	}
 }
 
-impl Debug for NbtString {
-	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result { Display::fmt(self, f) }
+impl NbtString {
+	pub fn pretty_fmt(&self, f: &mut PrettyFormatter) { f.write_str(&self.to_string()) }
 }
 
 impl NbtString {

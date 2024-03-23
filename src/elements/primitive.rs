@@ -64,8 +64,8 @@ macro_rules! primitive {
 			}
 		}
 
-		impl Debug for $name {
-			fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result { Display::fmt(self, f) }
+		impl $name {
+			pub fn pretty_fmt(&self, f: &mut PrettyFormatter) { f.write_str(&self.to_string()) }
 		}
 	};
 }

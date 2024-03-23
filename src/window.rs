@@ -29,7 +29,7 @@ use crate::{assets, WORKBENCH, WINDOW_PROPERTIES, error, OptionExt, since_epoch,
 pub const WINDOW_HEIGHT: usize = 420;
 pub const WINDOW_WIDTH: usize = 720;
 pub const MIN_WINDOW_HEIGHT: usize = HEADER_SIZE + 16;
-pub const MIN_WINDOW_WIDTH: usize = 620;
+pub const MIN_WINDOW_WIDTH: usize = 720;
 
 pub async fn run() -> ! {
 	let event_loop = EventLoop::new().expect("Event loop was unconstructable");
@@ -49,9 +49,7 @@ pub async fn run() -> ! {
 			.expect("valid format"),
 		));
 	#[cfg(target_os = "windows")] {
-		builder = builder
-			.with_drag_and_drop(true)
-			.with_transparent(std::env::args().any(|x| x.eq("--transparent")));
+		builder = builder.with_drag_and_drop(true)
 	}
 	let window = Rc::new(builder.build(&event_loop).expect("Window was constructable"));
 	#[cfg(target_arch = "wasm32")]
@@ -124,7 +122,6 @@ pub struct State<'window> {
 	diffuse_bind_group: BindGroup,
 	text_render_pipeline: RenderPipeline,
 	unicode_bind_group: BindGroup,
-	load_op: LoadOp<Color>,
 	last_tick: Duration,
 }
 
@@ -418,16 +415,6 @@ impl<'window> State<'window> {
 			},
 			multiview: None,
 		});
-		let load_op = if std::env::args().any(|x| x.eq("--transparent")) {
-			LoadOp::Load
-		} else {
-			LoadOp::Clear(Color {
-				r: 0.11774103726,
-				g: 0.11774103726,
-				b: 0.11774103726,
-				a: 1.0,
-			})
-		};
 
 		Self {
 			surface,
@@ -439,7 +426,6 @@ impl<'window> State<'window> {
 			diffuse_bind_group,
 			text_render_pipeline,
 			unicode_bind_group,
-			load_op,
 			last_tick: Duration::ZERO,
 		}
 	}
@@ -558,7 +544,12 @@ impl<'window> State<'window> {
 					view: &view,
 					resolve_target: None,
 					ops: Operations {
-						load: self.load_op,
+						load: LoadOp::Clear(Color {
+							r: 0.11774103726,
+							g: 0.11774103726,
+							b: 0.11774103726,
+							a: 1.0,
+						}),
 						store: StoreOp::Store,
 					},
 				})],

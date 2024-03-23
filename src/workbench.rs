@@ -1,5 +1,3 @@
-use std::convert::identity;
-use std::ffi::OsStr;
 use std::fmt::Write;
 use std::fs::read;
 use std::path::{Path, PathBuf};
@@ -7,18 +5,18 @@ use std::str::FromStr;
 use std::sync::mpsc::TryRecvError;
 use std::time::Duration;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, Result};
 use compact_str::{CompactString, format_compact, ToCompactString};
 use fxhash::{FxBuildHasher, FxHashSet};
 use uuid::Uuid;
 use winit::dpi::PhysicalPosition;
 use winit::event::{ElementState, KeyEvent, MouseButton, MouseScrollDelta};
 use winit::keyboard::{KeyCode, PhysicalKey};
-use zune_inflate::DeflateDecoder;
 
 use crate::{Bookmark, DropFn, encompasses, encompasses_or_equal, FileUpdateSubscription, FileUpdateSubscriptionType, flags, get_clipboard, HeldEntry, LinkedQueue, OptionExt, panic_unchecked, Position, recache_along_indices, RenderContext, set_clipboard, since_epoch, SortAlgorithm, StrExt, sum_indices, tab, tab_mut, WindowProperties};
 use crate::alert::Alert;
-use crate::assets::{ACTION_WHEEL_Z, BACKDROP_UV, BASE_TEXT_Z, BASE_Z, BOOKMARK_UV, CLOSED_WIDGET_UV, DARK_STRIPE_UV, EDITED_UV, HEADER_SIZE, HELD_ENTRY_Z, HIDDEN_BOOKMARK_UV, HORIZONTAL_SEPARATOR_UV, HOVERED_STRIPE_UV, HOVERED_WIDGET_UV, JUST_OVERLAPPING_BASE_TEXT_Z, LIGHT_STRIPE_UV, LINE_NUMBER_SEPARATOR_UV, OPEN_FOLDER_UV, SELECTED_ACTION_WHEEL, SELECTED_WIDGET_UV, SELECTION_UV, TRAY_UV, UNEDITED_UV, UNSELECTED_ACTION_WHEEL, UNSELECTED_WIDGET_UV};
+use crate::assets::{ACTION_WHEEL_Z, BACKDROP_UV, BASE_TEXT_Z, BASE_Z, BOOKMARK_UV, CLOSED_WIDGET_UV, DARK_STRIPE_UV, EDITED_UV, HEADER_SIZE, HELD_ENTRY_Z, HIDDEN_BOOKMARK_UV, HORIZONTAL_SEPARATOR_UV, HOVERED_STRIPE_UV, HOVERED_WIDGET_UV, JUST_OVERLAPPING_BASE_TEXT_Z, LIGHT_STRIPE_UV, LINE_NUMBER_SEPARATOR_UV, NEW_FILE_UV, OPEN_FOLDER_UV, SELECTED_ACTION_WHEEL, SELECTED_WIDGET_UV, SELECTION_UV, TRAY_UV, UNEDITED_UV, UNSELECTED_ACTION_WHEEL, UNSELECTED_WIDGET_UV};
+use crate::bookmark::Bookmarks;
 use crate::color::TextColor;
 use crate::elements::chunk::{NbtChunk, NbtRegion};
 use crate::elements::compound::NbtCompound;
@@ -153,11 +151,12 @@ impl Workbench {
 				horizontal_scroll: 0,
 				window_height: WINDOW_HEIGHT,
 				window_width: WINDOW_WIDTH,
-				bookmarks: vec![],
+				bookmarks: Bookmarks::new(),
 				uuid: Uuid::new_v4(),
 				freehand_mode: false,
 				selected_text: None,
 				last_close_attempt: Duration::ZERO,
+				last_selected_text_interaction: (0, 0, Duration::ZERO)
 			});
 		}
 		workbench
@@ -169,52 +168,7 @@ impl Workbench {
 	#[inline]
 	#[allow(clippy::equatable_if_let)]
 	pub fn on_open_file(&mut self, path: &Path, buf: Vec<u8>, window_properties: &mut WindowProperties) -> Result<()> {
-		let (nbt, compressed) = {
-			if path.extension().and_then(OsStr::to_str) == Some("mca") {
-				(
-					NbtElement::from_mca(buf.as_slice(), self.sort_algorithm).context("Failed to parse MCA file")?,
-					FileFormat::Mca,
-				)
-			} else if let Some(0x1F8B) = buf.first_chunk::<2>().copied().map(u16::from_be_bytes) {
-				(
-					NbtElement::from_file(
-						&DeflateDecoder::new(buf.as_slice())
-							.decode_gzip()
-							.context("Failed to decode gzip compressed NBT")?,
-						self.sort_algorithm,
-					)
-					.context("Failed to parse NBT")?,
-					FileFormat::Gzip,
-				)
-			} else if let Some(0x7801 | 0x789C | 0x78DA) = buf.first_chunk::<2>().copied().map(u16::from_be_bytes) {
-				(
-					NbtElement::from_file(
-						&DeflateDecoder::new(buf.as_slice())
-							.decode_zlib()
-							.context("Failed to decode zlib compressed NBT")?,
-						self.sort_algorithm,
-					)
-					.context("Failed to parse NBT")?,
-					FileFormat::Zlib,
-				)
-			} else if let Some(nbt) = NbtElement::from_file(buf.as_slice(), self.sort_algorithm) {
-				(nbt, FileFormat::Nbt)
-			} else {
-				(
-					core::str::from_utf8(&buf)
-						.ok()
-						.and_then(|s| NbtElement::from_str(s, self.sort_algorithm))
-						.context(anyhow!(
-							"Failed to find file type for file {}",
-							path.file_name()
-								.unwrap_or(&OsStr::new(""))
-								.to_string_lossy()
-						))?
-						.1,
-					FileFormat::Snbt,
-				)
-			}
-		};
+		let (nbt, compressed) = Tab::parse_raw(path, buf, self.sort_algorithm)?;
 		let mut tab = Tab::new(nbt, path, compressed, self.window_height, self.window_width)?;
 		if !tab.close_selected_text(false, window_properties) {
 			tab.selected_text = None;
@@ -273,149 +227,160 @@ impl Workbench {
 		let shift = self.held_keys.contains(&KeyCode::ShiftLeft) | self.held_keys.contains(&KeyCode::ShiftRight);
 		let x = self.mouse_x;
 		let y = self.mouse_y;
-		if state == ElementState::Released {
-			if self.process_action_wheel() { return true }
-			self.scrollbar_offset = None;
-			if button == MouseButton::Left {
-				self.steal_animation_data = None;
-			}
-			if let MouseButton::Left | MouseButton::Right = button {
-				if self.try_select_search_box(button) {
-					return true;
-				} else {
-					self.search_box.deselect();
-				}
-			}
-			if let MouseButton::Left | MouseButton::Right = button {
-				let shift = (self.held_keys.contains(&KeyCode::ShiftLeft) || self.held_keys.contains(&KeyCode::ShiftRight)) ^ (button == MouseButton::Right);
+		match state {
+			ElementState::Pressed => {
+				{
+					self.held_mouse_keys.insert(button);
 
-				if (self.window_width - 215 - 17 - 16 - 16..self.window_width - 215 - 1 - 16 - 16).contains(&self.mouse_x) && (26..42).contains(&self.mouse_y) {
 					let tab = tab_mut!(self);
-					self.search_box.on_bookmark_widget(shift, &mut tab.bookmarks, &mut tab.value);
-					return true;
-				}
+					let _ = tab.close_selected_text(false, window_properties);
+					tab.selected_text = None;
 
-				if (self.window_width - 215 - 17 - 16..self.window_width - 215 - 1 - 16).contains(&self.mouse_x) && (26..42).contains(&self.mouse_y) {
-					self.search_box.on_search_widget(shift);
-					return true;
+					if let MouseButton::Left | MouseButton::Right = button && self.try_select_search_box(button) {
+						return true;
+					} else {
+						self.search_box.deselect();
+					}
 				}
-
-				if (self.window_width - 215 - 17..self.window_width - 215 - 1).contains(&self.mouse_x) && (26..42).contains(&self.mouse_y) {
-					self.search_box.on_mode_widget(shift);
-					return true;
-				}
-			}
-			self.held_mouse_keys.remove(&button);
-			if y < 19 && x > 2 && y > 3 {
-				self.click_tab(button, window_properties);
-			} else if y < 42 && y > 26 && x < 16 {
-				self.open_file(window_properties);
-			} else if y >= HEADER_SIZE {
-				let left_margin = self.left_margin();
 				'a: {
-					if MouseButton::Left == button {
-						if self.toggle(shift, tab!(self).freehand_mode) {
-							break 'a;
+					if x >= left_margin && y >= HEADER_SIZE {
+						match self.action_wheel.take() {
+							Some(_) => {}
+							None => {
+								if button == MouseButton::Right {
+									let tab = tab_mut!(self);
+									let depth = Traverse::new(tab.scroll() / 16 + (y - HEADER_SIZE) / 16, &mut tab.value).enumerate().last().0;
+									self.action_wheel = Some((left_margin + depth * 16 + 16 + 6, ((y - HEADER_SIZE) & !15) + HEADER_SIZE + 7));
+									break 'a;
+								}
+							}
 						}
-					}
 
-					match core::mem::replace(&mut self.held_entry, HeldEntry::Empty) {
-						HeldEntry::Empty => {},
-						HeldEntry::FromAether(x) => {
-							self.drop(x, None, left_margin);
-							break 'a
+						if button == MouseButton::Left {
+							if self.try_steal(true) {
+								if self.steal_animation_data.as_ref().is_some_and(|x| (since_epoch() - x.0) >= Duration::from_millis(500)) && self.steal() {
+									break 'a;
+								}
+							} else {
+								self.steal_animation_data = None;
+							}
 						}
-						HeldEntry::FromKnown(x, indices) => {
-							self.drop(x, Some(indices), left_margin);
-							break 'a
+
+						if ((self.window_width - 7)..self.window_width).contains(&x) {
+							let tab = tab_mut!(self);
+							let height = tab.value.height() * 16 + 48;
+							let total = self.window_height - HEADER_SIZE;
+							if height - 48 > total {
+								let start = total * self.scroll() / height + HEADER_SIZE;
+								let end = start + total * total / height;
+								if (start..=end).contains(&y) {
+									self.scrollbar_offset = Some(y - start);
+									break 'a;
+								}
+							}
 						}
-					}
-
-					if (y - HEADER_SIZE) < 16 && x > 32 + left_margin {
-						if self.rename(x + horizontal_scroll) {
-							break 'a;
+					} else {
+						if !tab!(self).freehand_mode && self.held_entry.is_empty() && (24..46).contains(&y) && button == MouseButton::Left {
+							match self.hold_entry(button) {
+								Ok(true) => break 'a,
+								Err(e) => self.alert(Alert::new("Error!", TextColor::Red, e.to_string())),
+								_ => {}
+							}
 						}
-					}
 
-					if button == MouseButton::Middle {
-						if self.delete(shift) {
-							break 'a;
-						}
-					}
-
-					if button == MouseButton::Left {
-						if self.try_select_text() {
-							break 'a;
-						}
-					}
-
-					if button == MouseButton::Left {
-						if self.bookmark_line() {
-							break 'a;
-						}
-					}
-				}
-			}
-		} else {
-			{
-				let tab = tab_mut!(self);
-				let _ = tab.close_selected_text(false, window_properties);
-				tab.selected_text = None;
-			}
-
-			self.held_mouse_keys.insert(button);
-			'a: {
-				let freehand_mode = tab!(self).freehand_mode;
-
-				if x >= left_margin && y >= HEADER_SIZE {
-					match self.action_wheel.take() {
-						Some(_) => {},
-						None => {
-							if button == MouseButton::Right {
+						if let MouseButton::Left | MouseButton::Right = button {
+							if (264..280).contains(&x) && (26..42).contains(&y) {
 								let tab = tab_mut!(self);
-								let depth = Traverse::new(tab.scroll() / 16 + (y - HEADER_SIZE) / 16, &mut tab.value).enumerate().last().0;
-								self.action_wheel = Some((left_margin + depth * 16 + 16 + 6, ((y - HEADER_SIZE) & !15) + HEADER_SIZE + 7));
+								tab.freehand_mode = !tab.freehand_mode;
+								break 'a;
+							}
+							if (280..296).contains(&x) && (26..42).contains(&y) {
+								self.sort_algorithm = if (button == MouseButton::Right) ^ shift { self.sort_algorithm.rev_cycle() } else { self.sort_algorithm.cycle() };
 								break 'a;
 							}
 						}
 					}
 				}
-
-				if !freehand_mode && self.held_entry.is_empty() && (24..46).contains(&y) && button == MouseButton::Left {
-					match self.hold_entry(button) {
-						Ok(true) => break 'a,
-						Err(e) => self.alert(Alert::new("Error!", TextColor::Red, e.to_string())),
-						_ => {}
-					}
-				}
+			}
+			ElementState::Released => {
+				if self.process_action_wheel() { return true; }
+				self.scrollbar_offset = None;
 				if button == MouseButton::Left {
-					if self.try_steal(true) {
-						if self.steal_animation_data.as_ref().is_some_and(|x| (since_epoch() - x.0) >= Duration::from_millis(500)) && self.steal() {
-							break 'a;
-						}
-					} else {
-						self.steal_animation_data = None;
+					self.steal_animation_data = None;
+				}
+				if let MouseButton::Left | MouseButton::Right = button {
+					let shift = (self.held_keys.contains(&KeyCode::ShiftLeft) || self.held_keys.contains(&KeyCode::ShiftRight)) ^ (button == MouseButton::Right);
+
+					if (self.window_width - 215 - 17 - 16 - 16..self.window_width - 215 - 1 - 16 - 16).contains(&self.mouse_x) & &(26..42).contains(&self.mouse_y) {
+						let tab = tab_mut!( self );
+						self.search_box.on_bookmark_widget(shift, &mut tab.bookmarks, &mut tab.value);
+						return true;
+					}
+
+					if (self.window_width - 215 - 17 - 16..self.window_width - 215 - 1 - 16).contains(&self.mouse_x) & &(26..42).contains(&self.mouse_y) {
+						self.search_box.on_search_widget(shift);
+						return true;
+					}
+
+					if (self.window_width - 215 - 17..self.window_width - 215 - 1).contains(&self.mouse_x) & &(26..42).contains(&self.mouse_y) {
+						self.search_box.on_mode_widget(shift);
+						return true;
 					}
 				}
-				if let MouseButton::Left | MouseButton::Right = button && (248..264).contains(&x) && (26..42).contains(&y) {
-					let tab = tab_mut!(self);
-					tab.freehand_mode = !tab.freehand_mode;
-					break 'a;
-				}
-				if let MouseButton::Left | MouseButton::Right = button && (264..280).contains(&x) && (26..42).contains(&y) {
-					self.sort_algorithm = if button == MouseButton::Left { self.sort_algorithm.cycle() } else { self.sort_algorithm.rev_cycle() };
-					break 'a;
-				}
-				if ((self.window_width - 7)..self.window_width).contains(&x) {
-					let tab = tab_mut!(self);
-					let height = tab.value.height() * 16 + 48;
-					let total = self.window_height - HEADER_SIZE;
-					if height - 48 > total {
-						let start = total * self.scroll() / height + HEADER_SIZE;
-						let end = start + total * total / height;
-						if (start..=end).contains(&y) {
-							self.scrollbar_offset = Some(y - start);
-							break 'a;
+				self.held_mouse_keys.remove(&button);
+				if y < 19 && x > 2 && y > 3 {
+					self.click_tab(button, window_properties);
+				} else if y < 42 && y > 26 && x < 16 {
+					self.open_file(window_properties);
+				} else if y < 42 && y > 26 && x < 32 {
+					self.new_tab(window_properties, shift);
+				} else if y < 42 && y > 26 && x >= 296 && x < 312 {
+					if let Err(e) = tab_mut!(self).refresh(self.sort_algorithm) {
+						self.alert(Alert::new("Error!", TextColor::Red, e.to_string()))
+					}
+				} else if y >= HEADER_SIZE {
+					let left_margin = self.left_margin();
+					'a: {
+						if MouseButton::Left == button {
+							if self.toggle(shift, tab!(self).freehand_mode) {
+								break 'a;
+							}
+						}
+
+						match core::mem::replace(&mut self.held_entry, HeldEntry::Empty) {
+							HeldEntry::Empty => {}
+							HeldEntry::FromAether(x) => {
+								self.drop(x, None, left_margin);
+								break 'a;
+							}
+							HeldEntry::FromKnown(x, indices) => {
+								self.drop(x, Some(indices), left_margin);
+								break 'a;
+							}
+						}
+
+						if (y - HEADER_SIZE) < 16 && x > 32 + left_margin {
+							if self.rename(x + horizontal_scroll) {
+								break 'a;
+							}
+						}
+
+						if button == MouseButton::Middle {
+							if self.delete(shift) {
+								break 'a;
+							}
+						}
+
+						if button == MouseButton::Left {
+							if self.try_select_text() {
+								break 'a;
+							}
+						}
+
+						if button == MouseButton::Left {
+							if self.bookmark_line() {
+								break 'a;
+							}
 						}
 					}
 				}
@@ -486,10 +451,10 @@ impl Workbench {
 	#[inline]
 	#[allow(clippy::too_many_lines)]
 	pub fn try_subscription(&mut self) -> Result<()> {
-		fn write_snbt(subscription: &FileUpdateSubscription, data: &[u8], tab: &mut Tab, sort: SortAlgorithm) -> Result<()> {
+		fn write_snbt(subscription: &FileUpdateSubscription, data: &[u8], tab: &mut Tab) -> Result<()> {
 			let Some((key, value)) = core::str::from_utf8(data)
 				.ok()
-				.and_then(|s| NbtElement::from_str(s, sort))
+				.and_then(|s| NbtElement::from_str(s, SortAlgorithm::None))
 			else {
 				return Err(anyhow!("SNBT failed to parse."));
 			};
@@ -549,19 +514,7 @@ impl Workbench {
 					line_number += unsafe { parent.get_mut(idx).panic_unchecked("always valid idx") }.true_height();
 				}
 				line_number += 1;
-				let idx = tab
-					.bookmarks
-					.binary_search(&Bookmark::new(line_number, 0))
-					.unwrap_or_else(identity);
-				for bookmark in tab
-					.bookmarks
-					.iter_mut()
-					.skip(idx)
-					.take_while(|bookmark| bookmark.true_line_number < line_number + old_true_height)
-				{
-					bookmark.true_line_number = bookmark.true_line_number.wrapping_add(true_diff);
-					bookmark.line_number = bookmark.line_number.wrapping_add(diff);
-				}
+				tab.bookmarks[line_number..line_number + old_true_height].increment(diff, true_diff);
 				let mut iter = Navigate::new(rest.iter().copied(), &mut tab.value);
 				while let Some((_, _, _, parent, _)) = iter.next() {
 					parent.increment(diff, true_diff);
@@ -637,19 +590,7 @@ impl Workbench {
 				line_number += unsafe { parent.get_mut(idx).panic_unchecked("valid idx") }.true_height();
 			}
 			line_number += 1;
-			let idx = tab
-				.bookmarks
-				.binary_search(&Bookmark::new(line_number, 0))
-				.unwrap_or_else(identity);
-			for bookmark in tab
-				.bookmarks
-				.iter_mut()
-				.skip(idx)
-				.take_while(|bookmark| bookmark.true_line_number < line_number + old_true_height)
-			{
-				bookmark.true_line_number = bookmark.true_line_number.wrapping_add(true_diff);
-				bookmark.line_number = bookmark.line_number.wrapping_add(diff);
-			}
+			tab.bookmarks[line_number..line_number + old_true_height].increment(diff, true_diff);
 			let mut iter = Navigate::new(rest.iter().copied(), &mut tab.value);
 			while let Some((_, _, _, parent, _)) = iter.next() {
 				parent.increment(diff, true_diff);
@@ -674,7 +615,7 @@ impl Workbench {
 				};
 				match subscription.rx.try_recv() {
 					Ok(data) => match subscription.subscription_type {
-						FileUpdateSubscriptionType::Snbt => write_snbt(subscription, &data, tab, self.sort_algorithm)?,
+						FileUpdateSubscriptionType::Snbt => write_snbt(subscription, &data, tab)?,
 						FileUpdateSubscriptionType::ByteArray => write_array(subscription, tab, {
 							let mut array = NbtByteArray::new();
 							for (idx, byte) in data.into_iter().enumerate() {
@@ -787,20 +728,9 @@ impl Workbench {
 
 			recache_along_indices(&indices[..indices.len() - 1], &mut tab.value);
 			value.1.shut();
-			let mut idx = tab
-				.bookmarks
-				.binary_search(&Bookmark::new(line_number, 0))
-				.unwrap_or_else(identity);
-			while let Some(bookmark) = tab.bookmarks.get_mut(idx) {
-				if bookmark.true_line_number - line_number < true_height {
-					let _ = tab.bookmarks.remove(idx);
-				} else {
-					bookmark.true_line_number -= true_height;
-					bookmark.line_number -= height;
-					idx += 1;
-				}
-			}
-			// no need for encompass or equal since that's handled by `drop`
+			let _ = tab.bookmarks.remove(line_number..line_number + true_height);
+			tab.bookmarks[line_number..].decrement(height, true_height);
+			// no need for encompass_or_equal since that's handled by `drop`
 			self.held_entry = HeldEntry::FromKnown(value, indices.into_boxed_slice());
 			true
 		} else {
@@ -877,18 +807,7 @@ impl Workbench {
 				}
 			}
 			recache_along_indices(&indices[..indices.len() - 1], &mut tab.value);
-			let start = tab
-				.bookmarks
-				.binary_search(&Bookmark::new(line_number, 0))
-				.unwrap_or_else(identity);
-			for bookmark in tab.bookmarks.iter_mut().skip(start) {
-				if bookmark.true_line_number - line_number < true_height {
-					// do nothing, since the bookmark is within the tail node
-				} else {
-					bookmark.true_line_number += true_height;
-					bookmark.line_number += height;
-				}
-			}
+			tab.bookmarks[line_number + true_height..].increment(height, true_height);
 			if let Some(subscription) = &mut self.subscription
 				&& encompasses(&indices[..indices.len() - 1], &subscription.indices)
 			{
@@ -1003,19 +922,8 @@ impl Workbench {
 				unsafe { panic_unchecked("parents were dodged") }
 			};
 			recache_along_indices(&indices[..indices.len() - 1], &mut tab.value);
-			let mut idx = tab
-				.bookmarks
-				.binary_search(&Bookmark::new(line_number, 0))
-				.unwrap_or_else(identity);
-			while let Some(bookmark) = tab.bookmarks.get_mut(idx) {
-				if bookmark.true_line_number - line_number < true_height {
-					let _ = tab.bookmarks.remove(idx);
-				} else {
-					bookmark.true_line_number -= true_height;
-					bookmark.line_number -= height;
-					idx += 1;
-				}
-			}
+			let _ = tab.bookmarks.remove(line_number..line_number + true_height);
+			tab.bookmarks[line_number..].decrement(height, true_height);
 			if let Some(subscription) = &mut self.subscription {
 				if *indices == *subscription.indices {
 					self.subscription = None;
@@ -1103,14 +1011,7 @@ impl Workbench {
 					});
 				}
 				recache_along_indices(&indices[..indices.len() - 1], &mut tab.value);
-				let start = tab
-					.bookmarks
-					.binary_search(&Bookmark::new(line_number, 0))
-					.unwrap_or_else(identity);
-				for bookmark in tab.bookmarks.iter_mut().skip(start) {
-					bookmark.true_line_number += true_height;
-					bookmark.line_number += height;
-				}
+				tab.bookmarks[line_number..].increment(height, true_height);
 				self.subscription = None;
 			}
 		}
@@ -1119,9 +1020,9 @@ impl Workbench {
 
 	#[inline]
 	fn hold_entry(&mut self, button: MouseButton) -> Result<bool> {
-		if button == MouseButton::Left && self.mouse_x >= 16 + 4 {
+		if button == MouseButton::Left && self.mouse_x >= 16 + 16 + 4 {
 			let tab = tab!(self);
-			let x = self.mouse_x - (16 + 4);
+			let x = self.mouse_x - (16 + 16 + 4);
 			if x / 16 == 13 {
 				match NbtElement::from_str(&get_clipboard().ok_or_else(|| anyhow!("Failed to get clipboard"))?, self.sort_algorithm) {
 					Some((key, element)) => {
@@ -1134,28 +1035,23 @@ impl Workbench {
 					None => return Err(anyhow!("Could not parse clipboard as SNBT")),
 				}
 			} else {
-				self.held_entry = unsafe {
-					HeldEntry::FromAether((
-						None,
-						NbtElement::from_id(match x / 16 {
-							0 => NbtByte::ID,
-							1 => NbtShort::ID,
-							2 => NbtInt::ID,
-							3 => NbtLong::ID,
-							4 => NbtFloat::ID,
-							5 => NbtDouble::ID,
-							6 => NbtByteArray::ID,
-							7 => NbtIntArray::ID,
-							8 => NbtLongArray::ID,
-							9 => NbtString::ID,
-							10 => NbtList::ID,
-							11 => NbtCompound::ID,
-							12 if tab.value.id() == NbtRegion::ID => NbtChunk::ID,
-							_ => return Ok(false),
-						})
-						.panic_unchecked("Type was invalid somehow, even though we map each one"),
-					))
-				};
+				self.held_entry = HeldEntry::FromAether((None, NbtElement::from_id(match x / 16 {
+					0 => NbtByte::ID,
+					1 => NbtShort::ID,
+					2 => NbtInt::ID,
+					3 => NbtLong::ID,
+					4 => NbtFloat::ID,
+					5 => NbtDouble::ID,
+					6 => NbtByteArray::ID,
+					7 => NbtIntArray::ID,
+					8 => NbtLongArray::ID,
+					9 => NbtString::ID,
+					10 => NbtList::ID,
+					11 => NbtCompound::ID,
+					12 if tab.value.id() == NbtRegion::ID => NbtChunk::ID,
+					_ => return Ok(false),
+				}),
+				));
 			}
 		}
 		Ok(true)
@@ -1201,15 +1097,15 @@ impl Workbench {
 			}
 
 			if button == MouseButton::Middle {
-				self.new_tab(window_properties);
+				self.new_tab(window_properties, self.held_keys.contains(&KeyCode::ShiftLeft) | self.held_keys.contains(&KeyCode::ShiftRight));
 			}
 		}
 	}
 
 	#[inline]
-	pub fn new_tab(&mut self, window_properties: &mut WindowProperties) {
+	pub fn new_tab(&mut self, window_properties: &mut WindowProperties, region: bool) {
 		self.new_custom_tab(window_properties, Tab {
-			value: Box::new(NbtElement::Compound(NbtCompound::new())),
+			value: Box::new(if region { NbtElement::Region(NbtRegion::new()) } else { NbtElement::Compound(NbtCompound::new()) }),
 			name: "new.nbt".into(),
 			path: None,
 			compression: FileFormat::Nbt,
@@ -1220,11 +1116,12 @@ impl Workbench {
 			horizontal_scroll: 0,
 			window_height: self.window_height,
 			window_width: self.window_width,
-			bookmarks: vec![],
+			bookmarks: Bookmarks::new(),
 			uuid: Uuid::new_v4(),
 			freehand_mode: false,
 			selected_text: None,
 			last_close_attempt: Duration::ZERO,
+			last_selected_text_interaction: (0, 0, Duration::ZERO)
 		});
 	}
 
@@ -1328,16 +1225,12 @@ impl Workbench {
 				.panic_unchecked("nothing is wrong i didn't do .next")
 		}
 		.2;
-		let start = tab
-			.bookmarks
-			.binary_search(&Bookmark::new(line_number, 0))
-			.unwrap_or_else(identity);
 		let mut next_line_number = line_number;
 		let mut next_line_number_idx = 0;
-		for bookmark in tab.bookmarks.iter_mut().skip(start) {
-			if bookmark.true_line_number - line_number < true_height {
+		for bookmark in tab.bookmarks[line_number..].iter_mut() {
+			*bookmark = if bookmark.true_line_number() - line_number < true_height {
 				if open {
-					while next_line_number < bookmark.true_line_number {
+					while next_line_number < bookmark.true_line_number() {
 						next_line_number += unsafe {
 							element
 								.get(next_line_number_idx)
@@ -1346,28 +1239,21 @@ impl Workbench {
 						.true_height();
 						next_line_number_idx += 1;
 					}
-					let new_line_number = y + next_line_number_idx + 1;
-					bookmark.line_number = new_line_number;
-					if bookmark.true_line_number == next_line_number {
-						bookmark.uv = BOOKMARK_UV;
-					} else {
-						bookmark.uv = HIDDEN_BOOKMARK_UV;
-					}
+					Bookmark::with_uv(bookmark.true_line_number(), y + next_line_number_idx + 1, if bookmark.true_line_number() == next_line_number { BOOKMARK_UV } else { HIDDEN_BOOKMARK_UV })
 				} else {
-					bookmark.line_number = y;
-					bookmark.uv = HIDDEN_BOOKMARK_UV;
+					Bookmark::with_uv(bookmark.true_line_number(), y, HIDDEN_BOOKMARK_UV)
 				}
 			} else {
-				bookmark.line_number = bookmark.line_number.wrapping_add(increment);
-			}
+				bookmark.offset(increment, 0)
+			};
 		}
 		true
 	}
 
 	#[inline]
 	fn try_select_search_box(&mut self, button: MouseButton) -> bool {
-		if (283..self.window_width - 215 - 17 - 16 - 16).contains(&self.mouse_x) && (23..45).contains(&self.mouse_y) {
-			self.search_box.select(self.mouse_x - 283, button);
+		if (316..self.window_width - 215 - 17 - 16 - 16).contains(&self.mouse_x) && (23..45).contains(&self.mouse_y) {
+			self.search_box.select(self.mouse_x - 316, button);
 			true
 		} else {
 			false
@@ -1399,6 +1285,15 @@ impl Workbench {
 					child.id() == NbtChunk::ID,
 					indices,
 				);
+				if let Some(selected_text) = tab.selected_text.as_mut() {
+					let now = since_epoch();
+					let (old_y, old_cursor, timestamp) = core::mem::replace(&mut tab.last_selected_text_interaction, (y, selected_text.cursor, now));
+					if now - timestamp < Duration::from_millis(500) && old_y == y && old_cursor == selected_text.cursor && !selected_text.value.is_empty() {
+						tab.last_selected_text_interaction = (0, 0, Duration::ZERO);
+						selected_text.cursor = selected_text.value.len();
+						selected_text.selection = Some(0);
+					}
+				}
 				return tab.selected_text.is_some();
 			}
 		}
@@ -1420,13 +1315,8 @@ impl Workbench {
 				.panic_unchecked("Traverse always has something")
 		}
 		.3;
-		let line_number = Bookmark::new(true_height, (self.mouse_y + scroll - HEADER_SIZE) / 16);
-		match tab.bookmarks.binary_search(&line_number) {
-			Ok(idx) => {
-				let _ = tab.bookmarks.remove(idx);
-			}
-			Err(idx) => tab.bookmarks.insert(idx, line_number),
-		}
+		let bookmark = Bookmark::new(true_height, (self.mouse_y + scroll - HEADER_SIZE) / 16);
+		let _ = tab.bookmarks.toggle(bookmark);
 		true
 	}
 
@@ -1850,13 +1740,8 @@ impl Workbench {
 					}
 				}
 				recache_along_indices(&indices, &mut tab.value);
-				let start = tab
-					.bookmarks
-					.binary_search(&Bookmark::new(line_number, 0))
-					.unwrap_or_else(identity);
-				for bookmark in tab.bookmarks.iter_mut().skip(start) {
-					bookmark.line_number = (*y - HEADER_SIZE) / 16;
-					bookmark.uv = HIDDEN_BOOKMARK_UV;
+				for bookmark in tab.bookmarks[line_number..].iter_mut() {
+					*bookmark = Bookmark::with_uv(bookmark.true_line_number(), (*y - HEADER_SIZE) / 16, HIDDEN_BOOKMARK_UV);
 				}
 			}
 		}
@@ -1888,19 +1773,14 @@ impl Workbench {
 					}
 				}
 				recache_along_indices(&indices, &mut tab.value);
-				let start = tab
-					.bookmarks
-					.binary_search(&Bookmark::new(line_number, 0))
-					.unwrap_or_else(identity);
 				if shift {
 					let parent_line_number = (*y - HEADER_SIZE) / 16;
-					for bookmark in tab.bookmarks.iter_mut().skip(start) {
-						if bookmark.true_line_number - line_number < true_height {
-							bookmark.line_number = parent_line_number + bookmark.true_line_number - line_number;
-							bookmark.uv = BOOKMARK_UV;
+					for bookmark in tab.bookmarks[line_number..].iter_mut() {
+						*bookmark = if bookmark.true_line_number() - line_number < true_height {
+							bookmark.open(parent_line_number + bookmark.true_line_number() - line_number)
 						} else {
-							bookmark.line_number += increment;
-						}
+							Bookmark::with_uv(bookmark.true_line_number(), bookmark.line_number() + increment, bookmark.uv())
+						};
 					}
 				} else {
 					let element = Navigate::new(indices.iter().copied(), &mut tab.value)
@@ -1908,9 +1788,9 @@ impl Workbench {
 						.2;
 					let mut next_line_number = line_number;
 					let mut next_line_number_idx = 0;
-					for bookmark in tab.bookmarks.iter_mut().skip(start) {
-						if bookmark.true_line_number - line_number < true_height {
-							while next_line_number < bookmark.true_line_number {
+					for bookmark in tab.bookmarks[line_number..].iter_mut() {
+						*bookmark = if bookmark.true_line_number() - line_number < true_height {
+							while next_line_number < bookmark.true_line_number() {
 								next_line_number += unsafe {
 									element
 										.get(next_line_number_idx)
@@ -1920,15 +1800,14 @@ impl Workbench {
 								next_line_number_idx += 1;
 							}
 							let new_line_number = y + next_line_number_idx + 1;
-							bookmark.line_number = new_line_number;
-							if bookmark.true_line_number == next_line_number {
-								bookmark.uv = BOOKMARK_UV;
+							if bookmark.true_line_number() == next_line_number {
+								bookmark.open(new_line_number)
 							} else {
-								bookmark.uv = HIDDEN_BOOKMARK_UV;
+								bookmark.hidden(new_line_number)
 							}
 						} else {
-							bookmark.line_number += increment;
-						}
+							Bookmark::with_uv(bookmark.true_line_number(), bookmark.line_number() + increment, bookmark.uv())
+						};
 					}
 				}
 			}
@@ -1980,6 +1859,7 @@ impl Workbench {
 						}
 						SearchBoxKeyResult::Escape => {
 							self.search_box.post_input((self.window_width, self.window_height));
+							self.search_box.deselect();
 							return true;
 						}
 						SearchBoxKeyResult::ClearAllBookmarks => {
@@ -2152,106 +2032,19 @@ impl Workbench {
 						return true;
 					}
 				}
-				if flags == flags!(Alt) {
-					let id = if key == KeyCode::Digit1 {
-						NbtByte::ID
-					} else if key == KeyCode::Digit2 {
-						NbtShort::ID
-					} else if key == KeyCode::Digit3 {
-						NbtInt::ID
-					} else if key == KeyCode::Digit4 {
-						NbtLong::ID
-					} else if key == KeyCode::Digit5 {
-						NbtFloat::ID
-					} else if key == KeyCode::Digit6 {
-						NbtDouble::ID
-					} else if key == KeyCode::Digit7 {
-						NbtByteArray::ID
-					} else if key == KeyCode::Digit8 {
-						NbtIntArray::ID
-					} else if key == KeyCode::Digit9 {
-						NbtLongArray::ID
-					} else if key == KeyCode::Digit0 {
-						NbtString::ID
-					} else if key == KeyCode::Minus {
-						NbtList::ID
-					} else if key == KeyCode::Equal {
-						NbtCompound::ID
-					} else {
-						0
-					};
-					if let Some(element) = NbtElement::from_id(id) {
-						if let HeldEntry::FromKnown(element, indices) = core::mem::replace(&mut self.held_entry, HeldEntry::FromAether((None, element))) {
-							tab.append_to_history(WorkbenchAction::Remove {
-								indices,
-								element,
-							});
-						}
-						return true;
+				if key == KeyCode::KeyR && flags == flags!(Ctrl) {
+					if let Err(e) = tab.refresh(self.sort_algorithm) {
+						self.alert(Alert::new("Error!", TextColor::Red, e.to_string()))
 					}
-				}
-				'a: {
-					if key == KeyCode::KeyR && flags == flags!(Ctrl) {
-						if tab.history_changed {
-							break 'a;
-						};
-						let Some(path) = &tab.path else { break 'a };
-						let Ok(buf) = read(path) else { break 'a };
-						let (nbt, compression) = {
-							if path.extension().and_then(OsStr::to_str) == Some("mca") {
-								(NbtElement::from_mca(buf.as_slice(), self.sort_algorithm), FileFormat::Mca)
-							} else if buf.first_chunk::<2>().copied().map(u16::from_be_bytes) == Some(0x1F8B) {
-								(
-									DeflateDecoder::new(buf.as_slice())
-										.decode_gzip()
-										.ok()
-										.and_then(|x| NbtElement::from_file(&x, self.sort_algorithm)),
-									FileFormat::Zlib,
-								)
-							} else if let Some(0x7801 | 0x789C | 0x78DA) = buf.first_chunk::<2>().copied().map(u16::from_be_bytes) {
-								(
-									DeflateDecoder::new(buf.as_slice())
-										.decode_zlib()
-										.ok()
-										.and_then(|x| NbtElement::from_file(&x, self.sort_algorithm)),
-									FileFormat::Zlib,
-								)
-							} else if let Some(nbt) = NbtElement::from_file(&buf, self.sort_algorithm) {
-								(Some(nbt), FileFormat::Nbt)
-							} else {
-								let nbt = core::str::from_utf8(&buf)
-									.ok()
-									.and_then(|s| NbtElement::from_str(s, self.sort_algorithm))
-									.map(|x| x.1);
-								if let Some(NbtCompound::ID | NbtRegion::ID) = nbt.as_ref().map(NbtElement::id) {
-									(nbt, FileFormat::Snbt)
-								} else {
-									break 'a;
-								}
-							}
-						};
-						let Some(nbt) = nbt else { break 'a };
-						let old = core::mem::replace(&mut tab.value, Box::new(nbt));
-						#[cfg(not(target_arch = "wasm32"))]
-						std::thread::spawn(move || drop(old));
-						#[cfg(target_arch = "wasm32")]
-						drop(old);
-						tab.compression = compression;
-						tab.bookmarks = vec![];
-						tab.history_changed = false;
-						tab.undos = LinkedQueue::new();
-						tab.redos = LinkedQueue::new();
-						tab.scroll = tab.scroll();
-						tab.horizontal_scroll = tab.horizontal_scroll(self.held_entry.element());
-					}
+					return true;
 				}
 				if key == KeyCode::KeyF && flags == flags!(Ctrl + Shift) {
 					tab.freehand_mode = !tab.freehand_mode;
 					return true;
 				}
-				if key == KeyCode::KeyN && flags == flags!(Ctrl) {
+				if key == KeyCode::KeyN && flags & (!flags!(Shift)) == flags!(Ctrl) {
 					tab.selected_text = None;
-					self.new_tab(window_properties);
+					self.new_tab(window_properties, (flags & flags!(Shift)) > 0);
 					return true;
 				}
 				if key == KeyCode::KeyO && flags == flags!(Ctrl) {
@@ -2321,6 +2114,56 @@ impl Workbench {
 						tab_mut!(self).selected_text = None;
 						return true;
 					}
+				}
+				if flags == flags!() {
+					let tab = tab_mut!(self);
+					let x = if key == KeyCode::Digit1 {
+						(None, NbtElement::from_id(NbtByte::ID))
+					} else if key == KeyCode::Digit2 {
+						(None, NbtElement::from_id(NbtShort::ID))
+					} else if key == KeyCode::Digit3 {
+						(None, NbtElement::from_id(NbtInt::ID))
+					} else if key == KeyCode::Digit4 {
+						(None, NbtElement::from_id(NbtLong::ID))
+					} else if key == KeyCode::Digit5 {
+						(None, NbtElement::from_id(NbtFloat::ID))
+					} else if key == KeyCode::Digit6 {
+						(None, NbtElement::from_id(NbtDouble::ID))
+					} else if key == KeyCode::Digit7 {
+						(None, NbtElement::from_id(NbtByteArray::ID))
+					} else if key == KeyCode::Digit8 {
+						(None, NbtElement::from_id(NbtIntArray::ID))
+					} else if key == KeyCode::Digit9 {
+						(None, NbtElement::from_id(NbtLongArray::ID))
+					} else if key == KeyCode::Digit0 {
+						(None, NbtElement::from_id(NbtString::ID))
+					} else if key == KeyCode::Minus {
+						(None, NbtElement::from_id(NbtList::ID))
+					} else if key == KeyCode::Equal {
+						(None, NbtElement::from_id(NbtCompound::ID))
+					} else if key == KeyCode::Backquote && tab.value.id() == NbtRegion::ID {
+						(None, NbtElement::from_id(NbtChunk::ID))
+					} else if key == KeyCode::KeyC {
+						let Some(clipboard) = get_clipboard() else {
+							self.alert(Alert::new("Error!", TextColor::Red, "Failed to get clipboard"));
+							return true;
+						};
+						if let Some((key, value)) = NbtElement::from_str(&clipboard, self.sort_algorithm) {
+							(key, value)
+						} else {
+							self.alert(Alert::new("Error!", TextColor::Red, "Could not parse clipboard as SNBT"));
+							return true;
+						}
+					} else {
+						return true;
+					};
+					if let HeldEntry::FromKnown(element, indices) = core::mem::replace(&mut self.held_entry, HeldEntry::FromAether(x)) {
+						tab.append_to_history(WorkbenchAction::Remove {
+							indices,
+							element,
+						});
+					}
+					return true;
 				}
 			}
 		} else if key.state == ElementState::Released {
@@ -2402,9 +2245,11 @@ impl Workbench {
 	pub fn render(&mut self, builder: &mut VertexBufferBuilder) {
 		if self.raw_window_width < MIN_WINDOW_WIDTH || self.raw_window_height < MIN_WINDOW_HEIGHT { return; }
 
+		let shift = self.held_keys.contains(&KeyCode::ShiftLeft) || self.held_keys.contains(&KeyCode::ShiftRight);
+
 		{
 			builder.draw_texture_region_z(
-				(281, 22),
+				(313, 22),
 				BASE_Z,
 				LINE_NUMBER_SEPARATOR_UV,
 				(2, 23),
@@ -2488,12 +2333,21 @@ impl Workbench {
 		}
 		{
 			builder.draw_texture((0, 26), OPEN_FOLDER_UV, (16, 16));
+			builder.draw_texture((16, 26), NEW_FILE_UV, (16, 16));
 			if (0..16).contains(&ctx.mouse_x) && (26..42).contains(&ctx.mouse_y) {
 				builder.draw_texture((0, 26), SELECTION_UV, (16, 16));
 				builder.draw_tooltip(&["Open File (Ctrl + O)"], (self.mouse_x, self.mouse_y), false);
 			}
+			if (16..32).contains(&ctx.mouse_x) && (26..42).contains(&ctx.mouse_y) {
+				builder.draw_texture((16, 26), SELECTION_UV, (16, 16));
+				if shift {
+					builder.draw_tooltip(&["Create New Region File (Ctrl + Shift + N)"], (self.mouse_x, self.mouse_y), false);
+				} else {
+					builder.draw_tooltip(&["Create New NBT File (Ctrl + N)"], (self.mouse_x, self.mouse_y), false);
+				}
+			}
 			builder.draw_texture_region_z(
-				(17, 22),
+				(33, 22),
 				BASE_Z,
 				LINE_NUMBER_SEPARATOR_UV,
 				(2, 23),

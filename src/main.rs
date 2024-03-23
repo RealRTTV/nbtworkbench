@@ -36,6 +36,7 @@
 #![feature(box_patterns)]
 #![feature(const_black_box)]
 #![feature(const_collections_with_hasher)]
+#![feature(const_mut_refs)]
 #![feature(core_intrinsics)]
 #![feature(iter_array_chunks)]
 #![feature(iter_next_chunk)]
@@ -68,6 +69,7 @@ use elements::element::NbtElement;
 use vertex_buffer_builder::VertexBufferBuilder;
 
 use crate::assets::{BASE_TEXT_Z, BASE_Z, BOOKMARK_UV, BOOKMARK_Z, END_LINE_NUMBER_SEPARATOR_UV, HEADER_SIZE, HIDDEN_BOOKMARK_UV, HOVERED_WIDGET_UV, INSERTION_UV, INVALID_STRIPE_UV, LINE_NUMBER_SEPARATOR_UV, LINE_NUMBER_Z, SCROLLBAR_BOOKMARK_Z, SELECTED_TOGGLE_OFF_UV, SELECTED_TOGGLE_ON_UV, SORT_COMPOUND_BY_NAME, SORT_COMPOUND_BY_NOTHING, SORT_COMPOUND_BY_TYPE, TEXT_UNDERLINE_UV, TOGGLE_Z, UNSELECTED_TOGGLE_OFF_UV, UNSELECTED_TOGGLE_ON_UV, UNSELECTED_WIDGET_UV};
+use crate::bookmark::{Bookmark, BookmarkSlice};
 use crate::color::TextColor;
 use crate::elements::compound::{CompoundMap};
 use crate::elements::element::{NbtByteArray, NbtIntArray, NbtLongArray};
@@ -94,6 +96,8 @@ mod search_box;
 mod text;
 #[cfg(not(target_arch = "wasm32"))]
 mod cli;
+mod formatter;
+mod bookmark;
 
 #[macro_export]
 macro_rules! flags {
@@ -272,7 +276,6 @@ pub fn main() -> ! {
 /// # Minor Features
 /// * open icon for exe ver
 /// * gear icon to swap toolbar with settings panel
-///   * make floats either exact or "exact enough"
 /// * __ctrl + h__, open a playground `nbt` file to help with user interaction (bonus points if I have some way to tell if you haven't used this editor before)
 /// * [`last_modified`](NbtChunk) field actually gets some impl
 /// * autosave
@@ -482,31 +485,19 @@ pub fn recache_along_indices(indices: &[usize], root: &mut NbtElement) {
 
 #[inline]
 #[must_use]
-pub fn encompasses_or_equal(outer: &[usize], inner: &[usize]) -> bool {
-	let outer_len = outer.len();
-	let inner_len = inner.len();
-	if outer_len <= inner_len {
-		outer == &inner[..outer_len]
-	} else {
-		false
-	}
+pub fn encompasses_or_equal<T: Ord>(outer: &[T], inner: &[T]) -> bool {
+	outer.len() <= inner.len() && outer == &inner[..outer.len()]
 }
 
 #[inline]
 #[must_use]
-pub fn encompasses(outer: &[usize], inner: &[usize]) -> bool {
-	let outer_len = outer.len();
-	let inner_len = inner.len();
-	if outer_len < inner_len {
-		outer == &inner[..outer_len]
-	} else {
-		false
-	}
+pub fn encompasses<T: Ord>(outer: &[T], inner: &[T]) -> bool {
+	outer.len() < inner.len() && outer == &inner[..outer.len()]
 }
 
 #[inline]
 #[must_use]
-pub fn either_encompass(a: &[usize], b: &[usize]) -> bool {
+pub fn either_encompass<T: Ord>(a: &[T], b: &[T]) -> bool {
 	let min = usize::min(a.len(), b.len());
 	a[..min] == b[..min]
 }
@@ -583,14 +574,14 @@ impl SortAlgorithm {
 			Self::Type => SORT_COMPOUND_BY_TYPE,
 		};
 
-		let widget_uv = if (264..280).contains(&ctx.mouse_x) && (26..42).contains(&ctx.mouse_y) {
+		let widget_uv = if (280..296).contains(&ctx.mouse_x) && (26..42).contains(&ctx.mouse_y) {
 			builder.draw_tooltip(&[&format!("Compound Sorting Algorithm ({self})")], (ctx.mouse_x, ctx.mouse_y), false);
 			HOVERED_WIDGET_UV
 		} else {
 			UNSELECTED_WIDGET_UV
 		};
-		builder.draw_texture((264, 26), widget_uv, (16, 16));
-		builder.draw_texture((267, 29), uv, (10, 10));
+		builder.draw_texture((280, 26), widget_uv, (16, 16));
+		builder.draw_texture((283, 29), uv, (10, 10));
 
 
 	}
@@ -802,10 +793,10 @@ impl RenderContext {
 	}
 
 	#[inline]
-	pub fn render_line_numbers(&self, builder: &mut VertexBufferBuilder, mut bookmarks: &[Bookmark]) {
+	pub fn render_line_numbers(&self, builder: &mut VertexBufferBuilder, mut bookmarks: &BookmarkSlice) {
 		let start = self.line_numbers.first();
-		while let Some((&first, rest)) = bookmarks.split_first() {
-			if start.is_some_and(|&start| start > first.true_line_number) {
+		while let Some((head, rest)) = bookmarks.split_first() {
+			if start.is_some_and(|&start| start > head.true_line_number()) {
 				bookmarks = rest;
 			} else {
 				break;
@@ -840,7 +831,7 @@ impl RenderContext {
 			let _ = write!(builder, "{render_line_number}");
 			builder.color = color;
 
-			if let Some((&first, rest)) = bookmarks.split_first() && render_line_number == first.true_line_number {
+			if let Some((first, rest)) = bookmarks.split_first() && render_line_number == first.true_line_number() {
 				bookmarks = rest;
 				builder.draw_texture_region_z(
 					(2, y + 2),
@@ -851,7 +842,7 @@ impl RenderContext {
 				);
 			}
 			let mut hidden_bookmarks = 0_usize;
-			while let Some((&first, rest)) = bookmarks.split_first() && next_line_number.is_none_or(|next_line_number| render_line_number <= first.true_line_number && first.true_line_number < next_line_number) {
+			while let Some((first, rest)) = bookmarks.split_first() && next_line_number.is_none_or(|next_line_number| render_line_number <= first.true_line_number() && first.true_line_number() < next_line_number) {
 				bookmarks = rest;
 				if hidden_bookmarks < 5 {
 					builder.draw_texture_region_z(
@@ -898,15 +889,15 @@ impl RenderContext {
 	}
 
 	#[inline]
-	pub fn render_scrollbar_bookmarks(&self, builder: &mut VertexBufferBuilder, bookmarks: &[Bookmark], root: &NbtElement) {
+	pub fn render_scrollbar_bookmarks(&self, builder: &mut VertexBufferBuilder, bookmarks: &BookmarkSlice, root: &NbtElement) {
 		let height = root.height();
 		let mut hidden_bookmarks_at_y = 0_usize;
 		let mut hidden_bookmark_y = 0;
 		let mut bookmarks_at_y = 0_usize;
 		let mut bookmark_y = 0;
-		for bookmark in bookmarks {
-			let y = HEADER_SIZE + (bookmark.line_number * (builder.window_height() - HEADER_SIZE)) / height;
-			if bookmark.uv == BOOKMARK_UV {
+		for bookmark in bookmarks.iter() {
+			let y = HEADER_SIZE + (bookmark.line_number() * (builder.window_height() - HEADER_SIZE)) / height;
+			if bookmark.uv() == BOOKMARK_UV {
 				if bookmarks_at_y < 5 {
 					builder.draw_texture_z(
 						(builder.window_width() - 8, y),
@@ -1044,36 +1035,6 @@ impl<'a, T> Iterator for LinkedQueueIter<'a, T> {
 pub struct SinglyLinkedNode<T> {
 	value: T,
 	prev: Option<Box<SinglyLinkedNode<T>>>,
-}
-
-#[derive(Copy, Clone, Debug)]
-pub struct Bookmark {
-	true_line_number: usize,
-	line_number: usize,
-	uv: Vec2u,
-}
-
-impl Bookmark {
-	pub fn new(true_line_number: usize, line_number: usize) -> Self {
-		Self {
-			true_line_number,
-			line_number,
-			uv: BOOKMARK_UV,
-		}
-	}
-}
-
-impl PartialEq for Bookmark {
-	fn eq(&self, other: &Self) -> bool { self.true_line_number.eq(&other.true_line_number) }
-}
-
-impl Eq for Bookmark {}
-
-impl PartialOrd<Self> for Bookmark {
-	fn partial_cmp(&self, other: &Self) -> Option<Ordering> { Some(self.cmp(other)) }
-}
-impl Ord for Bookmark {
-	fn cmp(&self, other: &Self) -> Ordering { self.true_line_number.cmp(&other.true_line_number) }
 }
 
 pub fn smoothstep64(x: f64) -> f64 {
