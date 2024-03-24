@@ -1157,22 +1157,24 @@ impl Workbench {
 	}
 
 	#[inline]
+	#[cfg(any(target_os = "windows", target_os = "apple", target_os = "linux"))]
 	fn open_file(&mut self, window_properties: &mut WindowProperties) {
-		#[cfg(any(target_os = "windows", target_os = "apple", target_os = "linux"))] {
-			match native_dialog::FileDialog::new().set_location("~/Downloads").add_filter("NBT File", &["nbt", "snbt", "dat", "dat_old", "dat_mcr", "old"]).add_filter("Region File", &["mca", "mcr"]).show_open_single_file() {
+		match native_dialog::FileDialog::new().set_location("~/Downloads").add_filter("NBT File", &["nbt", "snbt", "dat", "dat_old", "dat_mcr", "old"]).add_filter("Region File", &["mca", "mcr"]).show_open_single_file() {
+			Err(e) => self.alert(Alert::new("Error!", TextColor::Red, e.to_string())),
+			Ok(None) => {},
+			Ok(Some(path)) => match std::fs::read(&path) {
+				Ok(bytes) => if let Err(e) = self.on_open_file(&path, bytes, window_properties) {
+					self.alert(Alert::new("Error!", TextColor::Red, e.to_string()))
+				},
 				Err(e) => self.alert(Alert::new("Error!", TextColor::Red, e.to_string())),
-				Ok(None) => {},
-				Ok(Some(path)) => match std::fs::read(&path) {
-					Ok(bytes) => if let Err(e) = self.on_open_file(&path, bytes, window_properties) {
-						self.alert(Alert::new("Error!", TextColor::Red, e.to_string()))
-					},
-					Err(e) => self.alert(Alert::new("Error!", TextColor::Red, e.to_string())),
-				}
 			}
-		};
-		#[cfg(target_arch = "wasm32")] {
-			crate::try_open_dialog();
 		}
+	}
+
+	#[inline]
+	#[cfg(target_arch = "wasm32")]
+	fn open_file(&mut self, _: &mut WindowProperties) {
+		crate::try_open_dialog();
 	}
 
 	#[inline]

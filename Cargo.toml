@@ -9,9 +9,9 @@ keywords = ["nbt", "window", "unsafe", "editor", "tree"]
 categories = ["graphics", "rendering", "text-editors", "parser-implementations"]
 
 # Required for Wasm target, but breaks `winres`
-#[lib]
-#crate-type = ["cdylib", "rlib"]
-#path = "src/main.rs"
+[lib]
+crate-type = ["cdylib", "rlib"]
+path = "src/main.rs"
 
 [package.metadata.winres]
 

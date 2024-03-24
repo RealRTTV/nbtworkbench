@@ -69,33 +69,34 @@ impl Tab {
 		})
 	}
 
+	#[cfg(any(target_os = "windows", target_os = "apple", target_os = "linux"))]
 	pub fn save(&mut self, force_dialog: bool) -> Result<()> {
-		#[cfg(any(target_os = "windows", target_os = "apple", target_os = "linux"))] {
-			let path = self.path.as_deref().unwrap_or(self.name.as_ref().as_ref());
-			if !path.exists() || force_dialog {
-				let mut builder = native_dialog::FileDialog::new();
-				if self.value.id() == NbtRegion::ID {
-					builder = builder.add_filter("Region File", &["mca", "mcr"]);
-				} else {
-					builder = builder.add_filter("NBT File", &["nbt", "snbt", "dat", "dat_old", "dat_mcr", "old"]);
-				}
-				let path = builder.show_save_single_file()?.ok_or_else(|| anyhow!("Save cancelled"))?;
-				self.name = path.file_name().and_then(|x| x.to_str()).expect("Path has a filename").to_string().into_boxed_str();
-				std::fs::write(&path, self.compression.encode(&self.value))?;
-				self.path = Some(path);
-				self.history_changed = false;
-				Ok(())
+		let path = self.path.as_deref().unwrap_or(self.name.as_ref().as_ref());
+		if !path.exists() || force_dialog {
+			let mut builder = native_dialog::FileDialog::new();
+			if self.value.id() == NbtRegion::ID {
+				builder = builder.add_filter("Region File", &["mca", "mcr"]);
 			} else {
-				std::fs::write(path, self.compression.encode(&self.value))?;
-				self.history_changed = false;
-				Ok(())
+				builder = builder.add_filter("NBT File", &["nbt", "snbt", "dat", "dat_old", "dat_mcr", "old"]);
 			}
-		}
-		#[cfg(target_arch = "wasm32")] {
-			let bytes = self.compression.encode(&self.value);
-			crate::save(self.name.as_ref(), bytes);
+			let path = builder.show_save_single_file()?.ok_or_else(|| anyhow!("Save cancelled"))?;
+			self.name = path.file_name().and_then(|x| x.to_str()).expect("Path has a filename").to_string().into_boxed_str();
+			std::fs::write(&path, self.compression.encode(&self.value))?;
+			self.path = Some(path);
+			self.history_changed = false;
+			Ok(())
+		} else {
+			std::fs::write(path, self.compression.encode(&self.value))?;
+			self.history_changed = false;
 			Ok(())
 		}
+	}
+
+	#[cfg(target_arch = "wasm32")]
+	pub fn save(&mut self, _: bool) -> Result<()> {
+		let bytes = self.compression.encode(&self.value);
+		crate::save(self.name.as_ref(), bytes);
+		Ok(())
 	}
 
 	#[allow(clippy::too_many_lines)]
@@ -230,10 +231,17 @@ impl Tab {
 		}
 
 		{
-			let enabled = self.path.is_some();
-			let widget_uv = if enabled && (296..312).contains(&ctx.mouse_x) && (26..42).contains(&ctx.mouse_y) {
-				builder.draw_tooltip(&["Refresh Tab (Ctrl + R)"], (ctx.mouse_x, ctx.mouse_y), false);
-				HOVERED_WIDGET_UV
+			let enabled = self.path.is_some() && cfg!(not(target_os = "wasm32"));
+			let widget_uv = if (296..312).contains(&ctx.mouse_x) && (26..42).contains(&ctx.mouse_y) {
+				#[cfg(target_arch = "wasm32")]
+				builder.draw_tooltip(&["Refresh Tab (Disabled on WebAssembly version)"], (ctx.mouse_x, ctx.mouse_y), false);
+				if enabled {
+					#[cfg(not(target_arch = "wasm32"))]
+					builder.draw_tooltip(&["Refresh Tab (Ctrl + R)"], (ctx.mouse_x, ctx.mouse_y), false);
+					HOVERED_WIDGET_UV
+				} else {
+					UNSELECTED_WIDGET_UV
+				}
 			} else {
 				UNSELECTED_WIDGET_UV
 			};
@@ -608,7 +616,7 @@ impl Tab {
 		})
 	}
 
-	#[cfg(not(target_os = "wasm32"))]
+	#[cfg(not(target_arch = "wasm32"))]
 	pub fn refresh(&mut self, sort_algorithm: SortAlgorithm) -> Result<()> {
 		let Some(path) = self.path.as_deref() else { return Err(anyhow!("File path was not present in tab")) };
 		let bytes = std::fs::read(path)?;
@@ -628,9 +636,9 @@ impl Tab {
 		Ok(())
 	}
 
-	#[cfg(target_os = "wasm32")]
-	pub fn refresh(&mut self) -> Result<()> {
-		Err(anyhow!("File refresh not supported on web"))
+	#[cfg(target_arch = "wasm32")]
+	pub fn refresh(&mut self, _: SortAlgorithm) -> Result<()> {
+		Ok(())
 	}
 }
 

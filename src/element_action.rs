@@ -7,9 +7,9 @@ use compact_str::CompactString;
 use notify::{EventKind, PollWatcher, RecursiveMode, Watcher};
 use uuid::Uuid;
 
-use crate::{panic_unchecked, set_clipboard, FileUpdateSubscription, since_epoch};
+use crate::{panic_unchecked, set_clipboard, FileUpdateSubscription};
 #[cfg(not(target_arch = "wasm32"))]
-use crate::{FileUpdateSubscriptionType, assets::{OPEN_ARRAY_IN_HEX_UV, OPEN_IN_TXT}};
+use crate::{FileUpdateSubscriptionType, assets::{OPEN_ARRAY_IN_HEX_UV, OPEN_IN_TXT}, since_epoch};
 use crate::assets::{ACTION_WHEEL_Z, COPY_FORMATTED_UV, COPY_RAW_UV, SORT_COMPOUND_BY_NAME, SORT_COMPOUND_BY_TYPE};
 use crate::elements::chunk::NbtChunk;
 use crate::elements::compound::NbtCompound;
@@ -110,7 +110,7 @@ impl ElementAction {
 	}
 
 	#[allow(clippy::too_many_lines)]
-	pub fn apply(self, key: Option<CompactString>, indices: Box<[usize]>, tab_uuid: Uuid, true_line_number: usize, line_number: usize, element: &mut NbtElement, bookmarks: &mut Bookmarks, subscription: &mut Option<FileUpdateSubscription>) -> Option<WorkbenchAction> {
+	pub fn apply(self, key: Option<CompactString>, indices: Box<[usize]>, _tab_uuid: Uuid, true_line_number: usize, line_number: usize, element: &mut NbtElement, bookmarks: &mut Bookmarks, _subscription: &mut Option<FileUpdateSubscription>) -> Option<WorkbenchAction> {
 		#[must_use]
 		#[cfg(not(target_arch = "wasm32"))]
 		fn open_file(str: &str) -> bool {
@@ -207,12 +207,12 @@ impl ElementAction {
 						drop(file);
 						if watcher.watch(&path, RecursiveMode::NonRecursive).is_err() { break 'm; };
 						if !open_file(&path.display().to_string()) { break 'm; }
-						*subscription = Some(FileUpdateSubscription {
+						*_subscription = Some(FileUpdateSubscription {
 							subscription_type,
 							indices,
 							rx,
 							watcher,
-							tab_uuid,
+							tab_uuid: _tab_uuid,
 						});
 					}
 				}
@@ -257,12 +257,12 @@ impl ElementAction {
 						drop(file);
 						if watcher.watch(&path, RecursiveMode::NonRecursive).is_err() { break 'm; };
 						if !open_file(&path.display().to_string()) { break 'm; }
-						*subscription = Some(FileUpdateSubscription {
+						*_subscription = Some(FileUpdateSubscription {
 							subscription_type: FileUpdateSubscriptionType::Snbt,
 							indices,
 							rx,
 							watcher,
-							tab_uuid,
+							tab_uuid: _tab_uuid,
 						});
 					}
 				}

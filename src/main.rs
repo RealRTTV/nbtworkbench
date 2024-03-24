@@ -1,53 +1,27 @@
-#![warn(
-	clippy::pedantic,
-	clippy::nursery,
-	clippy::perf,
-	clippy::correctness,
-	clippy::cargo,
-	clippy::style,
-	clippy::complexity,
-	clippy::unused_unit,
-	clippy::unused_async,
-	clippy::unused_peekable,
-	clippy::unused_self,
-	clippy::unused_format_specs,
-	clippy::unused_io_amount,
-	clippy::unused_rounding,
-	clippy::extra_unused_lifetimes,
-	clippy::extra_unused_type_parameters,
-	clippy::unwrap_used
-)]
 #![allow(
 	semicolon_in_expressions_from_macros,
 	internal_features,
-	clippy::unreadable_literal,
-	clippy::cast_precision_loss,
-	clippy::cast_lossless,
-	clippy::cast_sign_loss,
-	clippy::cast_possible_truncation,
-	clippy::collapsible_if,
-	clippy::collapsible_else_if,
-	clippy::redundant_else,
-	clippy::cast_possible_wrap,
-	clippy::multiple_crate_versions
+	incomplete_features,
 )]
-#![feature(adt_const_params)]
-#![feature(array_chunks)]
-#![feature(box_patterns)]
-#![feature(const_black_box)]
-#![feature(const_collections_with_hasher)]
-#![feature(const_mut_refs)]
-#![feature(core_intrinsics)]
-#![feature(iter_array_chunks)]
-#![feature(iter_next_chunk)]
-#![feature(lazy_cell)]
-#![feature(let_chains)]
-#![feature(maybe_uninit_array_assume_init)]
-#![feature(maybe_uninit_uninit_array)]
-#![feature(new_uninit)]
-#![feature(optimize_attribute)]
-#![feature(stmt_expr_attributes)]
-#![feature(unchecked_math)]
+#![feature(
+    adt_const_params,
+    array_chunks,
+    box_patterns,
+    const_black_box,
+    const_collections_with_hasher,
+    const_mut_refs,
+    core_intrinsics,
+    iter_array_chunks,
+    iter_next_chunk,
+    lazy_cell,
+    let_chains,
+    maybe_uninit_array_assume_init,
+    maybe_uninit_uninit_array,
+    new_uninit,
+    optimize_attribute,
+    stmt_expr_attributes,
+    unchecked_math
+)]
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 use std::cell::UnsafeCell;
@@ -274,7 +248,6 @@ pub fn main() -> ! {
 /// * wiki page for docs on minecraft's format of stuff
 /// * [chunk](NbtChunk) section rendering
 /// # Minor Features
-/// * open icon for exe ver
 /// * gear icon to swap toolbar with settings panel
 /// * __ctrl + h__, open a playground `nbt` file to help with user interaction (bonus points if I have some way to tell if you haven't used this editor before)
 /// * [`last_modified`](NbtChunk) field actually gets some impl

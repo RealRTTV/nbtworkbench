@@ -33,7 +33,7 @@ pub const MIN_WINDOW_WIDTH: usize = 720;
 
 pub async fn run() -> ! {
 	let event_loop = EventLoop::new().expect("Event loop was unconstructable");
-	let mut builder = WindowBuilder::new()
+	let builder = WindowBuilder::new()
 		.with_title("NBT Workbench")
 		.with_inner_size(PhysicalSize::new(WINDOW_WIDTH as u32, WINDOW_HEIGHT as u32))
 		.with_min_inner_size(PhysicalSize::new(
@@ -48,10 +48,13 @@ pub async fn run() -> ! {
 			)
 			.expect("valid format"),
 		));
-	#[cfg(target_os = "windows")] {
-		builder = builder.with_drag_and_drop(true)
-	}
-	let window = Rc::new(builder.build(&event_loop).expect("Window was constructable"));
+	let window = Rc::new('a: {
+		#[cfg(target_os = "windows")] {
+			break 'a builder.with_drag_and_drop(true)
+		}
+		#[cfg(not(target_os = "windows"))]
+		break 'a builder
+	}.build(&event_loop).expect("Window was constructable"));
 	#[cfg(target_arch = "wasm32")]
 	let window_size = {
 		web_sys::window().and_then(|window| {
