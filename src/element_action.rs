@@ -117,7 +117,7 @@ impl ElementAction {
 			'a: {
 				#[cfg(target_os = "windows")]
 				break 'a Command::new("cmd").args(["/c", "start", str]).status();
-				#[cfg(target_os = "apple")]
+				#[cfg(target_os = "macos")]
 				break 'a Command::new("open").arg(str).status();
 				#[cfg(target_os = "linux")]
 				break 'a Command::new("xdg-open").arg(str).status();

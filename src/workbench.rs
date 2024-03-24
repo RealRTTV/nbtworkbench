@@ -1157,7 +1157,7 @@ impl Workbench {
 	}
 
 	#[inline]
-	#[cfg(any(target_os = "windows", target_os = "apple", target_os = "linux"))]
+	#[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
 	fn open_file(&mut self, window_properties: &mut WindowProperties) {
 		match native_dialog::FileDialog::new().set_location("~/Downloads").add_filter("NBT File", &["nbt", "snbt", "dat", "dat_old", "dat_mcr", "old"]).add_filter("Region File", &["mca", "mcr"]).show_open_single_file() {
 			Err(e) => self.alert(Alert::new("Error!", TextColor::Red, e.to_string())),

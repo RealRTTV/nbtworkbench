@@ -69,7 +69,7 @@ impl Tab {
 		})
 	}
 
-	#[cfg(any(target_os = "windows", target_os = "apple", target_os = "linux"))]
+	#[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
 	pub fn save(&mut self, force_dialog: bool) -> Result<()> {
 		let path = self.path.as_deref().unwrap_or(self.name.as_ref().as_ref());
 		if !path.exists() || force_dialog {
