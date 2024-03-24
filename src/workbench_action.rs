@@ -1,4 +1,3 @@
-use std::convert::identity;
 use std::mem::MaybeUninit;
 use compact_str::{CompactString, ToCompactString};
 use std::path::PathBuf;

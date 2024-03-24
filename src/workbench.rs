@@ -2281,7 +2281,7 @@ impl Workbench {
 				LIGHT_STRIPE_UV + (1, 1)
 			};
 			builder.draw_texture_region_z(
-				(0, n * 16 + HEADER_SIZE + (n > 0) as usize),
+				(0, n * 16 + HEADER_SIZE - (n == 0) as usize),
 				BASE_Z,
 				uv,
 				(builder.window_width(), 16 + (n == 0) as usize),
@@ -2324,7 +2324,7 @@ impl Workbench {
 		let mut ctx = RenderContext::new(selected_y, selected_key, selected_value, selecting_key, ghost, left_margin, (self.mouse_x, self.mouse_y), tab.freehand_mode);
 		if self.mouse_y >= HEADER_SIZE && self.action_wheel.is_none() {
 			builder.draw_texture_region_z(
-				(0, (self.mouse_y & !15) + 1),
+				(0, (self.mouse_y & !15)),
 				BASE_Z,
 				HOVERED_STRIPE_UV,
 				(builder.window_width(), 16),

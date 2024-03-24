@@ -1,6 +1,5 @@
 use std::alloc::{alloc, Layout};
 use std::cmp::Ordering;
-use std::convert::identity;
 use std::fmt::{Display, Formatter, Write};
 use std::hash::Hasher;
 use std::intrinsics::likely;

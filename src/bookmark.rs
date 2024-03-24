@@ -155,9 +155,6 @@ impl Bookmarks {
 pub struct BookmarkSlice([Bookmark]);
 
 impl BookmarkSlice {
-    pub const EMPTY: &'static BookmarkSlice = unsafe { core::mem::transmute::<&[Bookmark], &Self>(&[]) };
-    pub const EMPTY_MUT: &'static mut BookmarkSlice = unsafe { core::mem::transmute::<&mut [Bookmark], &mut Self>(&mut []) };
-
     #[inline]
     pub fn increment(&mut self, value: usize, true_value: usize) {
         for bookmark in &mut self.0 {
@@ -262,13 +259,13 @@ impl<R: RangeBounds<usize>> Index<R> for BookmarkSlice {
     fn index(&self, index: R) -> &Self::Output {
         match (index.start_bound().map(|&x| Bookmark::new(x, 0)), index.end_bound().map(|&x| Bookmark::new(x, 0))) {
             (Bound::Unbounded, Bound::Unbounded) => self,
-            (Bound::Unbounded, Bound::Included(ref end)) => { let end = self.binary_search(end).unwrap_or_else(identity); if end >= self.len() { BookmarkSlice::EMPTY } else { slice!(self.0[..=end]) } },
+            (Bound::Unbounded, Bound::Included(ref end)) => { let end = self.binary_search(end).unwrap_or_else(identity); if end >= self.len() { slice!([]) } else { slice!(self.0[..=end]) } },
             (Bound::Unbounded, Bound::Excluded(ref end)) => { let end = self.binary_search(end).unwrap_or_else(identity); slice!(self.0[..end]) },
             (Bound::Included(ref start), Bound::Unbounded) => { let start = self.binary_search(start).unwrap_or_else(identity); slice!(self.0[start..]) },
-            (Bound::Included(ref start), Bound::Included(ref end)) => { let start = self.binary_search(start).unwrap_or_else(identity); let end = self.binary_search(end).unwrap_or_else(identity); if end >= self.len() { BookmarkSlice::EMPTY } else { slice!(self.0[start..=end]) } },
+            (Bound::Included(ref start), Bound::Included(ref end)) => { let start = self.binary_search(start).unwrap_or_else(identity); let end = self.binary_search(end).unwrap_or_else(identity); if end >= self.len() { slice!([]) } else { slice!(self.0[start..=end]) } },
             (Bound::Included(ref start), Bound::Excluded(ref end)) => { let start = self.binary_search(start).unwrap_or_else(identity); let end = self.binary_search(end).unwrap_or_else(identity); slice!(self.0[start..end]) },
             (Bound::Excluded(ref start), Bound::Unbounded) => { let start = self.binary_search(start).map_or_else(identity, |x| x + 1); slice!(self.0[start..]) },
-            (Bound::Excluded(ref start), Bound::Included(ref end)) => { let start = self.binary_search(start).map_or_else(identity, |x| x + 1); let end = self.binary_search(end).unwrap_or_else(identity); if end >= self.len() { BookmarkSlice::EMPTY } else { slice!(self.0[start..=end]) } },
+            (Bound::Excluded(ref start), Bound::Included(ref end)) => { let start = self.binary_search(start).map_or_else(identity, |x| x + 1); let end = self.binary_search(end).unwrap_or_else(identity); if end >= self.len() { slice!([]) } else { slice!(self.0[start..=end]) } },
             (Bound::Excluded(ref start), Bound::Excluded(ref end)) => { let start = self.binary_search(start).map_or_else(identity, |x| x + 1); let end = self.binary_search(end).unwrap_or_else(identity); slice!(self.0[start..end]) },
         }
     }
@@ -278,13 +275,13 @@ impl<R: RangeBounds<usize>> IndexMut<R> for BookmarkSlice {
     fn index_mut(&mut self, index: R) -> &mut Self::Output {
         match (index.start_bound().map(|&x| Bookmark::new(x, 0)), index.end_bound().map(|&x| Bookmark::new(x, 0))) {
             (Bound::Unbounded, Bound::Unbounded) => self,
-            (Bound::Unbounded, Bound::Included(ref end)) => { let end = self.binary_search(end).unwrap_or_else(identity); if end >= self.len() { BookmarkSlice::EMPTY_MUT } else { slice_mut!(self.0[..=end]) } },
+            (Bound::Unbounded, Bound::Included(ref end)) => { let end = self.binary_search(end).unwrap_or_else(identity); if end >= self.len() { slice_mut!([]) } else { slice_mut!(self.0[..=end]) } },
             (Bound::Unbounded, Bound::Excluded(ref end)) => { let end = self.binary_search(end).unwrap_or_else(identity); slice_mut!(self.0[..end]) },
             (Bound::Included(ref start), Bound::Unbounded) => { let start = self.binary_search(start).unwrap_or_else(identity); slice_mut!(self.0[start..]) },
-            (Bound::Included(ref start), Bound::Included(ref end)) => { let start = self.binary_search(start).unwrap_or_else(identity); let end = self.binary_search(end).unwrap_or_else(identity); if end >= self.len() { BookmarkSlice::EMPTY_MUT } else { slice_mut!(self.0[start..=end]) } },
+            (Bound::Included(ref start), Bound::Included(ref end)) => { let start = self.binary_search(start).unwrap_or_else(identity); let end = self.binary_search(end).unwrap_or_else(identity); if end >= self.len() { slice_mut!([]) } else { slice_mut!(self.0[start..=end]) } },
             (Bound::Included(ref start), Bound::Excluded(ref end)) => { let start = self.binary_search(start).unwrap_or_else(identity); let end = self.binary_search(end).unwrap_or_else(identity); slice_mut!(self.0[start..end]) },
             (Bound::Excluded(ref start), Bound::Unbounded) => { let start = self.binary_search(start).map_or_else(identity, |x| x + 1); slice_mut!(self.0[start..]) },
-            (Bound::Excluded(ref start), Bound::Included(ref end)) => { let start = self.binary_search(start).map_or_else(identity, |x| x + 1); let end = self.binary_search(end).unwrap_or_else(identity); if end >= self.len() { BookmarkSlice::EMPTY_MUT } else { slice_mut!(self.0[start..=end]) } },
+            (Bound::Excluded(ref start), Bound::Included(ref end)) => { let start = self.binary_search(start).map_or_else(identity, |x| x + 1); let end = self.binary_search(end).unwrap_or_else(identity); if end >= self.len() { slice_mut!([]) } else { slice_mut!(self.0[start..=end]) } },
             (Bound::Excluded(ref start), Bound::Excluded(ref end)) => { let start = self.binary_search(start).map_or_else(identity, |x| x + 1); let end = self.binary_search(end).unwrap_or_else(identity); slice_mut!(self.0[start..end]) },
         }
     }

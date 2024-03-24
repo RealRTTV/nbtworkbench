@@ -52,7 +52,7 @@
             import init, { open_file } from "./nbtworkbench.js?version=2";
             await init();
 
-            const canvas = document.getElementById("canvas")[0];
+            const canvas = document.getElementById("canvas");
 
             dialog.onchange = event => {
                 const file = event.target.files.item(0);
@@ -60,7 +60,6 @@
                     open_file(file.name, new Uint8Array(bytes));
                 })
             };
-
 
             canvas.addEventListener("pointerdown", openDialog);
             canvas.addEventListener("pointerup", openDialog);
