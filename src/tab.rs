@@ -357,6 +357,9 @@ impl Tab {
 	pub fn left_margin(&self, held: Option<&NbtElement>) -> usize { ((self.value.true_height() + held.map_or(0, NbtElement::true_height)).ilog10() as usize + 1) * 8 + 4 + 8 }
 
 	pub fn set_scroll(&mut self, scroll: f32) {
+		#[cfg(target_os = "macos")]
+		const SCROLL_MULTIPLIER: f32 = 4.0;
+		#[cfg(not(target_os = "macos"))]
 		const SCROLL_MULTIPLIER: f32 = 48.0;
 
 		if scroll.is_sign_negative() && self.scroll < (scroll * -SCROLL_MULTIPLIER) as usize {

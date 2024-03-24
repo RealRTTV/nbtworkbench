@@ -202,8 +202,7 @@ impl Workbench {
 						tabs_width += tab.name.width() + 32 + 6 + 6;
 					}
 					tabs_width
-				}
-					.saturating_sub(self.window_width),
+				}.saturating_sub(self.window_width),
 			);
 		} else {
 			let tab = tab_mut!(self);
