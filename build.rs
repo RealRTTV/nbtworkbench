@@ -39,12 +39,12 @@ fn main() {
 
 	if std::env::var("CARGO_CFG_TARGET_OS").unwrap() == "windows" {
 		if let Err(e) = winres::WindowsResource::new()
-			.set_icon_with_id(r"src/assets/build/icon_256.ico", "1")
 			.set_icon_with_id(r"src/assets/build/icon_128.ico", "2")
 			.set_icon_with_id(r"src/assets/build/icon_64.ico", "3")
 			.set_icon_with_id(r"src/assets/build/icon_48.ico", "4")
 			.set_icon_with_id(r"src/assets/build/icon_32.ico", "5")
 			.set_icon_with_id(r"src/assets/build/icon_16.ico", "6")
+			.set_icon_with_id(r"src/assets/build/icon_256.ico", "!")
 			.compile()
 		{
 			eprintln!("Error! {e}");

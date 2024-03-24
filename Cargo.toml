@@ -1,6 +1,6 @@
 [package]
 name = "nbtworkbench"
-version = "1.2.4"
+version = "1.2.5"
 edition = "2021"
 description = "A modern NBT Editor written in Rust designed for performance and efficiency."
 license-file = "LICENSE"
@@ -8,9 +8,10 @@ repository = "https://github.com/RealRTTV/nbtworkbench"
 keywords = ["nbt", "window", "unsafe", "editor", "tree"]
 categories = ["graphics", "rendering", "text-editors", "parser-implementations"]
 
-[lib]
-crate-type = ["cdylib", "rlib"]
-path = "src/main.rs"
+# Required for Wasm target, but breaks `winres`
+#[lib]
+#crate-type = ["cdylib", "rlib"]
+#path = "src/main.rs"
 
 [package.metadata.winres]
 
