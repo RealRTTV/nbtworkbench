@@ -41,10 +41,10 @@ impl Clone for NbtCompound {
 	#[allow(clippy::cast_ptr_alignment)]
 	fn clone(&self) -> Self {
 		unsafe {
-			let boxx = alloc(Layout::new::<CompoundMap>()).cast::<CompoundMap>();
-			boxx.write(self.entries.deref().clone());
+			let box_ptr = alloc(Layout::new::<CompoundMap>()).cast::<CompoundMap>();
+			box_ptr.write(self.entries.deref().clone());
 			Self {
-				entries: Box::from_raw(boxx),
+				entries: Box::from_raw(box_ptr),
 				height: self.height,
 				true_height: self.true_height,
 				max_depth: self.max_depth,
@@ -285,7 +285,6 @@ impl NbtCompound {
 					let mut y = ctx.y_offset;
 					for (name, value) in self.children() {
 						ctx.check_for_key_duplicate(|text, _| text == name, false);
-						// first check required so this don't render when it's the only selected
 						if y.saturating_sub(remaining_scroll * 16) != ctx.selected_y && y.saturating_sub(remaining_scroll * 16) >= HEADER_SIZE && ctx.key_duplicate_error {
 							ctx.red_line_numbers[1] = y.saturating_sub(remaining_scroll * 16);
 							ctx.draw_error_underline(
@@ -487,7 +486,6 @@ impl NbtCompound {
 					let mut y = ctx.y_offset;
 					for (name, value) in self.children() {
 						ctx.check_for_key_duplicate(|text, _| text == name, false);
-						// first check required so this don't render when it's the only selected
 						if y.saturating_sub(*remaining_scroll * 16) != ctx.selected_y && y.saturating_sub(*remaining_scroll * 16) >= HEADER_SIZE && ctx.key_duplicate_error {
 							ctx.red_line_numbers[1] = y.saturating_sub(*remaining_scroll * 16);
 							ctx.draw_error_underline(
@@ -1012,7 +1010,7 @@ impl CompoundMap {
 		};
 		let mut new_bookmarks = Box::<[Bookmark]>::new_uninit_slice(bookmarks[true_line_number..true_line_number + true_height].len());
 		let mut new_bookmarks_len = 0;
-		// yeah, it's hacky but there's not much else I *can* do. plus: it works extremely well.
+		// yeah, it's hacky... but there's not much else I *can* do. plus: it works extremely well.
 		for (idx, entry) in self.entries.iter_mut().enumerate() {
 			entry.hash = idx as u64;
 		}

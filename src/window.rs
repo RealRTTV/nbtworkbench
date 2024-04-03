@@ -129,7 +129,7 @@ pub struct State<'window> {
 }
 
 impl<'window> State<'window> {
-	#[allow(clippy::too_many_lines)] // yeah, but.... what am I supposed to do?
+	#[allow(clippy::too_many_lines)] // yeah, but... what am I supposed to do?
 	async fn new(window: &'window Window, size: PhysicalSize<u32>) -> State<'window> {
 		let instance = Instance::new(InstanceDescriptor {
 			backends: Backends::all(),

@@ -99,7 +99,7 @@ fn get_predicate(args: &mut Vec<String>) -> SearchPredicate {
 }
 
 fn file_size(path: impl AsRef<Path>) -> Option<u64> {
-    File::open(path).ok().and_then(|file| file.metadata().ok()).map(|metadata| metadata.len() as u64)
+    File::open(path).ok().and_then(|file| file.metadata().ok()).map(|metadata| metadata.len())
 }
 
 fn increment_progress_bar(completed: &AtomicU64, size: u64, total: u64, action: &str) {

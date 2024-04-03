@@ -41,20 +41,20 @@ impl Clone for NbtRegion {
 	fn clone(&self) -> Self {
 		unsafe {
 			let (map, chunks) = &*self.chunks;
-			let boxx = alloc(Layout::new::<(Vec<u16>, [NbtElement; 32 * 32])>()).cast::<(Vec<u16>, [NbtElement; 32 * 32])>();
-			let mapp = alloc(Layout::array::<u16>(map.len()).unwrap_unchecked()).cast::<u16>();
-			let chunkss = alloc(Layout::array::<NbtElement>(32 * 32).unwrap_unchecked()).cast::<NbtElement>();
-			map.as_ptr().copy_to_nonoverlapping(mapp, map.len());
+			let box_ptr = alloc(Layout::new::<(Vec<u16>, [NbtElement; 32 * 32])>()).cast::<(Vec<u16>, [NbtElement; 32 * 32])>();
+			let map_ptr = alloc(Layout::array::<u16>(map.len()).unwrap_unchecked()).cast::<u16>();
+			let chunks_ptr = alloc(Layout::array::<NbtElement>(32 * 32).unwrap_unchecked()).cast::<NbtElement>();
+			map.as_ptr().copy_to_nonoverlapping(map_ptr, map.len());
 			for n in 0..1024 {
-				chunkss.add(n).write(chunks.get_unchecked(n).clone());
+				chunks_ptr.add(n).write(chunks.get_unchecked(n).clone());
 			}
-			boxx.write((
-				Vec::from_raw_parts(mapp, map.len(), map.len()),
-				chunkss.cast::<[NbtElement; 32 * 32]>().read(),
+			box_ptr.write((
+				Vec::from_raw_parts(map_ptr, map.len(), map.len()),
+				chunks_ptr.cast::<[NbtElement; 32 * 32]>().read(),
 			));
 
 			Self {
-				chunks: Box::from_raw(boxx),
+				chunks: Box::from_raw(box_ptr),
 				height: self.height,
 				true_height: self.true_height,
 				max_depth: self.max_depth,
@@ -337,7 +337,7 @@ impl NbtRegion {
 	///
 	/// * `value` must be variant `NbtElement::Chunk`
 	///
-	/// * `self.map` must not contain a chunk in this `pos` already
+	/// * `self.map` must not contain a chunk in this `pos` yet
 	///
 	/// * `pos` is between 0..=1023
 	#[inline]
@@ -450,7 +450,6 @@ impl NbtRegion {
 								|key, value| key.parse::<u8>().ok() == x.parse::<u8>().ok() && value.is_some_and(|value| value.parse::<u8>().ok() == z.parse::<u8>().ok()),
 								true,
 							);
-							// first check required so this don't render when it's the only selected
 							let y2 = y.saturating_sub(remaining_scroll * 16);
 							if y2 != ctx.selected_y && y2 >= HEADER_SIZE && ctx.key_duplicate_error {
 								ctx.red_line_numbers[1] = y2;
@@ -745,10 +744,10 @@ impl Clone for NbtChunk {
 	#[inline]
 	fn clone(&self) -> Self {
 		unsafe {
-			let boxx = alloc(Layout::new::<NbtCompound>()).cast::<NbtCompound>();
-			boxx.write(self.inner.deref().clone());
+			let box_ptr = alloc(Layout::new::<NbtCompound>()).cast::<NbtCompound>();
+			box_ptr.write(self.inner.deref().clone());
 			Self {
-				inner: Box::from_raw(boxx),
+				inner: Box::from_raw(box_ptr),
 				last_modified: self.last_modified,
 				compression: self.compression,
 				x: self.x,
@@ -859,7 +858,6 @@ impl NbtChunk {
 					let mut y = ctx.y_offset;
 					for (name, value) in self.children() {
 						ctx.check_for_key_duplicate(|text, _| text == name, false);
-						// first check required so this don't render when it's the only selected
 						if y.saturating_sub(*remaining_scroll * 16) != ctx.selected_y && y.saturating_sub(*remaining_scroll * 16) >= HEADER_SIZE && ctx.key_duplicate_error {
 							ctx.red_line_numbers[1] = y.saturating_sub(*remaining_scroll * 16);
 							ctx.draw_error_underline(

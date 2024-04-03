@@ -22,6 +22,7 @@
     stmt_expr_attributes,
     unchecked_math
 )]
+#![feature(panic_update_hook)]
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
 use std::cell::UnsafeCell;
@@ -158,14 +159,6 @@ macro_rules! log {
 	};
 }
 
-#[macro_export]
-macro_rules! debg {
-	() => {
-		#[cfg(debug_assertions)]
-		$crate::log!("[{}:{}:{}]", file!(), line!(), column!())
-	};
-}
-
 #[wasm_bindgen(module = "/web/script.js")]
 #[cfg(target_arch = "wasm32")]
 extern "C" {
@@ -180,6 +173,9 @@ extern "C" {
 
 	#[wasm_bindgen(js_name = "save")]
 	fn save(name: &str, bytes: Vec<u8>);
+
+	#[wasm_bindgen(js_name = "onPanic")]
+	fn on_panic(msg: String);
 }
 
 pub static mut WORKBENCH: UnsafeCell<Workbench> = UnsafeCell::new(unsafe { Workbench::uninit() });
@@ -200,7 +196,9 @@ pub fn open_file(name: String, bytes: Vec<u8>) {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen(start))]
 #[cfg(target_arch = "wasm32")]
 pub fn wasm_main() {
-	::console_error_panic_hook::set_once();
+	std::panic::set_hook(Box::new(|info| {
+		on_panic(info.to_string());
+	}));
 	wasm_bindgen_futures::spawn_local(async move {
 		window::run().await;
 	});
@@ -229,7 +227,7 @@ pub fn main() -> ! {
 	          --version, -v       Displays the version of nbtworkbench you're running.
 	          -?, -h, --help, /?  Displays this dialog.
 	          --mode, -m          Changes the `find` mode to take the <query> field as either, a containing substring, a regex (match whole), or snbt. [default: normal]
-	          --search, -s        Searches for results matching the <query> in either, the key, the value, or both (note that substrings and regex saerch the same pattern in both key and value, while the regex uses it's key field to match equal strings). [default: all]
+	          --search, -s        Searches for results matching the <query> in either, the key, the value, or both (note that substrings and regex search the same pattern in both key and value, while the regex uses it's key field to match equal strings). [default: all]
 	          --format, -f        Specifies the format to be reformatted to; either `nbt`, `snbt`, `dat/dat_old/gzip` or `zlib`.
 	          --out-dir, -d       Specifies the output directory. [default: ./]
 	          --out-ext, -e       Specifies the output file extension (if not specified, it will infer from --format)"#
@@ -251,7 +249,7 @@ pub fn main() -> ! {
 /// * gear icon to swap toolbar with settings panel
 /// * __ctrl + h__, open a playground `nbt` file to help with user interaction (bonus points if I have some way to tell if you haven't used this editor before)
 /// * [`last_modified`](NbtChunk) field actually gets some impl
-/// * autosave
+/// * auto save
 /// * blur behind tooltip
 /// # Major Features
 /// * macros
@@ -578,7 +576,7 @@ impl SortAlgorithm {
 	pub fn sort(self, map: &mut CompoundMap) {
 		if let Self::None = self { return; }
 		let hashes = map.entries.iter().map(|entry| entry.hash).collect::<Vec<_>>();
-		// yeah, it's hacky but there's not much else I *can* do. plus: it works extremely well.
+		// yeah, it's hacky... but there's not much else I *can* do. plus: it works extremely well.
 		for (idx, entry) in map.entries.iter_mut().enumerate() {
 			entry.hash = idx as u64;
 		}
@@ -925,8 +923,9 @@ pub struct LinkedQueue<T> {
 // perf enhancement
 impl<T> Drop for LinkedQueue<T> {
 	fn drop(&mut self) {
-		while let Some(box SinglyLinkedNode { value: _, prev }) = self.tail.take() {
-			self.tail = prev;
+		while let Some(box SinglyLinkedNode { value: _, mut prev }) = self.tail.take() {
+			// take is not required, but then intellij gets upset.
+			self.tail = prev.take();
 		}
 	}
 }
@@ -974,8 +973,9 @@ impl<T> LinkedQueue<T> {
 	pub const fn is_empty(&self) -> bool { self.len == 0 }
 
 	pub fn clear(&mut self) {
-		while let Some(box SinglyLinkedNode { value: _, prev }) = self.tail.take() {
-			self.tail = prev;
+		while let Some(box SinglyLinkedNode { value: _, mut prev }) = self.tail.take() {
+			// take is not required, but then intellij gets upset.
+			self.tail = prev.take();
 		}
 		self.len = 0;
 	}
@@ -1305,7 +1305,7 @@ impl<T> OptionExt<T> for Option<T> {
 ///
 /// # Panics
 ///
-/// * When `debug_assertions` is true, it panics with the respective `msg`
+/// * When `debug_assertions` are true, it panics with the respective `msg`
 #[allow(unused_variables)] // intellij being freaky
 pub unsafe fn panic_unchecked(msg: &str) -> ! {
 	#[cfg(debug_assertions)]

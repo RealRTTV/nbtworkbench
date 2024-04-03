@@ -209,7 +209,7 @@ impl ElementAction {
 						if !open_file(&path.display().to_string()) { break 'm; }
 						*_subscription = Some(FileUpdateSubscription {
 							subscription_type,
-							indices,
+							indices: indices.clone(),
 							rx,
 							watcher,
 							tab_uuid: _tab_uuid,
@@ -248,7 +248,7 @@ impl ElementAction {
 						break 'm;
 					};
 					if let Ok(mut file) = OpenOptions::new().write(true).create(true).open(&path) {
-						if let Some(key) = key
+						if let Some(key) = key.as_deref()
 							&& element.id() != NbtChunk::ID
 						{
 							if write!(&mut file, "{key}: ").is_err() { break 'm; }
@@ -259,7 +259,7 @@ impl ElementAction {
 						if !open_file(&path.display().to_string()) { break 'm; }
 						*_subscription = Some(FileUpdateSubscription {
 							subscription_type: FileUpdateSubscriptionType::Snbt,
-							indices,
+							indices: indices.clone(),
 							rx,
 							watcher,
 							tab_uuid: _tab_uuid,

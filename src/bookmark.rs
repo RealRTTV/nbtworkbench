@@ -122,7 +122,7 @@ impl Bookmarks {
     }
 
     /// # Safety
-    /// `inner` must be sorted least to greatest, i.e. it is up to the caller to assure `inner.is_sorted()`
+    /// `inner` must be sorted least to greatest, i.e.; it is up to the caller to assure `inner.is_sorted()`
     #[inline]
     pub unsafe fn from_raw(inner: Vec<Bookmark>) -> Self {
         Self {

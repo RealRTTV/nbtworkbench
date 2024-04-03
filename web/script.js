@@ -1,14 +1,14 @@
 export function tryOpenDialog() {
-    shouldOpenDialog = true;
+    document.getElementById("shouldOpenDialog").innerText = "true";
 }
 
 export function getClipboard() {
-    return clipboard;
+    return document.getElementById("clipboard").innerText;
 }
 
 export function onInput() {
     if (!navigator.userAgent.toLowerCase().includes("firefox") && !navigator.userAgent.toLowerCase().includes("safari")) {
-        window.navigator.clipboard.readText().then((str) => clipboard = str).catch(x => x)
+        window.navigator.clipboard.readText().then((str) => document.getElementById("clipboard").innerText = str).catch(x => x)
     }
 }
 
@@ -17,4 +17,13 @@ export function save(name, bytes) {
     download.href = URL.createObjectURL(new Blob([bytes], { endings: "transparent" }));
     download.download = name;
     download.click();
+}
+
+export function onPanic(error) {
+    let stack = new Error().stack;
+    document.getElementById("crashReportRaw").innerText = error + "\n\nStack:\n\n" + stack + "\n";
+    let panic = document.getElementById("panic");
+    panic.style.opacity = "0.8";
+    panic.style.display = "grid";
+    panic.style.zIndex = "1";
 }

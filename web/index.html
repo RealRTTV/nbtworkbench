@@ -32,20 +32,53 @@
                 overflow: hidden;
                 background-color: #0F0F0F;
             }
+
+            #panic {
+                width: 100%;
+                height: 100%;
+                position: absolute;
+                top: 0;
+                left: 0;
+                display: grid;
+                opacity: 0;
+                transition: opacity 0.5s ease-in-out;
+                -moz-transition: opacity 0.5s ease-in-out;
+                -o-transition: opacity 0.5s ease-in-out;
+                -webkit-transition: opacity 0.5s ease-in-out;
+                z-index: -1;
+            }
+
+            #panic_background {
+                background-color: #FF7F7F;
+            }
+
+            #panic_text {
+                position: absolute;
+                left: 50%;
+                top: 45%;
+                transform: translate(-50%, -55%);
+                color: white;
+                text-align: center;
+                font-size: 30px;
+                font-family: Calibri, sans-serif
+            }
         </style>
     </head>
     <body>
         <input type="file" accept=".nbt,.snbt,.dat,.dat_old,.dat_mcr,.old,.mca,.mcr,.csv" style="display:none" id="file_dialog"/>
-        <a style="display:none" id="download"></a>
+        <div style="display:none">
+            <a id="download"></a>
+            <a id="clipboard"></a>
+            <a id="shouldOpenDialog"></a>
+            <a id="crashReportRaw"></a>
+        </div>
         <script type="module">
             const dialog = document.getElementById("file_dialog");
 
-            let clipboard = '';
-            let shouldOpenDialog = false;
-
             function openDialog(event) {
+                let shouldOpenDialog = document.getElementById("shouldOpenDialog").innerText === "true";
                 if (!shouldOpenDialog) return;
-                shouldOpenDialog = false;
+                document.getElementById("shouldOpenDialog").innerText = "false";
                 dialog.click();
             }
 
@@ -79,5 +112,17 @@
                 })
             }
         </script>
+        <div id="panic">
+            <div id="panic_background">
+                <div id="panic_text">
+                    <h1 style="font-size: 60px; font-family: Arial, sans-serif">NBT Workbench has crashed!</h1>
+                    <p>If you'd like to help out and report this problem, please:</p>
+                    <ul style="text-align: left; left: 50%; transform: translate(-50%, 0%); display: inline-block; position: absolute; margin: 0">
+                        <li> <a style="text-decoration: underline; cursor: pointer" onclick="window.navigator.clipboard.writeText(document.getElementById('crashReportRaw').innerText)">Copy your crash report</a> </li>
+                        <li> <p>Click <a href="https://github.com/RealRTTV/nbtworkbench/issues" style="color: white">here</a> to report your issue!</p> </li>
+                    </ul>
+                </div>
+            </div>
+        </div>
     </body>
 </html>

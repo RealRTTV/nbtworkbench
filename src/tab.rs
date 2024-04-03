@@ -44,7 +44,6 @@ pub struct Tab {
 }
 
 impl Tab {
-	#[must_use]
 	pub fn new(nbt: NbtElement, path: &Path, compression: FileFormat, window_height: usize, window_width: usize) -> Result<Self> {
 		if !(nbt.id() == NbtCompound::ID || nbt.id() == NbtRegion::ID) { return Err(anyhow!("Parsed NBT was not a Compound or Region")) }
 
@@ -295,7 +294,7 @@ impl Tab {
 
 			{
 				let uv = if mx == Some(208) && !skip_tooltips {
-					builder.draw_tooltip(&["Clipboard (C)"], (mouse_x, mouse_y), false);
+					builder.draw_tooltip(&["Clipboard (V)"], (mouse_x, mouse_y), false);
 					UNKNOWN_NBT_UV
 				} else {
 					UNKNOWN_NBT_GHOST_UV
@@ -356,6 +355,7 @@ impl Tab {
 	#[must_use]
 	pub fn left_margin(&self, held: Option<&NbtElement>) -> usize { ((self.value.true_height() + held.map_or(0, NbtElement::true_height)).ilog10() as usize + 1) * 8 + 4 + 8 }
 
+	#[inline]
 	pub fn set_scroll(&mut self, scroll: f32) {
 		#[cfg(target_os = "macos")]
 		const SCROLL_MULTIPLIER: f32 = 4.0;
@@ -372,6 +372,7 @@ impl Tab {
 		self.scroll = self.scroll();
 	}
 
+	#[inline]
 	pub fn set_horizontal_scroll(&mut self, scroll: f32, held: Option<&NbtElement>) {
 		#[cfg(target_os = "macos")]
 		const SCROLL_MULTIPLIER: f32 = 4.0;

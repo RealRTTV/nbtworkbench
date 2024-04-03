@@ -43,13 +43,13 @@ impl Clone for NbtList {
 		unsafe {
 			let len = self.elements.len();
 			let ptr = alloc(Layout::array::<NbtElement>(len).unwrap_unchecked()).cast::<NbtElement>();
-			let boxx = alloc(Layout::new::<Vec<NbtElement>>()).cast::<Vec<NbtElement>>();
+			let box_ptr = alloc(Layout::new::<Vec<NbtElement>>()).cast::<Vec<NbtElement>>();
 			for n in 0..len {
 				ptr.add(n).write(self.elements.get_unchecked(n).clone());
 			}
-			boxx.write(Vec::from_raw_parts(ptr.cast::<NbtElement>(), len, len));
+			box_ptr.write(Vec::from_raw_parts(ptr.cast::<NbtElement>(), len, len));
 			Self {
-				elements: Box::from_raw(boxx),
+				elements: Box::from_raw(box_ptr),
 				height: self.height,
 				true_height: self.true_height,
 				max_depth: self.max_depth,
@@ -93,10 +93,10 @@ impl NbtList {
 				true_height += element.true_height() as u32;
 				ptr.add(n).write(element);
 			}
-			let boxx = alloc(Layout::new::<Vec<NbtElement>>()).cast::<Vec<NbtElement>>();
-			boxx.write(Vec::from_raw_parts(ptr, len, len));
+			let box_ptr = alloc(Layout::new::<Vec<NbtElement>>()).cast::<Vec<NbtElement>>();
+			box_ptr.write(Vec::from_raw_parts(ptr, len, len));
 			Some(Self {
-				elements: Box::from_raw(boxx),
+				elements: Box::from_raw(box_ptr),
 				height: 1 + len as u32,
 				true_height,
 				max_depth: 0,
@@ -544,7 +544,11 @@ impl<'a> Iterator for ValueMutIterator<'a> {
 	fn next(&mut self) -> Option<Self::Item> {
 		match self {
 			Self::Generic(iter) => iter.next(),
-			// SAFETY: the only problem here is aliasing, which is assumed to not occur due to `map` indices not being identical, if they are identical it's UB, so all we need is to check if we have two pointers to the same data, which doesn't occur in mutation
+			// SAFETY: the only problem here is aliasing,
+			// which is assumed to not occur due to `map` indices not being identical
+			// (if they are identical it's UB).
+			// so all we need is to check if we have two pointers to the same data,
+			// which doesn't occur in mutation
 			Self::Region(array, iter) => unsafe {
 				let chunk = iter.next().map(|&x| {
 					array
@@ -571,7 +575,11 @@ impl<'a> DoubleEndedIterator for ValueMutIterator<'a> {
 	fn next_back(&mut self) -> Option<Self::Item> {
 		match self {
 			Self::Generic(iter) => iter.next_back(),
-			// SAFETY: the only problem here is aliasing, which is assumed to not occur due to `map` indices not being identical, if they are identical it's UB, so all we need is to check if we have two pointers to the same data, which doesn't occur in mutation
+			// SAFETY: the only problem here is aliasing,
+			// which is assumed to not occur due to `map` indices not being identical
+			// (if they are identical it's UB).
+			// so all we need is to check if we have two pointers to the same data,
+			// which doesn't occur in mutation
 			Self::Region(array, iter) => unsafe {
 				let chunk = iter.next_back().map(|&x| {
 					array

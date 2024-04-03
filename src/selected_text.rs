@@ -11,7 +11,7 @@ use crate::text::{Cachelike, SelectedTextKeyResult, Text};
 use crate::vertex_buffer_builder::VertexBufferBuilder;
 
 #[derive(Clone, Debug)]
-#[allow(clippy::module_name_repetitions)] // yeah no it's better like this
+#[allow(clippy::module_name_repetitions)] // yeah no, it's better like this
 pub struct SelectedTextCache {
 	keyfix: Option<(Box<str>, TextColor)>,
 	value: Box<str>,
@@ -269,7 +269,7 @@ impl SelectedText {
 	pub fn width(&self) -> usize { self.prefix.0.width() + self.keyfix.as_ref().map(|x| x.0.width()).unwrap_or(0) + self.value.width() + self.valuefix.as_ref().map(|x| x.0.width()).unwrap_or(0) + self.suffix.0.width() }
 
 	#[cfg_attr(not(debug_assertions), inline)]
-	#[allow(clippy::cognitive_complexity, clippy::too_many_lines)] // i handled this fn well
+	#[allow(clippy::cognitive_complexity, clippy::too_many_lines)] // I handled this fn well
 	#[must_use]
 	pub fn on_key_press(&mut self, key: KeyCode, char: Option<char>, flags: u8) -> SelectedTextKeyResult {
 		if key == KeyCode::ArrowUp {

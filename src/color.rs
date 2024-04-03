@@ -19,6 +19,7 @@ pub enum TextColor {
 	TreeString,
 	TreeKey,
 	TreePrimitive,
+	Custom(u32),
 }
 
 impl TextColor {
@@ -43,6 +44,7 @@ impl TextColor {
 			Self::TreeString => 0x7FE9AC,
 			Self::TreeKey => 0x6EADE2,
 			Self::TreePrimitive => 0xD19A66,
+			Self::Custom(value) => value & 0xFFFFFF,
 		}
 	}
 }

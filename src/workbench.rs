@@ -1,5 +1,4 @@
 use std::fmt::Write;
-use std::fs::read;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 use std::sync::mpsc::TryRecvError;
@@ -127,7 +126,7 @@ impl Workbench {
 				.nth(1)
 				.and_then(|x| PathBuf::from_str(&x).ok())
 			{
-				if let Err(e) = workbench.on_open_file(path, read(path).unwrap_or(vec![]), window_properties) {
+				if let Err(e) = workbench.on_open_file(path, std::fs::read(path).unwrap_or(vec![]), window_properties) {
 					workbench.alert(Alert::new("Error!", TextColor::Red, e.to_string()))
 				} else {
 					break 'create_tab;
@@ -437,8 +436,6 @@ impl Workbench {
 							return true;
 						}
 					}
-				} else {
-					// features, idk
 				}
 			}
 			true
@@ -729,7 +726,7 @@ impl Workbench {
 			value.1.shut();
 			let _ = tab.bookmarks.remove(line_number..line_number + true_height);
 			tab.bookmarks[line_number..].decrement(height, true_height);
-			// no need for encompass_or_equal since that's handled by `drop`
+			// no need for encompass_or_equal since `drop` handles that
 			self.held_entry = HeldEntry::FromKnown(value, indices.into_boxed_slice());
 			true
 		} else {
@@ -1370,7 +1367,7 @@ impl Workbench {
 	pub fn shift_selected_text_up(&mut self) {
 		let tab = tab_mut!(self);
 		if let Some(SelectedText(Text { additional: SelectedTextAdditional { y, indices, .. }, .. })) = &mut tab.selected_text {
-			if indices.is_empty() { return } // well it could be empty
+			if indices.is_empty() { return } // well, it could be empty
 			let child_idx = unsafe {
 				indices
 					.last()
@@ -1427,7 +1424,7 @@ impl Workbench {
 	pub fn shift_selected_text_down(&mut self) {
 		let tab = tab_mut!(self);
 		if let Some(SelectedText(Text { additional: SelectedTextAdditional { y, indices, .. }, .. })) = &mut tab.selected_text {
-			// well it could be empty
+			// well, it could be empty
 			if indices.is_empty() { return }
 			let child_idx = unsafe {
 				indices
@@ -1553,7 +1550,7 @@ impl Workbench {
 			} else {
 				let total = sum_indices(indices.iter().copied(), &tab.value) - 1;
 				let mut indices = vec![];
-				// SAFETY: total is -1'd meaning that it's original range of 1..=root.height() is now ..root.height(), which is in range
+				// SAFETY: total is -1'd means that it's original range of 1..=root.height() is now ..root.height(), which is in range
  				let (k, v) = 'w: {
 					let mut iter = TraverseParents::new(total, &mut tab.value);
 					while let Some((position, idx, key, value, _)) = iter.next() {
@@ -1608,7 +1605,7 @@ impl Workbench {
 		let total = if let Some(SelectedText(Text { additional: SelectedTextAdditional { indices, .. }, .. })) = tab.selected_text.as_ref() {
 			let mut total = sum_indices(indices.iter().copied(), &tab.value);
 			total += 1; // move down
-			// down needs a check that it doesn't surpass the end
+			// needs a check that it doesn't surpass the end
 			if total >= tab.value.height() { return }
 			total
 		} else {
@@ -2144,7 +2141,7 @@ impl Workbench {
 						(None, NbtElement::from_id(NbtCompound::ID))
 					} else if key == KeyCode::Backquote && tab.value.id() == NbtRegion::ID {
 						(None, NbtElement::from_id(NbtChunk::ID))
-					} else if key == KeyCode::KeyC {
+					} else if key == KeyCode::KeyV {
 						let Some(clipboard) = get_clipboard() else {
 							self.alert(Alert::new("Error!", TextColor::Red, "Failed to get clipboard"));
 							return true;
@@ -2325,7 +2322,7 @@ impl Workbench {
 		let mut ctx = RenderContext::new(selected_y, selected_key, selected_value, selecting_key, ghost, left_margin, (self.mouse_x, self.mouse_y), tab.freehand_mode);
 		if self.mouse_y >= HEADER_SIZE && self.action_wheel.is_none() {
 			builder.draw_texture_region_z(
-				(0, (self.mouse_y & !15)),
+				(0, self.mouse_y & !15),
 				BASE_Z,
 				HOVERED_STRIPE_UV,
 				(builder.window_width(), 16),
@@ -2554,8 +2551,6 @@ impl Workbench {
 					hovered,
 				);
 			}
-		} else {
-			// features, idk
 		}
 	}
 

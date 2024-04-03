@@ -131,63 +131,68 @@ impl Clone for NbtElement {
 
 #[allow(non_snake_case)]
 impl NbtElement {
+	#[inline]
+	pub fn set_id(&mut self, id: u8) {
+		unsafe { core::ptr::write(core::ptr::addr_of_mut!(self.id.id), id); }
+	}
+	
 	#[must_use]
 	#[inline]
-	pub const fn Byte(this: NbtByte) -> Self {
+	pub fn Byte(this: NbtByte) -> Self {
 		let mut this = Self {
 			byte: ManuallyDrop::new(this),
 		};
-		this.id.id = NbtByte::ID;
+		this.set_id(NbtByte::ID);
 		this
 	}
 
 	#[must_use]
 	#[inline]
-	pub const fn Short(this: NbtShort) -> Self {
+	pub fn Short(this: NbtShort) -> Self {
 		let mut this = Self {
 			short: ManuallyDrop::new(this),
 		};
-		this.id.id = NbtShort::ID;
+		this.set_id(NbtShort::ID);
 		this
 	}
 
 	#[must_use]
 	#[inline]
-	pub const fn Int(this: NbtInt) -> Self {
+	pub fn Int(this: NbtInt) -> Self {
 		let mut this = Self {
 			int: ManuallyDrop::new(this),
 		};
-		this.id.id = NbtInt::ID;
+		this.set_id(NbtInt::ID);
 		this
 	}
 
 	#[must_use]
 	#[inline]
-	pub const fn Long(this: NbtLong) -> Self {
+	pub fn Long(this: NbtLong) -> Self {
 		let mut this = Self {
 			long: ManuallyDrop::new(this),
 		};
-		this.id.id = NbtLong::ID;
+		this.set_id(NbtLong::ID);
 		this
 	}
 
 	#[must_use]
 	#[inline]
-	pub const fn Float(this: NbtFloat) -> Self {
+	pub fn Float(this: NbtFloat) -> Self {
 		let mut this = Self {
 			float: ManuallyDrop::new(this),
 		};
-		this.id.id = NbtFloat::ID;
+		this.set_id(NbtFloat::ID);
 		this
 	}
 
 	#[must_use]
 	#[inline]
-	pub const fn Double(this: NbtDouble) -> Self {
+	pub fn Double(this: NbtDouble) -> Self {
 		let mut this = Self {
 			double: ManuallyDrop::new(this),
 		};
-		this.id.id = NbtDouble::ID;
+		this.set_id(NbtDouble::ID);
 		this
 	}
 
@@ -197,7 +202,7 @@ impl NbtElement {
 		let mut this = Self {
 			byte_array: ManuallyDrop::new(this),
 		};
-		this.id.id = NbtByteArray::ID;
+		this.set_id(NbtByteArray::ID);
 		this
 	}
 
@@ -207,7 +212,7 @@ impl NbtElement {
 		let mut this = Self {
 			string: ManuallyDrop::new(this),
 		};
-		this.id.id = NbtString::ID;
+		this.set_id(NbtString::ID);
 		this
 	}
 
@@ -217,7 +222,7 @@ impl NbtElement {
 		let mut this = Self {
 			list: ManuallyDrop::new(this),
 		};
-		this.id.id = NbtList::ID;
+		this.set_id(NbtList::ID);
 		this
 	}
 
@@ -227,16 +232,17 @@ impl NbtElement {
 		let mut this = Self {
 			compound: ManuallyDrop::new(this),
 		};
-		this.id.id = NbtCompound::ID;
+		this.set_id(NbtCompound::ID);
 		this
 	}
 
 	#[must_use]
+	#[inline]
 	pub fn IntArray(this: NbtIntArray) -> Self {
 		let mut this = Self {
 			int_array: ManuallyDrop::new(this),
 		};
-		this.id.id = NbtIntArray::ID;
+		this.set_id(NbtIntArray::ID);
 		this
 	}
 
@@ -246,7 +252,7 @@ impl NbtElement {
 		let mut this = Self {
 			long_array: ManuallyDrop::new(this),
 		};
-		this.id.id = NbtLongArray::ID;
+		this.set_id(NbtLongArray::ID);
 		this
 	}
 
@@ -256,7 +262,7 @@ impl NbtElement {
 		let mut this = Self {
 			chunk: ManuallyDrop::new(this),
 		};
-		this.id.id = NbtChunk::ID;
+		this.set_id(NbtChunk::ID);
 		this
 	}
 
@@ -266,7 +272,7 @@ impl NbtElement {
 		let mut this = Self {
 			region: ManuallyDrop::new(this),
 		};
-		this.id.id = NbtRegion::ID;
+		this.set_id(NbtRegion::ID);
 		this
 	}
 }
@@ -305,10 +311,8 @@ impl NbtElement {
 			s = s2.trim_start();
 			return if let Some(s2) = s.strip_prefix('f') {
 				Some((s2.trim_start(), Self::Float(NbtFloat { value: f32::NAN })))
-			} else if let Some(s2) = s.strip_prefix('d') {
-				Some((s2.trim_start(), Self::Double(NbtDouble { value: f64::NAN })))
 			} else {
-				Some((s2.trim_start(), Self::Double(NbtDouble { value: f64::NAN })))
+				Some((s2.strip_prefix('d').unwrap_or(s2).trim_start(), Self::Double(NbtDouble { value: f64::NAN })))
 			};
 		}
 
@@ -321,16 +325,9 @@ impl NbtElement {
 						value: f32::INFINITY,
 					}),
 				))
-			} else if let Some(s2) = s.strip_prefix('d') {
-				Some((
-					s2.trim_start(),
-					Self::Double(NbtDouble {
-						value: f64::INFINITY,
-					}),
-				))
 			} else {
 				Some((
-					s2.trim_start(),
+					s2.strip_prefix('d').unwrap_or(s2).trim_start(),
 					Self::Double(NbtDouble {
 						value: f64::INFINITY,
 					}),
@@ -392,7 +389,7 @@ impl NbtElement {
 			digit_end_idx
 		};
 		if digit_end_idx > 0 {
-			let suffix = (s[digit_end_idx..])
+			let suffix = s[digit_end_idx..]
 				.trim_start()
 				.as_bytes()
 				.first()
@@ -401,36 +398,36 @@ impl NbtElement {
 				Some(b'b') => Some((
 					&s[(digit_end_idx + 1)..],
 					Self::Byte(NbtByte {
-						value: (s[..digit_end_idx]).parse().ok()?,
+						value: s[..digit_end_idx].parse().ok()?,
 					}),
 				)),
 				Some(b's') => Some((
 					&s[(digit_end_idx + 1)..],
 					Self::Short(NbtShort {
-						value: (s[..digit_end_idx]).parse().ok()?,
+						value: s[..digit_end_idx].parse().ok()?,
 					}),
 				)),
 				Some(b'l') => Some((
 					&s[(digit_end_idx + 1)..],
 					Self::Long(NbtLong {
-						value: (s[..digit_end_idx]).parse().ok()?,
+						value: s[..digit_end_idx].parse().ok()?,
 					}),
 				)),
 				Some(b'f') => Some((
 					&s[(digit_end_idx + 1)..],
 					Self::Float(NbtFloat {
-						value: (s[..digit_end_idx]).parse().ok()?,
+						value: s[..digit_end_idx].parse().ok()?,
 					}),
 				)),
 				Some(b'd') => Some((
 					&s[(digit_end_idx + 1)..],
 					Self::Double(NbtDouble {
-						value: (s[..digit_end_idx]).parse().ok()?,
+						value: s[..digit_end_idx].parse().ok()?,
 					}),
 				)),
 				Some(b'|') => Some({
 					let mut s = s;
-					let Ok(x @ 0..=31) = (s[..digit_end_idx]).parse::<u8>() else {
+					let Ok(x @ 0..=31) = s[..digit_end_idx].parse::<u8>() else {
 						return None;
 					};
 					s = s[digit_end_idx..].trim_start().split_at(1).1.trim_start();
@@ -942,7 +939,7 @@ impl NbtElement {
 	///
 	/// * `self` cannot contain that specific variant of `Self`, i.e. `Self::NbtByte` in an `Self::NbtIntArray`
 	///
-	/// If any changes are made to this error list then duplicate may have to be updated as it relies on this never occurring
+	/// If any changes are made to this error list, then the duplicate may have to be updated as it relies on this never occurring
 	#[inline]
 	pub fn insert(&mut self, idx: usize, value: Self) -> Result<(), Self> {
 		unsafe {
