@@ -6,7 +6,7 @@ use std::ptr::NonNull;
 
 use compact_str::CompactString;
 
-use crate::assets::{BASE_Z, JUST_OVERLAPPING_BASE_TEXT_Z, STRING_UV};
+use crate::assets::{BASE_Z, JUST_OVERLAPPING_BASE_TEXT_Z, STRING_UV, ZOffset};
 use crate::decoder::Decoder;
 use crate::encoder::UncheckedBufWriter;
 use crate::{RenderContext, StrExt, VertexBufferBuilder};
@@ -96,7 +96,7 @@ impl NbtString {
 	}
 
 	#[inline]
-	pub fn render_icon(pos: impl Into<(usize, usize)>, z: u8, builder: &mut VertexBufferBuilder) { builder.draw_texture_z(pos, z, STRING_UV, (16, 16)); }
+	pub fn render_icon(pos: impl Into<(usize, usize)>, z: ZOffset, builder: &mut VertexBufferBuilder) { builder.draw_texture_z(pos, z, STRING_UV, (16, 16)); }
 }
 
 #[repr(C)]

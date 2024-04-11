@@ -10,7 +10,7 @@ use std::{fmt, fmt::Write};
 use compact_str::{format_compact, CompactString, ToCompactString};
 use hashbrown::raw::RawTable;
 
-use crate::assets::{BASE_Z, BYTE_ARRAY_UV, BYTE_UV, CONNECTION_UV, DOUBLE_UV, FLOAT_UV, INT_ARRAY_UV, INT_UV, LONG_ARRAY_UV, LONG_UV, SHORT_UV};
+use crate::assets::{BASE_Z, BYTE_ARRAY_UV, BYTE_UV, CONNECTION_UV, DOUBLE_UV, FLOAT_UV, INT_ARRAY_UV, INT_UV, LONG_ARRAY_UV, LONG_UV, SHORT_UV, ZOffset};
 use crate::decoder::Decoder;
 use crate::elements::chunk::{NbtChunk, NbtRegion};
 use crate::elements::compound::{CompoundMap, CompoundMapIter, Entry, NbtCompound};
@@ -639,7 +639,7 @@ impl NbtElement {
 	}
 
 	#[inline]
-	pub fn render_icon(id: u8, pos: impl Into<(usize, usize)>, z: u8, builder: &mut VertexBufferBuilder) {
+	pub fn render_icon(id: u8, pos: impl Into<(usize, usize)>, z: ZOffset, builder: &mut VertexBufferBuilder) {
 		match id {
 			0 => {}
 			NbtByte::ID => NbtByte::render_icon(pos, z, builder),

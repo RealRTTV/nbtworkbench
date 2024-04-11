@@ -48,7 +48,7 @@ macro_rules! primitive {
 			}
 
 			#[inline]
-			pub fn render_icon(pos: impl Into<(usize, usize)>, z: u8, builder: &mut VertexBufferBuilder) { builder.draw_texture_z(pos, z, $uv, (16, 16)); }
+			pub fn render_icon(pos: impl Into<(usize, usize)>, z: ZOffset, builder: &mut VertexBufferBuilder) { builder.draw_texture_z(pos, z, $uv, (16, 16)); }
 
 			#[inline]
 			pub fn value(&self) -> CompactString { $compact_format(self.value) }

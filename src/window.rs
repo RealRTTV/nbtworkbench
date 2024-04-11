@@ -8,7 +8,7 @@ use wasm_bindgen::JsValue;
 use wgpu::util::{BufferInitDescriptor, DeviceExt};
 #[allow(clippy::wildcard_imports)]
 use wgpu::*;
-use winit::dpi::PhysicalSize;
+use winit::dpi::{PhysicalPosition, PhysicalSize};
 #[allow(clippy::wildcard_imports)]
 use winit::event::*;
 use winit::event_loop::EventLoop;
@@ -474,7 +474,7 @@ impl<'window> State<'window> {
 			WindowEvent::ModifiersChanged(_) => false,
 			WindowEvent::CursorMoved { position, .. } => workbench.on_mouse_move(*position),
 			WindowEvent::CursorEntered { .. } => false,
-			WindowEvent::CursorLeft { .. } => false,
+			WindowEvent::CursorLeft { .. } => workbench.on_mouse_move(PhysicalPosition::new(0.0, 0.0)),
 			WindowEvent::MouseWheel { delta, .. } => workbench.on_scroll(*delta),
 			WindowEvent::MouseInput { state, button, .. } => workbench.on_mouse_input(*state, *button, window_properties),
 			WindowEvent::TouchpadPressure { .. } => false,

@@ -6,7 +6,7 @@ use regex::Regex;
 use winit::event::MouseButton;
 
 use winit::keyboard::KeyCode;
-use crate::assets::{ADD_SEARCH_BOOKMARKS_UV, BASE_Z, BOOKMARK_UV, DARK_STRIPE_UV, HIDDEN_BOOKMARK_UV, HOVERED_WIDGET_UV, REGEX_SEARCH_MODE_UV, REMOVE_SEARCH_BOOKMARKS_UV, SEARCH_KEYS_UV, SEARCH_KEYS_AND_VALUES_UV, SEARCH_VALUES_UV, SNBT_SEARCH_MODE_UV, STRING_SEARCH_MODE_UV, UNSELECTED_WIDGET_UV};
+use crate::assets::{ADD_SEARCH_BOOKMARKS_UV, BASE_Z, BOOKMARK_UV, DARK_STRIPE_UV, HIDDEN_BOOKMARK_UV, HOVERED_WIDGET_UV, REGEX_SEARCH_MODE_UV, REMOVE_SEARCH_BOOKMARKS_UV, SEARCH_KEYS_UV, SEARCH_KEYS_AND_VALUES_UV, SEARCH_VALUES_UV, SNBT_SEARCH_MODE_UV, STRING_SEARCH_MODE_UV, UNSELECTED_WIDGET_UV, SEARCH_BOX_Z, SEARCH_BOX_SELECTION_Z};
 
 use crate::color::TextColor;
 use crate::{combined_two_sorted, create_regex, flags, since_epoch, SortAlgorithm, StrExt};
@@ -172,7 +172,7 @@ impl SearchBox {
 
         builder.draw_texture_region_z(
             pos,
-            0,
+            SEARCH_BOX_Z,
             DARK_STRIPE_UV,
             (builder.window_width() - 215 - pos.x, 22),
             (16, 16),
@@ -183,7 +183,7 @@ impl SearchBox {
         builder.horizontal_scroll = self.horizontal_scroll;
 
         if self.value.is_empty() {
-            builder.settings(pos + (0, 3), false, 0);
+            builder.settings(pos + (0, 3), false, SEARCH_BOX_Z);
             builder.color = TextColor::Gray.to_raw();
             let _ = write!(builder, "{}", match self.mode {
                 SearchMode::String => r#"Search..."#,
@@ -192,9 +192,9 @@ impl SearchBox {
             });
         }
         if self.is_selected() {
-            self.0.render(builder, TextColor::White, pos + (0, 3), 0);
+            self.0.render(builder, TextColor::White, pos + (0, 3), SEARCH_BOX_Z, SEARCH_BOX_SELECTION_Z);
         } else {
-            builder.settings(pos + (0, 3), false, 0);
+            builder.settings(pos + (0, 3), false, SEARCH_BOX_Z);
             builder.color = TextColor::White.to_raw();
             let _ = write!(builder, "{}", self.value);
         }

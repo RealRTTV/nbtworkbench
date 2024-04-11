@@ -243,7 +243,7 @@ macro_rules! array {
 						ctx.render_errors(ctx.pos(), builder);
 						let str = Self::transmute(element).to_compact_string();
 						if ctx.forbid(ctx.pos()) {
-							builder.settings(ctx.pos() + (20, 0), false, 1);
+							builder.settings(ctx.pos() + (20, 0), false, JUST_OVERLAPPING_BASE_TEXT_Z);
 							builder.color = TextColor::TreePrimitive.to_raw();
 							let _ = write!(builder, "{str}");
 						}
@@ -353,7 +353,7 @@ macro_rules! array {
 			pub const fn max_depth(&self) -> usize { self.max_depth as usize }
 
 			#[inline]
-			pub fn render_icon(pos: impl Into<(usize, usize)>, z: u8, builder: &mut VertexBufferBuilder) { builder.draw_texture_z(pos, z, $uv, (16, 16)); }
+			pub fn render_icon(pos: impl Into<(usize, usize)>, z: ZOffset, builder: &mut VertexBufferBuilder) { builder.draw_texture_z(pos, z, $uv, (16, 16)); }
 
 			#[inline]
 			pub fn render_element_icon(pos: impl Into<(usize, usize)>, builder: &mut VertexBufferBuilder) { builder.draw_texture(pos, $element_uv, (16, 16)); }

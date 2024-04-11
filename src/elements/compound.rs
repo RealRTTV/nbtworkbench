@@ -11,7 +11,7 @@ use compact_str::{format_compact, CompactString, ToCompactString};
 use fxhash::FxHasher;
 use hashbrown::raw::RawTable;
 
-use crate::assets::{JUST_OVERLAPPING_BASE_TEXT_Z, BASE_Z, COMPOUND_ROOT_UV, COMPOUND_UV, CONNECTION_UV, HEADER_SIZE, LINE_NUMBER_CONNECTOR_Z, LINE_NUMBER_SEPARATOR_UV};
+use crate::assets::{JUST_OVERLAPPING_BASE_TEXT_Z, BASE_Z, COMPOUND_ROOT_UV, COMPOUND_UV, CONNECTION_UV, HEADER_SIZE, LINE_NUMBER_CONNECTOR_Z, LINE_NUMBER_SEPARATOR_UV, ZOffset};
 use crate::decoder::Decoder;
 use crate::elements::chunk::NbtChunk;
 use crate::elements::element::NbtElement;
@@ -717,7 +717,7 @@ impl NbtCompound {
 	}
 
 	#[inline]
-	pub fn render_icon(pos: impl Into<(usize, usize)>, z: u8, builder: &mut VertexBufferBuilder) { builder.draw_texture_z(pos, z, COMPOUND_UV, (16, 16)); }
+	pub fn render_icon(pos: impl Into<(usize, usize)>, z: ZOffset, builder: &mut VertexBufferBuilder) { builder.draw_texture_z(pos, z, COMPOUND_UV, (16, 16)); }
 }
 
 // Based on indexmap, but they didn't let me clone with unchecked mem stuff

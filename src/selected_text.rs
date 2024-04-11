@@ -4,7 +4,7 @@ use std::ops::{Deref, DerefMut};
 use winit::keyboard::KeyCode;
 
 use crate::{flags, OptionExt, StrExt};
-use crate::assets::{BASE_TEXT_Z, HEADER_SIZE, SELECTED_TEXT_Z, SELECTION_UV};
+use crate::assets::{BASE_TEXT_Z, HEADER_SIZE, SELECTED_TEXT_SELECTION_Z, SELECTED_TEXT_Z, SELECTION_UV};
 use crate::color::TextColor;
 use crate::selected_text::SelectedTextKeyResult::{Down, ForceClose, ForceOpen, Keyfix, ShiftDown, ShiftUp, Up, Valuefix};
 use crate::text::{Cachelike, SelectedTextKeyResult, Text};
@@ -289,13 +289,13 @@ impl SelectedText {
 		}
 
 		if key == KeyCode::ArrowLeft {
-			if flags & flags!(Shift) == 0 && self.selection.is_none() && self.cursor == 0 && self.keyfix.is_some() { return Keyfix }
-			if flags == flags!(Alt) || flags == flags!(Shift + Alt) { return ForceClose }
+			if flags & !flags!(Ctrl) == 0 && self.selection.is_none() && self.cursor == 0 && self.keyfix.is_some() { return Keyfix }
+			if flags & !flags!(Shift) == flags!(Alt) { return ForceClose }
 		}
 
 		if key == KeyCode::ArrowRight {
-			if flags & flags!(Shift) == 0 && self.selection.is_none() && self.cursor == self.value.len() && self.valuefix.is_some() { return Valuefix }
-			if flags == flags!(Alt) || flags == flags!(Shift + Alt) { return ForceOpen }
+			if flags & !flags!(Ctrl) == 0 && self.selection.is_none() && self.cursor == self.value.len() && self.valuefix.is_some() { return Valuefix }
+			if (flags) & !flags!(Shift) == flags!(Alt) { return ForceOpen }
 		}
 
 		self.0.on_key_press(key, char, flags).into()
@@ -313,7 +313,7 @@ impl SelectedText {
 		if y < HEADER_SIZE { return }
 
 		let prefix_width = self.prefix.0.as_str().width() + self.keyfix.as_ref().map_or(0, |x| x.0.width());
-		self.0.render(builder, self.value_color, (x + prefix_width, y).into(), SELECTED_TEXT_Z);
+		self.0.render(builder, self.value_color, (x + prefix_width, y).into(), SELECTED_TEXT_Z, SELECTED_TEXT_SELECTION_Z);
 
 		builder.draw_texture_z((x - 4 - 16, y), SELECTED_TEXT_Z, SELECTION_UV, (16, 16));
 		builder.settings((x, y), false, BASE_TEXT_Z);

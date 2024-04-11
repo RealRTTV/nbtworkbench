@@ -14,7 +14,7 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 
 use crate::{Bookmark, DropFn, encompasses, encompasses_or_equal, FileUpdateSubscription, FileUpdateSubscriptionType, flags, get_clipboard, HeldEntry, LinkedQueue, OptionExt, panic_unchecked, Position, recache_along_indices, RenderContext, set_clipboard, since_epoch, SortAlgorithm, StrExt, sum_indices, tab, tab_mut, WindowProperties};
 use crate::alert::Alert;
-use crate::assets::{ACTION_WHEEL_Z, BACKDROP_UV, BASE_TEXT_Z, BASE_Z, BOOKMARK_UV, CLOSED_WIDGET_UV, DARK_STRIPE_UV, EDITED_UV, HEADER_SIZE, HELD_ENTRY_Z, HIDDEN_BOOKMARK_UV, HORIZONTAL_SEPARATOR_UV, HOVERED_STRIPE_UV, HOVERED_WIDGET_UV, JUST_OVERLAPPING_BASE_TEXT_Z, LIGHT_STRIPE_UV, LINE_NUMBER_SEPARATOR_UV, NEW_FILE_UV, OPEN_FOLDER_UV, SELECTED_ACTION_WHEEL, SELECTED_WIDGET_UV, SELECTION_UV, TRAY_UV, UNEDITED_UV, UNSELECTED_ACTION_WHEEL, UNSELECTED_WIDGET_UV};
+use crate::assets::{ACTION_WHEEL_Z, BACKDROP_UV, BASE_TEXT_Z, BASE_Z, BOOKMARK_UV, CLOSED_WIDGET_UV, DARK_STRIPE_UV, EDITED_UV, HEADER_SIZE, HELD_ENTRY_Z, HIDDEN_BOOKMARK_UV, HORIZONTAL_SEPARATOR_UV, HOVERED_STRIPE_UV, HOVERED_WIDGET_UV, JUST_OVERLAPPING_BASE_TEXT_Z, LIGHT_STRIPE_UV, LINE_NUMBER_SEPARATOR_UV, NEW_FILE_UV, OPEN_FOLDER_UV, SELECTED_ACTION_WHEEL, SELECTED_WIDGET_UV, SELECTION_UV, TRAY_UV, JUST_UNDERLAPPING_BASE_Z, UNEDITED_UV, UNSELECTED_ACTION_WHEEL, UNSELECTED_WIDGET_UV};
 use crate::bookmark::Bookmarks;
 use crate::color::TextColor;
 use crate::decoder::Decoder;
@@ -1164,7 +1164,7 @@ impl Workbench {
 	#[inline]
 	#[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
 	fn open_file(&mut self, window_properties: &mut WindowProperties) {
-		match native_dialog::FileDialog::new().set_location("~/Downloads").add_filter("NBT File", &["nbt", "snbt", "dat", "dat_old", "dat_mcr", "old"]).add_filter("Region File", &["mca", "mcr"]).show_open_single_file() {
+		match native_dialog::FileDialog::new().set_location("~/Downloads").add_filter("Uncompressed NBT File", &["nbt"]).add_filter("SNBT File", &["snbt"]).add_filter("Region File", &["mca", "mcr"]).add_filter("Compressed NBT File", &["dat", "dat_old", "dat_new", "dat_mcr", "old"]).show_open_single_file() {
 			Err(e) => self.alert(Alert::new("Error!", TextColor::Red, e.to_string())),
 			Ok(None) => {},
 			Ok(Some(path)) => match std::fs::read(&path) {
@@ -1762,7 +1762,7 @@ impl Workbench {
 			let shift = self.held_keys.contains(&KeyCode::ShiftLeft) | self.held_keys.contains(&KeyCode::ShiftRight);
 			let (_, _, element, line_number) = Navigate::new(indices.iter().copied(), &mut tab.value).last();
 			let true_height = element.true_height();
-			let pred = if shift {
+			let predicate = if shift {
 				#[cfg(not(target_arch = "wasm32"))]
 				std::thread::scope(|scope| element.expand(scope));
 				#[cfg(target_arch = "wasm32")]
@@ -1771,7 +1771,7 @@ impl Workbench {
 			} else {
 				!element.open() && element.toggle().is_some()
 			};
-			if pred {
+			if predicate {
 				let increment = element.height() - 1;
 				let mut iter = Navigate::new(indices.iter().copied(), &mut tab.value);
 				while let Some((position, _, _, value, _)) = iter.next() {
@@ -2267,7 +2267,7 @@ impl Workbench {
 
 		builder.draw_texture_region_z(
 			(0, 23),
-			BASE_Z - 1,
+			JUST_UNDERLAPPING_BASE_Z,
 			BACKDROP_UV,
 			(283, 22),
 			(16, 16),
@@ -2275,14 +2275,14 @@ impl Workbench {
 
 		builder.draw_texture_region_z(
 			(self.window_width - 215, 23),
-			BASE_Z - 1,
+			JUST_UNDERLAPPING_BASE_Z,
 			BACKDROP_UV,
 			(215, 22),
 			(16, 16),
 		);
 
 		for n in 0..(builder.window_height() - HEADER_SIZE + 15) / 16 {
-			let uv = if n % 2 == 0 {
+			let uv = if (n % 2 == 0) ^ ((builder.scroll() / 16) % 2 == 0) {
 				DARK_STRIPE_UV + (1, 1)
 			} else {
 				LIGHT_STRIPE_UV + (1, 1)

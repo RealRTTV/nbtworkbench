@@ -5,7 +5,7 @@ use std::time::Duration;
 use winit::keyboard::KeyCode;
 
 use crate::{flags, get_clipboard, is_jump_char_boundary, is_utf8_char_boundary, LinkedQueue, OptionExt, set_clipboard, since_epoch, StrExt};
-use crate::assets::SELECTION_UV;
+use crate::assets::{SELECTION_UV, ZOffset};
 use crate::color::TextColor;
 use crate::text::KeyResult::{Failed, Finish, NothingSpecial, Escape};
 use crate::vertex_buffer_builder::{Vec2u, VertexBufferBuilder};
@@ -527,7 +527,7 @@ impl<Additional: Clone, Cache: Cachelike<Additional>> Text<Additional, Cache> {
         Failed
     }
 
-    pub fn render(&self, builder: &mut VertexBufferBuilder, color: TextColor, pos: Vec2u, z: u8) {
+    pub fn render(&self, builder: &mut VertexBufferBuilder, color: TextColor, pos: Vec2u, z: ZOffset, selection_z: ZOffset) {
         use std::fmt::Write;
 
         let (x, y) = pos.into();
@@ -550,7 +550,7 @@ impl<Additional: Clone, Cache: Cachelike<Additional>> Text<Additional, Cache> {
                 let end = self.value.split_at(end).0.width();
                 builder.draw_texture_region_z(
                     (start + x, y),
-                    z + 1,
+                    selection_z,
                     SELECTION_UV + (1, 1),
                     (end - start - 1, 16),
                     (14, 14),
@@ -558,7 +558,7 @@ impl<Additional: Clone, Cache: Cachelike<Additional>> Text<Additional, Cache> {
                 if duration_from_last_interaction < Duration::from_millis(500) || duration_from_last_interaction.subsec_millis() < 500 {
                     builder.draw_texture_region_z(
                         (x + cursor_prefixing.width() - 1, y),
-                        z + 1,
+                        selection_z,
                         SELECTION_UV,
                         (2, 16),
                         (1, 16),
@@ -568,7 +568,7 @@ impl<Additional: Clone, Cache: Cachelike<Additional>> Text<Additional, Cache> {
                 if duration_from_last_interaction < Duration::from_millis(500) || duration_from_last_interaction.subsec_millis() < 500 {
                     builder.draw_texture_region_z(
                         (x + cursor_prefixing.width(), y),
-                        z + 1,
+                        selection_z,
                         SELECTION_UV,
                         (2, 16),
                         (1, 16),

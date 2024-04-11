@@ -9,7 +9,7 @@ use std::thread::Scope;
 use compact_str::{format_compact, CompactString, ToCompactString};
 use zune_inflate::{DeflateDecoder, DeflateOptions};
 
-use crate::assets::{JUST_OVERLAPPING_BASE_TEXT_Z, BASE_Z, CHUNK_UV, CONNECTION_UV, HEADER_SIZE, LINE_NUMBER_CONNECTOR_Z, LINE_NUMBER_SEPARATOR_UV, REGION_UV};
+use crate::assets::{JUST_OVERLAPPING_BASE_TEXT_Z, BASE_Z, CHUNK_UV, CONNECTION_UV, HEADER_SIZE, LINE_NUMBER_CONNECTOR_Z, LINE_NUMBER_SEPARATOR_UV, REGION_UV, ZOffset};
 use crate::elements::compound::NbtCompound;
 use crate::elements::element::NbtElement;
 use crate::elements::list::{ValueIterator, ValueMutIterator};
@@ -117,7 +117,7 @@ impl NbtRegion {
 						)?,
 					),
 					3 => (FileFormat::Nbt, NbtElement::from_file(data, sort)?),
-					4 => (FileFormat::ChunkLz4, NbtElement::from_file(&lz4_flex::decompress(data, data.len()).ok()?, sort)?),
+					4 => (FileFormat::Lz4, NbtElement::from_file(&lz4_flex::decompress(data, data.len()).ok()?, sort)?),
 					_ => return None,
 				};
 				if element.id() != NbtCompound::ID { return None }
@@ -516,7 +516,7 @@ impl NbtRegion {
 	}
 
 	#[inline]
-	pub fn render_icon(pos: impl Into<(usize, usize)>, z: u8, builder: &mut VertexBufferBuilder) { builder.draw_texture_z(pos, z, REGION_UV, (16, 16)); }
+	pub fn render_icon(pos: impl Into<(usize, usize)>, z: ZOffset, builder: &mut VertexBufferBuilder) { builder.draw_texture_z(pos, z, REGION_UV, (16, 16)); }
 
 	#[inline]
 	pub fn children(&self) -> ValueIterator {
@@ -787,7 +787,7 @@ impl NbtChunk {
 					FileFormat::Gzip => 1_u8,
 					FileFormat::Zlib => 2_u8,
 					FileFormat::Nbt => 3_u8,
-					FileFormat::ChunkLz4 => 4_u8,
+					FileFormat::Lz4 => 4_u8,
 					_ => core::hint::unreachable_unchecked(),
 				}
 				.to_be_bytes(),
@@ -921,7 +921,7 @@ impl NbtChunk {
 	}
 
 	#[inline]
-	pub fn render_icon(pos: impl Into<(usize, usize)>, z: u8, builder: &mut VertexBufferBuilder) { builder.draw_texture_z(pos, z, CHUNK_UV, (16, 16)); }
+	pub fn render_icon(pos: impl Into<(usize, usize)>, z: ZOffset, builder: &mut VertexBufferBuilder) { builder.draw_texture_z(pos, z, CHUNK_UV, (16, 16)); }
 }
 
 impl Deref for NbtChunk {

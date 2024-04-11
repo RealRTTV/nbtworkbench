@@ -10,8 +10,8 @@ use flate2::Compression;
 use uuid::Uuid;
 use zune_inflate::DeflateDecoder;
 
-use crate::{LinkedQueue, OptionExt, panic_unchecked, RenderContext, SortAlgorithm, StrExt, WindowProperties};
-use crate::assets::{BASE_Z, BYTE_ARRAY_GHOST_UV, BYTE_ARRAY_UV, BYTE_GRAYSCALE_UV, BYTE_UV, CHUNK_GHOST_UV, CHUNK_UV, COMPOUND_GHOST_UV, COMPOUND_ROOT_UV, COMPOUND_UV, DISABLED_REFRESH_UV, DOUBLE_GRAYSCALE_UV, DOUBLE_UV, ENABLED_FREEHAND_MODE_UV, FLOAT_GRAYSCALE_UV, FLOAT_UV, FREEHAND_MODE_UV, GZIP_FILE_TYPE_UV, HEADER_SIZE, HELD_SCROLLBAR_UV, HOVERED_WIDGET_UV, INT_ARRAY_GHOST_UV, INT_ARRAY_UV, INT_GRAYSCALE_UV, INT_UV, JUST_OVERLAPPING_BASE_Z, LINE_NUMBER_SEPARATOR_UV, LIST_GHOST_UV, LIST_UV, LONG_ARRAY_GHOST_UV, LONG_ARRAY_UV, LONG_GRAYSCALE_UV, LONG_UV, MCA_FILE_TYPE_UV, NBT_FILE_TYPE_UV, REDO_UV, REFRESH_UV, REGION_UV, SCROLLBAR_Z, SHORT_GRAYSCALE_UV, SHORT_UV, SNBT_FILE_TYPE_UV, STEAL_ANIMATION_OVERLAY_UV, STRING_GHOST_UV, STRING_UV, UNDO_UV, UNHELD_SCROLLBAR_UV, UNKNOWN_NBT_GHOST_UV, UNKNOWN_NBT_UV, UNSELECTED_WIDGET_UV, ZLIB_FILE_TYPE_UV};
+use crate::{LinkedQueue, OptionExt, panic_unchecked, RenderContext, since_epoch, SortAlgorithm, StrExt, WindowProperties};
+use crate::assets::{BASE_Z, BYTE_ARRAY_GHOST_UV, BYTE_ARRAY_UV, BYTE_GRAYSCALE_UV, BYTE_UV, CHUNK_GHOST_UV, CHUNK_UV, COMPOUND_GHOST_UV, COMPOUND_ROOT_UV, COMPOUND_UV, DISABLED_REFRESH_UV, DOUBLE_GRAYSCALE_UV, DOUBLE_UV, ENABLED_FREEHAND_MODE_UV, FLOAT_GRAYSCALE_UV, FLOAT_UV, FREEHAND_MODE_UV, GZIP_FILE_TYPE_UV, HEADER_SIZE, HELD_SCROLLBAR_UV, HOVERED_WIDGET_UV, INT_ARRAY_GHOST_UV, INT_ARRAY_UV, INT_GRAYSCALE_UV, INT_UV, JUST_OVERLAPPING_BASE_Z, LINE_NUMBER_SEPARATOR_UV, LIST_GHOST_UV, LIST_UV, LONG_ARRAY_GHOST_UV, LONG_ARRAY_UV, LONG_GRAYSCALE_UV, LONG_UV, MCA_FILE_TYPE_UV, NBT_FILE_TYPE_UV, REDO_UV, REFRESH_UV, REGION_UV, SCROLLBAR_Z, SHORT_GRAYSCALE_UV, SHORT_UV, SNBT_FILE_TYPE_UV, STEAL_ANIMATION_OVERLAY_UV, STRING_GHOST_UV, STRING_UV, UNDO_UV, UNHELD_SCROLLBAR_UV, UNKNOWN_NBT_GHOST_UV, UNKNOWN_NBT_UV, UNSELECTED_WIDGET_UV, ZLIB_FILE_TYPE_UV, ZOffset};
 use crate::color::TextColor;
 use crate::elements::chunk::NbtRegion;
 use crate::elements::compound::NbtCompound;
@@ -73,11 +73,12 @@ impl Tab {
 		let path = self.path.as_deref().unwrap_or(self.name.as_ref().as_ref());
 		if path.try_exists().is_err() || force_dialog {
 			let mut builder = native_dialog::FileDialog::new();
-			if self.value.id() == NbtRegion::ID {
-				builder = builder.add_filter("Region File", &["mca", "mcr"]);
-			} else {
-				builder = builder.add_filter("NBT File", &["nbt", "snbt", "dat", "dat_old", "dat_mcr", "old"]);
-			}
+			builder = match self.compression {
+				FileFormat::Nbt => builder.add_filter("Uncompressed NBT File", &["nbt"]),
+				FileFormat::Snbt => builder.add_filter("SNBT File", &["snbt"]),
+				FileFormat::Lz4 | FileFormat::Mca => builder.add_filter("Region File", &["mca", "mcr"]),
+				FileFormat::Gzip | FileFormat::Zlib => builder.add_filter("Compressed NBT File", &["dat", "dat_old", "dat_new", "dat_mcr", "old"]),
+			};
 			let path = builder.show_save_single_file()?.ok_or_else(|| anyhow!("Save cancelled"))?;
 			self.name = path.file_name().and_then(|x| x.to_str()).expect("Path has a filename").to_string().into_boxed_str();
 			std::fs::write(&path, self.compression.encode(&self.value))?;
@@ -310,7 +311,7 @@ impl Tab {
 		}
 	}
 
-	pub fn draw_icon(&self, builder: &mut VertexBufferBuilder, pos: impl Into<(usize, usize)>, z: u8) {
+	pub fn draw_icon(&self, builder: &mut VertexBufferBuilder, pos: impl Into<(usize, usize)>, z: ZOffset) {
 		let id = self.value.id();
 		if id == NbtCompound::ID {
 			builder.draw_texture_z(pos, z, COMPOUND_ROOT_UV, (16, 16));
@@ -577,7 +578,7 @@ impl Tab {
 
 	#[inline]
 	pub fn parse_raw(path: &Path, buf: Vec<u8>, sort_algorithm: SortAlgorithm) -> Result<(NbtElement, FileFormat)> {
-		Ok(if path.extension().and_then(OsStr::to_str) == Some("mca") {
+		Ok(if let Some("mca" | "mcr") = path.extension().and_then(OsStr::to_str) {
 			(
 				NbtElement::from_mca(buf.as_slice(), sort_algorithm).context("Failed to parse MCA file")?,
 				FileFormat::Mca,
@@ -625,6 +626,10 @@ impl Tab {
 
 	#[cfg(not(target_arch = "wasm32"))]
 	pub fn refresh(&mut self, sort_algorithm: SortAlgorithm) -> Result<()> {
+		if self.history_changed && core::mem::replace(&mut self.last_close_attempt, since_epoch()).as_millis() > 3000 {
+			return Ok(());
+		}
+
 		let Some(path) = self.path.as_deref() else { return Err(anyhow!("File path was not present in tab")) };
 		let bytes = std::fs::read(path)?;
 		let (value, format) = Tab::parse_raw(path, bytes, sort_algorithm)?;
@@ -655,7 +660,7 @@ pub enum FileFormat {
 	Nbt,
 	Gzip,
 	Zlib,
-	ChunkLz4,
+	Lz4,
 	Snbt,
 	Mca,
 }
@@ -671,7 +676,7 @@ impl FileFormat {
 
 			// has to be separate
 			Self::Mca => Self::Mca,
-			Self::ChunkLz4 => Self::ChunkLz4,
+			Self::Lz4 => Self::Lz4,
 		}
 	}
 
@@ -685,7 +690,7 @@ impl FileFormat {
 
 			// has to be separate
 			Self::Mca => Self::Mca,
-			Self::ChunkLz4 => Self::ChunkLz4,
+			Self::Lz4 => Self::Lz4,
 		}
 	}
 
@@ -703,7 +708,7 @@ impl FileFormat {
 				let _ = flate2::read::ZlibEncoder::new(&*data.to_file(), Compression::best()).read_to_end(&mut vec);
 				vec
 			}
-			Self::ChunkLz4 => {
+			Self::Lz4 => {
 				lz4_flex::compress(&*data.to_file())
 			}
 			Self::Snbt => data.to_string().into_bytes(),
@@ -718,7 +723,7 @@ impl FileFormat {
 			Self::Zlib => ZLIB_FILE_TYPE_UV,
 			Self::Snbt => SNBT_FILE_TYPE_UV,
 			Self::Mca => MCA_FILE_TYPE_UV,
-			Self::ChunkLz4 => Vec2u::new(240, 240),
+			Self::Lz4 => Vec2u::new(240, 240),
 		}
 	}
 
@@ -730,7 +735,7 @@ impl FileFormat {
 			Self::Zlib => "ZLib",
 			Self::Snbt => "SNBT",
 			Self::Mca => "MCA",
-			Self::ChunkLz4 => "LZ4",
+			Self::Lz4 => "LZ4",
 		}
 	}
 }

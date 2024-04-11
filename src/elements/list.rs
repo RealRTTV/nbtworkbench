@@ -6,7 +6,7 @@ use std::slice::{Iter, IterMut};
 #[cfg(not(target_arch = "wasm32"))]
 use std::thread::Scope;
 
-use crate::assets::{JUST_OVERLAPPING_BASE_TEXT_Z, BASE_Z, CONNECTION_UV, LIST_UV};
+use crate::assets::{JUST_OVERLAPPING_BASE_TEXT_Z, BASE_Z, CONNECTION_UV, LIST_UV, ZOffset};
 use crate::decoder::Decoder;
 use crate::elements::chunk::NbtChunk;
 use crate::elements::element::{id_to_string_name, NbtElement};
@@ -466,7 +466,7 @@ impl NbtList {
 	}
 
 	#[inline]
-	pub fn render_icon(pos: impl Into<(usize, usize)>, z: u8, builder: &mut VertexBufferBuilder) { builder.draw_texture_z(pos, z, LIST_UV, (16, 16)); }
+	pub fn render_icon(pos: impl Into<(usize, usize)>, z: ZOffset, builder: &mut VertexBufferBuilder) { builder.draw_texture_z(pos, z, LIST_UV, (16, 16)); }
 
 	#[inline]
 	pub fn recache_depth(&mut self) {

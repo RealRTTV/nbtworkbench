@@ -3,7 +3,7 @@ use std::ops::BitAnd;
 
 use winit::dpi::PhysicalSize;
 
-use crate::assets::{BASE_TEXT_Z, BASE_Z, TOOLTIP_UV, TOOLTIP_Z};
+use crate::assets::{BASE_TEXT_Z, BASE_Z, TOOLTIP_Z, TOOLTIP_UV, ZOffset};
 use crate::color::TextColor;
 use crate::StrExt;
 
@@ -22,7 +22,7 @@ pub struct VertexBufferBuilder {
 	pub horizontal_scroll: usize,
 	pub text_coords: (usize, usize),
 	dropshadow: bool,
-	text_z: u8,
+	text_z: ZOffset,
 	pub color: u32,
 	two_over_width: f32,
 	negative_two_over_height: f32,
@@ -87,7 +87,7 @@ impl VertexBufferBuilder {
 	pub const fn drew_tooltip(&self) -> bool { self.drew_tooltip }
 
 	#[inline]
-	pub fn settings(&mut self, pos: impl Into<(usize, usize)>, dropshadow: bool, z: u8) {
+	pub fn settings(&mut self, pos: impl Into<(usize, usize)>, dropshadow: bool, z: ZOffset) {
 		self.text_coords = pos.into();
 		self.dropshadow = dropshadow;
 		self.text_z = z;
@@ -95,7 +95,7 @@ impl VertexBufferBuilder {
 
 	#[inline]
 	#[rustfmt::skip]
-	fn draw_char(&mut self, c: u16, x: usize, y: usize, z: u8) -> usize {
+	fn draw_char(&mut self, c: u16, x: usize, y: usize, z: ZOffset) -> usize {
 		if self.dropshadow {
 			self.draw_unicode_z_color(x + 1, y + 1, z, c, {
 				self.color
@@ -197,7 +197,7 @@ impl VertexBufferBuilder {
 	}
 
 	#[inline]
-	pub fn draw_unicode_z_color(&mut self, x: usize, y: usize, z: u8, char: u16, color: u32) {
+	pub fn draw_unicode_z_color(&mut self, x: usize, y: usize, z: ZOffset, char: u16, color: u32) {
 		unsafe {
 			if self.text_vertices.capacity() - self.text_vertices.len() < 16 {
 				self.text_vertices.reserve_exact(98304);
@@ -205,7 +205,7 @@ impl VertexBufferBuilder {
 			}
 			let x = (x as isize - self.horizontal_scroll as isize) as f32 * self.scale;
 			let y = y as f32 * self.scale;
-			let z_and_color = f32::from_bits(((255 - z) as u32) | (color << 8));
+			let z_and_color = f32::from_bits(((255 - z as u8) as u32) | (color << 8));
 			let char = f32::from_bits(char as u32);
 
 			let x0 = x.mul_add(self.two_over_width, -1.0);
@@ -302,14 +302,14 @@ impl VertexBufferBuilder {
 	pub fn draw_texture(&mut self, pos: impl Into<(usize, usize)>, uv: impl Into<(usize, usize)>, dims: impl Into<(usize, usize)>) { self.draw_texture_z(pos, BASE_Z, uv, dims); }
 
 	#[inline]
-	pub fn draw_texture_z(&mut self, pos: impl Into<(usize, usize)>, z: u8, uv: impl Into<(usize, usize)>, dims: impl Into<(usize, usize)>) {
+	pub fn draw_texture_z(&mut self, pos: impl Into<(usize, usize)>, z: ZOffset, uv: impl Into<(usize, usize)>, dims: impl Into<(usize, usize)>) {
 		let dims = dims.into();
 		self.draw_texture_region_z(pos, z, uv, dims, dims);
 	}
 
 	#[inline(never)]
 	#[allow(clippy::many_single_char_names)]
-	pub fn draw_texture_region_z(&mut self, pos: impl Into<(usize, usize)>, z: u8, uv: impl Into<(usize, usize)>, dims: impl Into<(usize, usize)>, uv_dims: impl Into<(usize, usize)>) {
+	pub fn draw_texture_region_z(&mut self, pos: impl Into<(usize, usize)>, z: ZOffset, uv: impl Into<(usize, usize)>, dims: impl Into<(usize, usize)>, uv_dims: impl Into<(usize, usize)>) {
 		unsafe {
 			let pos = pos.into();
 			let uv = uv.into();
@@ -317,7 +317,7 @@ impl VertexBufferBuilder {
 			let uv_dims = uv_dims.into();
 			let x = (pos.0 as isize - self.horizontal_scroll as isize) as f32 * self.scale;
 			let y = pos.1 as f32 * self.scale;
-			let z = 1.0 - z as f32 / 256.0;
+			let z = 1.0 - z as u8 as f32 / 256.0;
 			let u = uv.0 as f32;
 			let v = uv.1 as f32;
 			let width = dims.0 as f32 * self.scale;

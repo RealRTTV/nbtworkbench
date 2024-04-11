@@ -147,22 +147,33 @@ pub const NEW_FILE_UV: Vec2u = Vec2u::new(96, 48);
 pub const REFRESH_UV: Vec2u = Vec2u::new(152, 144);
 pub const DISABLED_REFRESH_UV: Vec2u = Vec2u::new(168, 144);
 
-pub const BASE_Z: u8 = 5;
-pub const JUST_OVERLAPPING_BASE_Z: u8 = BASE_Z + 1;
-pub const BASE_TEXT_Z: u8 = 10;
-pub const JUST_OVERLAPPING_BASE_TEXT_Z: u8 = BASE_TEXT_Z + 1;
-pub const TOGGLE_Z: u8 = 20;
-pub const LINE_NUMBER_Z: u8 = 60;
-pub const LINE_NUMBER_CONNECTOR_Z: u8 = LINE_NUMBER_Z + 1;
-pub const BOOKMARK_Z: u8 = 80;
-pub const SELECTED_TEXT_Z: u8 = 130;
-pub const ACTION_WHEEL_Z: u8 = 190;
-pub const SCROLLBAR_BOOKMARK_Z: u8 = SCROLLBAR_Z - 1;
-pub const SCROLLBAR_Z: u8 = 200;
-pub const HELD_ENTRY_Z: u8 = 210;
-pub const ALERT_Z: u8 = 240;
-pub const ALERT_TEXT_Z: u8 = ALERT_Z + 1;
-pub const TOOLTIP_Z: u8 = 250;
+#[repr(u8)]
+#[allow(non_camel_case_types)]
+#[derive(Copy, Clone)]
+pub enum ZOffset {
+	SEARCH_BOX_Z = 50,
+	SEARCH_BOX_SELECTION_Z = 51,
+	JUST_UNDERLAPPING_BASE_Z = 79,
+    BASE_Z = 80,
+    JUST_OVERLAPPING_BASE_Z = 81,
+    BASE_TEXT_Z = 90,
+    JUST_OVERLAPPING_BASE_TEXT_Z = 91,
+    TOGGLE_Z = 100,
+    LINE_NUMBER_Z = 130,
+    LINE_NUMBER_CONNECTOR_Z = 131,
+    BOOKMARK_Z = 140,
+    SELECTED_TEXT_Z = 170,
+	SELECTED_TEXT_SELECTION_Z = 171,
+    ACTION_WHEEL_Z = 190,
+    SCROLLBAR_BOOKMARK_Z = 199,
+    SCROLLBAR_Z = 200,
+    HELD_ENTRY_Z = 210,
+    ALERT_Z = 240,
+    ALERT_TEXT_Z = 241,
+    TOOLTIP_Z = 250,
+}
+
+pub use ZOffset::*;
 
 #[allow(clippy::cast_ptr_alignment)]
 pub fn icon() -> Vec<u8> {
