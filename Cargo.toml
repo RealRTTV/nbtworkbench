@@ -9,12 +9,12 @@ keywords = ["nbt", "window", "unsafe", "editor", "tree"]
 categories = ["graphics", "rendering", "text-editors", "parser-implementations"]
 
 # Wasm Only
-#[lib]
-#crate-type = ["cdylib", "rlib"]
-#path = "src/main.rs"
+[lib]
+crate-type = ["cdylib", "rlib"]
+path = "src/main.rs"
 
 # Windows Only
-[package.metadata.winres]
+#[package.metadata.winres]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

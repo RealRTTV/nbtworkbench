@@ -1079,22 +1079,26 @@ impl NbtElement {
 					#[cfg(not(target_arch = "wasm32"))]
 					ElementAction::OpenInTxt,
 				],
+				#[cfg(not(target_arch = "wasm32"))]
 				NbtList::ID => {
 					const FULL: [ElementAction; 4] = [
 						ElementAction::CopyRaw,
 						ElementAction::CopyFormatted,
-						#[cfg(not(target_arch = "wasm32"))]
 						ElementAction::OpenInTxt,
-					    #[cfg(not(target_arch = "wasm32"))]
 						ElementAction::OpenArrayInHex
 					];
 					let id = self.as_list_unchecked().element;
-					if matches!(id, NbtByte::ID | NbtShort::ID | NbtInt::ID | NbtLong::ID) || cfg!(target_arch = "wasm32") {
+					if matches!(id, NbtByte::ID | NbtShort::ID | NbtInt::ID | NbtLong::ID) {
 						&FULL
 					} else {
 						&FULL[..FULL.len() - 1]
 					}
 				},
+				#[cfg(target_arch = "wasm32")]
+				NbtList::ID => &[
+					ElementAction::CopyRaw,
+					ElementAction::CopyFormatted,
+				],
 				NbtCompound::ID => &[
 					ElementAction::CopyRaw,
 					ElementAction::CopyFormatted,
