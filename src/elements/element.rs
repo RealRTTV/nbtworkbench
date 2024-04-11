@@ -1026,7 +1026,7 @@ impl NbtElement {
 	#[inline]
 	#[must_use]
 	#[allow(clippy::match_same_arms)]
-	pub const fn actions(&self) -> &[ElementAction] {
+	pub fn actions(&self) -> &[ElementAction] {
 		unsafe {
 			match self.id() {
 				NbtByte::ID => &[
@@ -1079,12 +1079,22 @@ impl NbtElement {
 					#[cfg(not(target_arch = "wasm32"))]
 					ElementAction::OpenInTxt,
 				],
-				NbtList::ID => &[
-					ElementAction::CopyRaw,
-					ElementAction::CopyFormatted,
-					#[cfg(not(target_arch = "wasm32"))]
-					ElementAction::OpenInTxt,
-				],
+				NbtList::ID => {
+					const FULL: [ElementAction; 4] = [
+						ElementAction::CopyRaw,
+						ElementAction::CopyFormatted,
+						#[cfg(not(target_arch = "wasm32"))]
+						ElementAction::OpenInTxt,
+					    #[cfg(not(target_arch = "wasm32"))]
+						ElementAction::OpenArrayInHex
+					];
+					let id = self.as_list_unchecked().element;
+					if let NbtByte::ID | NbtShort::ID | NbtInt::ID | NbtLong::ID = id {
+						&FULL
+					} else {
+						&FULL[..FULL.len() - 1]
+					}
+				},
 				NbtCompound::ID => &[
 					ElementAction::CopyRaw,
 					ElementAction::CopyFormatted,

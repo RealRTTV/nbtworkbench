@@ -146,7 +146,7 @@ impl ElementAction {
 
 					let hash = (since_epoch().as_millis() as usize).wrapping_mul(element as *mut NbtElement as usize);
 					let path = std::env::temp_dir().join(format!(
-						"nbtworkbench-{hash:0width$x}.hex",
+						"nbtworkbench-{hash:0width$x}.bin",
 						width = usize::BITS as usize / 8
 					));
 					let (tx, rx) = std::sync::mpsc::channel();
@@ -196,6 +196,42 @@ impl ElementAction {
 										vec.extend(child.as_long_unchecked().value.to_be_bytes());
 									}
 									vec
+								} else if let Some(list) = element.as_list() {
+									match list.element {
+										NbtByte::ID => {
+											subscription_type = FileUpdateSubscriptionType::ByteList;
+											let mut vec = Vec::with_capacity(list.len());
+											for child in list.children() {
+												vec.push(child.as_byte_unchecked().value as u8);
+											}
+											vec
+										},
+										NbtShort::ID => {
+											subscription_type = FileUpdateSubscriptionType::ShortList;
+											let mut vec = Vec::with_capacity(list.len() * 2);
+											for child in list.children() {
+												vec.extend(child.as_short_unchecked().value.to_be_bytes());
+											}
+											vec
+										},
+										NbtInt::ID => {
+											subscription_type = FileUpdateSubscriptionType::IntList;
+											let mut vec = Vec::with_capacity(list.len() * 4);
+											for child in list.children() {
+												vec.extend(child.as_int_unchecked().value.to_be_bytes());
+											}
+											vec
+										},
+										NbtLong::ID => {
+											subscription_type = FileUpdateSubscriptionType::LongList;
+											let mut vec = Vec::with_capacity(list.len() * 8);
+											for child in list.children() {
+												vec.extend(child.as_long_unchecked().value.to_be_bytes());
+											}
+											vec
+										},
+										_ => panic_unchecked("list was let through even thought it didn't have valid type"),
+									}
 								} else {
 									break 'm;
 								}

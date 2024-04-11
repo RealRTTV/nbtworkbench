@@ -19,11 +19,11 @@
     maybe_uninit_uninit_array,
     new_uninit,
     optimize_attribute,
+	panic_update_hook,
     stmt_expr_attributes,
     unchecked_math
 )]
-#![feature(panic_update_hook)]
-#![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
+#![windows_subsystem = "windows"]
 
 use std::cell::UnsafeCell;
 use std::cmp::Ordering;
@@ -206,6 +206,9 @@ pub fn wasm_main() {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn main() -> ! {
+	#[cfg(target_os = "windows")] unsafe {
+		winapi::um::wincon::AttachConsole(winapi::um::wincon::ATTACH_PARENT_PROCESS);
+	}
 
 	let first_arg = std::env::args().nth(1);
 	if let Some("find") = first_arg.as_deref() {
@@ -217,20 +220,21 @@ pub fn main() -> ! {
 		std::process::exit(0);
 	} else if let Some("-?" | "/?" | "--help" | "-h") = first_arg.as_deref() {
 		println!(
-			r#"Usage:
-	          nbtworkbench --version|-v
-	          nbtworkbench -?|-h|--help|/?
-	          nbtworkbench find <path> [(--mode|-m)=normal|regex|snbt] [(--search|-s)=key|value|all] <query>
-	          nbtworkbench reformat (--format|-f)=<format> [(--out-dir|-d)=<out-dir>] [(--out-ext|-e)=<out-ext>] <path>
+			r#"
+Usage:
+  nbtworkbench --version|-v
+  nbtworkbench -?|-h|--help|/?
+  nbtworkbench find <path> [(--mode|-m)=normal|regex|snbt] [(--search|-s)=key|value|all] <query>
+  nbtworkbench reformat (--format|-f)=<format> [(--out-dir|-d)=<out-dir>] [(--out-ext|-e)=<out-ext>] <path>
 
-	        Options:
-	          --version, -v       Displays the version of nbtworkbench you're running.
-	          -?, -h, --help, /?  Displays this dialog.
-	          --mode, -m          Changes the `find` mode to take the <query> field as either, a containing substring, a regex (match whole), or snbt. [default: normal]
-	          --search, -s        Searches for results matching the <query> in either, the key, the value, or both (note that substrings and regex search the same pattern in both key and value, while the regex uses it's key field to match equal strings). [default: all]
-	          --format, -f        Specifies the format to be reformatted to; either `nbt`, `snbt`, `dat/dat_old/gzip` or `zlib`.
-	          --out-dir, -d       Specifies the output directory. [default: ./]
-	          --out-ext, -e       Specifies the output file extension (if not specified, it will infer from --format)"#
+Options:
+  --version, -v       Displays the version of nbtworkbench you're running.
+  -?, -h, --help, /?  Displays this dialog.
+  --mode, -m          Changes the `find` mode to take the <query> field as either, a containing substring, a regex (match whole), or snbt. [default: normal]
+  --search, -s        Searches for results matching the <query> in either, the key, the value, or both (note that substrings and regex search the same pattern in both key and value, while the regex uses it's key field to match equal strings). [default: all]
+  --format, -f        Specifies the format to be reformatted to; either `nbt`, `snbt`, `dat/dat_old/gzip` or `zlib`.
+  --out-dir, -d       Specifies the output directory. [default: ./]
+  --out-ext, -e       Specifies the output file extension (if not specified, it will infer from --format)"#
 		);
 		std::process::exit(0);
 	} else {
@@ -523,11 +527,16 @@ pub struct FileUpdateSubscription {
 	tab_uuid: uuid::Uuid,
 }
 
+#[derive(Copy, Clone)]
 pub enum FileUpdateSubscriptionType {
 	Snbt,
 	ByteArray,
 	IntArray,
 	LongArray,
+	ByteList,
+	ShortList,
+	IntList,
+	LongList,
 }
 
 #[derive(Copy, Clone)]

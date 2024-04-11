@@ -4,7 +4,7 @@ use std::str::FromStr;
 use std::sync::mpsc::TryRecvError;
 use std::time::Duration;
 
-use anyhow::{anyhow, Result};
+use anyhow::{anyhow, Context, Result};
 use compact_str::{CompactString, format_compact, ToCompactString};
 use fxhash::{FxBuildHasher, FxHashSet};
 use uuid::Uuid;
@@ -17,12 +17,14 @@ use crate::alert::Alert;
 use crate::assets::{ACTION_WHEEL_Z, BACKDROP_UV, BASE_TEXT_Z, BASE_Z, BOOKMARK_UV, CLOSED_WIDGET_UV, DARK_STRIPE_UV, EDITED_UV, HEADER_SIZE, HELD_ENTRY_Z, HIDDEN_BOOKMARK_UV, HORIZONTAL_SEPARATOR_UV, HOVERED_STRIPE_UV, HOVERED_WIDGET_UV, JUST_OVERLAPPING_BASE_TEXT_Z, LIGHT_STRIPE_UV, LINE_NUMBER_SEPARATOR_UV, NEW_FILE_UV, OPEN_FOLDER_UV, SELECTED_ACTION_WHEEL, SELECTED_WIDGET_UV, SELECTION_UV, TRAY_UV, UNEDITED_UV, UNSELECTED_ACTION_WHEEL, UNSELECTED_WIDGET_UV};
 use crate::bookmark::Bookmarks;
 use crate::color::TextColor;
+use crate::decoder::Decoder;
 use crate::elements::chunk::{NbtChunk, NbtRegion};
 use crate::elements::compound::NbtCompound;
 use crate::elements::element::{NbtByte, NbtByteArray, NbtDouble, NbtFloat, NbtInt, NbtIntArray, NbtLong, NbtLongArray, NbtShort};
 use crate::elements::element::NbtElement;
 use crate::elements::list::{NbtList, ValueIterator};
 use crate::elements::string::NbtString;
+use crate::encoder::UncheckedBufWriter;
 use crate::search_box::SearchBox;
 use crate::selected_text::{SelectedText, SelectedTextAdditional};
 use crate::tab::{FileFormat, Tab};
@@ -612,40 +614,47 @@ impl Workbench {
 				match subscription.rx.try_recv() {
 					Ok(data) => match subscription.subscription_type {
 						FileUpdateSubscriptionType::Snbt => write_snbt(subscription, &data, tab)?,
-						FileUpdateSubscriptionType::ByteArray => write_array(subscription, tab, {
-							let mut array = NbtByteArray::new();
-							for (idx, byte) in data.into_iter().enumerate() {
-								let _ = array.insert(idx, NbtElement::Byte(NbtByte { value: byte as i8 }));
-							}
-							NbtElement::ByteArray(array)
-						})?,
-						FileUpdateSubscriptionType::IntArray => write_array(subscription, tab, {
-							let mut array = NbtIntArray::new();
-							let iter = data.array_chunks::<4>();
-							if !iter.remainder().is_empty() { return Err(anyhow!("Expected a multiple of 4 bytes for int array")) }
-							for (idx, &chunk) in iter.enumerate() {
-								let _ = array.insert(
-									idx,
-									NbtElement::Int(NbtInt {
-										value: i32::from_be_bytes(chunk),
-									}),
-								);
-							}
-							NbtElement::IntArray(array)
-						})?,
-						FileUpdateSubscriptionType::LongArray => write_array(subscription, tab, {
-							let mut array = NbtLongArray::new();
-							let iter = data.array_chunks::<8>();
-							if !iter.remainder().is_empty() { return Err(anyhow!("Expected a multiple of 8 bytes for long array")) }
-							for (idx, &chunk) in iter.enumerate() {
-								let _ = array.insert(
-									idx,
-									NbtElement::Long(NbtLong {
-										value: i64::from_be_bytes(chunk),
-									}),
-								);
-							}
-							NbtElement::LongArray(array)
+						kind @ (FileUpdateSubscriptionType::ByteArray | FileUpdateSubscriptionType::IntArray | FileUpdateSubscriptionType::LongArray | FileUpdateSubscriptionType::ByteList | FileUpdateSubscriptionType::ShortList | FileUpdateSubscriptionType::IntList | FileUpdateSubscriptionType::LongList) => write_array(subscription, tab, {
+							let mut buf = UncheckedBufWriter::new();
+							let id = match kind {
+								FileUpdateSubscriptionType::ByteArray if data.len() % 1 == 0 => {
+									buf.write(&(data.len() as u32).to_be_bytes());
+									NbtByteArray::ID
+								},
+								FileUpdateSubscriptionType::IntArray if data.len() % 4 == 0 => {
+									buf.write(&(data.len() as u32 / 4).to_be_bytes());
+									NbtIntArray::ID
+								},
+								FileUpdateSubscriptionType::LongArray if data.len() % 8 == 0 => {
+									buf.write(&(data.len() as u32 / 8).to_be_bytes());
+									NbtLongArray::ID
+								},
+								FileUpdateSubscriptionType::ByteList if data.len() % 1 == 0 => {
+									buf.write(&[NbtByte::ID]);
+									buf.write(&(data.len() as u32).to_be_bytes());
+									NbtList::ID
+								},
+								FileUpdateSubscriptionType::ShortList if data.len() % 2 == 0 => {
+									buf.write(&[NbtShort::ID]);
+									buf.write(&(data.len() as u32 / 2).to_be_bytes());
+									NbtList::ID
+								},
+								FileUpdateSubscriptionType::IntList if data.len() % 4 == 0 => {
+									buf.write(&[NbtInt::ID]);
+									buf.write(&(data.len() as u32 / 4).to_be_bytes());
+									NbtList::ID
+								},
+								FileUpdateSubscriptionType::LongList if data.len() % 8 == 0 => {
+									buf.write(&[NbtLong::ID]);
+									buf.write(&(data.len() as u32 / 8).to_be_bytes());
+									NbtList::ID
+								},
+								_ => return Err(anyhow!("Invalid width for designated type of array")),
+							};
+							buf.write(&data);
+							let buf = buf.finish();
+							let mut decoder = Decoder::new(&buf, SortAlgorithm::None);
+							NbtElement::from_bytes(id, &mut decoder).context("Could not read bytes for array")?
 						})?,
 					},
 					Err(TryRecvError::Disconnected) => {

@@ -71,7 +71,7 @@ impl Tab {
 	#[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
 	pub fn save(&mut self, force_dialog: bool) -> Result<()> {
 		let path = self.path.as_deref().unwrap_or(self.name.as_ref().as_ref());
-		if !path.exists() || force_dialog {
+		if path.try_exists().is_err() || force_dialog {
 			let mut builder = native_dialog::FileDialog::new();
 			if self.value.id() == NbtRegion::ID {
 				builder = builder.add_filter("Region File", &["mca", "mcr"]);
