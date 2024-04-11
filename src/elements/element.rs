@@ -1089,7 +1089,7 @@ impl NbtElement {
 						ElementAction::OpenArrayInHex
 					];
 					let id = self.as_list_unchecked().element;
-					if let NbtByte::ID | NbtShort::ID | NbtInt::ID | NbtLong::ID = id {
+					if matches!(id, NbtByte::ID | NbtShort::ID | NbtInt::ID | NbtLong::ID) || cfg!(target_arch = "wasm32") {
 						&FULL
 					} else {
 						&FULL[..FULL.len() - 1]
