@@ -126,6 +126,8 @@ impl VertexBufferBuilder {
 	pub fn draw_tooltip(&mut self, text: &[&str], pos: impl Into<(usize, usize)>, force_draw_right: bool) {
 		use core::fmt::Write;
 
+		if self.drew_tooltip { return }
+
 		let (mut x, y) = pos.into();
 		let y = y + 16;
 		let text_width = text.iter().map(|x| x.width()).max().unwrap_or(0);

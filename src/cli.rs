@@ -113,7 +113,6 @@ fn get_argument(key: &str, args: &mut Vec<String>) -> Option<String> {
 }
 
 #[inline]
-#[cfg(not(target_arch = "wasm32"))]
 pub fn find() -> ! {
     let mut args = std::env::args().collect::<Vec<_>>();
     // one for the exe, one for the `find`
@@ -185,7 +184,6 @@ pub fn find() -> ! {
 }
 
 #[inline]
-#[cfg(not(target_arch = "wasm32"))]
 pub fn reformat() -> ! {
     let mut args = std::env::args().collect::<Vec<_>>();
     args.drain(..2);

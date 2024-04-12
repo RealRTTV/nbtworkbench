@@ -220,6 +220,7 @@ impl<Additional: Clone, Cache: Cachelike<Additional>> Text<Additional, Cache> {
                     self.value = format!("{low}{high}");
                     self.selection = None;
                 }
+                self.cursor = start;
                 return NothingSpecial;
             }
         }

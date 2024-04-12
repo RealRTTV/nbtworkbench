@@ -51,8 +51,8 @@ pub const SELECTED_ACTION_WHEEL: [Vec2u; 8] = [
 	Vec2u::new(187, 57),
 ];
 pub const TRAY_UV: Vec2u = Vec2u::new(128, 80);
-pub const EDITED_UV: Vec2u = Vec2u::new(16, 64);
-pub const UNEDITED_UV: Vec2u = Vec2u::new(32, 64);
+pub const SAVE_UV: Vec2u = Vec2u::new(16, 64);
+pub const SAVE_GRAYSCALE_UV: Vec2u = Vec2u::new(32, 64);
 pub const NBT_FILE_TYPE_UV: Vec2u = Vec2u::new(32, 80);
 pub const GZIP_FILE_TYPE_UV: Vec2u = Vec2u::new(48, 80);
 pub const ZLIB_FILE_TYPE_UV: Vec2u = Vec2u::new(64, 80);

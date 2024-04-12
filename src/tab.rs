@@ -10,7 +10,7 @@ use flate2::Compression;
 use uuid::Uuid;
 use zune_inflate::DeflateDecoder;
 
-use crate::{LinkedQueue, OptionExt, panic_unchecked, RenderContext, since_epoch, SortAlgorithm, StrExt, WindowProperties};
+use crate::{DOUBLE_CLICK_INTERVAL, LinkedQueue, OptionExt, panic_unchecked, RenderContext, since_epoch, SortAlgorithm, StrExt, WindowProperties};
 use crate::assets::{BASE_Z, BYTE_ARRAY_GHOST_UV, BYTE_ARRAY_UV, BYTE_GRAYSCALE_UV, BYTE_UV, CHUNK_GHOST_UV, CHUNK_UV, COMPOUND_GHOST_UV, COMPOUND_ROOT_UV, COMPOUND_UV, DISABLED_REFRESH_UV, DOUBLE_GRAYSCALE_UV, DOUBLE_UV, ENABLED_FREEHAND_MODE_UV, FLOAT_GRAYSCALE_UV, FLOAT_UV, FREEHAND_MODE_UV, GZIP_FILE_TYPE_UV, HEADER_SIZE, HELD_SCROLLBAR_UV, HOVERED_WIDGET_UV, INT_ARRAY_GHOST_UV, INT_ARRAY_UV, INT_GRAYSCALE_UV, INT_UV, JUST_OVERLAPPING_BASE_Z, LINE_NUMBER_SEPARATOR_UV, LIST_GHOST_UV, LIST_UV, LONG_ARRAY_GHOST_UV, LONG_ARRAY_UV, LONG_GRAYSCALE_UV, LONG_UV, MCA_FILE_TYPE_UV, NBT_FILE_TYPE_UV, REDO_UV, REFRESH_UV, REGION_UV, SCROLLBAR_Z, SHORT_GRAYSCALE_UV, SHORT_UV, SNBT_FILE_TYPE_UV, STEAL_ANIMATION_OVERLAY_UV, STRING_GHOST_UV, STRING_UV, UNDO_UV, UNHELD_SCROLLBAR_UV, UNKNOWN_NBT_GHOST_UV, UNKNOWN_NBT_UV, UNSELECTED_WIDGET_UV, ZLIB_FILE_TYPE_UV, ZOffset};
 use crate::color::TextColor;
 use crate::elements::chunk::NbtRegion;
@@ -30,7 +30,7 @@ pub struct Tab {
 	pub compression: FileFormat,
 	pub undos: LinkedQueue<WorkbenchAction>,
 	pub redos: LinkedQueue<WorkbenchAction>,
-	pub history_changed: bool,
+	pub unsaved_changes: bool,
 	pub scroll: usize,
 	pub horizontal_scroll: usize,
 	pub window_height: usize,
@@ -44,6 +44,13 @@ pub struct Tab {
 }
 
 impl Tab {
+	pub const FILE_TYPE_FILTERS: &'static [(&'static str, &'static [&'static str])] = &[
+		("Uncompressed NBT File", &["nbt"]),
+		("SNBT File", &["snbt"]),
+		("Region File", &["mca", "mcr"]),
+		("Compressed NBT File", &["dat", "dat_old", "dat_new", "dat_mcr", "old", "schem", "schematic", "litematic"]),
+	];
+
 	pub fn new(nbt: NbtElement, path: &Path, compression: FileFormat, window_height: usize, window_width: usize) -> Result<Self> {
 		if !(nbt.id() == NbtCompound::ID || nbt.id() == NbtRegion::ID) { return Err(anyhow!("Parsed NBT was not a Compound or Region")) }
 
@@ -54,7 +61,7 @@ impl Tab {
 			compression,
 			undos: LinkedQueue::new(),
 			redos: LinkedQueue::new(),
-			history_changed: false,
+			unsaved_changes: false,
 			scroll: 0,
 			horizontal_scroll: 0,
 			window_height,
@@ -71,23 +78,25 @@ impl Tab {
 	#[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
 	pub fn save(&mut self, force_dialog: bool) -> Result<()> {
 		let path = self.path.as_deref().unwrap_or(self.name.as_ref().as_ref());
-		if path.try_exists().is_err() || force_dialog {
+		if !path.is_absolute() || force_dialog {
 			let mut builder = native_dialog::FileDialog::new();
-			builder = match self.compression {
-				FileFormat::Nbt => builder.add_filter("Uncompressed NBT File", &["nbt"]),
-				FileFormat::Snbt => builder.add_filter("SNBT File", &["snbt"]),
-				FileFormat::Lz4 | FileFormat::Mca => builder.add_filter("Region File", &["mca", "mcr"]),
-				FileFormat::Gzip | FileFormat::Zlib => builder.add_filter("Compressed NBT File", &["dat", "dat_old", "dat_new", "dat_mcr", "old"]),
+			let initial_index = match self.compression {
+				FileFormat::Nbt => 0,
+				FileFormat::Snbt => 1,
+				FileFormat::Lz4 | FileFormat::Mca => 2,
+				FileFormat::Gzip | FileFormat::Zlib => 3,
 			};
+			builder = builder.add_filter(Self::FILE_TYPE_FILTERS[initial_index].0, Self::FILE_TYPE_FILTERS[initial_index].1);
+			builder = Self::FILE_TYPE_FILTERS.iter().enumerate().filter_map(|(idx, value)| if idx == initial_index { None } else { Some(value) }).fold(builder, |builder, filter| builder.add_filter(filter.0, filter.1));
 			let path = builder.show_save_single_file()?.ok_or_else(|| anyhow!("Save cancelled"))?;
 			self.name = path.file_name().and_then(|x| x.to_str()).expect("Path has a filename").to_string().into_boxed_str();
 			std::fs::write(&path, self.compression.encode(&self.value))?;
 			self.path = Some(path);
-			self.history_changed = false;
+			self.unsaved_changes = false;
 			Ok(())
 		} else {
 			std::fs::write(path, self.compression.encode(&self.value))?;
-			self.history_changed = false;
+			self.unsaved_changes = false;
 			Ok(())
 		}
 	}
@@ -323,7 +332,7 @@ impl Tab {
 	pub fn append_to_history(&mut self, action: WorkbenchAction) {
 		self.undos.push(action);
 		self.redos.clear();
-		self.history_changed = true;
+		self.unsaved_changes = true;
 	}
 
 	#[must_use]
@@ -626,22 +635,24 @@ impl Tab {
 
 	#[cfg(not(target_arch = "wasm32"))]
 	pub fn refresh(&mut self, sort_algorithm: SortAlgorithm) -> Result<()> {
-		if self.history_changed && core::mem::replace(&mut self.last_close_attempt, since_epoch()).as_millis() > 3000 {
+		let Some(path) = self.path.as_deref() else { return Err(anyhow!("File path was not present in tab")) };
+
+		if self.unsaved_changes && (since_epoch() - core::mem::replace(&mut self.last_close_attempt, since_epoch())) > DOUBLE_CLICK_INTERVAL {
 			return Ok(());
 		}
 
-		let Some(path) = self.path.as_deref() else { return Err(anyhow!("File path was not present in tab")) };
 		let bytes = std::fs::read(path)?;
 		let (value, format) = Tab::parse_raw(path, bytes, sort_algorithm)?;
 
 		self.bookmarks.clear();
 		self.scroll = 0;
 		self.compression = format;
-		self.history_changed = false;
+		self.unsaved_changes = false;
 		self.undos.clear();
 		self.redos.clear();
 		self.uuid = Uuid::new_v4();
 		self.selected_text = None;
+		self.last_close_attempt = Duration::ZERO;
 		let old = core::mem::replace(&mut self.value, Box::new(value));
 		std::thread::Builder::new().stack_size(50_331_648 /*48MiB*/).spawn(move || drop(old)).expect("Failed to spawn thread");
 

@@ -727,7 +727,7 @@ impl NbtRegion {
 pub struct NbtChunk {
 	inner: Box<NbtCompound>,
 	last_modified: u32,
-	// need to restrict this file format to only use GZIP, ZLIB and Uncompressed
+	// need to restrict this file format to only use GZIP, ZLIB, Uncompressed, and LZ4
 	compression: FileFormat,
 	pub x: u8,
 	pub z: u8,

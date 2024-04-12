@@ -65,7 +65,7 @@
         </style>
     </head>
     <body>
-        <input type="file" accept=".nbt,.snbt,.dat,.dat_old,.dat_mcr,.old,.mca,.mcr,.csv" style="display:none" id="file_dialog"/>
+        <input type="file" accept=".nbt, .snbt, .dat, .dat_old, .dat_new, .dat_mcr, .mca, .mcr" style="display:none" id="file_dialog"/>
         <div style="display:none">
             <a id="download"></a>
             <a id="clipboard"></a>
@@ -75,11 +75,13 @@
         <script type="module">
             const dialog = document.getElementById("file_dialog");
 
-            function openDialog(event) {
-                let shouldOpenDialog = document.getElementById("shouldOpenDialog").innerText === "true";
-                if (!shouldOpenDialog) return;
-                document.getElementById("shouldOpenDialog").innerText = "false";
-                dialog.click();
+            function onEvent(event) {
+                do {
+                    let shouldOpenDialog = document.getElementById("shouldOpenDialog").innerText === "true";
+                    if (!shouldOpenDialog) break;
+                    document.getElementById("shouldOpenDialog").innerText = "false";
+                    dialog.click();
+                } while (false)
             }
 
             import init, { open_file } from "./nbtworkbench.js?version=2";
@@ -94,11 +96,11 @@
                 })
             };
 
-            canvas.addEventListener("pointerdown", openDialog);
-            canvas.addEventListener("pointerup", openDialog);
-            canvas.addEventListener("keydown", openDialog);
-            canvas.addEventListener("keyup", openDialog);
-            canvas.addEventListener("keypress", openDialog);
+            canvas.addEventListener("pointerdown", onEvent);
+            canvas.addEventListener("pointerup", onEvent);
+            canvas.addEventListener("keydown", onEvent);
+            canvas.addEventListener("keyup", onEvent);
+            canvas.addEventListener("keypress", onEvent);
             canvas.ondragover = event => {
                 event.stopPropagation();
                 event.preventDefault();

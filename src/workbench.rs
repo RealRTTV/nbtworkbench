@@ -12,9 +12,9 @@ use winit::dpi::PhysicalPosition;
 use winit::event::{ElementState, KeyEvent, MouseButton, MouseScrollDelta};
 use winit::keyboard::{KeyCode, PhysicalKey};
 
-use crate::{Bookmark, DropFn, encompasses, encompasses_or_equal, FileUpdateSubscription, FileUpdateSubscriptionType, flags, get_clipboard, HeldEntry, LinkedQueue, OptionExt, panic_unchecked, Position, recache_along_indices, RenderContext, set_clipboard, since_epoch, SortAlgorithm, StrExt, sum_indices, tab, tab_mut, WindowProperties};
+use crate::{Bookmark, DOUBLE_CLICK_INTERVAL, DropFn, encompasses, encompasses_or_equal, FileUpdateSubscription, FileUpdateSubscriptionType, flags, get_clipboard, HeldEntry, LinkedQueue, OptionExt, panic_unchecked, Position, recache_along_indices, RenderContext, set_clipboard, since_epoch, SortAlgorithm, StrExt, sum_indices, tab, tab_mut, WindowProperties};
 use crate::alert::Alert;
-use crate::assets::{ACTION_WHEEL_Z, BACKDROP_UV, BASE_TEXT_Z, BASE_Z, BOOKMARK_UV, CLOSED_WIDGET_UV, DARK_STRIPE_UV, EDITED_UV, HEADER_SIZE, HELD_ENTRY_Z, HIDDEN_BOOKMARK_UV, HORIZONTAL_SEPARATOR_UV, HOVERED_STRIPE_UV, HOVERED_WIDGET_UV, JUST_OVERLAPPING_BASE_TEXT_Z, LIGHT_STRIPE_UV, LINE_NUMBER_SEPARATOR_UV, NEW_FILE_UV, OPEN_FOLDER_UV, SELECTED_ACTION_WHEEL, SELECTED_WIDGET_UV, SELECTION_UV, TRAY_UV, JUST_UNDERLAPPING_BASE_Z, UNEDITED_UV, UNSELECTED_ACTION_WHEEL, UNSELECTED_WIDGET_UV};
+use crate::assets::{ACTION_WHEEL_Z, BACKDROP_UV, BASE_TEXT_Z, BASE_Z, BOOKMARK_UV, CLOSED_WIDGET_UV, DARK_STRIPE_UV, SAVE_UV, HEADER_SIZE, HELD_ENTRY_Z, HIDDEN_BOOKMARK_UV, HORIZONTAL_SEPARATOR_UV, HOVERED_STRIPE_UV, HOVERED_WIDGET_UV, JUST_OVERLAPPING_BASE_TEXT_Z, LIGHT_STRIPE_UV, LINE_NUMBER_SEPARATOR_UV, NEW_FILE_UV, OPEN_FOLDER_UV, SELECTED_ACTION_WHEEL, SELECTED_WIDGET_UV, SELECTION_UV, TRAY_UV, JUST_UNDERLAPPING_BASE_Z, SAVE_GRAYSCALE_UV, UNSELECTED_ACTION_WHEEL, UNSELECTED_WIDGET_UV};
 use crate::bookmark::Bookmarks;
 use crate::color::TextColor;
 use crate::decoder::Decoder;
@@ -147,7 +147,7 @@ impl Workbench {
 				compression: FileFormat::Nbt,
 				undos: LinkedQueue::new(),
 				redos: LinkedQueue::new(),
-				history_changed: false,
+				unsaved_changes: false,
 				scroll: 0,
 				horizontal_scroll: 0,
 				window_height: WINDOW_HEIGHT,
@@ -533,7 +533,7 @@ impl Workbench {
 						value: (None, core::mem::replace(tab.value.as_mut(), value)),
 					});
 					tab.redos.clear();
-					tab.history_changed = true;
+					tab.unsaved_changes = true;
 				} else {
 					return Err(anyhow!("Root element type cannot be changed"));
 				}
@@ -1116,7 +1116,7 @@ impl Workbench {
 			compression: FileFormat::Nbt,
 			undos: LinkedQueue::new(),
 			redos: LinkedQueue::new(),
-			history_changed: false,
+			unsaved_changes: false,
 			scroll: 0,
 			horizontal_scroll: 0,
 			window_height: self.window_height,
@@ -1139,7 +1139,7 @@ impl Workbench {
 	#[inline]
 	pub fn remove_tab(&mut self, idx: usize, window_properties: &mut WindowProperties) -> bool {
 		let tab = unsafe { self.tabs.get_unchecked_mut(idx) };
-		if tab.history_changed && core::mem::replace(&mut tab.last_close_attempt, since_epoch()).as_millis() > 3000 {
+		if tab.unsaved_changes && (since_epoch() - core::mem::replace(&mut tab.last_close_attempt, since_epoch())) > DOUBLE_CLICK_INTERVAL {
 			return false;
 		}
 
@@ -1164,7 +1164,7 @@ impl Workbench {
 	#[inline]
 	#[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
 	fn open_file(&mut self, window_properties: &mut WindowProperties) {
-		match native_dialog::FileDialog::new().set_location("~/Downloads").add_filter("Uncompressed NBT File", &["nbt"]).add_filter("SNBT File", &["snbt"]).add_filter("Region File", &["mca", "mcr"]).add_filter("Compressed NBT File", &["dat", "dat_old", "dat_new", "dat_mcr", "old"]).show_open_single_file() {
+		match Tab::FILE_TYPE_FILTERS.iter().fold(native_dialog::FileDialog::new().set_location("~/Downloads"), |builder, filter| builder.add_filter(filter.0, filter.1)).show_open_single_file() {
 			Err(e) => self.alert(Alert::new("Error!", TextColor::Red, e.to_string())),
 			Ok(None) => {},
 			Ok(Some(path)) => match std::fs::read(&path) {
@@ -1295,7 +1295,7 @@ impl Workbench {
 				if let Some(selected_text) = tab.selected_text.as_mut() {
 					let now = since_epoch();
 					let (old_y, old_cursor, timestamp) = core::mem::replace(&mut tab.last_selected_text_interaction, (y, selected_text.cursor, now));
-					if now - timestamp < Duration::from_millis(500) && old_y == y && old_cursor == selected_text.cursor && !selected_text.value.is_empty() {
+					if now - timestamp < DOUBLE_CLICK_INTERVAL && old_y == y && old_cursor == selected_text.cursor && !selected_text.value.is_empty() {
 						tab.last_selected_text_interaction = (0, 0, Duration::ZERO);
 						selected_text.cursor = selected_text.value.len();
 						selected_text.selection = Some(0);
@@ -1949,30 +1949,6 @@ impl Workbench {
 						SelectedTextKeyResult::Failed => {} // next thing pls
 					}
 				}
-				// todo, custom help file
-				// if key == KeyCode::H && flags == flags!(Ctrl) {
-				// 	if let Some(tab) = self.tab_mut() {
-				// 		tab.selected_text = None;
-				// 	}
-				// 	self.new_custom_tab(f, Tab {
-				// 		value: Box::new(Box::new(NbtElement::from_file(include_bytes!("assets/help.nbt")).expect("Included help nbt contains valid data"))),
-				// 		name: "Click the toggle button to begin".to_owned().into_boxed_str(),
-				// 		path: None,
-				// 		compression: FileFormat::Nbt,
-				// 		undos: LinkedQueue::new(),
-				// 		redos: LinkedQueue::new(),
-				// 		history_changed: false,
-				// 		scroll: 0,
-				// 		horizontal_scroll: 0,
-				// 		window_height: self.window_height,
-				// 		window_width: self.window_width,
-				// 		bookmarks: vec![],
-				// 		uuid: Uuid::new_v4(),
-				// 		freehand_mode: false,
-				// 		selected_text: None,
-				// 	});
-				// 	return true;
-				// }
 				if key == KeyCode::KeyF && flags == flags!(Ctrl) {
 					self.search_box.select(0, MouseButton::Left);
 					return true;
@@ -2428,7 +2404,7 @@ impl Workbench {
 		builder.horizontal_scroll = self.tab_scroll;
 		for (idx, tab) in self.tabs.iter().enumerate() {
 			let remaining_width = tab.name.width() + 48 + 3;
-			let uv = if (since_epoch() - tab.last_close_attempt).as_millis() <= 3000 {
+			let uv = if (since_epoch() - tab.last_close_attempt) <= DOUBLE_CLICK_INTERVAL {
 				CLOSED_WIDGET_UV
 			} else if idx == self.tab {
 				SELECTED_WIDGET_UV
@@ -2457,10 +2433,10 @@ impl Workbench {
 			builder.draw_texture((offset, 3), uv + (13, 0), (3, 16));
 			builder.draw_texture(
 				(offset - 32, 3),
-				if tab.history_changed {
-					EDITED_UV
+				if tab.unsaved_changes {
+					SAVE_UV
 				} else {
-					UNEDITED_UV
+					SAVE_GRAYSCALE_UV
 				},
 				(16, 16),
 			);

@@ -8,15 +8,15 @@ repository = "https://github.com/RealRTTV/nbtworkbench"
 keywords = ["nbt", "window", "unsafe", "editor", "tree"]
 categories = ["graphics", "rendering", "text-editors", "parser-implementations"]
 
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
 # Wasm Only
 #[lib]
 #crate-type = ["cdylib", "rlib"]
 #path = "src/main.rs"
 
 # Windows Only
-[package.metadata.winres]
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+#[package.metadata.winres]
 
 [profile.release]
 opt-level = 3

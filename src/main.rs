@@ -180,6 +180,7 @@ extern "C" {
 
 pub static mut WORKBENCH: UnsafeCell<Workbench> = UnsafeCell::new(unsafe { Workbench::uninit() });
 pub static mut WINDOW_PROPERTIES: UnsafeCell<WindowProperties> = UnsafeCell::new(WindowProperties::Fake);
+pub const DOUBLE_CLICK_INTERVAL: Duration = Duration::from_millis(500);
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
@@ -244,15 +245,13 @@ Options:
 
 /// # Refactor
 /// * render trees using `RenderLine` struct/enum
-/// * make `Bookmarks` struct a thing and add functionality there
 /// # Long Term Goals
 /// * smart screen
 /// * wiki page for docs on minecraft's format of stuff
-/// * [chunk](NbtChunk) section rendering
+/// * [chunk](elements::chunk::NbtChunk) section rendering
 /// # Minor Features
 /// * gear icon to swap toolbar with settings panel
-/// * __ctrl + h__, open a playground `nbt` file to help with user interaction (bonus points if I have some way to tell if you haven't used this editor before)
-/// * [`last_modified`](NbtChunk) field actually gets some impl
+/// * [`last_modified`](elements::chunk::NbtChunk) field actually gets some impl
 /// * auto save
 /// * blur behind tooltip
 /// # Major Features
@@ -300,34 +299,40 @@ pub fn get_clipboard() -> Option<String> {
 	return cli_clipboard::get_contents().ok();
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 pub fn set_clipboard(value: String) -> bool {
-	#[cfg(not(target_arch = "wasm32"))]
-	return cli_clipboard::set_contents(value).is_ok();
-	#[cfg(target_arch = "wasm32")]
-	return web_sys::window().map(|window| window.navigator()).and_then(|navigator| navigator.clipboard()).map(|clipboard| clipboard.write_text(&value)).is_some();
+	cli_clipboard::set_contents(value).is_ok()
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn set_clipboard(value: String) -> bool {
+	web_sys::window().map(|window| window.navigator()).and_then(|navigator| navigator.clipboard()).map(|clipboard| clipboard.write_text(&value)).is_some()
 }
 
 #[must_use]
 pub fn create_regex(mut str: String) -> Option<Regex> {
-	if !str.starts_with("/") {
-		return None;
-	}
-
-	str = str.split_off(1);
-
-	let mut flags = 0_u8;
-	while let Some(char) = str.pop() {
-		match char {
-			'i' => flags |= 0b000001,
-			'g' => flags |= 0b000010,
-			'm' => flags |= 0b000100,
-			's' => flags |= 0b001000,
-			'u' => flags |= 0b010000,
-			'y' => flags |= 0b100000,
-			'/' => break,
-			_ => return None
+	let flags = 'a: {
+		if !str.starts_with("/") {
+			break 'a 0;
 		}
-	}
+
+		str = str.split_off(1);
+
+		let mut flags = 0_u8;
+		while let Some(char) = str.pop() {
+			match char {
+				'i' => flags |= 0b000001,
+				'g' => flags |= 0b000010,
+				'm' => flags |= 0b000100,
+				's' => flags |= 0b001000,
+				'u' => flags |= 0b010000,
+				'y' => flags |= 0b100000,
+				'/' => break,
+				_ => return None
+			}
+		}
+		flags
+	};
 
 	RegexBuilder::new(&str)
 		.case_insensitive(flags & 0b1 > 0)
@@ -339,11 +344,15 @@ pub fn create_regex(mut str: String) -> Option<Regex> {
 }
 
 #[must_use]
+#[cfg(not(target_arch = "wasm32"))]
 pub fn since_epoch() -> Duration {
-	#[cfg(not(target_arch = "wasm32"))]
-	return unsafe { std::time::SystemTime::UNIX_EPOCH.elapsed().unwrap_unchecked() };
-	#[cfg(target_arch = "wasm32")]
-	return Duration::from_nanos((web_sys::js_sys::Date::now() * 1_000_000.0) as u64);
+	std::time::SystemTime::UNIX_EPOCH.elapsed().unwrap_or_else(|e| e.duration())
+}
+
+#[must_use]
+#[cfg(target_arch = "wasm32")]
+pub fn since_epoch() -> Duration {
+	Duration::from_nanos((web_sys::js_sys::Date::now() * 1_000_000.0) as u64)
 }
 
 pub fn sum_indices<I: Iterator<Item = usize>>(indices: I, mut root: &NbtElement) -> usize {

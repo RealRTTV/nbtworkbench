@@ -11,7 +11,7 @@ NBT Workbench is written completely from scratch in [Rust](https://www.rust-lang
 (Features marked with a ☆ are new and not available in NBT Studio or Explorer):
 
 * Java NBT files (`level.dat` / `hotbar.nbt`)
-* Java region files (`.mca`)
+* Java region files (`.mca` / `.mcr`)
   * ☆ Now supports the new 1.21 LZ4 compression format
 * SNBT files (`.snbt`)
 * ☆ [Web Version](https://rttv.ca/main)
@@ -22,13 +22,14 @@ NBT Workbench is written completely from scratch in [Rust](https://www.rust-lang
   * By holding right-click over an NBT tag: A circular action wheel will appear, which will let you make specific changes to NBT tags, this includes:
   * Copying the condensed/raw or formatted/pretty SNBT version of a tag.
   * ☆ Opening an array in a preferred hex editor.
-  * ☆ Opening nbt as SNBT in a preferred text editor.
+  * ☆ Opening NBT as SNBT in a preferred text editor.
   * ☆ Sorting Compounds alphabetically or by type.
 * ☆ Editing tag key/values in one click by simply being overtop the text.
 * ☆ Searching with substrings, regex and snbt matching.
 * ☆ Bookmarks
 * ☆ Line Numbers
 * ☆ Dark Mode
+* ☆ Colored Text
 * ☆ Remastered NBT Explorer Art
 * ☆ CLI Mode `nbtworkbench -?`
   * ☆ `nbtworkbench find` to search across multiple files
@@ -97,3 +98,16 @@ however, it would not come to be without the lovely projects below inspiring it.
 
 ### Icons
 * Remastered/Inspired by [jaquado](https://github.com/jaquadro)'s [NBTExplorer](https://github.com/jaquadro/NBTExplorer) icons.
+
+# Compiling
+### For Windows
+* You must have [Rust](https://rustup.rs) 1.78.0+ \[Nightly\] (target: x86_64-pc-windows-msvc)
+* Uncomment the windows-only section of your `Cargo.toml` file and make sure the other sections are commented out.
+* Run the following command to make a release build in `./target/x86_64-pc-windows-msvc/release`:\
+`cargo +nightly build --release --target x86_64-pc-windows-msvc -Zbuild-std=std,panic_abort -Zbuild-std-features=panic_immediate_abort -- -Ctarget-feature=+avx`
+### For Wasm
+* You must have [Rust](https://rustup.rs) 1.78.0+ \[Nightly\] (target: x86_64-pc-windows-msvc)
+* You must have [wasm-pack](https://crates.io/crates/wasm-pack) installed using cargo
+* Uncomment the wasm-only section of your `Cargo.toml` file and make sure the other sections are commented out.
+* Run the following command to compile for web assembly in `./web`:\
+`wasm-pack build --release --target web --out-name nbtworkbench --out-dir web`
