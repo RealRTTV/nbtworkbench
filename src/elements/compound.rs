@@ -12,7 +12,7 @@ use fxhash::FxHasher;
 use hashbrown::raw::RawTable;
 
 use crate::assets::{JUST_OVERLAPPING_BASE_TEXT_Z, BASE_Z, COMPOUND_ROOT_UV, COMPOUND_UV, CONNECTION_UV, HEADER_SIZE, LINE_NUMBER_CONNECTOR_Z, LINE_NUMBER_SEPARATOR_UV, ZOffset};
-use crate::decoder::Decoder;
+use crate::be_decoder::BigEndianDecoder;
 use crate::elements::chunk::NbtChunk;
 use crate::elements::element::NbtElement;
 use crate::encoder::UncheckedBufWriter;
@@ -20,6 +20,7 @@ use crate::{DropFn, OptionExt, RenderContext, SortAlgorithm, StrExt, VertexBuffe
 use crate::color::TextColor;
 use crate::formatter::PrettyFormatter;
 use crate::bookmark::{Bookmark, BookmarkSlice};
+use crate::le_decoder::LittleEndianDecoder;
 
 #[allow(clippy::module_name_repetitions)]
 #[repr(C)]
@@ -31,9 +32,9 @@ pub struct NbtCompound {
 	open: bool,
 }
 
-impl PartialEq for NbtCompound {
-	fn eq(&self, other: &Self) -> bool {
-		self.entries == other.entries
+impl NbtCompound {
+	pub fn matches(&self, other: &Self) -> bool {
+		self.entries.matches(&other.entries)
 	}
 }
 
@@ -78,7 +79,7 @@ impl NbtCompound {
 	}
 
 	#[inline]
-	pub fn from_bytes(decoder: &mut Decoder) -> Option<Self> {
+	pub fn from_be_bytes(decoder: &mut BigEndianDecoder) -> Option<Self> {
 		let mut compound = Self::new();
 		unsafe {
 			decoder.assert_len(1)?;
@@ -86,7 +87,7 @@ impl NbtCompound {
 			while current_element != 0 {
 				decoder.assert_len(2)?;
 				let key = decoder.string()?;
-				let value = NbtElement::from_bytes(current_element, decoder)?;
+				let value = NbtElement::from_be_bytes(current_element, decoder)?;
 				compound.insert_replacing(key, value);
 				match decoder.assert_len(1) {
 					Some(()) => {}
@@ -98,11 +99,45 @@ impl NbtCompound {
 			Some(compound)
 		}
 	}
-	pub fn to_bytes(&self, writer: &mut UncheckedBufWriter) {
+
+	#[inline]
+	pub fn to_be_bytes(&self, writer: &mut UncheckedBufWriter) {
 		for (key, value) in self.children() {
 			writer.write(&[value.id()]);
-			writer.write_str(key);
-			value.to_bytes(writer);
+			writer.write_be_str(key);
+			value.to_be_bytes(writer);
+		}
+		writer.write(&[0x00]);
+	}
+
+	#[inline]
+	pub fn from_le_bytes(decoder: &mut LittleEndianDecoder) -> Option<Self> {
+		let mut compound = Self::new();
+		unsafe {
+			decoder.assert_len(1)?;
+			let mut current_element = decoder.u8();
+			while current_element != 0 {
+				decoder.assert_len(2)?;
+				let key = decoder.string()?;
+				let value = NbtElement::from_le_bytes(current_element, decoder)?;
+				compound.insert_replacing(key, value);
+				match decoder.assert_len(1) {
+					Some(()) => {}
+					None => break, // wow mojang, saving one byte, so cool of you
+				};
+				current_element = decoder.u8();
+			}
+			decoder.sort(&mut compound.entries);
+			Some(compound)
+		}
+	}
+
+	#[inline]
+	pub fn to_le_bytes(&self, writer: &mut UncheckedBufWriter) {
+		for (key, value) in self.children() {
+			writer.write(&[value.id()]);
+			writer.write_le_str(key);
+			value.to_le_bytes(writer);
 		}
 		writer.write(&[0x00]);
 	}
@@ -727,17 +762,14 @@ pub struct CompoundMap {
 	pub entries: Vec<Entry>,
 }
 
-impl PartialEq for CompoundMap {
-	fn eq(&self, other: &Self) -> bool {
-		// disabled to make the comparison work like the nbt predicate in mc.
-		// if self.entries.len() != other.entries.len() { return false }
-
+impl CompoundMap {
+	pub fn matches(&self, other: &Self) -> bool {
 		for entry in &self.entries {
-			if other.idx_of(&entry.key).and_then(|idx| other.get_idx(idx)) != Some((&entry.key, &entry.value)) {
-				return false
+			if let Some((key, value)) = other.idx_of(&entry.key).and_then(|idx| other.get_idx(idx)) && key == entry.key && entry.value.matches(value) {
+				continue
 			}
+			return false
 		}
-
 		true
 	}
 }

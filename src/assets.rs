@@ -1,11 +1,14 @@
+use std::cell::LazyCell;
 use std::mem::ManuallyDrop;
+use std::ops::Deref;
+use zune_png::zune_core::options::DecoderOptions;
 use crate::since_epoch;
 
 use crate::vertex_buffer_builder::Vec2u;
 
 pub const HEADER_SIZE: usize = 48;
 
-pub const ATLAS: &[u8] = include_bytes!("assets/atlas.hex");
+pub const ATLAS_ENCODED: &[u8] = include_bytes!("assets/atlas.png");
 pub const ATLAS_WIDTH: usize = 256;
 pub const ATLAS_HEIGHT: usize = 256;
 pub const UNICODE_LEN: usize = 1_818_624;
@@ -58,6 +61,8 @@ pub const GZIP_FILE_TYPE_UV: Vec2u = Vec2u::new(48, 80);
 pub const ZLIB_FILE_TYPE_UV: Vec2u = Vec2u::new(64, 80);
 pub const SNBT_FILE_TYPE_UV: Vec2u = Vec2u::new(80, 80);
 pub const MCA_FILE_TYPE_UV: Vec2u = Vec2u::new(96, 80);
+pub const LITTLE_ENDIAN_NBT_FILE_TYPE_UV: Vec2u = Vec2u::new(152, 160);
+pub const LITTLE_ENDIAN_HEADER_NBT_FILE_TYPE_UV: Vec2u = Vec2u::new(168, 160);
 pub const OPEN_FOLDER_UV: Vec2u = Vec2u::new(112, 80);
 pub const UNSELECTED_TOGGLE_ON_UV: Vec2u = Vec2u::new(0, 64);
 pub const UNSELECTED_TOGGLE_OFF_UV: Vec2u = Vec2u::new(8, 64);
@@ -170,10 +175,17 @@ pub enum ZOffset {
     HELD_ENTRY_Z = 210,
     ALERT_Z = 240,
     ALERT_TEXT_Z = 241,
-    TOOLTIP_Z = 250,
+	TOOLTIP_BLUR_Z = 254,
+    TOOLTIP_Z = 255,
 }
 
 pub use ZOffset::*;
+
+static mut ATLAS_CELL: LazyCell<Vec<u8>> = LazyCell::new(|| zune_png::PngDecoder::new_with_options(ATLAS_ENCODED, DecoderOptions::new_fast().png_set_confirm_crc(false)).decode_raw().unwrap());
+
+pub fn atlas() -> &'static [u8] {
+	unsafe { ATLAS_CELL.deref().as_slice() }
+}
 
 #[allow(clippy::cast_ptr_alignment)]
 pub fn icon() -> Vec<u8> {

@@ -52,8 +52,13 @@ impl UncheckedBufWriter {
 		}
 	}
 
-	pub fn write_str(&mut self, str: &str) {
+	pub fn write_be_str(&mut self, str: &str) {
 		self.write(&(str.len() as u16).to_be_bytes());
+		self.write(str.as_bytes());
+	}
+
+	pub fn write_le_str(&mut self, str: &str) {
+		self.write(&(str.len() as u16).to_le_bytes());
 		self.write(str.as_bytes());
 	}
 

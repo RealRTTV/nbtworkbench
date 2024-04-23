@@ -92,7 +92,7 @@ pub async fn run() -> ! {
 							Err(SurfaceError::Timeout) => { error!("Frame took too long to process") },
 						}
 					}
-					WindowEvent::CloseRequested => std::process::exit(0),
+					WindowEvent::CloseRequested => if workbench.close() == 0 { std::process::exit(0) },
 					WindowEvent::Resized(new_size) => state.resize(workbench, new_size),
 					_ => {}
 				}
@@ -125,7 +125,11 @@ pub struct State<'window> {
 	diffuse_bind_group: BindGroup,
 	text_render_pipeline: RenderPipeline,
 	unicode_bind_group: BindGroup,
+	tooltip_effect_render_pipeline: RenderPipeline,
+	texture_reference_bind_group_layout: BindGroupLayout,
+	sampler: Sampler,
 	last_tick: Duration,
+	copy_render_pipeline: RenderPipeline,
 }
 
 impl<'window> State<'window> {
@@ -203,7 +207,7 @@ impl<'window> State<'window> {
 				origin: Origin3d::ZERO,
 				aspect: TextureAspect::All,
 			},
-			assets::ATLAS,
+			assets::atlas(),
 			ImageDataLayout {
 				offset: 0,
 				bytes_per_row: Some(4 * assets::ATLAS_WIDTH as u32),
@@ -324,12 +328,7 @@ impl<'window> State<'window> {
 			usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
 			view_formats: &[],
 		});
-		queue.write_texture(ImageCopyTexture {
-			texture: &unicode_texture,
-			mip_level: 0,
-			origin: Origin3d::ZERO,
-			aspect: TextureAspect::All,
-		}, &unsafe {
+		queue.write_texture(unicode_texture.as_image_copy(), &unsafe {
 			zune_inflate::DeflateDecoder::new_with_options(
 				include_bytes!("assets/unicode.hex.zib"),
 				DeflateOptions::default().set_confirm_checksum(false),
@@ -369,14 +368,14 @@ impl<'window> State<'window> {
 			label: Some("Text Shader"),
 			source: ShaderSource::Wgsl(Cow::Borrowed(crate::text_shader::SOURCE)),
 		});
-		let text_render_pipeline_payout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
+		let text_render_pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
 			label: Some("Text Render Pipeline Layout"),
 			bind_group_layouts: &[&unicode_bind_group_layout],
 			push_constant_ranges: &[],
 		});
 		let text_render_pipeline = device.create_render_pipeline(&RenderPipelineDescriptor {
 			label: Some("Text Render Pipeline"),
-			layout: Some(&text_render_pipeline_payout),
+			layout: Some(&text_render_pipeline_layout),
 			vertex: VertexState {
 				module: &text_shader,
 				entry_point: "vertex",
@@ -418,6 +417,139 @@ impl<'window> State<'window> {
 			},
 			multiview: None,
 		});
+		let texture_reference_bind_group_layout = device.create_bind_group_layout(&BindGroupLayoutDescriptor {
+			label: Some("Tooltip Effect Bind Group Layout"),
+			entries: &[
+				BindGroupLayoutEntry {
+					binding: 0,
+					visibility: ShaderStages::FRAGMENT,
+					ty: BindingType::Texture {
+						sample_type: TextureSampleType::Float {
+							filterable: true,
+						},
+						view_dimension: TextureViewDimension::D2,
+						multisampled: false,
+					},
+					count: None,
+				},
+				BindGroupLayoutEntry {
+					binding: 1,
+					visibility: ShaderStages::FRAGMENT,
+					ty: BindingType::Sampler(SamplerBindingType::Filtering),
+					count: None,
+				}
+			],
+		});
+		let tooltip_effect_shader = device.create_shader_module(ShaderModuleDescriptor {
+			label: Some("Tooltip Effect Shader"),
+			source: ShaderSource::Wgsl(Cow::Borrowed(crate::tooltip_effect_shader::SOURCE))
+		});
+		let tooltip_effect_render_pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
+			label: Some("Tooltip Effect Render Pipeline Layout"),
+			bind_group_layouts: &[&texture_reference_bind_group_layout],
+			push_constant_ranges: &[],
+		});
+		let tooltip_effect_render_pipeline = device.create_render_pipeline(&RenderPipelineDescriptor {
+			label: Some("Tooltip Effect Render Pipeline"),
+			layout: Some(&tooltip_effect_render_pipeline_layout),
+			vertex: VertexState {
+				module: &tooltip_effect_shader,
+				entry_point: "vertex",
+				buffers: &[VertexBufferLayout {
+					array_stride: 8,
+					step_mode: VertexStepMode::Vertex,
+					attributes: &vertex_attr_array![0 => Float32x2],
+				}],
+			},
+			fragment: Some(FragmentState {
+				module: &tooltip_effect_shader,
+				entry_point: "fragment",
+				targets: &[Some(ColorTargetState {
+					format: config.format,
+					blend: Some(BlendState::REPLACE),
+					write_mask: ColorWrites::ALL,
+				})],
+			}),
+			primitive: PrimitiveState {
+				topology: PrimitiveTopology::TriangleList,
+				strip_index_format: None,
+				front_face: FrontFace::Ccw,
+				cull_mode: Some(Face::Back),
+				polygon_mode: PolygonMode::Fill,
+				unclipped_depth: false,
+				conservative: false,
+			},
+			depth_stencil: None,
+			multisample: MultisampleState {
+				count: 1,
+				mask: !0,
+				alpha_to_coverage_enabled: false,
+			},
+			multiview: None,
+		});
+		let copy_render_pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
+			label: Some("Copy Render Pipeline Layout"),
+			bind_group_layouts: &[&texture_reference_bind_group_layout],
+			push_constant_ranges: &[],
+		});
+		let copy_shader = device.create_shader_module(ShaderModuleDescriptor {
+			label: Some("Copy Shader"),
+			source: ShaderSource::Wgsl(Cow::Borrowed(crate::copy_shader::SOURCE))
+		});
+		let copy_render_pipeline = device.create_render_pipeline(&RenderPipelineDescriptor {
+			label: Some("Copy Render Pipeline"),
+			layout: Some(&copy_render_pipeline_layout),
+			vertex: VertexState {
+				module: &copy_shader,
+				entry_point: "vertex",
+				buffers: &[VertexBufferLayout {
+					array_stride: 8,
+					step_mode: VertexStepMode::Vertex,
+					attributes: &vertex_attr_array![0 => Float32x2],
+				}],
+			},
+			primitive: PrimitiveState {
+				topology: PrimitiveTopology::TriangleList,
+				strip_index_format: None,
+				front_face: FrontFace::Ccw,
+				cull_mode: Some(Face::Back),
+				unclipped_depth: false,
+				polygon_mode: PolygonMode::Fill,
+				conservative: false,
+			},
+			depth_stencil: Some(DepthStencilState {
+				format: TextureFormat::Depth32Float,
+				depth_write_enabled: true,
+				depth_compare: CompareFunction::LessEqual,
+				stencil: StencilState::default(),
+				bias: DepthBiasState::default(),
+			}),
+			multisample: MultisampleState {
+				count: 1,
+				mask: !0,
+				alpha_to_coverage_enabled: false,
+			},
+			fragment: Some(FragmentState {
+				module: &copy_shader,
+				entry_point: "fragment",
+				targets: &[Some(ColorTargetState {
+					format: config.format,
+					blend: Some(BlendState::ALPHA_BLENDING),
+					write_mask: ColorWrites::ALL,
+				})],
+			}),
+			multiview: None,
+		});
+		let sampler = device.create_sampler(&SamplerDescriptor {
+			label: Some("Sampler"),
+			address_mode_u: AddressMode::Repeat,
+			address_mode_v: AddressMode::Repeat,
+			address_mode_w: AddressMode::Repeat,
+			mag_filter: FilterMode::Nearest,
+			min_filter: FilterMode::Nearest,
+			mipmap_filter: FilterMode::Nearest,
+			..Default::default()
+		});
 
 		Self {
 			surface,
@@ -429,6 +561,10 @@ impl<'window> State<'window> {
 			diffuse_bind_group,
 			text_render_pipeline,
 			unicode_bind_group,
+			tooltip_effect_render_pipeline,
+			texture_reference_bind_group_layout,
+			copy_render_pipeline,
+			sampler,
 			last_tick: Duration::ZERO,
 		}
 	}
@@ -511,10 +647,24 @@ impl<'window> State<'window> {
 		if let Err(e) = workbench.try_subscription() {
 			workbench.alert(Alert::new("Error!", TextColor::Red, e.to_string()))
 		}
-		let output = self.surface.get_current_texture()?;
-		let view = output
-			.texture
-			.create_view(&TextureViewDescriptor::default());
+		let surface_texture = self.surface.get_current_texture()?;
+		let size = Extent3d {
+			width: surface_texture.texture.width(),
+			height: surface_texture.texture.height(),
+			depth_or_array_layers: 1,
+		};
+		let surface_view = surface_texture.texture.create_view(&TextureViewDescriptor::default());
+		let texture = self.device.create_texture(&TextureDescriptor {
+			label: Some("Texture"),
+			size,
+			mip_level_count: 1,
+			sample_count: 1,
+			dimension: TextureDimension::D2,
+			format: surface_texture.texture.format(),
+			usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_SRC,
+			view_formats: &[],
+		});
+		let view = texture.create_view(&TextureViewDescriptor::default());
 		let mut encoder = self
 			.device
 			.create_command_encoder(&CommandEncoderDescriptor {
@@ -522,11 +672,7 @@ impl<'window> State<'window> {
 			});
 		let depth_texture = self.device.create_texture(&TextureDescriptor {
 			label: Some("Depth Texture"),
-			size: Extent3d {
-				width: self.config.width,
-				height: self.config.height,
-				depth_or_array_layers: 1,
-			},
+			size,
 			mip_level_count: 1,
 			sample_count: 1,
 			dimension: TextureDimension::D2,
@@ -536,11 +682,20 @@ impl<'window> State<'window> {
 		});
 		let depth_texture_view = depth_texture.create_view(&TextureViewDescriptor::default());
 
+		let mut builder = VertexBufferBuilder::new(
+			self.size,
+			assets::ATLAS_WIDTH,
+			assets::ATLAS_HEIGHT,
+			workbench.scroll(),
+			workbench.scale,
+		);
+
 		{
 			let vertex_buffer;
 			let index_buffer;
 			let text_vertex_buffer;
 			let text_index_buffer;
+
 			let mut render_pass = encoder.begin_render_pass(&RenderPassDescriptor {
 				label: Some("Render Pass"),
 				color_attachments: &[Some(RenderPassColorAttachment {
@@ -567,14 +722,6 @@ impl<'window> State<'window> {
 				timestamp_writes: None,
 				occlusion_query_set: None,
 			});
-
-			let mut builder = VertexBufferBuilder::new(
-				self.size,
-				assets::ATLAS_WIDTH,
-				assets::ATLAS_HEIGHT,
-				workbench.scroll(),
-				workbench.scale,
-			);
 			workbench.render(&mut builder);
 
 			let show_cursor = true;
@@ -628,8 +775,272 @@ impl<'window> State<'window> {
 			}
 		}
 
-		self.queue.submit(std::iter::once(encoder.finish()));
-		output.present();
+		self.queue.submit(Some(encoder.finish()));
+
+		if builder.drew_tooltip() {
+			builder.clear_buffers();
+			let mut encoder = self.device.create_command_encoder(&CommandEncoderDescriptor { label: Some("Tooltip Command Encoder"), });
+
+			let tooltip_effect_texture = self.device.create_texture(&TextureDescriptor {
+				label: Some("Tooltip Effect Texture"),
+				size,
+				mip_level_count: 1,
+				sample_count: 1,
+				dimension: TextureDimension::D2,
+				format: surface_texture.texture.format(),
+				usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::TEXTURE_BINDING,
+				view_formats: &[],
+			});
+
+			let tooltip_effect_texture_view = tooltip_effect_texture.create_view(&TextureViewDescriptor::default());
+
+			let vertices = {
+				let tooltip_effect_vertex_buffer;
+				let tooltip_effect_bind_group;
+
+				let mut tooltip_effect_render_pass = encoder.begin_render_pass(&RenderPassDescriptor {
+					label: Some("Tooltip Effect Render Pass"),
+					color_attachments: &[Some(RenderPassColorAttachment {
+						view: &tooltip_effect_texture_view,
+						resolve_target: None,
+						ops: Operations {
+							load: LoadOp::Clear(Color {
+								r: 0.0,
+								g: 0.0,
+								b: 0.0,
+								a: 0.0,
+							}),
+							store: StoreOp::Store,
+						},
+					})],
+					depth_stencil_attachment: None,
+					timestamp_writes: None,
+					occlusion_query_set: None,
+				});
+
+				if let Some(vertices) = builder.draw_tooltip0() {
+					tooltip_effect_bind_group = self.device.create_bind_group(&BindGroupDescriptor {
+						label: Some("Tooltip Effect Bind Group"),
+						layout: &self.texture_reference_bind_group_layout,
+						entries: &[
+							BindGroupEntry {
+								binding: 0,
+								resource: BindingResource::TextureView(&view),
+							},
+							BindGroupEntry {
+								binding: 1,
+								resource: BindingResource::Sampler(&self.sampler),
+							}
+						],
+					});
+
+					tooltip_effect_render_pass.set_pipeline(&self.tooltip_effect_render_pipeline);
+					tooltip_effect_render_pass.set_bind_group(0, &tooltip_effect_bind_group, &[]);
+
+					tooltip_effect_vertex_buffer = self.device.create_buffer_init(&BufferInitDescriptor {
+						label: Some("Tooltip Effect Vertex Buffer"),
+						contents: unsafe { std::slice::from_raw_parts(vertices.as_ptr().cast::<u8>(), vertices.len() * 4) },
+						usage: BufferUsages::VERTEX,
+					});
+
+					tooltip_effect_render_pass.set_vertex_buffer(0, tooltip_effect_vertex_buffer.slice(..));
+
+					tooltip_effect_render_pass.draw(0..6, 0..1);
+					vertices
+				} else {
+					panic!("Tooltip existed, then didn't?")
+				}
+			};
+
+			{
+				let tooltip_vertex_buffer;
+				let tooltip_index_buffer;
+				let tooltip_text_vertex_buffer;
+				let tooltip_text_index_buffer;
+
+				let copy_bind_group;
+				let copy_vertex_buffer;
+
+				let mut render_pass = encoder.begin_render_pass(&RenderPassDescriptor {
+					label: Some("Tooltip Render Pass"),
+					color_attachments: &[Some(RenderPassColorAttachment {
+						view: &view,
+						resolve_target: None,
+						ops: Operations {
+							load: LoadOp::Load,
+							store: StoreOp::Store,
+						},
+					})],
+					depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
+						view: &depth_texture_view,
+						depth_ops: Some(Operations {
+							load: LoadOp::Clear(1.0),
+							store: StoreOp::Store,
+						}),
+						stencil_ops: None,
+					}),
+					timestamp_writes: None,
+					occlusion_query_set: None,
+				});
+
+				{
+					copy_bind_group = self.device.create_bind_group(&BindGroupDescriptor {
+						label: Some("Copy Bind Group"),
+						layout: &self.texture_reference_bind_group_layout,
+						entries: &[
+							BindGroupEntry {
+								binding: 0,
+								resource: BindingResource::TextureView(&tooltip_effect_texture_view),
+							},
+							BindGroupEntry {
+								binding: 1,
+								resource: BindingResource::Sampler(&self.sampler),
+							}
+						],
+					});
+
+					render_pass.set_pipeline(&self.copy_render_pipeline);
+					render_pass.set_bind_group(0, &copy_bind_group, &[]);
+
+					copy_vertex_buffer = self.device.create_buffer_init(&BufferInitDescriptor {
+						label: Some("Copy Vertex Buffer"),
+						contents: unsafe { std::slice::from_raw_parts(vertices.as_ptr().cast::<u8>(), vertices.len() * 4) },
+						usage: BufferUsages::VERTEX,
+					});
+
+					render_pass.set_vertex_buffer(0, copy_vertex_buffer.slice(..));
+					render_pass.draw(0..6, 0..1);
+				}
+
+				{
+					render_pass.set_pipeline(&self.render_pipeline);
+					render_pass.set_bind_group(0, &self.diffuse_bind_group, &[]);
+
+					tooltip_vertex_buffer = self.device.create_buffer_init(&BufferInitDescriptor {
+						label: Some("Tooltip Vertex Buffer"),
+						contents: builder.vertices(),
+						usage: BufferUsages::VERTEX,
+					});
+
+					tooltip_index_buffer = self.device.create_buffer_init(&BufferInitDescriptor {
+						label: Some("Tooltip Index Buffer"),
+						contents: builder.indices(),
+						usage: BufferUsages::INDEX,
+					});
+
+					render_pass.set_vertex_buffer(0, tooltip_vertex_buffer.slice(..));
+					render_pass.set_index_buffer(tooltip_index_buffer.slice(..), IndexFormat::Uint16);
+
+					render_pass.draw_indexed(0..builder.indices_len(), 0, 0..1);
+				}
+
+				{
+					render_pass.set_pipeline(&self.text_render_pipeline);
+					render_pass.set_bind_group(0, &self.unicode_bind_group, &[]);
+
+					tooltip_text_vertex_buffer = self.device.create_buffer_init(&BufferInitDescriptor {
+						label: Some("Tooltip Text Vertex Buffer"),
+						contents: builder.text_vertices(),
+						usage: BufferUsages::VERTEX,
+					});
+
+					tooltip_text_index_buffer = self.device.create_buffer_init(&BufferInitDescriptor {
+						label: Some("Tooltip Text Index Buffer"),
+						contents: builder.text_indices(),
+						usage: BufferUsages::INDEX,
+					});
+
+					render_pass.set_vertex_buffer(0, tooltip_text_vertex_buffer.slice(..));
+					render_pass.set_index_buffer(tooltip_text_index_buffer.slice(..), IndexFormat::Uint32);
+
+					render_pass.draw_indexed(0..builder.text_indices_len(), 0, 0..1);
+				}
+			}
+
+			self.queue.submit(Some(encoder.finish()));
+		}
+
+		let mut encoder = self.device.create_command_encoder(&CommandEncoderDescriptor { label: Some("Copy Command Encoder"), });
+		{
+			const COPY_VERTEX_BUFFER_DATA: &[f32] = &[
+				// 0
+				1.0,
+				1.0,
+
+				// 1
+				-1.0,
+				1.0,
+
+				// 2
+				-1.0,
+				-1.0,
+
+				// 0
+				1.0,
+				1.0,
+
+				// 2
+				-1.0,
+				-1.0,
+
+				// 3
+				1.0,
+				-1.0,
+			];
+
+			let copy_vertex_buffer;
+			let copy_bind_group;
+
+			let mut render_pass = encoder.begin_render_pass(&RenderPassDescriptor {
+				label: Some("Copy Render Pass"),
+				color_attachments: &[Some(RenderPassColorAttachment {
+					view: &surface_view,
+					resolve_target: None,
+					ops: Operations {
+						load: LoadOp::Load,
+						store: StoreOp::Store,
+					},
+				})],
+				depth_stencil_attachment: Some(RenderPassDepthStencilAttachment {
+					view: &depth_texture_view,
+					depth_ops: Some(Operations {
+						load: LoadOp::Clear(1.0),
+						store: StoreOp::Store,
+					}),
+					stencil_ops: None,
+				}),
+				timestamp_writes: None,
+				occlusion_query_set: None,
+			});
+
+			copy_vertex_buffer = self.device.create_buffer_init(&BufferInitDescriptor {
+				label: Some("Copy Vertex Buffer"),
+				contents: unsafe { std::slice::from_raw_parts(COPY_VERTEX_BUFFER_DATA.as_ptr().cast::<u8>(), COPY_VERTEX_BUFFER_DATA.len() * 4) },
+				usage: BufferUsages::VERTEX,
+			});
+
+			copy_bind_group = self.device.create_bind_group(&BindGroupDescriptor {
+				label: Some("Copy Bind Group"),
+				layout: &self.texture_reference_bind_group_layout,
+				entries: &[BindGroupEntry {
+					binding: 0,
+					resource: BindingResource::TextureView(&view),
+				}, BindGroupEntry {
+					binding: 1,
+					resource: BindingResource::Sampler(&self.sampler),
+				}],
+			});
+
+			render_pass.set_pipeline(&self.copy_render_pipeline);
+			render_pass.set_bind_group(0, &copy_bind_group, &[]);
+
+			render_pass.set_vertex_buffer(0, copy_vertex_buffer.slice(..));
+
+			render_pass.draw(0..6, 0..1);
+		}
+		self.queue.submit(Some(encoder.finish()));
+
+		surface_texture.present();
 
 		Ok(())
 	}

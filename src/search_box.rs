@@ -90,7 +90,7 @@ impl SearchPredicate {
             }
             SearchPredicateInner::Snbt(k, element) => {
                 // cmp order does matter
-                let a = element == value;
+                let a = element.matches(value);
                 let b = k.as_deref() == key;
                 ((self.search_flags == 0b11) & a & b) | ((self.search_flags == 0b01) & a) | ((self.search_flags == 0b10) & b)
             },

@@ -17,7 +17,7 @@ use crate::alert::Alert;
 use crate::assets::{ACTION_WHEEL_Z, BACKDROP_UV, BASE_TEXT_Z, BASE_Z, BOOKMARK_UV, CLOSED_WIDGET_UV, DARK_STRIPE_UV, SAVE_UV, HEADER_SIZE, HELD_ENTRY_Z, HIDDEN_BOOKMARK_UV, HORIZONTAL_SEPARATOR_UV, HOVERED_STRIPE_UV, HOVERED_WIDGET_UV, JUST_OVERLAPPING_BASE_TEXT_Z, LIGHT_STRIPE_UV, LINE_NUMBER_SEPARATOR_UV, NEW_FILE_UV, OPEN_FOLDER_UV, SELECTED_ACTION_WHEEL, SELECTED_WIDGET_UV, SELECTION_UV, TRAY_UV, JUST_UNDERLAPPING_BASE_Z, SAVE_GRAYSCALE_UV, UNSELECTED_ACTION_WHEEL, UNSELECTED_WIDGET_UV};
 use crate::bookmark::Bookmarks;
 use crate::color::TextColor;
-use crate::decoder::Decoder;
+use crate::be_decoder::BigEndianDecoder;
 use crate::elements::chunk::{NbtChunk, NbtRegion};
 use crate::elements::compound::NbtCompound;
 use crate::elements::element::{NbtByte, NbtByteArray, NbtDouble, NbtFloat, NbtInt, NbtIntArray, NbtLong, NbtLongArray, NbtShort};
@@ -136,7 +136,7 @@ impl Workbench {
 			}
 			workbench.new_custom_tab(window_properties, Tab {
 				#[cfg(debug_assertions)]
-				value: Box::new(NbtElement::from_file(include_bytes!("assets/test.nbt"), SortAlgorithm::None).expect("Included debug nbt contains valid data")),
+				value: Box::new(NbtElement::from_be_file(include_bytes!("assets/test.nbt"), SortAlgorithm::None).expect("Included debug nbt contains valid data")),
 				#[cfg(debug_assertions)]
 				name: "test.nbt".into(),
 				#[cfg(not(debug_assertions))]
@@ -144,7 +144,7 @@ impl Workbench {
 				#[cfg(not(debug_assertions))]
 				name: "new.nbt".into(),
 				path: None,
-				compression: FileFormat::Nbt,
+				format: FileFormat::Nbt,
 				undos: LinkedQueue::new(),
 				redos: LinkedQueue::new(),
 				unsaved_changes: false,
@@ -157,7 +157,8 @@ impl Workbench {
 				freehand_mode: false,
 				selected_text: None,
 				last_close_attempt: Duration::ZERO,
-				last_selected_text_interaction: (0, 0, Duration::ZERO)
+				last_selected_text_interaction: (0, 0, Duration::ZERO),
+				last_interaction: since_epoch(),
 			});
 		}
 		workbench
@@ -169,8 +170,8 @@ impl Workbench {
 	#[inline]
 	#[allow(clippy::equatable_if_let)]
 	pub fn on_open_file(&mut self, path: &Path, buf: Vec<u8>, window_properties: &mut WindowProperties) -> Result<()> {
-		let (nbt, compressed) = Tab::parse_raw(path, buf, self.sort_algorithm)?;
-		let mut tab = Tab::new(nbt, path, compressed, self.window_height, self.window_width)?;
+		let (nbt, format) = Tab::parse_raw(path, buf, self.sort_algorithm)?;
+		let mut tab = Tab::new(nbt, path, format, self.window_height, self.window_width)?;
 		if !tab.close_selected_text(false, window_properties) {
 			tab.selected_text = None;
 		};
@@ -188,12 +189,12 @@ impl Workbench {
 				(pos.x as f32, pos.y as f32)
 			}
 		};
-		let ctrl = self.held_keys.contains(&KeyCode::ControlLeft) | self.held_keys.contains(&KeyCode::ControlRight) | self.held_keys.contains(&KeyCode::SuperLeft) | self.held_keys.contains(&KeyCode::SuperRight);
+		let ctrl = self.ctrl();
 		if ctrl {
 			self.set_scale(self.scale.wrapping_add(v.signum() as isize as usize));
 			return true;
 		}
-		let shift = self.held_keys.contains(&KeyCode::ShiftLeft) | self.held_keys.contains(&KeyCode::ShiftRight);
+		let shift = self.shift();
 		if self.mouse_y < 21 {
 			let scroll = if shift { -v } else { -h };
 			self.tab_scroll = ((self.tab_scroll as isize + (scroll * 48.0) as isize).max(0) as usize).min(
@@ -222,9 +223,10 @@ impl Workbench {
 	#[inline]
 	#[allow(clippy::collapsible_if)]
 	pub fn on_mouse_input(&mut self, state: ElementState, button: MouseButton, window_properties: &mut WindowProperties) -> bool {
+		tab_mut!(self).last_interaction = since_epoch();
 		let left_margin = self.left_margin();
 		let horizontal_scroll = self.horizontal_scroll();
-		let shift = self.held_keys.contains(&KeyCode::ShiftLeft) | self.held_keys.contains(&KeyCode::ShiftRight);
+		let shift = self.shift();
 		let x = self.mouse_x;
 		let y = self.mouse_y;
 		match state {
@@ -347,7 +349,7 @@ impl Workbench {
 							}
 						}
 
-						match core::mem::replace(&mut self.held_entry, HeldEntry::Empty) {
+						match self.held_entry.take() {
 							HeldEntry::Empty => {}
 							HeldEntry::FromAether(x) => {
 								self.drop(x, None, left_margin);
@@ -365,14 +367,8 @@ impl Workbench {
 							}
 						}
 
-						if button == MouseButton::Middle {
-							if self.delete(shift) {
-								break 'a;
-							}
-						}
-
 						if button == MouseButton::Left {
-							if self.try_select_text() {
+							if self.try_select_text(false) {
 								break 'a;
 							}
 						}
@@ -653,8 +649,8 @@ impl Workbench {
 							};
 							buf.write(&data);
 							let buf = buf.finish();
-							let mut decoder = Decoder::new(&buf, SortAlgorithm::None);
-							NbtElement::from_bytes(id, &mut decoder).context("Could not read bytes for array")?
+							let mut decoder = BigEndianDecoder::new(&buf, SortAlgorithm::None);
+							NbtElement::from_be_bytes(id, &mut decoder).context("Could not read bytes for array")?
 						})?,
 					},
 					Err(TryRecvError::Disconnected) => {
@@ -978,8 +974,8 @@ impl Workbench {
 						element: (key, element),
 					});
 				}
-
 				tab.selected_text = None;
+				false
 			}
 			DropFn::Dropped(height, true_height, _, line_number) => {
 				if let Some(from_indices) = from_indices {
@@ -1018,9 +1014,9 @@ impl Workbench {
 				recache_along_indices(&indices[..indices.len() - 1], &mut tab.value);
 				tab.bookmarks[line_number..].increment(height, true_height);
 				self.subscription = None;
+				true
 			}
 		}
-		true
 	}
 
 	#[inline]
@@ -1077,9 +1073,9 @@ impl Workbench {
 						self.remove_tab(idx, window_properties);
 					} else if idx == self.tab && x > width - 16 && x < width {
 						if button == MouseButton::Left {
-							tab.compression = tab.compression.cycle();
+							tab.format = tab.format.cycle();
 						} else if button == MouseButton::Right {
-							tab.compression = tab.compression.rev_cycle();
+							tab.format = tab.format.rev_cycle();
 						}
 					} else if idx == self.tab && x + 1 >= width - 32 && x < width - 16 {
 						if let Err(e) = tab.save(self.held_keys.contains(&KeyCode::ShiftLeft) || self.held_keys.contains(&KeyCode::ShiftRight)) {
@@ -1113,7 +1109,7 @@ impl Workbench {
 			value: Box::new(if region { NbtElement::Region(NbtRegion::new()) } else { NbtElement::Compound(NbtCompound::new()) }),
 			name: "new.nbt".into(),
 			path: None,
-			compression: FileFormat::Nbt,
+			format: FileFormat::Nbt,
 			undos: LinkedQueue::new(),
 			redos: LinkedQueue::new(),
 			unsaved_changes: false,
@@ -1126,7 +1122,8 @@ impl Workbench {
 			freehand_mode: false,
 			selected_text: None,
 			last_close_attempt: Duration::ZERO,
-			last_selected_text_interaction: (0, 0, Duration::ZERO)
+			last_selected_text_interaction: (0, 0, Duration::ZERO),
+			last_interaction: since_epoch(),
 		});
 	}
 
@@ -1186,6 +1183,18 @@ impl Workbench {
 	#[must_use]
 	fn left_margin(&self) -> usize {
 		tab!(self).left_margin(self.held_entry.element())
+	}
+
+	#[inline]
+	#[must_use]
+	pub fn ctrl(&self) -> bool {
+		self.held_keys.contains(&KeyCode::ControlLeft) | self.held_keys.contains(&KeyCode::ControlRight) | self.held_keys.contains(&KeyCode::SuperLeft) | self.held_keys.contains(&KeyCode::SuperRight)
+	}
+
+	#[inline]
+	#[must_use]
+	pub fn shift(&self) -> bool {
+		self.held_keys.contains(&KeyCode::ShiftLeft) | self.held_keys.contains(&KeyCode::ShiftRight)
 	}
 
 	#[inline]
@@ -1268,7 +1277,7 @@ impl Workbench {
 	}
 
 	#[inline]
-	fn try_select_text(&mut self) -> bool {
+	fn try_select_text(&mut self, snap_to_ends: bool) -> bool {
 		let left_margin = self.left_margin();
 		let horizontal_scroll = self.horizontal_scroll();
 		if self.mouse_x + horizontal_scroll < left_margin { return false }
@@ -1283,12 +1292,15 @@ impl Workbench {
 			indices.push(idx);
 			if let Position::Last | Position::Only = position {
 				let child = unsafe { value.get(idx).panic_unchecked("Child didn't exist somehow") };
+				let target_x = indices.len() * 16 + 32 + 4 + left_margin;
+				let k = key.map_or_else(|| child.as_chunk().map(|chunk| (chunk.x.to_string().into_boxed_str(), TextColor::TreePrimitive, true)), |x| Some((x.into_string().into_boxed_str(), TextColor::TreeKey, true)));
+				let v = Some(child.value()).map(|(a, c)| (a.into_string().into_boxed_str(), c, c != TextColor::TreeKey));
 				tab.selected_text = SelectedText::new(
-					indices.len() * 16 + 32 + 4 + left_margin,
-					self.mouse_x + horizontal_scroll,
+					target_x,
+					(self.mouse_x + horizontal_scroll).clamp(if snap_to_ends { target_x } else { 0 }, if snap_to_ends { k.as_ref().map_or(0, |(k, _, b)| (*b as usize) * (k.width() + ": ".width() * v.is_some() as usize)) + v.as_ref().map_or(0, |(v, _, b)| (*b as usize) * v.width()) + target_x } else { usize::MAX }),
 					y * 16 + HEADER_SIZE,
-					key.map_or_else(|| child.as_chunk().map(|chunk| (chunk.x.to_string().into_boxed_str(), TextColor::TreePrimitive, true)), |x| Some((x.into_string().into_boxed_str(), TextColor::TreeKey, true))),
-					Some(child.value()).map(|(a, c)| (a.into_string().into_boxed_str(), c, c != TextColor::TreeKey)),
+					k,
+					v,
 					child.id() == NbtChunk::ID,
 					indices,
 				);
@@ -1756,10 +1768,10 @@ impl Workbench {
 
 	#[inline]
 	pub fn force_open(&mut self) {
+		let shift = self.shift();
 		let tab = tab_mut!(self);
 		if let Some(SelectedText(Text { additional: SelectedTextAdditional { y, indices, .. }, .. })) = tab.selected_text.as_ref() {
 			let indices = indices.clone();
-			let shift = self.held_keys.contains(&KeyCode::ShiftLeft) | self.held_keys.contains(&KeyCode::ShiftRight);
 			let (_, _, element, line_number) = Navigate::new(indices.iter().copied(), &mut tab.value).last();
 			let true_height = element.true_height();
 			let predicate = if shift {
@@ -1850,6 +1862,7 @@ impl Workbench {
 		clippy::cognitive_complexity
 	)]
 	pub fn on_key_input(&mut self, key: &KeyEvent, window_properties: &mut WindowProperties) -> bool {
+		tab_mut!(self).last_interaction = since_epoch();
 		if key.state == ElementState::Pressed {
 			if let PhysicalKey::Code(key) = key.physical_key {
 				self.held_keys.insert(key);
@@ -1953,13 +1966,6 @@ impl Workbench {
 					self.search_box.select(0, MouseButton::Left);
 					return true;
 				}
-				if key == KeyCode::KeyV && flags == flags!(Ctrl) && let Some(element) = get_clipboard().and_then(|x| NbtElement::from_str(&x, self.sort_algorithm)) && (element.1.id() != NbtChunk::ID || tab.value.id() == NbtRegion::ID) {
-					let old_held_entry = core::mem::replace(&mut self.held_entry, HeldEntry::FromAether(element));
-					let HeldEntry::FromAether(pair) = core::mem::replace(&mut self.held_entry, old_held_entry) else {
-						unsafe { panic_unchecked("we just set it you, bozo") }
-					};
-					return self.drop(pair, None, left_margin);
-				}
 				if key == KeyCode::Equal && flags == flags!(Ctrl) {
 					self.set_scale(self.scale + 1);
 					return true;
@@ -1976,6 +1982,13 @@ impl Workbench {
 				if !self.held_entry.is_empty() && key == KeyCode::Escape && flags == flags!() {
 					self.held_entry = HeldEntry::Empty;
 					return true;
+				}
+				if (key == KeyCode::Enter || key == KeyCode::NumpadEnter) && tab.selected_text.is_none() && flags == flags!() {
+					return match self.held_entry.take() {
+						HeldEntry::Empty => { self.try_select_text(true); true },
+						HeldEntry::FromAether(pair) => self.drop(pair, None, left_margin),
+						HeldEntry::FromKnown(pair, indices) => return self.drop(pair, Some(indices), left_margin)
+					}
 				}
 				if flags == flags!(Ctrl) {
 					if key == KeyCode::Digit1 {
@@ -2358,6 +2371,19 @@ impl Workbench {
 
 	#[inline]
 	pub fn tick(&mut self) {
+		#[cfg(not(target_arch = "wasm32"))] {
+			let mut alerts = vec![];
+			for (idx, tab) in self.tabs.iter_mut().enumerate() {
+				if let Some(path) = tab.path.as_deref() && path.is_absolute() && (since_epoch() - tab.last_interaction >= Tab::AUTOSAVE_INTERVAL) && tab.unsaved_changes && tab.value.true_height() <= Tab::AUTOSAVE_MAXIMUM_LINES {
+					if let Err(e) = tab.save(false) {
+						alerts.push(Alert::new("Error!", TextColor::Red, e.context(format!("Failed to autosave {nth} tab", nth = crate::nth(idx + 1))).to_string()));
+					}
+				}
+			}
+			for alert in alerts {
+				self.alert(alert);
+			}
+		}
 		if (!self.held_entry.is_empty() || tab!(self).freehand_mode) && self.action_wheel.is_none() && self.scrollbar_offset.is_none() {
 			self.try_mouse_scroll();
 		}
@@ -2368,6 +2394,23 @@ impl Workbench {
 		} else {
 			self.steal_animation_data = None;
 		}
+	}
+
+	#[inline]
+	#[must_use]
+	pub fn close(&mut self) -> usize {
+		let mut failed_tabs = 0_usize;
+
+		for tab in &mut self.tabs {
+			if tab.unsaved_changes && (since_epoch() - core::mem::replace(&mut tab.last_close_attempt, since_epoch())) > DOUBLE_CLICK_INTERVAL {
+				failed_tabs += 1;
+			}
+		}
+
+		if failed_tabs > 0 {
+			self.alert(Alert::new("Are you sure you want to exit?", TextColor::Yellow, format!("You have {failed_tabs} unsaved tabs.")));
+		}
+		failed_tabs
 	}
 
 	#[inline]
@@ -2440,12 +2483,12 @@ impl Workbench {
 				},
 				(16, 16),
 			);
-			builder.draw_texture((offset - 16, 3), tab.compression.uv(), (16, 16));
+			builder.draw_texture((offset - 16, 3), tab.format.uv(), (16, 16));
 			if (offset - 32..offset - 16).contains(&self.mouse_x) && (3..19).contains(&self.mouse_y) {
 				builder.draw_tooltip(&["Save"], (self.mouse_x, self.mouse_y), false);
 			}
 			if (offset - 16..offset).contains(&self.mouse_x) && (3..19).contains(&self.mouse_y) {
-				builder.draw_tooltip(&[tab.compression.into_str()], (self.mouse_x, self.mouse_y), false);
+				builder.draw_tooltip(&[tab.format.into_str()], (self.mouse_x, self.mouse_y), false);
 			}
 			offset += 6;
 		}
@@ -2569,7 +2612,7 @@ impl Workbench {
 		clippy::too_many_lines
 	)]
 	fn char_from_key(&self, key: KeyCode) -> Option<char> {
-		if self.held_keys.contains(&KeyCode::ControlLeft) | self.held_keys.contains(&KeyCode::ControlRight) | self.held_keys.contains(&KeyCode::SuperLeft) | self.held_keys.contains(&KeyCode::SuperRight) { return None }
+		if self.ctrl() { return None }
 		let shift = self.held_keys.contains(&KeyCode::ShiftLeft) || self.held_keys.contains(&KeyCode::ShiftRight);
 		Some(match key {
 			KeyCode::Digit1 => if shift { '!' } else { '1' },
@@ -2626,20 +2669,8 @@ impl Workbench {
 			KeyCode::NumpadEqual => '=',
 			KeyCode::NumpadMultiply => '*',
 			KeyCode::NumpadSubtract => '-',
-			KeyCode::Quote => {
-				if shift {
-					'"'
-				} else {
-					'\''
-				}
-			}
-			KeyCode::Backslash => {
-				if shift {
-					'|'
-				} else {
-					'\\'
-				}
-			}
+			KeyCode::Quote => if shift { '"' } else { '\'' },
+			KeyCode::Backslash => if shift { '|' } else { '\\' },
 			KeyCode::Semicolon => if shift { ':' } else { ';' },
 			KeyCode::Comma => if shift { '<' } else { ',' },
 			KeyCode::Equal => if shift { '+' } else { '=' },

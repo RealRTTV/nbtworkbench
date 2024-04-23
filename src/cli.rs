@@ -251,8 +251,8 @@ pub fn reformat() -> ! {
                 }
 
                 let tab = workbench.tabs.remove(0);
-                if let FileFormat::Nbt | FileFormat::Snbt | FileFormat::Gzip | FileFormat::Zlib = tab.compression {} else {
-                    error!("Tab had invalid file format {}", tab.compression.to_string());
+                if let FileFormat::Nbt | FileFormat::Snbt | FileFormat::Gzip | FileFormat::Zlib = tab.format {} else {
+                    error!("Tab had invalid file format {}", tab.format.to_string());
                 }
 
                 let out = format.encode(&tab.value);

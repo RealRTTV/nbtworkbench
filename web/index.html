@@ -65,7 +65,7 @@
         </style>
     </head>
     <body>
-        <input type="file" accept=".nbt, .snbt, .dat, .dat_old, .dat_new, .dat_mcr, .mca, .mcr" style="display:none" id="file_dialog"/>
+        <input type="file" accept=".nbt, .snbt, .dat, .dat_old, .dat_new, .dat_mcr, .mca, .mcr, .mcstructure" style="display:none" id="file_dialog"/>
         <div style="display:none">
             <a id="download"></a>
             <a id="clipboard"></a>
@@ -84,7 +84,7 @@
                 } while (false)
             }
 
-            import init, { open_file } from "./nbtworkbench.js?version=2";
+            import init, { open_file, close } from "./nbtworkbench.js?version=2";
             await init();
 
             const canvas = document.getElementById("canvas");
@@ -104,7 +104,7 @@
             canvas.ondragover = event => {
                 event.stopPropagation();
                 event.preventDefault();
-            }
+            };
             canvas.ondrop = event => {
                 event.stopPropagation();
                 event.preventDefault();
@@ -112,7 +112,14 @@
                 file.arrayBuffer().then(bytes => {
                     open_file(file.name, new Uint8Array(bytes));
                 })
-            }
+            };
+            window.onbeforeunload = event => {
+                event.preventDefault();
+                let unsaved_tabs = close();
+                if (unsaved_tabs > 0) {
+                    event.returnValue = "Are you sure you want to close? You have " + unsaved_tabs + " unsaved tabs.";
+                }
+            };
         </script>
         <div id="panic">
             <div id="panic_background">

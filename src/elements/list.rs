@@ -7,13 +7,14 @@ use std::slice::{Iter, IterMut};
 use std::thread::Scope;
 
 use crate::assets::{JUST_OVERLAPPING_BASE_TEXT_Z, BASE_Z, CONNECTION_UV, LIST_UV, ZOffset};
-use crate::decoder::Decoder;
+use crate::be_decoder::BigEndianDecoder;
 use crate::elements::chunk::NbtChunk;
 use crate::elements::element::{id_to_string_name, NbtElement};
 use crate::encoder::UncheckedBufWriter;
 use crate::{DropFn, OptionExt, RenderContext, SortAlgorithm, StrExt, VertexBufferBuilder};
 use crate::color::TextColor;
 use crate::formatter::PrettyFormatter;
+use crate::le_decoder::LittleEndianDecoder;
 
 #[allow(clippy::module_name_repetitions)]
 #[repr(C)]
@@ -26,12 +27,12 @@ pub struct NbtList {
 	open: bool,
 }
 
-impl PartialEq for NbtList {
-	fn eq(&self, other: &Self) -> bool {
+impl NbtList {
+	pub fn matches(&self, other: &Self) -> bool {
 		if self.is_empty() {
 			other.is_empty()
 		} else {
-			self.elements.iter().all(|a| other.elements.iter().any(|b| a == b))
+			self.elements.iter().all(|a| other.elements.iter().any(|b| a.matches(b)))
 		}
 	}
 }
@@ -81,7 +82,7 @@ impl NbtList {
 	}
 	#[allow(clippy::cast_ptr_alignment)]
 	#[inline]
-	pub fn from_bytes(decoder: &mut Decoder) -> Option<Self> {
+	pub fn from_be_bytes(decoder: &mut BigEndianDecoder) -> Option<Self> {
 		unsafe {
 			decoder.assert_len(5)?;
 			let element = decoder.u8();
@@ -89,7 +90,7 @@ impl NbtList {
 			let ptr = alloc(Layout::array::<NbtElement>(len).unwrap_unchecked()).cast::<NbtElement>();
 			let mut true_height = 1;
 			for n in 0..len {
-				let element = NbtElement::from_bytes(element, decoder)?;
+				let element = NbtElement::from_be_bytes(element, decoder)?;
 				true_height += element.true_height() as u32;
 				ptr.add(n).write(element);
 			}
@@ -105,11 +106,49 @@ impl NbtList {
 			})
 		}
 	}
-	pub fn to_bytes(&self, writer: &mut UncheckedBufWriter) {
+
+	#[inline]
+	pub fn to_be_bytes(&self, writer: &mut UncheckedBufWriter) {
 		writer.write(&[self.element]);
 		writer.write(&(self.len() as u32).to_be_bytes());
 		for element in self.elements.iter() {
-			element.to_bytes(writer);
+			element.to_be_bytes(writer);
+		}
+	}
+
+	#[allow(clippy::cast_ptr_alignment)]
+	#[inline]
+	pub fn from_le_bytes(decoder: &mut LittleEndianDecoder) -> Option<Self> {
+		unsafe {
+			decoder.assert_len(5)?;
+			let element = decoder.u8();
+			let len = decoder.u32() as usize;
+			let ptr = alloc(Layout::array::<NbtElement>(len).unwrap_unchecked()).cast::<NbtElement>();
+			let mut true_height = 1;
+			for n in 0..len {
+				let element = NbtElement::from_le_bytes(element, decoder)?;
+				true_height += element.true_height() as u32;
+				ptr.add(n).write(element);
+			}
+			let box_ptr = alloc(Layout::new::<Vec<NbtElement>>()).cast::<Vec<NbtElement>>();
+			box_ptr.write(Vec::from_raw_parts(ptr, len, len));
+			Some(Self {
+				elements: Box::from_raw(box_ptr),
+				height: 1 + len as u32,
+				true_height,
+				max_depth: 0,
+				element,
+				open: false,
+			})
+		}
+	}
+
+	#[inline]
+	pub fn to_le_bytes(&self, writer: &mut UncheckedBufWriter) {
+		writer.write(&[self.element]);
+		writer.write(&(self.len() as u32).to_le_bytes());
+		for element in self.elements.iter() {
+			element.to_le_bytes(writer);
 		}
 	}
 }
@@ -262,6 +301,82 @@ impl NbtList {
 }
 
 impl NbtList {
+	#[inline]
+	pub fn render_root(&self, builder: &mut VertexBufferBuilder, str: &str, ctx: &mut RenderContext) {
+		let mut remaining_scroll = builder.scroll() / 16;
+
+		'head: {
+			if remaining_scroll > 0 {
+				remaining_scroll -= 1;
+				ctx.skip_line_numbers(1);
+				break 'head;
+			}
+
+			ctx.line_number();
+			Self::render_icon(ctx.pos(), BASE_Z, builder);
+			if !self.is_empty() {
+				ctx.draw_toggle(ctx.pos() - (16, 0), self.open, builder);
+			}
+			ctx.render_errors(ctx.pos(), builder);
+			if ctx.forbid(ctx.pos()) {
+				builder.settings(ctx.pos() + (20, 0), false, JUST_OVERLAPPING_BASE_TEXT_Z);
+				builder.color = TextColor::TreeKey.to_raw();
+				let _ = write!(builder, "{str}: {}", self.value());
+			}
+
+			let pos = ctx.pos();
+			if ctx.draw_held_entry_bar(ctx.pos() + (16, 16), builder, |x, y| pos + (16, 8) == (x, y), |id| (id != NbtChunk::ID) && (id == self.element || self.is_empty())) {} else if self.height() == 1 && ctx.draw_held_entry_bar(ctx.pos() + (16, 16), builder, |x, y| pos + (16, 16) == (x, y), |id| (id != NbtChunk::ID) && (id == self.element || self.is_empty()), ) {}
+
+			ctx.y_offset += 16;
+		}
+
+		if self.open {
+			ctx.x_offset += 16;
+
+			for (idx, element) in self.children().enumerate() {
+				if ctx.y_offset > builder.window_height() {
+					break;
+				}
+
+				let height = element.height();
+				if remaining_scroll >= height {
+					remaining_scroll -= height;
+					ctx.skip_line_numbers(element.true_height());
+					continue;
+				}
+
+				let pos = ctx.pos();
+				ctx.draw_held_entry_bar(ctx.pos(), builder, |x, y| pos == (x, y), |id| (id != NbtChunk::ID) && (id == self.element || self.is_empty()));
+
+				if remaining_scroll == 0 {
+					builder.draw_texture(
+						ctx.pos() - (16, 0),
+						CONNECTION_UV,
+						(
+							16,
+							(idx != self.len() - 1) as usize * 7 + 9,
+						),
+					);
+				}
+				ctx.check_for_key_duplicate(|_, _| false, false);
+				element.render(
+					&mut remaining_scroll,
+					builder,
+					None,
+					idx == self.len() - 1,
+					ctx,
+				);
+
+				let pos = ctx.pos();
+				ctx.draw_held_entry_bar(ctx.pos(), builder, |x, y| pos == (x, y + 8), |id| (id != NbtChunk::ID) && (id == self.element || self.is_empty()));
+			}
+
+			ctx.x_offset -= 16;
+		} else {
+			ctx.skip_line_numbers(self.true_height() - 1);
+		}
+	}
+
 	#[inline]
 	pub fn render(&self, builder: &mut VertexBufferBuilder, name: Option<&str>, remaining_scroll: &mut usize, tail: bool, ctx: &mut RenderContext) {
 		let mut y_before = ctx.y_offset;

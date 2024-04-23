@@ -26,7 +26,7 @@ pub struct VertexBufferBuilder {
 	pub color: u32,
 	two_over_width: f32,
 	negative_two_over_height: f32,
-	drew_tooltip: bool,
+	owned_tooltip: Option<(Box<[String]>, Vec2u, bool)>,
 	scale: f32,
 }
 
@@ -75,7 +75,7 @@ impl VertexBufferBuilder {
 			color: TextColor::White.to_raw(),
 			two_over_width: 2.0 / size.width as f32,
 			negative_two_over_height: -2.0 / size.height as f32,
-			drew_tooltip: false,
+			owned_tooltip: None,
 			scale: scale as f32,
 		}
 	}
@@ -84,7 +84,7 @@ impl VertexBufferBuilder {
 	pub const fn scroll(&self) -> usize { self.scroll }
 
 	#[inline]
-	pub const fn drew_tooltip(&self) -> bool { self.drew_tooltip }
+	pub const fn drew_tooltip(&self) -> bool { self.owned_tooltip.is_some() }
 
 	#[inline]
 	pub fn settings(&mut self, pos: impl Into<(usize, usize)>, dropshadow: bool, z: ZOffset) {
@@ -124,9 +124,23 @@ impl VertexBufferBuilder {
 
 	#[inline]
 	pub fn draw_tooltip(&mut self, text: &[&str], pos: impl Into<(usize, usize)>, force_draw_right: bool) {
+		self.owned_tooltip.get_or_insert_with(move || (text.iter().map(|s| s.to_string()).collect::<Vec<_>>().into_boxed_slice(), Vec2u::from(pos.into()), force_draw_right));
+	}
+
+	pub fn clear_buffers(&mut self) {
+		self.vertices.clear();
+		self.indices.clear();
+		self.text_vertices.clear();
+		self.text_indices.clear();
+		self.text_vertices_len = 0;
+		self.vertices_len = 0;
+	}
+
+	#[inline]
+	pub fn draw_tooltip0(&mut self) -> Option<[f32; 12]> {
 		use core::fmt::Write;
 
-		if self.drew_tooltip { return }
+		let (text, pos, force_draw_right) = if let Some(tooltip) = self.owned_tooltip.take() { tooltip } else { return None };
 
 		let (mut x, y) = pos.into();
 		let y = y + 16;
@@ -134,11 +148,11 @@ impl VertexBufferBuilder {
 		if x >= self.window_width() / 2 && !force_draw_right {
 			x = x.saturating_sub(text_width + 3);
 		}
-		let old_text_z = core::mem::replace(&mut self.text_z, TOOLTIP_Z);
-		let old_text_coords = core::mem::replace(&mut self.text_coords, (x + 3, y + 3));
+		self.text_z = TOOLTIP_Z;
+		self.text_coords = (x + 3, y + 3);
 		self.draw_texture_z((x, y), TOOLTIP_Z, TOOLTIP_UV, (3, 3));
 		let mut max = x + 3;
-		for &line in text {
+		for line in text.iter() {
 			let _ = write!(self, "{line}");
 			max = max.max(self.text_coords.0);
 			self.text_coords.0 = x + 3;
@@ -169,7 +183,6 @@ impl VertexBufferBuilder {
 			TOOLTIP_UV + (13, 13),
 			(3, 3),
 		);
-
 		self.draw_texture_region_z(
 			(x, y + 3),
 			TOOLTIP_Z,
@@ -193,9 +206,36 @@ impl VertexBufferBuilder {
 			(10, 10),
 		);
 
-		self.text_z = old_text_z;
-		self.text_coords = old_text_coords;
-		self.drew_tooltip = true;
+		let x0 = (x as f32).mul_add(self.two_over_width, -1.0);
+		let x1 = self.two_over_width.mul_add((width + 6) as f32 * self.scale, x0);
+		let y1 = (y as f32).mul_add(self.negative_two_over_height, 1.0);
+		let y0 = self.negative_two_over_height.mul_add((height + 6) as f32 * self.scale, y1);
+
+		Some([
+			// 0
+			x1,
+			y1,
+
+			// 1
+			x0,
+			y1,
+
+			// 2
+			x0,
+			y0,
+
+			// 0
+			x1,
+			y1,
+
+			// 2
+			x0,
+			y0,
+
+			// 3
+			x1,
+			y0,
+		])
 	}
 
 	#[inline]

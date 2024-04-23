@@ -1,6 +1,6 @@
 [package]
 name = "nbtworkbench"
-version = "1.2.6"
+version = "1.3.0"
 edition = "2021"
 description = "A modern NBT Editor written in Rust designed for performance and efficiency."
 license-file = "LICENSE"
@@ -16,7 +16,7 @@ categories = ["graphics", "rendering", "text-editors", "parser-implementations"]
 #path = "src/main.rs"
 
 # Windows Only
-#[package.metadata.winres]
+[package.metadata.winres]
 
 [profile.release]
 opt-level = 3
@@ -45,7 +45,6 @@ strip = false
 debug = true
 
 [build-dependencies]
-zune-png = "0.4.10"
 flate2 = "1.0.27"
 winres = "0.1.12"
 
@@ -66,6 +65,7 @@ anyhow = "1.0.79"
 lz4_flex = { version = "0.11.2", default-features = false, features = ["std", "nightly"] }
 regex = "1.10.3"
 glob = "0.3.1"
+zune-png = { version = "0.4.10", features = [] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 winapi = { version = "0.3.9", features = [] }

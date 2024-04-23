@@ -1,7 +1,6 @@
 #[macro_export]
 macro_rules! array {
 	($element_field:ident, $name:ident, $t:ty, $my_id:literal, $id:literal, $char:literal, $uv:ident, $element_uv:ident) => {
-		#[derive(Default)]
 		#[repr(C)]
 		pub struct $name {
 			values: Box<Vec<NbtElement>>,
@@ -9,9 +8,19 @@ macro_rules! array {
 			open: bool,
 		}
 
-		impl PartialEq for $name {
-			fn eq(&self, other: &Self) -> bool {
-				self.values == other.values
+		impl $name {
+			pub fn matches(&self, other: &Self) -> bool {
+				if self.values.len() != other.values.len() {
+					return false
+				}
+
+				for (a, b) in self.values.iter().zip(other.values.iter()) {
+					if !a.matches(b) {
+						return false
+					}
+				}
+
+				true
 			}
 		}
 
@@ -70,7 +79,7 @@ macro_rules! array {
 			}
 
 			#[inline]
-			pub fn from_bytes(decoder: &mut Decoder) -> Option<Self> {
+			pub fn from_be_bytes(decoder: &mut BigEndianDecoder) -> Option<Self> {
 				unsafe {
 					decoder.assert_len(4)?;
 					let len = decoder.u32() as usize;
@@ -101,10 +110,49 @@ macro_rules! array {
 			}
 
 			#[inline]
-			pub fn to_bytes(&self, writer: &mut UncheckedBufWriter) {
+			pub fn to_be_bytes(&self, writer: &mut UncheckedBufWriter) {
 				writer.write(&(self.len() as u32).to_be_bytes());
 				for entry in self.values.iter() {
 					writer.write(&Self::transmute(entry).to_be_bytes());
+				}
+			}
+
+			#[inline]
+			pub fn from_le_bytes(decoder: &mut LittleEndianDecoder) -> Option<Self> {
+				unsafe {
+					decoder.assert_len(4)?;
+					let len = decoder.u32() as usize;
+					decoder.assert_len(len * core::mem::size_of::<$t>())?;
+					let vec = alloc(Layout::array::<NbtElement>(len).unwrap_unchecked()).cast::<NbtElement>();
+					for idx in 0..len {
+						let mut element = NbtElement {
+							$element_field: core::mem::transmute(<$t>::from_le_bytes(
+								decoder
+									.data
+									.add(idx * core::mem::size_of::<$t>())
+									.cast::<[u8; core::mem::size_of::<$t>()]>()
+									.read(),
+							)),
+						};
+						element.id.id = $id;
+						vec.add(idx).write(element);
+					}
+					decoder.data = decoder.data.add(len * core::mem::size_of::<$t>());
+					let boxx = alloc(Layout::new::<Vec<NbtElement>>()).cast::<Vec<NbtElement>>();
+					boxx.write(Vec::from_raw_parts(vec, len, len));
+					Some(Self {
+						values: Box::from_raw(boxx),
+						open: false,
+						max_depth: 0,
+					})
+				}
+			}
+
+			#[inline]
+			pub fn to_le_bytes(&self, writer: &mut UncheckedBufWriter) {
+				writer.write(&(self.len() as u32).to_le_bytes());
+				for entry in self.values.iter() {
+					writer.write(&Self::transmute(entry).to_le_bytes());
 				}
 			}
 		}

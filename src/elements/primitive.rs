@@ -4,7 +4,7 @@ macro_rules! primitive {
 		primitive!($uv, $s, $name, $t, $id, |x: $t| x.to_compact_string());
 	};
 	($uv:ident, $s:expr, $name:ident, $t:ty, $id:literal, $compact_format:expr) => {
-		#[derive(Copy, Clone, Default, PartialEq)]
+		#[derive(Copy, Clone, Default)]
 		#[repr(transparent)]
 		pub struct $name {
 			pub value: $t,
@@ -14,14 +14,27 @@ macro_rules! primitive {
 			pub const ID: u8 = $id;
 
 			#[inline]
-			pub fn to_bytes(&self, writer: &mut UncheckedBufWriter) { writer.write(self.value.to_be_bytes().as_ref()); }
+			pub fn to_be_bytes(&self, writer: &mut UncheckedBufWriter) { writer.write(self.value.to_be_bytes().as_ref()); }
 
 			#[inline]
-			pub fn from_bytes(decoder: &mut Decoder) -> Option<Self> {
+			pub fn from_be_bytes(decoder: &mut BigEndianDecoder) -> Option<Self> {
 				unsafe {
 					decoder.assert_len(core::mem::size_of::<$t>())?;
 					Some(Self {
 						value: <$t>::from_be_bytes(decoder.read_bytes::<{ core::mem::size_of::<$t>() }>()),
+					})
+				}
+			}
+
+			#[inline]
+			pub fn to_le_bytes(&self, writer: &mut UncheckedBufWriter) { writer.write(self.value.to_le_bytes().as_ref()); }
+			
+			#[inline]
+			pub fn from_le_bytes(decoder: &mut LittleEndianDecoder) -> Option<Self> {
+				unsafe {
+					decoder.assert_len(core::mem::size_of::<$t>())?;
+					Some(Self {
+						value: <$t>::from_le_bytes(decoder.read_bytes::<{ core::mem::size_of::<$t>() }>()),
 					})
 				}
 			}
@@ -66,6 +79,10 @@ macro_rules! primitive {
 
 		impl $name {
 			pub fn pretty_fmt(&self, f: &mut PrettyFormatter) { f.write_str(&self.to_string()) }
+		}
+
+		impl $name {
+			pub fn matches(&self, other: &Self) -> bool { self.value == other.value }
 		}
 	};
 }

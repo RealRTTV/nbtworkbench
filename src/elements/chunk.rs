@@ -29,9 +29,17 @@ pub struct NbtRegion {
 	open: bool,
 }
 
-impl PartialEq for NbtRegion {
-	fn eq(&self, other: &Self) -> bool {
-		self.chunks == other.chunks
+impl NbtRegion {
+	pub fn matches(&self, other: &Self) -> bool {
+		for (a, b) in self.chunks.deref().1.iter().zip(other.chunks.deref().1.iter()) {
+			if a.is_null() != b.is_null() {
+				return false
+			}
+			if !a.matches(b) {
+				return false
+			}
+		}
+		true
 	}
 }
 
@@ -84,7 +92,7 @@ impl NbtRegion {
 	pub fn new() -> Self { Self::default() }
 
 	#[must_use]
-	pub fn from_bytes(bytes: &[u8], sort: SortAlgorithm) -> Option<Self> {
+	pub fn from_be_bytes(bytes: &[u8], sort: SortAlgorithm) -> Option<Self> {
 		fn parse(raw: u32, bytes: &[u8], sort: SortAlgorithm) -> Option<(FileFormat, NbtElement)> {
 			if raw < 512 { return Some((FileFormat::Zlib, unsafe { core::mem::zeroed() })) }
 
@@ -100,7 +108,7 @@ impl NbtRegion {
 				let (compression, element) = match compression {
 					1 => (
 						FileFormat::Gzip,
-						NbtElement::from_file(
+						NbtElement::from_be_file(
 							&DeflateDecoder::new_with_options(data, DeflateOptions::default().set_confirm_checksum(false))
 								.decode_gzip()
 								.ok()?,
@@ -109,15 +117,15 @@ impl NbtRegion {
 					),
 					2 => (
 						FileFormat::Zlib,
-						NbtElement::from_file(
+						NbtElement::from_be_file(
 							&DeflateDecoder::new_with_options(data, DeflateOptions::default().set_confirm_checksum(false))
 								.decode_zlib()
 								.ok()?,
 							sort,
 						)?,
 					),
-					3 => (FileFormat::Nbt, NbtElement::from_file(data, sort)?),
-					4 => (FileFormat::Lz4, NbtElement::from_file(&lz4_flex::decompress(data, data.len()).ok()?, sort)?),
+					3 => (FileFormat::Nbt, NbtElement::from_be_file(data, sort)?),
+					4 => (FileFormat::Lz4, NbtElement::from_be_file(&lz4_flex::decompress(data, data.len()).ok()?, sort)?),
 					_ => return None,
 				};
 				if element.id() != NbtCompound::ID { return None }
@@ -210,7 +218,7 @@ impl NbtRegion {
 			Some(region)
 		};
 	}
-	pub fn to_bytes(&self, writer: &mut UncheckedBufWriter) {
+	pub fn to_be_bytes(&self, writer: &mut UncheckedBufWriter) {
 		unsafe {
 			std::thread::scope(move |s| {
 				let mut chunks = Vec::with_capacity(1024);
@@ -223,7 +231,7 @@ impl NbtRegion {
 								.cast::<ManuallyDrop<NbtChunk>>()
 								.read();
 							let mut writer = UncheckedBufWriter::new();
-							chunk.to_bytes(&mut writer);
+							chunk.to_be_bytes(&mut writer);
 							(writer.finish(), chunk.last_modified)
 						}
 					}));
@@ -733,9 +741,9 @@ pub struct NbtChunk {
 	pub z: u8,
 }
 
-impl PartialEq for NbtChunk {
-	fn eq(&self, other: &Self) -> bool {
-		self.inner == other.inner
+impl NbtChunk {
+	pub fn matches(&self, other: &Self) -> bool {
+		self.inner.matches(&other.inner)
 	}
 }
 
@@ -772,7 +780,7 @@ impl NbtChunk {
 			last_modified,
 		}
 	}
-	pub fn to_bytes(&self, writer: &mut UncheckedBufWriter) {
+	pub fn to_be_bytes(&self, writer: &mut UncheckedBufWriter) {
 		// todo, mcc
 		unsafe {
 			let encoded = self

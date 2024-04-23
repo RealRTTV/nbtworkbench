@@ -7,11 +7,8 @@ use std::io::Read;
 use std::mem::MaybeUninit;
 
 const UNICODE: &[u8] = include_bytes!("src/assets/build/unicode.hex");
-const ATLAS: &[u8] = include_bytes!(r"src/assets/build/atlas.png");
 
 fn main() {
-	{ write(r"src\assets\atlas.hex", zune_png::PngDecoder::new(ATLAS).decode_raw().unwrap()).unwrap(); }
-
 	{
 		let mut char_widths: [MaybeUninit<u8>; 56832] = MaybeUninit::uninit_array();
 		for (idx, maybe) in char_widths.iter_mut().enumerate() {

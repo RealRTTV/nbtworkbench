@@ -11,7 +11,7 @@ use compact_str::{format_compact, CompactString, ToCompactString};
 use hashbrown::raw::RawTable;
 
 use crate::assets::{BASE_Z, BYTE_ARRAY_UV, BYTE_UV, CONNECTION_UV, DOUBLE_UV, FLOAT_UV, INT_ARRAY_UV, INT_UV, LONG_ARRAY_UV, LONG_UV, SHORT_UV, ZOffset};
-use crate::decoder::Decoder;
+use crate::be_decoder::BigEndianDecoder;
 use crate::elements::chunk::{NbtChunk, NbtRegion};
 use crate::elements::compound::{CompoundMap, CompoundMapIter, Entry, NbtCompound};
 use crate::element_action::ElementAction;
@@ -20,6 +20,7 @@ use crate::elements::string::NbtString;
 use crate::encoder::UncheckedBufWriter;
 use crate::{panic_unchecked, since_epoch, SortAlgorithm, array, primitive, DropFn, RenderContext, StrExt, VertexBufferBuilder, TextColor, assets::JUST_OVERLAPPING_BASE_TEXT_Z};
 use crate::formatter::PrettyFormatter;
+use crate::le_decoder::LittleEndianDecoder;
 use crate::tab::FileFormat;
 
 primitive!(BYTE_UV, { Some('b') }, NbtByte, i8, 1);
@@ -34,7 +35,7 @@ array!(long, NbtLongArray, i64, 12, 4, 'L', LONG_ARRAY_UV, LONG_UV);
 
 #[repr(C)]
 #[derive(Copy, Clone)]
-pub struct NbtElementDiscriminant {
+pub struct NbtElementId {
 	_pad: [MaybeUninit<u8>; 23],
 	pub id: u8,
 }
@@ -55,29 +56,29 @@ pub union NbtElement {
 	compound: ManuallyDrop<NbtCompound>,
 	int_array: ManuallyDrop<NbtIntArray>,
 	long_array: ManuallyDrop<NbtLongArray>,
-	id: NbtElementDiscriminant,
+	id: NbtElementId,
 }
 
-impl PartialEq for NbtElement {
-	fn eq(&self, other: &Self) -> bool {
+impl NbtElement {
+	pub fn matches(&self, other: &Self) -> bool {
 		if self.id() != other.id() { return false }
 
 		unsafe {
 			match self.id() {
-				NbtChunk::ID => self.chunk == other.chunk,
-				NbtRegion::ID => self.region == other.region,
-				NbtByte::ID => self.byte == other.byte,
-				NbtShort::ID => self.short == other.short,
-				NbtInt::ID => self.int == other.int,
-				NbtLong::ID => self.long == other.long,
-				NbtFloat::ID => self.float == other.float,
-				NbtDouble::ID => self.double == other.double,
-				NbtByteArray::ID => self.byte_array == other.byte_array,
-				NbtString::ID => self.string == other.string,
-				NbtList::ID => self.list == other.list,
-				NbtCompound::ID => self.compound == other.compound,
-				NbtIntArray::ID => self.int_array == other.int_array,
-				NbtLongArray::ID => self.long_array == other.long_array,
+				NbtChunk::ID => self.chunk.matches(&other.chunk),
+				NbtRegion::ID => self.region.matches(&other.region),
+				NbtByte::ID => self.byte.matches(&other.byte),
+				NbtShort::ID => self.short.matches(&other.short),
+				NbtInt::ID => self.int.matches(&other.int),
+				NbtLong::ID => self.long.matches(&other.long),
+				NbtFloat::ID => self.float.matches(&other.float),
+				NbtDouble::ID => self.double.matches(&other.double),
+				NbtByteArray::ID => self.byte_array.matches(&other.byte_array),
+				NbtString::ID => self.string.matches(&other.string),
+				NbtList::ID => self.list.matches(&other.list),
+				NbtCompound::ID => self.compound.matches(&other.compound),
+				NbtIntArray::ID => self.int_array.matches(&other.int_array),
+				NbtLongArray::ID => self.long_array.matches(&other.long_array),
 				_ => core::hint::unreachable_unchecked(),
 			}
 		}
@@ -459,42 +460,84 @@ impl NbtElement {
 		NbtString::from_str0(s).map(|(s, x)| (s, Self::String(x)))
 	}
 	#[inline(never)]
-	pub fn from_bytes(element: u8, decoder: &mut Decoder) -> Option<Self> {
+	pub fn from_be_bytes(element: u8, decoder: &mut BigEndianDecoder) -> Option<Self> {
 		Some(match element {
-			NbtByte::ID => Self::Byte(NbtByte::from_bytes(decoder)?),
-			NbtShort::ID => Self::Short(NbtShort::from_bytes(decoder)?),
-			NbtInt::ID => Self::Int(NbtInt::from_bytes(decoder)?),
-			NbtLong::ID => Self::Long(NbtLong::from_bytes(decoder)?),
-			NbtFloat::ID => Self::Float(NbtFloat::from_bytes(decoder)?),
-			NbtDouble::ID => Self::Double(NbtDouble::from_bytes(decoder)?),
-			NbtByteArray::ID => Self::ByteArray(NbtByteArray::from_bytes(decoder)?),
-			NbtString::ID => Self::String(NbtString::from_bytes(decoder)?),
-			NbtList::ID => Self::List(NbtList::from_bytes(decoder)?),
-			NbtCompound::ID => Self::Compound(NbtCompound::from_bytes(decoder)?),
-			NbtIntArray::ID => Self::IntArray(NbtIntArray::from_bytes(decoder)?),
-			NbtLongArray::ID => Self::LongArray(NbtLongArray::from_bytes(decoder)?),
+			NbtByte::ID => Self::Byte(NbtByte::from_be_bytes(decoder)?),
+			NbtShort::ID => Self::Short(NbtShort::from_be_bytes(decoder)?),
+			NbtInt::ID => Self::Int(NbtInt::from_be_bytes(decoder)?),
+			NbtLong::ID => Self::Long(NbtLong::from_be_bytes(decoder)?),
+			NbtFloat::ID => Self::Float(NbtFloat::from_be_bytes(decoder)?),
+			NbtDouble::ID => Self::Double(NbtDouble::from_be_bytes(decoder)?),
+			NbtByteArray::ID => Self::ByteArray(NbtByteArray::from_be_bytes(decoder)?),
+			NbtString::ID => Self::String(NbtString::from_be_bytes(decoder)?),
+			NbtList::ID => Self::List(NbtList::from_be_bytes(decoder)?),
+			NbtCompound::ID => Self::Compound(NbtCompound::from_be_bytes(decoder)?),
+			NbtIntArray::ID => Self::IntArray(NbtIntArray::from_be_bytes(decoder)?),
+			NbtLongArray::ID => Self::LongArray(NbtLongArray::from_be_bytes(decoder)?),
 			_ => return None,
 		})
 	}
 
 	#[inline(never)]
-	pub fn to_bytes(&self, writer: &mut UncheckedBufWriter) {
+	pub fn to_be_bytes(&self, writer: &mut UncheckedBufWriter) {
 		unsafe {
 			match self.id() {
-				NbtByte::ID => self.byte.to_bytes(writer),
-				NbtShort::ID => self.short.to_bytes(writer),
-				NbtInt::ID => self.int.to_bytes(writer),
-				NbtLong::ID => self.long.to_bytes(writer),
-				NbtFloat::ID => self.float.to_bytes(writer),
-				NbtDouble::ID => self.double.to_bytes(writer),
-				NbtByteArray::ID => self.byte_array.to_bytes(writer),
-				NbtString::ID => self.string.to_bytes(writer),
-				NbtList::ID => self.list.to_bytes(writer),
-				NbtCompound::ID => self.compound.to_bytes(writer),
-				NbtIntArray::ID => self.int_array.to_bytes(writer),
-				NbtLongArray::ID => self.long_array.to_bytes(writer),
-				NbtChunk::ID => self.chunk.to_bytes(writer),
-				NbtRegion::ID => self.region.to_bytes(writer),
+				NbtByte::ID => self.byte.to_be_bytes(writer),
+				NbtShort::ID => self.short.to_be_bytes(writer),
+				NbtInt::ID => self.int.to_be_bytes(writer),
+				NbtLong::ID => self.long.to_be_bytes(writer),
+				NbtFloat::ID => self.float.to_be_bytes(writer),
+				NbtDouble::ID => self.double.to_be_bytes(writer),
+				NbtByteArray::ID => self.byte_array.to_be_bytes(writer),
+				NbtString::ID => self.string.to_be_bytes(writer),
+				NbtList::ID => self.list.to_be_bytes(writer),
+				NbtCompound::ID => self.compound.to_be_bytes(writer),
+				NbtIntArray::ID => self.int_array.to_be_bytes(writer),
+				NbtLongArray::ID => self.long_array.to_be_bytes(writer),
+				NbtChunk::ID => self.chunk.to_be_bytes(writer),
+				NbtRegion::ID => self.region.to_be_bytes(writer),
+				_ => core::hint::unreachable_unchecked(),
+			};
+		}
+	}
+
+	#[inline(never)]
+	pub fn from_le_bytes(element: u8, decoder: &mut LittleEndianDecoder) -> Option<Self> {
+		Some(match element {
+			NbtByte::ID => Self::Byte(NbtByte::from_le_bytes(decoder)?),
+			NbtShort::ID => Self::Short(NbtShort::from_le_bytes(decoder)?),
+			NbtInt::ID => Self::Int(NbtInt::from_le_bytes(decoder)?),
+			NbtLong::ID => Self::Long(NbtLong::from_le_bytes(decoder)?),
+			NbtFloat::ID => Self::Float(NbtFloat::from_le_bytes(decoder)?),
+			NbtDouble::ID => Self::Double(NbtDouble::from_le_bytes(decoder)?),
+			NbtByteArray::ID => Self::ByteArray(NbtByteArray::from_le_bytes(decoder)?),
+			NbtString::ID => Self::String(NbtString::from_le_bytes(decoder)?),
+			NbtList::ID => Self::List(NbtList::from_le_bytes(decoder)?),
+			NbtCompound::ID => Self::Compound(NbtCompound::from_le_bytes(decoder)?),
+			NbtIntArray::ID => Self::IntArray(NbtIntArray::from_le_bytes(decoder)?),
+			NbtLongArray::ID => Self::LongArray(NbtLongArray::from_le_bytes(decoder)?),
+			_ => return None,
+		})
+	}
+
+	#[inline(never)]
+	pub fn to_le_bytes(&self, writer: &mut UncheckedBufWriter) {
+		unsafe {
+			match self.id() {
+				NbtByte::ID => self.byte.to_le_bytes(writer),
+				NbtShort::ID => self.short.to_le_bytes(writer),
+				NbtInt::ID => self.int.to_le_bytes(writer),
+				NbtLong::ID => self.long.to_le_bytes(writer),
+				NbtFloat::ID => self.float.to_le_bytes(writer),
+				NbtDouble::ID => self.double.to_le_bytes(writer),
+				NbtByteArray::ID => self.byte_array.to_le_bytes(writer),
+				NbtString::ID => self.string.to_le_bytes(writer),
+				NbtList::ID => self.list.to_le_bytes(writer),
+				NbtCompound::ID => self.compound.to_le_bytes(writer),
+				NbtIntArray::ID => self.int_array.to_le_bytes(writer),
+				NbtLongArray::ID => self.long_array.to_le_bytes(writer),
+				NbtChunk::ID => { /* no */ },
+				NbtRegion::ID => { /* no */ },
 				_ => core::hint::unreachable_unchecked(),
 			};
 		}
@@ -536,33 +579,78 @@ impl NbtElement {
 
 	#[inline]
 	#[must_use]
-	pub fn from_file(bytes: &[u8], sort: SortAlgorithm) -> Option<Self> {
-		let mut decoder = Decoder::new(bytes, sort);
-		decoder.assert_len(3)?;
+	pub fn from_be_file(bytes: &[u8], sort: SortAlgorithm) -> Option<Self> {
+		let mut decoder = BigEndianDecoder::new(bytes, sort);
+		decoder.assert_len(1)?;
 		unsafe {
-			if decoder.u8() != 0x0A { return None }
-			let skip = decoder.u16() as usize;
-			decoder.skip(skip);
+			if decoder.u8() != NbtCompound::ID { return None }
+			// fix for >= 1.20.2 protocol since they removed the empty field
+			if decoder.assert_len(2).is_none() || decoder.data.cast::<u16>().read_unaligned() == 0_u16.to_be() {
+				let _ = decoder.u16();
+			}
 		}
-		let nbt = Self::Compound(NbtCompound::from_bytes(&mut decoder)?);
+		let nbt = Self::Compound(NbtCompound::from_be_bytes(&mut decoder)?);
 		Some(nbt)
 	}
 
 	#[inline]
 	#[must_use]
-	pub fn to_file(&self) -> Vec<u8> {
+	pub fn to_be_file(&self) -> Vec<u8> {
 		let mut writer = UncheckedBufWriter::new();
 		if self.id() == NbtCompound::ID {
-			writer.write(&[0x0A, 0x00, 0x00]);
+			writer.write(&[NbtCompound::ID, 0x00, 0x00]);
 		}
-		self.to_bytes(&mut writer);
+		self.to_be_bytes(&mut writer);
 		writer.finish()
 	}
 
 	#[inline]
 	#[must_use]
-	pub fn from_mca(bytes: &[u8], sort: SortAlgorithm) -> Option<Self> {
-		NbtRegion::from_bytes(bytes, sort).map(Self::Region)
+	pub fn from_be_mca(bytes: &[u8], sort: SortAlgorithm) -> Option<Self> {
+		NbtRegion::from_be_bytes(bytes, sort).map(Self::Region)
+	}
+
+	#[inline]
+	#[must_use]
+	pub fn from_le_file(bytes: &[u8], sort: SortAlgorithm) -> Option<(Self, bool)> {
+		let mut decoder = LittleEndianDecoder::new(bytes, sort);
+		unsafe {
+			decoder.assert_len(1)?;
+			let kind = decoder.u8();
+			match kind {
+				NbtCompound::ID => {
+					decoder.assert_len(2)?;
+					let skip = decoder.u16() as usize;
+					decoder.skip(skip);
+					Some((Self::Compound(NbtCompound::from_le_bytes(&mut decoder)?), decoder.header()))
+				},
+				NbtList::ID => {
+					decoder.assert_len(2)?;
+					let skip = decoder.u16() as usize;
+					decoder.skip(skip);
+					Some((Self::List(NbtList::from_le_bytes(&mut decoder)?), decoder.header()))
+				},
+				_ => return None,
+			}
+		}
+	}
+
+	#[inline]
+	#[must_use]
+	pub fn to_le_file(&self, header: bool) -> Vec<u8> {
+		let mut writer = UncheckedBufWriter::new();
+		writer.write(&[self.id(), 0x00, 0x00]);
+		self.to_le_bytes(&mut writer);
+		let raw = writer.finish();
+		if header {
+			let mut header = UncheckedBufWriter::new();
+			header.write(&[0x08, 0x00, 0x00, 0x00]);
+			header.write(&(raw.len() as u32).to_le_bytes());
+			header.write(&raw);
+			header.finish()
+		} else {
+			raw
+		}
 	}
 
 	#[inline]
@@ -575,20 +663,12 @@ impl NbtElement {
 				NbtLong::ID => self.long.render(builder, str, ctx),
 				NbtFloat::ID => self.float.render(builder, str, ctx),
 				NbtDouble::ID => self.double.render(builder, str, ctx),
-				NbtByteArray::ID => self
-					.byte_array
-					.render(builder, str, remaining_scroll, tail, ctx),
+				NbtByteArray::ID => self.byte_array.render(builder, str, remaining_scroll, tail, ctx),
 				NbtString::ID => self.string.render(builder, str, ctx),
 				NbtList::ID => self.list.render(builder, str, remaining_scroll, tail, ctx),
-				NbtCompound::ID => self
-					.compound
-					.render(builder, str, remaining_scroll, tail, ctx),
-				NbtIntArray::ID => self
-					.int_array
-					.render(builder, str, remaining_scroll, tail, ctx),
-				NbtLongArray::ID => self
-					.long_array
-					.render(builder, str, remaining_scroll, tail, ctx),
+				NbtCompound::ID => self.compound.render(builder, str, remaining_scroll, tail, ctx),
+				NbtIntArray::ID => self.int_array.render(builder, str, remaining_scroll, tail, ctx),
+				NbtLongArray::ID => self.long_array.render(builder, str, remaining_scroll, tail, ctx),
 				NbtChunk::ID => self.chunk.render(builder, remaining_scroll, tail, ctx),
 				NbtRegion::ID => {
 					// can't be done at all

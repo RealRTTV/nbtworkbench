@@ -25,6 +25,8 @@
 )]
 #![windows_subsystem = "windows"]
 
+extern crate core;
+
 use std::cell::UnsafeCell;
 use std::cmp::Ordering;
 use std::convert::identity;
@@ -55,7 +57,7 @@ use crate::workbench::Workbench;
 mod alert;
 mod assets;
 mod color;
-mod decoder;
+mod be_decoder;
 mod encoder;
 mod selected_text;
 mod shader;
@@ -64,7 +66,7 @@ mod text_shader;
 mod tree_travel;
 mod vertex_buffer_builder;
 mod window;
-pub mod workbench;
+mod workbench;
 mod workbench_action;
 mod element_action;
 mod search_box;
@@ -73,6 +75,9 @@ mod text;
 mod cli;
 mod formatter;
 mod bookmark;
+mod tooltip_effect_shader;
+mod copy_shader;
+mod le_decoder;
 
 #[macro_export]
 macro_rules! flags {
@@ -130,9 +135,9 @@ macro_rules! tab_mut {
 #[cfg(not(target_arch = "wasm32"))]
 #[macro_export]
 macro_rules! error {
-    ($($arg:tt)*) => {
+    ($($arg:tt)*) => {{
 		eprintln!($($arg)*);
-	};
+	}};
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -146,9 +151,9 @@ macro_rules! error {
 #[cfg(not(target_arch = "wasm32"))]
 #[macro_export]
 macro_rules! log {
-    ($($arg:tt)*) => {
+    ($($arg:tt)*) => {{
 		println!($($arg)*);
-	};
+	}};
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -194,6 +199,13 @@ pub fn open_file(name: String, bytes: Vec<u8>) {
 	}
 }
 
+#[cfg(target_arch = "wasm32")]
+#[wasm_bindgen]
+pub fn close() -> usize {
+	let workbench = unsafe { WORKBENCH.get_mut() };
+	workbench.close()
+}
+
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen(start))]
 #[cfg(target_arch = "wasm32")]
 pub fn wasm_main() {
@@ -205,6 +217,17 @@ pub fn wasm_main() {
 	});
 }
 
+/// # Refactor
+/// * render trees using `RenderLine` struct/enum
+/// * rendering code is duplicated af
+/// # Long Term Goals
+/// * smart screen
+/// * [chunk](elements::chunk::NbtChunk) section rendering
+/// # Minor Features
+/// * [`last_modified`](elements::chunk::NbtChunk) field actually gets some impl
+/// # Major Features
+/// * macros
+/// * keyboard-based element dropping (like vim stuff)
 #[cfg(not(target_arch = "wasm32"))]
 pub fn main() -> ! {
 	#[cfg(target_os = "windows")] unsafe {
@@ -243,22 +266,6 @@ Options:
 	}
 }
 
-/// # Refactor
-/// * render trees using `RenderLine` struct/enum
-/// # Long Term Goals
-/// * smart screen
-/// * wiki page for docs on minecraft's format of stuff
-/// * [chunk](elements::chunk::NbtChunk) section rendering
-/// # Minor Features
-/// * gear icon to swap toolbar with settings panel
-/// * [`last_modified`](elements::chunk::NbtChunk) field actually gets some impl
-/// * auto save
-/// * blur behind tooltip
-/// # Major Features
-/// * macros
-/// * keyboard-based element dropping (press numbers before to specify count for move operations, right shift to enable mode)
-/// * animations!!!!
-
 pub enum DropFn {
 	Dropped(usize, usize, Option<CompactString>, usize),
 	Missed(Option<CompactString>, NbtElement),
@@ -282,6 +289,7 @@ pub enum HeldEntry {
 
 impl HeldEntry {
 	#[must_use]
+	#[inline]
 	pub const fn element(&self) -> Option<&NbtElement> {
 		match self {
 			Self::Empty => None,
@@ -290,7 +298,13 @@ impl HeldEntry {
 	}
 
 	#[must_use]
+	#[inline]
 	pub const fn is_empty(&self) -> bool { matches!(self, Self::Empty) }
+
+	#[inline]
+	pub fn take(&mut self) -> Self {
+		core::mem::replace(self, HeldEntry::Empty)
+	}
 }
 
 #[must_use]
@@ -353,6 +367,22 @@ pub fn since_epoch() -> Duration {
 #[cfg(target_arch = "wasm32")]
 pub fn since_epoch() -> Duration {
 	Duration::from_nanos((web_sys::js_sys::Date::now() * 1_000_000.0) as u64)
+}
+
+pub fn nth(n: usize) -> String {
+	let mut buf = String::with_capacity(n.checked_ilog10().map_or(1, |x| x + 1) as usize + 2);
+	let _ = write!(&mut buf, "{n}");
+	if n / 10 % 10 == 1 {
+		buf.push_str("th");
+	} else {
+		match n % 10 {
+			1 => buf.push_str("st"),
+			2 => buf.push_str("nd"),
+			3 => buf.push_str("rd"),
+			_ => buf.push_str("th"),
+		}
+	}
+	buf
 }
 
 pub fn sum_indices<I: Iterator<Item = usize>>(indices: I, mut root: &NbtElement) -> usize {

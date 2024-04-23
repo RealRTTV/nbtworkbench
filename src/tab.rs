@@ -10,8 +10,8 @@ use flate2::Compression;
 use uuid::Uuid;
 use zune_inflate::DeflateDecoder;
 
-use crate::{DOUBLE_CLICK_INTERVAL, LinkedQueue, OptionExt, panic_unchecked, RenderContext, since_epoch, SortAlgorithm, StrExt, WindowProperties};
-use crate::assets::{BASE_Z, BYTE_ARRAY_GHOST_UV, BYTE_ARRAY_UV, BYTE_GRAYSCALE_UV, BYTE_UV, CHUNK_GHOST_UV, CHUNK_UV, COMPOUND_GHOST_UV, COMPOUND_ROOT_UV, COMPOUND_UV, DISABLED_REFRESH_UV, DOUBLE_GRAYSCALE_UV, DOUBLE_UV, ENABLED_FREEHAND_MODE_UV, FLOAT_GRAYSCALE_UV, FLOAT_UV, FREEHAND_MODE_UV, GZIP_FILE_TYPE_UV, HEADER_SIZE, HELD_SCROLLBAR_UV, HOVERED_WIDGET_UV, INT_ARRAY_GHOST_UV, INT_ARRAY_UV, INT_GRAYSCALE_UV, INT_UV, JUST_OVERLAPPING_BASE_Z, LINE_NUMBER_SEPARATOR_UV, LIST_GHOST_UV, LIST_UV, LONG_ARRAY_GHOST_UV, LONG_ARRAY_UV, LONG_GRAYSCALE_UV, LONG_UV, MCA_FILE_TYPE_UV, NBT_FILE_TYPE_UV, REDO_UV, REFRESH_UV, REGION_UV, SCROLLBAR_Z, SHORT_GRAYSCALE_UV, SHORT_UV, SNBT_FILE_TYPE_UV, STEAL_ANIMATION_OVERLAY_UV, STRING_GHOST_UV, STRING_UV, UNDO_UV, UNHELD_SCROLLBAR_UV, UNKNOWN_NBT_GHOST_UV, UNKNOWN_NBT_UV, UNSELECTED_WIDGET_UV, ZLIB_FILE_TYPE_UV, ZOffset};
+use crate::{LinkedQueue, OptionExt, panic_unchecked, RenderContext, since_epoch, SortAlgorithm, StrExt, WindowProperties};
+use crate::assets::{BASE_Z, BYTE_ARRAY_GHOST_UV, BYTE_ARRAY_UV, BYTE_GRAYSCALE_UV, BYTE_UV, CHUNK_GHOST_UV, CHUNK_UV, COMPOUND_GHOST_UV, COMPOUND_ROOT_UV, COMPOUND_UV, DISABLED_REFRESH_UV, DOUBLE_GRAYSCALE_UV, DOUBLE_UV, ENABLED_FREEHAND_MODE_UV, FLOAT_GRAYSCALE_UV, FLOAT_UV, FREEHAND_MODE_UV, GZIP_FILE_TYPE_UV, HEADER_SIZE, HELD_SCROLLBAR_UV, HOVERED_WIDGET_UV, INT_ARRAY_GHOST_UV, INT_ARRAY_UV, INT_GRAYSCALE_UV, INT_UV, JUST_OVERLAPPING_BASE_Z, LITTLE_ENDIAN_NBT_FILE_TYPE_UV, LINE_NUMBER_SEPARATOR_UV, LIST_GHOST_UV, LIST_UV, LONG_ARRAY_GHOST_UV, LONG_ARRAY_UV, LONG_GRAYSCALE_UV, LONG_UV, MCA_FILE_TYPE_UV, NBT_FILE_TYPE_UV, REDO_UV, REFRESH_UV, REGION_UV, SCROLLBAR_Z, SHORT_GRAYSCALE_UV, SHORT_UV, SNBT_FILE_TYPE_UV, STEAL_ANIMATION_OVERLAY_UV, STRING_GHOST_UV, STRING_UV, UNDO_UV, UNHELD_SCROLLBAR_UV, UNKNOWN_NBT_GHOST_UV, UNKNOWN_NBT_UV, UNSELECTED_WIDGET_UV, ZLIB_FILE_TYPE_UV, ZOffset, LITTLE_ENDIAN_HEADER_NBT_FILE_TYPE_UV};
 use crate::color::TextColor;
 use crate::elements::chunk::NbtRegion;
 use crate::elements::compound::NbtCompound;
@@ -19,6 +19,7 @@ use crate::elements::element::NbtElement;
 use crate::selected_text::{SelectedText, SelectedTextAdditional};
 use crate::text::Text;
 use crate::bookmark::Bookmarks;
+use crate::elements::list::NbtList;
 use crate::tree_travel::Navigate;
 use crate::vertex_buffer_builder::{Vec2u, VertexBufferBuilder};
 use crate::workbench_action::WorkbenchAction;
@@ -27,7 +28,7 @@ pub struct Tab {
 	pub value: Box<NbtElement>,
 	pub name: Box<str>,
 	pub path: Option<PathBuf>,
-	pub compression: FileFormat,
+	pub format: FileFormat,
 	pub undos: LinkedQueue<WorkbenchAction>,
 	pub redos: LinkedQueue<WorkbenchAction>,
 	pub unsaved_changes: bool,
@@ -41,6 +42,7 @@ pub struct Tab {
 	pub selected_text: Option<SelectedText>,
 	pub last_close_attempt: Duration,
 	pub last_selected_text_interaction: (usize, usize, Duration),
+	pub last_interaction: Duration,
 }
 
 impl Tab {
@@ -49,16 +51,20 @@ impl Tab {
 		("SNBT File", &["snbt"]),
 		("Region File", &["mca", "mcr"]),
 		("Compressed NBT File", &["dat", "dat_old", "dat_new", "dat_mcr", "old", "schem", "schematic", "litematic"]),
+		("Little Endian NBT File", &["nbt", "mcstructure"]),
+		("Little Endian NBT File (With Header)", &["dat"]),
 	];
+	pub const AUTOSAVE_INTERVAL: Duration = Duration::from_secs(30);
+	pub const AUTOSAVE_MAXIMUM_LINES: usize = 1_000_000;
 
-	pub fn new(nbt: NbtElement, path: &Path, compression: FileFormat, window_height: usize, window_width: usize) -> Result<Self> {
-		if !(nbt.id() == NbtCompound::ID || nbt.id() == NbtRegion::ID) { return Err(anyhow!("Parsed NBT was not a Compound or Region")) }
+	pub fn new(nbt: NbtElement, path: &Path, format: FileFormat, window_height: usize, window_width: usize) -> Result<Self> {
+		if !(nbt.id() == NbtCompound::ID || nbt.id() == NbtRegion::ID || nbt.id() == NbtList::ID) { return Err(anyhow!("Parsed NBT was not a Compound, Region, or List")) }
 
 		Ok(Self {
 			value: Box::new(nbt),
 			name: path.file_name().map(OsStr::to_string_lossy).context("Could not obtain path filename")?.into(),
 			path: Some(path).filter(|path| path.is_absolute()).map(|path| path.to_path_buf()),
-			compression,
+			format,
 			undos: LinkedQueue::new(),
 			redos: LinkedQueue::new(),
 			unsaved_changes: false,
@@ -71,31 +77,33 @@ impl Tab {
 			freehand_mode: false,
 			selected_text: None,
 			last_close_attempt: Duration::ZERO,
-			last_selected_text_interaction: (0, 0, Duration::ZERO)
+			last_selected_text_interaction: (0, 0, Duration::ZERO),
+			last_interaction: since_epoch(),
 		})
 	}
 
 	#[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
 	pub fn save(&mut self, force_dialog: bool) -> Result<()> {
-		let path = self.path.as_deref().unwrap_or(self.name.as_ref().as_ref());
-		if !path.is_absolute() || force_dialog {
+		if let Some(path) = self.path.as_deref() && path.is_absolute() && !force_dialog {
+			std::fs::write(path, self.format.encode(&self.value))?;
+			self.unsaved_changes = false;
+			Ok(())
+		} else {
 			let mut builder = native_dialog::FileDialog::new();
-			let initial_index = match self.compression {
+			let initial_index = match self.format {
 				FileFormat::Nbt => 0,
 				FileFormat::Snbt => 1,
 				FileFormat::Lz4 | FileFormat::Mca => 2,
 				FileFormat::Gzip | FileFormat::Zlib => 3,
+				FileFormat::LittleEndianNbt => 4,
+				FileFormat::LittleEndianHeaderNbt => 5,
 			};
 			builder = builder.add_filter(Self::FILE_TYPE_FILTERS[initial_index].0, Self::FILE_TYPE_FILTERS[initial_index].1);
 			builder = Self::FILE_TYPE_FILTERS.iter().enumerate().filter_map(|(idx, value)| if idx == initial_index { None } else { Some(value) }).fold(builder, |builder, filter| builder.add_filter(filter.0, filter.1));
 			let path = builder.show_save_single_file()?.ok_or_else(|| anyhow!("Save cancelled"))?;
 			self.name = path.file_name().and_then(|x| x.to_str()).expect("Path has a filename").to_string().into_boxed_str();
-			std::fs::write(&path, self.compression.encode(&self.value))?;
+			std::fs::write(&path, self.format.encode(&self.value))?;
 			self.path = Some(path);
-			self.unsaved_changes = false;
-			Ok(())
-		} else {
-			std::fs::write(path, self.compression.encode(&self.value))?;
 			self.unsaved_changes = false;
 			Ok(())
 		}
@@ -103,8 +111,9 @@ impl Tab {
 
 	#[cfg(target_arch = "wasm32")]
 	pub fn save(&mut self, _: bool) -> Result<()> {
-		let bytes = self.compression.encode(&self.value);
+		let bytes = self.format.encode(&self.value);
 		crate::save(self.name.as_ref(), bytes);
+		self.unsaved_changes = false;
 		Ok(())
 	}
 
@@ -121,6 +130,8 @@ impl Tab {
 			compound.render_root(builder, &self.name, ctx);
 		} else if let Some(region) = self.value.as_region() {
 			region.render_root(builder, &self.name, ctx);
+		} else if let Some(list) = self.value.as_list() {
+			list.render_root(builder, &self.name, ctx);
 		}
 		builder.color = TextColor::White.to_raw();
 		ctx.render_line_numbers(builder, &self.bookmarks);
@@ -240,7 +251,7 @@ impl Tab {
 		}
 
 		{
-			let enabled = self.path.is_some() && cfg!(not(target_os = "wasm32"));
+			let enabled = self.path.as_deref().is_some_and(|path| path.exists()) && cfg!(not(target_os = "wasm32"));
 			let widget_uv = if (296..312).contains(&ctx.mouse_x) && (26..42).contains(&ctx.mouse_y) {
 				#[cfg(target_arch = "wasm32")]
 				builder.draw_tooltip(&["Refresh Tab (Disabled on WebAssembly version)"], (ctx.mouse_x, ctx.mouse_y), false);
@@ -326,6 +337,8 @@ impl Tab {
 			builder.draw_texture_z(pos, z, COMPOUND_ROOT_UV, (16, 16));
 		} else if id == NbtRegion::ID {
 			builder.draw_texture_z(pos, z, REGION_UV, (16, 16));
+		} else if id == NbtList::ID {
+			builder.draw_texture_z(pos, z, LIST_UV, (16, 16));
 		}
 	}
 
@@ -589,12 +602,12 @@ impl Tab {
 	pub fn parse_raw(path: &Path, buf: Vec<u8>, sort_algorithm: SortAlgorithm) -> Result<(NbtElement, FileFormat)> {
 		Ok(if let Some("mca" | "mcr") = path.extension().and_then(OsStr::to_str) {
 			(
-				NbtElement::from_mca(buf.as_slice(), sort_algorithm).context("Failed to parse MCA file")?,
+				NbtElement::from_be_mca(buf.as_slice(), sort_algorithm).context("Failed to parse MCA file")?,
 				FileFormat::Mca,
 			)
 		} else if let Some(0x1F8B) = buf.first_chunk::<2>().copied().map(u16::from_be_bytes) {
 			(
-				NbtElement::from_file(
+				NbtElement::from_be_file(
 					&DeflateDecoder::new(buf.as_slice())
 						.decode_gzip()
 						.context("Failed to decode gzip compressed NBT")?,
@@ -605,7 +618,7 @@ impl Tab {
 			)
 		} else if let Some(0x7801 | 0x789C | 0x78DA) = buf.first_chunk::<2>().copied().map(u16::from_be_bytes) {
 			(
-				NbtElement::from_file(
+				NbtElement::from_be_file(
 					&DeflateDecoder::new(buf.as_slice())
 						.decode_zlib()
 						.context("Failed to decode zlib compressed NBT")?,
@@ -614,8 +627,10 @@ impl Tab {
 					.context("Failed to parse NBT")?,
 				FileFormat::Zlib,
 			)
-		} else if let Some(nbt) = NbtElement::from_file(buf.as_slice(), sort_algorithm) {
+		} else if let Some(nbt) = NbtElement::from_be_file(buf.as_slice(), sort_algorithm) {
 			(nbt, FileFormat::Nbt)
+		} else if let Some((nbt, header)) = NbtElement::from_le_file(buf.as_slice(), sort_algorithm) {
+			(nbt, if header { FileFormat::LittleEndianHeaderNbt } else { FileFormat::LittleEndianNbt })
 		} else {
 			(
 				core::str::from_utf8(&buf)
@@ -637,7 +652,7 @@ impl Tab {
 	pub fn refresh(&mut self, sort_algorithm: SortAlgorithm) -> Result<()> {
 		let Some(path) = self.path.as_deref() else { return Err(anyhow!("File path was not present in tab")) };
 
-		if self.unsaved_changes && (since_epoch() - core::mem::replace(&mut self.last_close_attempt, since_epoch())) > DOUBLE_CLICK_INTERVAL {
+		if self.unsaved_changes && (since_epoch() - core::mem::replace(&mut self.last_close_attempt, since_epoch())) > crate::DOUBLE_CLICK_INTERVAL {
 			return Ok(());
 		}
 
@@ -646,14 +661,12 @@ impl Tab {
 
 		self.bookmarks.clear();
 		self.scroll = 0;
-		self.compression = format;
+		self.format = format;
 		self.unsaved_changes = false;
-		self.undos.clear();
-		self.redos.clear();
 		self.uuid = Uuid::new_v4();
 		self.selected_text = None;
 		self.last_close_attempt = Duration::ZERO;
-		let old = core::mem::replace(&mut self.value, Box::new(value));
+		let old = (core::mem::replace(&mut self.value, Box::new(value)), core::mem::replace(&mut self.undos, LinkedQueue::new()), core::mem::replace(&mut self.redos, LinkedQueue::new()));
 		std::thread::Builder::new().stack_size(50_331_648 /*48MiB*/).spawn(move || drop(old)).expect("Failed to spawn thread");
 
 		Ok(())
@@ -671,8 +684,12 @@ pub enum FileFormat {
 	Nbt,
 	Gzip,
 	Zlib,
-	Lz4,
 	Snbt,
+	LittleEndianNbt,
+	LittleEndianHeaderNbt,
+
+	Lz4,
+
 	Mca,
 }
 
@@ -682,7 +699,9 @@ impl FileFormat {
 		match self {
 			Self::Nbt => Self::Gzip,
 			Self::Gzip => Self::Zlib,
-			Self::Zlib => Self::Snbt,
+			Self::Zlib => Self::LittleEndianNbt,
+			Self::LittleEndianNbt => Self::LittleEndianHeaderNbt,
+			Self::LittleEndianHeaderNbt => Self::Snbt,
 			Self::Snbt => Self::Nbt,
 
 			// has to be separate
@@ -697,7 +716,9 @@ impl FileFormat {
 			Self::Nbt => Self::Snbt,
 			Self::Gzip => Self::Nbt,
 			Self::Zlib => Self::Gzip,
-			Self::Snbt => Self::Zlib,
+			Self::LittleEndianNbt => Self::Zlib,
+			Self::LittleEndianHeaderNbt => Self::LittleEndianNbt,
+			Self::Snbt => Self::LittleEndianHeaderNbt,
 
 			// has to be separate
 			Self::Mca => Self::Mca,
@@ -708,21 +729,20 @@ impl FileFormat {
 	#[must_use]
 	pub fn encode(self, data: &NbtElement) -> Vec<u8> {
 		match self {
-			Self::Nbt | Self::Mca => data.to_file(),
+			Self::Nbt | Self::Mca => data.to_be_file(),
 			Self::Gzip => {
 				let mut vec = vec![];
-				let _ = flate2::read::GzEncoder::new(&*data.to_file(), Compression::best()).read_to_end(&mut vec);
+				let _ = flate2::read::GzEncoder::new(&*data.to_be_file(), Compression::best()).read_to_end(&mut vec);
 				vec
 			}
 			Self::Zlib => {
 				let mut vec = vec![];
-				let _ = flate2::read::ZlibEncoder::new(&*data.to_file(), Compression::best()).read_to_end(&mut vec);
+				let _ = flate2::read::ZlibEncoder::new(&*data.to_be_file(), Compression::best()).read_to_end(&mut vec);
 				vec
 			}
-			Self::Lz4 => {
-				lz4_flex::compress(&*data.to_file())
-			}
+			Self::Lz4 => lz4_flex::compress(&*data.to_be_file()),
 			Self::Snbt => data.to_string().into_bytes(),
+			format @ (Self::LittleEndianNbt | Self::LittleEndianHeaderNbt) => data.to_le_file(format == Self::LittleEndianHeaderNbt),
 		}
 	}
 
@@ -734,6 +754,8 @@ impl FileFormat {
 			Self::Zlib => ZLIB_FILE_TYPE_UV,
 			Self::Snbt => SNBT_FILE_TYPE_UV,
 			Self::Mca => MCA_FILE_TYPE_UV,
+			Self::LittleEndianNbt => LITTLE_ENDIAN_NBT_FILE_TYPE_UV,
+			Self::LittleEndianHeaderNbt => LITTLE_ENDIAN_HEADER_NBT_FILE_TYPE_UV,
 			Self::Lz4 => Vec2u::new(240, 240),
 		}
 	}
@@ -747,6 +769,8 @@ impl FileFormat {
 			Self::Snbt => "SNBT",
 			Self::Mca => "MCA",
 			Self::Lz4 => "LZ4",
+			Self::LittleEndianNbt => "Little Endian NBT",
+			Self::LittleEndianHeaderNbt => "Little Endian NBT (With Header)",
 		}
 	}
 }

@@ -7,11 +7,12 @@ use std::ptr::NonNull;
 use compact_str::CompactString;
 
 use crate::assets::{BASE_Z, JUST_OVERLAPPING_BASE_TEXT_Z, STRING_UV, ZOffset};
-use crate::decoder::Decoder;
+use crate::be_decoder::BigEndianDecoder;
 use crate::encoder::UncheckedBufWriter;
 use crate::{RenderContext, StrExt, VertexBufferBuilder};
 use crate::color::TextColor;
 use crate::formatter::PrettyFormatter;
+use crate::le_decoder::LittleEndianDecoder;
 
 #[repr(transparent)]
 #[allow(clippy::module_name_repetitions)]
@@ -20,8 +21,8 @@ pub struct NbtString {
 	pub str: TwentyThree,
 }
 
-impl PartialEq for NbtString {
-	fn eq(&self, other: &Self) -> bool {
+impl NbtString {
+	pub fn matches(&self, other: &Self) -> bool {
 		self.str.as_str() == other.str.as_str()
 	}
 }
@@ -38,7 +39,8 @@ impl NbtString {
 		))
 	}
 
-	pub fn from_bytes(decoder: &mut Decoder) -> Option<Self> {
+	#[inline]
+	pub fn from_be_bytes(decoder: &mut BigEndianDecoder) -> Option<Self> {
 		unsafe {
 			decoder.assert_len(2)?;
 			Some(Self {
@@ -46,7 +48,22 @@ impl NbtString {
 			})
 		}
 	}
-	pub fn to_bytes(&self, writer: &mut UncheckedBufWriter) { writer.write_str(self.str.as_str()); }
+
+	#[inline]
+	pub fn to_be_bytes(&self, writer: &mut UncheckedBufWriter) { writer.write_be_str(self.str.as_str()); }
+
+	#[inline]
+	pub fn from_le_bytes(decoder: &mut LittleEndianDecoder) -> Option<Self> {
+		unsafe {
+			decoder.assert_len(2)?;
+			Some(Self {
+				str: TwentyThree::new(decoder.string()?),
+			})
+		}
+	}
+
+	#[inline]
+	pub fn to_le_bytes(&self, writer: &mut UncheckedBufWriter) { writer.write_le_str(self.str.as_str()); }
 }
 
 impl NbtString {

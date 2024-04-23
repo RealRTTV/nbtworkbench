@@ -7,7 +7,7 @@ use compact_str::CompactString;
 use notify::{EventKind, PollWatcher, RecursiveMode, Watcher};
 use uuid::Uuid;
 
-use crate::{panic_unchecked, set_clipboard, FileUpdateSubscription};
+use crate::{panic_unchecked, set_clipboard, FileUpdateSubscription, StrExt};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::{FileUpdateSubscriptionType, assets::{OPEN_ARRAY_IN_HEX_UV, OPEN_IN_TXT}, since_epoch};
 use crate::assets::{ACTION_WHEEL_Z, COPY_FORMATTED_UV, COPY_RAW_UV, SORT_COMPOUND_BY_NAME, SORT_COMPOUND_BY_TYPE};
@@ -287,7 +287,7 @@ impl ElementAction {
 						if let Some(key) = key.as_deref()
 							&& element.id() != NbtChunk::ID
 						{
-							if write!(&mut file, "{key}: ").is_err() { break 'm; }
+							if write!(&mut file, "{k}: ", k = if key.needs_escape() { format!("{key:?}") } else { key.to_owned() }).is_err() { break 'm; }
 						}
 						if write!(&mut file, "{element:#?}").is_err() { break 'm; }
 						drop(file);
