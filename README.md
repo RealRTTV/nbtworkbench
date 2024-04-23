@@ -13,7 +13,10 @@ NBT Workbench is written completely from scratch in [Rust](https://www.rust-lang
 * Java NBT files (`level.dat` / `hotbar.nbt`)
 * Java region files (`.mca` / `.mcr`)
   * ☆ Now supports the new 1.21 LZ4 compression format
+  * ☆ Now supports the 1.20.2 NBT packet format
 * SNBT files (`.snbt`)
+* Bedrock files (`.nbt`, `.dat`, `.mcstructure`)
+  * ☆ List as root element
 * ☆ [Web Version](https://rttv.ca/main)
 * Save as dialog
 * Create new nbt file / new region file
@@ -27,6 +30,7 @@ NBT Workbench is written completely from scratch in [Rust](https://www.rust-lang
 * ☆ Editing tag key/values in one click by simply being overtop the text.
 * ☆ Searching with substrings, regex and snbt matching.
 * ☆ Bookmarks
+* ☆ Autosave
 * ☆ Line Numbers
 * ☆ Dark Mode
 * ☆ Colored Text
