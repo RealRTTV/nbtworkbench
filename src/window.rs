@@ -155,10 +155,7 @@ impl<'window> State<'window> {
 				&DeviceDescriptor {
 					required_features: adapter.features(),
 					required_limits: if cfg!(target_arch = "wasm32") {
-						Limits {
-							max_texture_dimension_2d: 8192,
-							..Limits::downlevel_webgl2_defaults()
-						}
+						Limits::downlevel_webgl2_defaults()
 					} else {
 						Limits::default()
 					},
@@ -317,8 +314,8 @@ impl<'window> State<'window> {
 		let unicode_texture = device.create_texture(&TextureDescriptor {
 			label: Some("Unicode Texture Array"),
 			size: Extent3d {
-				width: 256,
-				height: assets::UNICODE_LEN as u32 / 256,
+				width: 512,
+				height: assets::UNICODE_LEN as u32 / 512,
 				depth_or_array_layers: 1,
 			},
 			mip_level_count: 1,
@@ -335,11 +332,11 @@ impl<'window> State<'window> {
 			).decode_zlib().ok().panic_unchecked("there is no way this fails, otherwise i deserve the ub that comes from this.")
 		}, ImageDataLayout {
 			offset: 0,
-			bytes_per_row: Some(256),
-			rows_per_image: Some(assets::UNICODE_LEN as u32 / 256),
+			bytes_per_row: Some(512),
+			rows_per_image: Some(assets::UNICODE_LEN as u32 / 512),
 		}, Extent3d {
-			width: 256,
-			height: assets::UNICODE_LEN as u32 / 256,
+			width: 512,
+			height: assets::UNICODE_LEN as u32 / 512,
 			depth_or_array_layers: 1,
 		});
 		let unicode_texture_view = unicode_texture.create_view(&TextureViewDescriptor::default());

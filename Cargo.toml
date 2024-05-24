@@ -1,6 +1,6 @@
 [package]
 name = "nbtworkbench"
-version = "1.3.0"
+version = "1.3.1"
 edition = "2021"
 description = "A modern NBT Editor written in Rust designed for performance and efficiency."
 license-file = "LICENSE"
@@ -50,22 +50,23 @@ winres = "0.1.12"
 
 [dependencies]
 zune-inflate = { version = "0.2.54", features = ["gzip", "zlib"] }
-flate2 = "1.0.27"
-winit = "0.29.10"
-wgpu = { version = "=0.19.1", default-features = false, features = ["webgl", "wgsl", "dx12", "metal"] }
+flate2 = "1.0.28"
+winit = "0.29.15"
+wgpu = { version = "=0.19.4", default-features = false, features = ["webgl", "wgsl", "dx12", "metal"] }
 fxhash = "0.2.1"
-hashbrown = { version = "0.14.0", features = ["raw", "inline-more", "nightly"], default-features = false }
-getrandom = { version = "0.2.12", features = ["js"] }
-notify = "6.0.1"
-uuid = { version = "1.4.1", features = ["v4"] }
+hashbrown = { version = "0.14.3", features = ["raw", "inline-more", "nightly"], default-features = false }
+getrandom = { version = "0.2.14", features = ["js"] }
+notify = "6.1.1"
+uuid = { version = "1.8.0", features = ["v4"] }
 compact_str = "0.7.1"
 wgsl-inline = { version = "0.2.0", features = ["minify"] }
 static_assertions = "1.1.0"
-anyhow = "1.0.79"
-lz4_flex = { version = "0.11.2", default-features = false, features = ["std", "nightly"] }
-regex = "1.10.3"
+anyhow = "1.0.82"
+lz4_flex = { version = "0.11.3", default-features = false, features = ["std", "nightly"] }
+regex = "1.10.4"
 glob = "0.3.1"
 zune-png = { version = "0.4.10", features = [] }
+polonius-the-crab = "0.4.1"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 winapi = { version = "0.3.9", features = [] }
@@ -78,4 +79,4 @@ native-dialog = "0.7.0"
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = "0.2.91"
 wasm-bindgen-futures = "0.4.41"
-web-sys = { version = "=0.3.67", features = ["console", "Document", "Window", "Element", "Clipboard", "DateTimeValue", "HtmlElement", "HtmlDocument", "HtmlTextAreaElement", "Blob", "HtmlAreaElement", "Url"] }
+web-sys = { version = "=0.3.69", features = ["console", "Document", "Window", "Element", "Clipboard", "DateTimeValue", "HtmlElement", "HtmlDocument", "HtmlTextAreaElement", "Blob", "HtmlAreaElement", "Url"] }

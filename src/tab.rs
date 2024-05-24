@@ -251,7 +251,7 @@ impl Tab {
 		}
 
 		{
-			let enabled = self.path.as_deref().is_some_and(|path| path.exists()) && cfg!(not(target_os = "wasm32"));
+			let enabled = self.path.as_deref().is_some_and(|path| path.exists()) && !cfg!(target_arch = "wasm32");
 			let widget_uv = if (296..312).contains(&ctx.mouse_x) && (26..42).contains(&ctx.mouse_y) {
 				#[cfg(target_arch = "wasm32")]
 				builder.draw_tooltip(&["Refresh Tab (Disabled on WebAssembly version)"], (ctx.mouse_x, ctx.mouse_y), false);

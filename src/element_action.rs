@@ -7,9 +7,9 @@ use compact_str::CompactString;
 use notify::{EventKind, PollWatcher, RecursiveMode, Watcher};
 use uuid::Uuid;
 
-use crate::{panic_unchecked, set_clipboard, FileUpdateSubscription, StrExt};
+use crate::{panic_unchecked, set_clipboard, FileUpdateSubscription};
 #[cfg(not(target_arch = "wasm32"))]
-use crate::{FileUpdateSubscriptionType, assets::{OPEN_ARRAY_IN_HEX_UV, OPEN_IN_TXT}, since_epoch};
+use crate::{FileUpdateSubscriptionType, assets::{OPEN_ARRAY_IN_HEX_UV, OPEN_IN_TXT}, since_epoch, StrExt};
 use crate::assets::{ACTION_WHEEL_Z, COPY_FORMATTED_UV, COPY_RAW_UV, SORT_COMPOUND_BY_NAME, SORT_COMPOUND_BY_TYPE};
 use crate::elements::chunk::NbtChunk;
 use crate::elements::compound::NbtCompound;

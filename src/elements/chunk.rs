@@ -93,8 +93,8 @@ impl NbtRegion {
 
 	#[must_use]
 	pub fn from_be_bytes(bytes: &[u8], sort: SortAlgorithm) -> Option<Self> {
-		fn parse(raw: u32, bytes: &[u8], sort: SortAlgorithm) -> Option<(FileFormat, NbtElement)> {
-			if raw < 512 { return Some((FileFormat::Zlib, unsafe { core::mem::zeroed() })) }
+		fn parse(raw: u32, bytes: &[u8], sort: SortAlgorithm) -> Option<(FileFormat, Option<NbtCompound>)> {
+			if raw < 512 { return Some((FileFormat::Zlib, None)) }
 
 			let len = (raw as usize & 0xFF) * 4096;
 			let offset = ((raw >> 8) - 2) as usize * 4096;
@@ -128,11 +128,11 @@ impl NbtRegion {
 					4 => (FileFormat::Lz4, NbtElement::from_be_file(&lz4_flex::decompress(data, data.len()).ok()?, sort)?),
 					_ => return None,
 				};
-				if element.id() != NbtCompound::ID { return None }
-				Some((compression, element))
-			} else {
-				None
+				if let Some(element) = element.into_compound() {
+					return Some((compression, Some(element)));
+				}
 			}
+			None
 		}
 
 		if bytes.len() < 8192 { return None }
@@ -155,23 +155,19 @@ impl NbtRegion {
 				threads.push((timestamp, s.spawn(move || parse(offset, bytes, sort))));
 			}
 
-
-			for (pos, (timestamp, thread)) in threads.into_iter().enumerate() {
+			let mut pos = 0;
+			for (timestamp, thread) in threads {
 				let (format, element) = thread.join().ok()??;
-				if element.id() == NbtCompound::ID {
+				if let Some(element) = element {
 					unsafe {
 						region.insert_unchecked(
 							pos,
 							region.len(),
-							NbtElement::Chunk(NbtChunk::from_compound(
-								core::mem::transmute(element),
-								((pos >> 5) as u8 & 31, pos as u8 & 31),
-								format,
-								timestamp,
-							)),
+							NbtElement::Chunk(NbtChunk::from_compound(element, ((pos >> 5) as u8 & 31, pos as u8 & 31), format, timestamp, )),
 						);
 					}
 				}
+				pos += 1;
 			}
 
 			Some(region)
@@ -198,20 +194,14 @@ impl NbtRegion {
 
 			for (pos, (timestamp, thread)) in threads.into_iter().enumerate() {
 				let (format, element) = thread?;
-				if element.id() == NbtCompound::ID {
+				if let Some(element) = element {
 					unsafe {
 						region.insert_unchecked(
 							pos,
 							region.len(),
-							NbtElement::Chunk(NbtChunk::from_compound(
-								core::mem::transmute_copy(&element),
-								((pos >> 5) as u8 & 31, pos as u8 & 31),
-								format,
-								timestamp,
-							)),
+							NbtElement::Chunk(NbtChunk::from_compound(element, ((pos >> 5) as u8 & 31, pos as u8 & 31), format, timestamp, )),
 						);
 					}
-					core::mem::forget(element);
 				}
 			}
 

@@ -20,8 +20,7 @@
     new_uninit,
     optimize_attribute,
 	panic_update_hook,
-    stmt_expr_attributes,
-    unchecked_math
+    stmt_expr_attributes
 )]
 #![windows_subsystem = "windows"]
 
@@ -56,28 +55,28 @@ use crate::workbench::Workbench;
 
 mod alert;
 mod assets;
-mod color;
 mod be_decoder;
+mod bookmark;
+#[cfg(not(target_arch = "wasm32"))]
+mod cli;
+mod color;
+mod copy_shader;
+mod element_action;
 mod encoder;
+mod formatter;
+mod le_decoder;
+mod search_box;
 mod selected_text;
 mod shader;
 mod tab;
+mod text;
 mod text_shader;
+mod tooltip_effect_shader;
 mod tree_travel;
 mod vertex_buffer_builder;
 mod window;
 mod workbench;
 mod workbench_action;
-mod element_action;
-mod search_box;
-mod text;
-#[cfg(not(target_arch = "wasm32"))]
-mod cli;
-mod formatter;
-mod bookmark;
-mod tooltip_effect_shader;
-mod copy_shader;
-mod le_decoder;
 
 #[macro_export]
 macro_rules! flags {
@@ -1371,6 +1370,7 @@ pub mod elements {
 	pub mod list;
 	pub mod primitive;
 	pub mod string;
+	pub mod null;
 }
 
 const_assert_eq!(

@@ -55,7 +55,7 @@ wgsl! {
 		let x = u32(input.uv[0] * 16.0);
 		let y = u32(input.uv[1] * 16.0);
 		let bit_index = input.character * 256u + y * 16 + x;
-		let byte = u32(textureLoad(buf, vec2<u32>(bit_index / 8u % 256u, bit_index / 8u / 256u), 0)[0] * 255.0);
+		let byte = u32(textureLoad(buf, vec2<u32>(bit_index / 8u % 512u, bit_index / 8u / 512u), 0)[0] * 255.0);
 		let bit = (byte >> (7u - bit_index % 8u)) & 1u;
 		if (bit == 0u) {
 			discard;

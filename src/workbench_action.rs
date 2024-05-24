@@ -2,7 +2,7 @@ use std::mem::MaybeUninit;
 use compact_str::{CompactString, ToCompactString};
 use std::path::PathBuf;
 
-use crate::assets::{ADD_TAIL_UV, ADD_UV, MOVE_TAIL_UV, MOVE_UV, REMOVE_TAIL_UV, REMOVE_UV, RENAME_TAIL_UV, RENAME_UV, REORDER_TAIL_UV, REORDER_UV, REPLACE_TAIL_UV, REPLACE_UV};
+use crate::assets::{ADD_TAIL_UV, ADD_UV, BULK_TAIL_UV, BULK_UV, MOVE_TAIL_UV, MOVE_UV, REMOVE_TAIL_UV, REMOVE_UV, RENAME_TAIL_UV, RENAME_UV, REORDER_TAIL_UV, REORDER_UV, REPLACE_TAIL_UV, REPLACE_UV};
 use crate::elements::element::NbtElement;
 use crate::vertex_buffer_builder::VertexBufferBuilder;
 use crate::{encompasses, encompasses_or_equal, FileUpdateSubscription};
@@ -36,6 +36,9 @@ pub enum WorkbenchAction {
 	ReorderCompound {
 		indices: Box<[usize]>,
 		reordering_indices: Box<[usize]>,
+	},
+	Bulk {
+		actions: Box<[WorkbenchAction]>,
 	}
 }
 
@@ -365,7 +368,7 @@ impl WorkbenchAction {
 				let mut inverted_indices = Box::<[usize]>::new_uninit_slice(previous_entries.len());
 				let mut current_line_number = line_number + 1;
 				let mut current_true_line_number = true_line_number + 1;
-				for (idx, &new_idx) in reordering_indices.into_iter().enumerate() {
+				for (idx, &new_idx) in reordering_indices.iter().enumerate() {
 					let entry = core::mem::replace(previous_entries.get_unchecked_mut(new_idx), MaybeUninit::uninit()).assume_init();
 					*indices.find(entry.hash, |&x| x == new_idx).panic_unchecked("index obviously exists").as_mut() = idx;
 					let line_number = *line_numbers.get_unchecked(new_idx);
@@ -392,6 +395,17 @@ impl WorkbenchAction {
 					indices: traversal_indices,
 					reordering_indices: inverted_indices.assume_init(),
 				})
+			},
+			Self::Bulk { actions } => {
+				let mut array = Box::new_uninit_slice(actions.len());
+
+				for (idx, action) in actions.into_vec().into_iter().rev().enumerate() {
+					array[idx].write(action.undo(root, bookmarks, subscription, path, name));
+				}
+
+				return Some(Self::Bulk {
+					actions: array.assume_init()
+				})
 			}
 		})
 	}
@@ -403,12 +417,9 @@ impl WorkbenchAction {
 			Self::Add { .. } => builder.draw_texture(pos, if tail { ADD_TAIL_UV } else { ADD_UV }, (16, 16)),
 			Self::Rename { .. } => builder.draw_texture(pos, if tail { RENAME_TAIL_UV } else { RENAME_UV }, (16, 16)),
 			Self::Move { .. } => builder.draw_texture(pos, if tail { MOVE_TAIL_UV } else { MOVE_UV }, (16, 16)),
-			Self::Replace { .. } => builder.draw_texture(
-				pos,
-				if tail { REPLACE_TAIL_UV } else { REPLACE_UV },
-				(16, 16),
-			),
+			Self::Replace { .. } => builder.draw_texture(pos, if tail { REPLACE_TAIL_UV } else { REPLACE_UV }, (16, 16)),
 			Self::ReorderCompound { .. } => builder.draw_texture(pos, if tail { REORDER_TAIL_UV } else { REORDER_UV }, (16, 16)),
+			Self::Bulk { .. } => builder.draw_texture(pos, if tail { BULK_TAIL_UV } else { BULK_UV }, (16, 16)),
 		}
 	}
 }
