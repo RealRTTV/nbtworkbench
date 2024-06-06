@@ -76,6 +76,7 @@ jobs:
       with:
         command: "mv ${{ steps.bin.outputs.BIN_PATH }} target/${{ matrix.job.target }}/${{ steps.bin.outputs.BIN_NAME }}"
         filename: ${{ matrix.job.target }}.zip
+        directory: "target"
         path: ${{ matrix.job.target }}/${{ steps.bin.outputs.BIN_NAME }}
     - name: Upload files to a GitHub release
       uses: svenstaro/upload-release-action@2.9.0
