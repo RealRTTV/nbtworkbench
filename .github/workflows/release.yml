@@ -66,15 +66,17 @@ jobs:
         echo "BIN_NAME=${BIN_NAME}" >> $GITHUB_OUTPUT
     - uses: actions/upload-artifact@v4
       with:
-        name: ${{ matrix.job.target }}.zip
+        name: ${{ matrix.job.target }}
         path: ${{ steps.bin.outputs.BIN_PATH }}
         if-no-files-found: error
         retention-days: 90
         compression-level: 9
-    - run: |
-        mv ${{ steps.bin.outputs.BIN_PATH }} target/${{ matrix.job.target }}/${{ steps.bin.outputs.BIN_NAME }}
-        cd target
-        zip -r ${{ matrix.job.target }}.zip ${{ matrix.job.target }}/${{ steps.bin.outputs.BIN_NAME }}
+    - name: ZIP Outputs
+      uses: thedoctor0/zip-release@0.7.5
+      with:
+        command: "mv ${{ steps.bin.outputs.BIN_PATH }} target/${{ matrix.job.target }}/${{ steps.bin.outputs.BIN_NAME }}"
+        filename: ${{ matrix.job.target }}.zip
+        path: ${{ matrix.job.target }}/${{ steps.bin.outputs.BIN_NAME }}
     - name: Upload files to a GitHub release
       uses: svenstaro/upload-release-action@2.9.0
       with:
