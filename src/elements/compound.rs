@@ -19,7 +19,7 @@ use crate::encoder::UncheckedBufWriter;
 use crate::{DropFn, OptionExt, RenderContext, SortAlgorithm, StrExt, VertexBufferBuilder};
 use crate::color::TextColor;
 use crate::formatter::PrettyFormatter;
-use crate::bookmark::{Bookmark, BookmarkSlice};
+use crate::marked_line::{MarkedLine, MarkedLineSlice};
 use crate::le_decoder::LittleEndianDecoder;
 
 #[allow(clippy::module_name_repetitions)]
@@ -297,7 +297,7 @@ impl NbtCompound {
 			}
 
 			let pos = ctx.pos();
-			if ctx.draw_held_entry_bar(ctx.pos() + (16, 16), builder, |x, y| pos + (16, 8) == (x, y), |id| id != NbtChunk::ID) {} else if self.height() == 1 && ctx.draw_held_entry_bar(ctx.pos() + (16, 16), builder, |x, y| pos + (16, 16) == (x, y), |id| id != NbtChunk::ID) {}
+			if ctx.draw_held_entry_bar(ctx.pos() + (16, 16), builder, |x, y| pos + (16, 8) == (x, y), |x| self.can_insert(x)) {} else if self.height() == 1 && ctx.draw_held_entry_bar(ctx.pos() + (16, 16), builder, |x, y| pos + (16, 16) == (x, y), |x| self.can_insert(x)) {}
 
 			ctx.y_offset += 16;
 		}
@@ -347,7 +347,7 @@ impl NbtCompound {
 				}
 
 				let pos = ctx.pos();
-				ctx.draw_held_entry_bar(ctx.pos(), builder, |x, y| pos == (x, y), |id| id != NbtChunk::ID);
+				ctx.draw_held_entry_bar(ctx.pos(), builder, |x, y| pos == (x, y), |x| self.can_insert(x));
 
 				if remaining_scroll == 0 {
 					builder.draw_texture(
@@ -372,7 +372,7 @@ impl NbtCompound {
 				);
 
 				let pos = ctx.pos();
-				ctx.draw_held_entry_bar(ctx.pos(), builder, |x, y| pos == (x, y + 8), |id| id != NbtChunk::ID);
+				ctx.draw_held_entry_bar(ctx.pos(), builder, |x, y| pos == (x, y + 8), |x| self.can_insert(x));
 			}
 		}
 	}
@@ -395,6 +395,12 @@ impl NbtCompound {
 	#[inline]
 	#[must_use]
 	pub const fn max_depth(&self) -> usize { self.max_depth as usize }
+	
+	#[inline]
+	#[must_use]
+	pub fn can_insert(&self, value: &NbtElement) -> bool {
+		value.id() != NbtChunk::ID
+	}
 }
 
 impl Display for NbtCompound {
@@ -495,7 +501,7 @@ impl NbtCompound {
 			}
 
 			let pos = ctx.pos();
-			if ctx.draw_held_entry_bar(ctx.pos() + (16, 16), builder, |x, y| pos + (16, 8) == (x, y), |id| id != NbtChunk::ID) {} else if self.height() == 1 && ctx.draw_held_entry_bar(ctx.pos() + (16, 16), builder, |x, y| pos + (16, 16) == (x, y), |id| id != NbtChunk::ID) {}
+			if ctx.draw_held_entry_bar(ctx.pos() + (16, 16), builder, |x, y| pos + (16, 8) == (x, y), |x| self.can_insert(x)) {} else if self.height() == 1 && ctx.draw_held_entry_bar(ctx.pos() + (16, 16), builder, |x, y| pos + (16, 16) == (x, y), |x| self.can_insert(x)) {}
 
 			ctx.y_offset += 16;
 			y_before += 16;
@@ -548,7 +554,7 @@ impl NbtCompound {
 				}
 
 				let pos = ctx.pos();
-				ctx.draw_held_entry_bar(ctx.pos(), builder, |x, y| pos == (x, y), |id| id != NbtChunk::ID);
+				ctx.draw_held_entry_bar(ctx.pos(), builder, |x, y| pos == (x, y),|x| self.can_insert(x));
 
 				if *remaining_scroll == 0 {
 					builder.draw_texture(
@@ -573,7 +579,7 @@ impl NbtCompound {
 				);
 
 				let pos = ctx.pos();
-				ctx.draw_held_entry_bar(ctx.pos(), builder, |x, y| pos == (x, y + 8), |id| id != NbtChunk::ID);
+				ctx.draw_held_entry_bar(ctx.pos(), builder, |x, y| pos == (x, y + 8), |x| self.can_insert(x));
 			}
 
 			if !tail {
@@ -1030,7 +1036,7 @@ impl CompoundMap {
 		Some((entry.key.as_ref(), &mut entry.value))
 	}
 
-	pub fn sort_by<F: FnMut((&str, &NbtElement), (&str, &NbtElement)) -> Ordering>(&mut self, mut f: F, line_number: usize, true_line_number: usize, true_height: usize, open: bool, bookmarks: &mut BookmarkSlice) -> Box<[usize]> {
+	pub fn sort_by<F: FnMut((&str, &NbtElement), (&str, &NbtElement)) -> Ordering>(&mut self, mut f: F, line_number: usize, true_line_number: usize, true_height: usize, open: bool, bookmarks: &mut MarkedLineSlice) -> Box<[usize]> {
 		let hashes = self.entries.iter().map(|entry| entry.hash).collect::<Vec<_>>();
 		let true_line_numbers = {
 			let mut current_line_number = true_line_number + 1;
@@ -1040,7 +1046,7 @@ impl CompoundMap {
 			let mut current_line_number = line_number + 1;
 			self.entries.iter().map(|entry| { let new_line_number = current_line_number; current_line_number += entry.value.height(); new_line_number }).collect::<Vec<_>>()
 		};
-		let mut new_bookmarks = Box::<[Bookmark]>::new_uninit_slice(bookmarks[true_line_number..true_line_number + true_height].len());
+		let mut new_bookmarks = Box::<[MarkedLine]>::new_uninit_slice(bookmarks[true_line_number..true_line_number + true_height].len());
 		let mut new_bookmarks_len = 0;
 		// yeah, it's hacky... but there's not much else I *can* do. plus: it works extremely well.
 		for (idx, entry) in self.entries.iter_mut().enumerate() {
@@ -1075,7 +1081,7 @@ impl CompoundMap {
 			}
 		}
 		let bookmark_slice = &mut bookmarks[true_line_number..true_line_number + true_height];
-		unsafe { core::ptr::copy_nonoverlapping(new_bookmarks.as_ptr().cast::<Bookmark>(), bookmark_slice.as_mut_ptr(), bookmark_slice.len()); }
+		unsafe { core::ptr::copy_nonoverlapping(new_bookmarks.as_ptr().cast::<MarkedLine>(), bookmark_slice.as_mut_ptr(), bookmark_slice.len()); }
 		unsafe { inverted_indices.assume_init() }
 	}
 

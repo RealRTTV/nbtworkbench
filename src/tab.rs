@@ -10,15 +10,15 @@ use flate2::Compression;
 use uuid::Uuid;
 use zune_inflate::DeflateDecoder;
 
-use crate::{LinkedQueue, OptionExt, panic_unchecked, RenderContext, since_epoch, SortAlgorithm, StrExt, WindowProperties};
+use crate::{DOUBLE_CLICK_INTERVAL, LinkedQueue, OptionExt, panic_unchecked, RenderContext, since_epoch, SortAlgorithm, StrExt, TAB_CLOSE_DOUBLE_CLICK_INTERVAL, WindowProperties};
 use crate::assets::{BASE_Z, BYTE_ARRAY_GHOST_UV, BYTE_ARRAY_UV, BYTE_GRAYSCALE_UV, BYTE_UV, CHUNK_GHOST_UV, CHUNK_UV, COMPOUND_GHOST_UV, COMPOUND_ROOT_UV, COMPOUND_UV, DISABLED_REFRESH_UV, DOUBLE_GRAYSCALE_UV, DOUBLE_UV, ENABLED_FREEHAND_MODE_UV, FLOAT_GRAYSCALE_UV, FLOAT_UV, FREEHAND_MODE_UV, GZIP_FILE_TYPE_UV, HEADER_SIZE, HELD_SCROLLBAR_UV, HOVERED_WIDGET_UV, INT_ARRAY_GHOST_UV, INT_ARRAY_UV, INT_GRAYSCALE_UV, INT_UV, JUST_OVERLAPPING_BASE_Z, LITTLE_ENDIAN_NBT_FILE_TYPE_UV, LINE_NUMBER_SEPARATOR_UV, LIST_GHOST_UV, LIST_UV, LONG_ARRAY_GHOST_UV, LONG_ARRAY_UV, LONG_GRAYSCALE_UV, LONG_UV, MCA_FILE_TYPE_UV, NBT_FILE_TYPE_UV, REDO_UV, REFRESH_UV, REGION_UV, SCROLLBAR_Z, SHORT_GRAYSCALE_UV, SHORT_UV, SNBT_FILE_TYPE_UV, STEAL_ANIMATION_OVERLAY_UV, STRING_GHOST_UV, STRING_UV, UNDO_UV, UNHELD_SCROLLBAR_UV, UNKNOWN_NBT_GHOST_UV, UNKNOWN_NBT_UV, UNSELECTED_WIDGET_UV, ZLIB_FILE_TYPE_UV, ZOffset, LITTLE_ENDIAN_HEADER_NBT_FILE_TYPE_UV};
 use crate::color::TextColor;
 use crate::elements::chunk::NbtRegion;
 use crate::elements::compound::NbtCompound;
 use crate::elements::element::NbtElement;
 use crate::selected_text::{SelectedText, SelectedTextAdditional};
-use crate::text::Text;
-use crate::bookmark::Bookmarks;
+use crate::text::{get_cursor_left_jump_idx, get_cursor_right_jump_idx, Text};
+use crate::marked_line::MarkedLines;
 use crate::elements::list::NbtList;
 use crate::tree_travel::Navigate;
 use crate::vertex_buffer_builder::{Vec2u, VertexBufferBuilder};
@@ -36,7 +36,8 @@ pub struct Tab {
 	pub horizontal_scroll: usize,
 	pub window_height: usize,
 	pub window_width: usize,
-	pub bookmarks: Bookmarks,
+	pub bookmarks: MarkedLines,
+	pub edited_lines: MarkedLines,
 	pub uuid: Uuid,
 	pub freehand_mode: bool,
 	pub selected_text: Option<SelectedText>,
@@ -72,7 +73,8 @@ impl Tab {
 			horizontal_scroll: 0,
 			window_height,
 			window_width,
-			bookmarks: Bookmarks::new(),
+			bookmarks: MarkedLines::new(),
+			edited_lines: MarkedLines::new(),
 			uuid: Uuid::new_v4(),
 			freehand_mode: false,
 			selected_text: None,
@@ -100,7 +102,7 @@ impl Tab {
 			};
 			builder = builder.add_filter(Self::FILE_TYPE_FILTERS[initial_index].0, Self::FILE_TYPE_FILTERS[initial_index].1);
 			builder = Self::FILE_TYPE_FILTERS.iter().enumerate().filter_map(|(idx, value)| if idx == initial_index { None } else { Some(value) }).fold(builder, |builder, filter| builder.add_filter(filter.0, filter.1));
-			let path = builder.show_save_single_file()?.ok_or_else(|| anyhow!("Save cancelled"))?;
+			let Some(path) = builder.show_save_single_file()? else { return Ok(()) };
 			self.name = path.file_name().and_then(|x| x.to_str()).expect("Path has a filename").to_string().into_boxed_str();
 			std::fs::write(&path, self.format.encode(&self.value))?;
 			self.path = Some(path);
@@ -133,8 +135,8 @@ impl Tab {
 		} else if let Some(list) = self.value.as_list() {
 			list.render_root(builder, &self.name, ctx);
 		}
-		builder.color = TextColor::White.to_raw();
-		ctx.render_line_numbers(builder, &self.bookmarks);
+		builder.color = TextColor::Default.to_raw();
+		ctx.render_line_numbers(builder, &self.bookmarks, &self.edited_lines);
 		ctx.render_key_value_errors(builder);
 		builder.horizontal_scroll = horizontal_scroll_before;
 
@@ -341,7 +343,31 @@ impl Tab {
 			builder.draw_texture_z(pos, z, LIST_UV, (16, 16));
 		}
 	}
-
+	
+	pub fn set_selected_text(&mut self, line_number: Option<usize>, selected_text: Option<SelectedText>) {
+		self.selected_text = selected_text;
+		let now = since_epoch();
+		if let Some(selected_text) = self.selected_text.as_mut() && let Some(line_number) = line_number {
+			let (old_y, times_clicked, timestamp) = core::mem::replace(&mut self.last_selected_text_interaction, (line_number, 0, now));
+			if now - timestamp < DOUBLE_CLICK_INTERVAL && old_y == line_number && !selected_text.value.is_empty() {
+				self.last_selected_text_interaction = (line_number, times_clicked + 1, now);
+				// the previous click count was divisible by 1
+				let (left, right) = if times_clicked % 2 == 1 {
+					(0, selected_text.value.len())
+				} else {
+					(get_cursor_left_jump_idx(selected_text.cursor, selected_text.value.as_bytes()), get_cursor_right_jump_idx(selected_text.cursor, selected_text.value.as_bytes()))
+				};
+				// if they're == it's also false, just being careful here
+				if right > left {
+					selected_text.selection = Some(left);
+				}
+				selected_text.cursor = right;
+			}
+		} else {
+			self.last_selected_text_interaction = (0, 0, Duration::ZERO);
+		}
+	}
+	
 	pub fn append_to_history(&mut self, action: WorkbenchAction) {
 		self.undos.push(action);
 		self.redos.clear();
@@ -652,7 +678,7 @@ impl Tab {
 	pub fn refresh(&mut self, sort_algorithm: SortAlgorithm) -> Result<()> {
 		let Some(path) = self.path.as_deref() else { return Err(anyhow!("File path was not present in tab")) };
 
-		if self.unsaved_changes && (since_epoch() - core::mem::replace(&mut self.last_close_attempt, since_epoch())) > crate::DOUBLE_CLICK_INTERVAL {
+		if self.unsaved_changes && (since_epoch() - core::mem::replace(&mut self.last_close_attempt, since_epoch())) > TAB_CLOSE_DOUBLE_CLICK_INTERVAL {
 			return Ok(());
 		}
 

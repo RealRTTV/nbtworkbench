@@ -75,6 +75,48 @@ pub trait Cachelike<Additional: Clone>: PartialEq + Clone {
     fn revert(self, text: &mut Text<Additional, Self>) where Self: Sized;
 }
 
+pub fn get_cursor_left_jump_idx(mut cursor: usize, bytes: &[u8]) -> usize {
+    if cursor > 0 {
+        cursor -= 1;
+        let last_byte = bytes[cursor];
+        let is_last_jump_char_boundary = is_jump_char_boundary(last_byte);
+        while cursor > 0 {
+            let byte = bytes[cursor];
+            if is_utf8_char_boundary(byte) && (!is_last_jump_char_boundary && is_jump_char_boundary(byte) || is_last_jump_char_boundary && byte != last_byte) {
+                // this is to fix "string   |" [CTRL + BACKSPACE] => "strin" instead of "string"
+                cursor += 1;
+                while !is_utf8_char_boundary(bytes[cursor]) {
+                    cursor += 1;
+                }
+                break;
+            }
+            cursor -= 1;
+        }
+    }
+    cursor
+}
+
+pub fn get_cursor_right_jump_idx(mut cursor: usize, bytes: &[u8]) -> usize {
+    if cursor < bytes.len() {
+        cursor += 1;
+        if cursor < bytes.len() {
+            let first_byte = bytes[cursor];
+            let is_first_jump_char_boundary = is_jump_char_boundary(first_byte);
+            while cursor < bytes.len() {
+                let byte = bytes[cursor];
+                if is_utf8_char_boundary(byte) && (!is_first_jump_char_boundary && is_jump_char_boundary(byte) || is_first_jump_char_boundary && byte != first_byte) {
+                    while !is_utf8_char_boundary(bytes[cursor]) {
+                        cursor -= 1;
+                    }
+                    break;
+                }
+                cursor += 1;
+            }
+        }
+    }
+    cursor
+}
+
 #[derive(Clone)]
 pub struct Text<Additional: Clone, Cache: Cachelike<Additional>> {
     pub value: String,
@@ -385,27 +427,7 @@ impl<Additional: Clone, Cache: Cachelike<Additional>> Text<Additional, Cache> {
 
                 let mut new = self.cursor;
                 if flags & flags!(Ctrl) > 0 {
-                    if new > 0 {
-                        new -= 1;
-                        while new > 0 {
-                            if self.value.as_bytes()[new].is_ascii_whitespace() {
-                                new -= 1;
-                            } else {
-                                break;
-                            }
-                        }
-                        let last_byte = self.value.as_bytes()[new];
-                        let last_jump_char_boundary = is_jump_char_boundary(last_byte);
-                        while new > 0 {
-                            let byte = self.value.as_bytes()[new];
-                            if is_utf8_char_boundary(byte) && (!last_jump_char_boundary && is_jump_char_boundary(byte) || last_jump_char_boundary && byte != last_byte) {
-                                // this is to fix "string   |" [CTRL + BACKSPACE] => "strin" instead of "string"
-                                new += 1;
-                                break;
-                            }
-                            new -= 1;
-                        }
-                    }
+                    new = get_cursor_left_jump_idx(self.cursor, self.value.as_bytes());
                 } else {
                     if new > 0 {
                         new -= 1;
@@ -447,27 +469,7 @@ impl<Additional: Clone, Cache: Cachelike<Additional>> Text<Additional, Cache> {
 
                 let mut new = self.cursor;
                 if flags & flags!(Ctrl) > 0 {
-                    if new < self.value.len() {
-                        new += 1;
-                        if new < self.value.len() {
-                            while new < self.value.len() {
-                                if self.value.as_bytes()[new].is_ascii_whitespace() {
-                                    new += 1;
-                                } else {
-                                    break;
-                                }
-                            }
-                            let first_byte = self.value.as_bytes()[new];
-                            let first_jump_char_boundary = is_jump_char_boundary(first_byte);
-                            while new < self.value.len() {
-                                let byte = self.value.as_bytes()[new];
-                                if is_utf8_char_boundary(byte) && (!first_jump_char_boundary && is_jump_char_boundary(byte) || first_jump_char_boundary && byte != first_byte) {
-                                    break;
-                                }
-                                new += 1;
-                            }
-                        }
-                    }
+                    new = get_cursor_right_jump_idx(self.cursor, self.value.as_bytes());
                 } else {
                     if new < self.value.len() {
                         new += 1;

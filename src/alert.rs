@@ -65,7 +65,7 @@ impl Alert {
 		builder.settings(pos + (18, 4), true, ALERT_TEXT_Z);
 		builder.color = self.title_color;
 		let _ = write!(builder, "{}", self.title);
-		builder.color = TextColor::White.to_raw();
+		builder.color = TextColor::Default.to_raw();
 		builder.settings(pos + (18, 20), true, ALERT_TEXT_Z);
 		let _ = write!(builder, "{}", self.message);
 	}

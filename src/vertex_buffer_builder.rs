@@ -72,7 +72,7 @@ impl VertexBufferBuilder {
 			text_coords: (0, 0),
 			dropshadow: false,
 			text_z: BASE_TEXT_Z,
-			color: TextColor::White.to_raw(),
+			color: TextColor::Default.to_raw(),
 			two_over_width: 2.0 / size.width as f32,
 			negative_two_over_height: -2.0 / size.height as f32,
 			owned_tooltip: None,

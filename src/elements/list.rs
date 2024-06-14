@@ -216,13 +216,19 @@ impl NbtList {
 	#[inline]
 	#[must_use]
 	pub fn is_empty(&self) -> bool { self.elements.is_empty() }
+	
+	#[inline]
+	#[must_use]
+	pub fn can_insert(&self, value: &NbtElement) -> bool {
+		value.id() != NbtChunk::ID && (self.element == value.id() || self.is_empty())
+	}
 
 	/// # Errors
 	///
 	/// * `NbtElement::id` of `value` != `self.id()`
 	#[inline]
 	pub fn insert(&mut self, idx: usize, value: NbtElement) -> Result<(), NbtElement> {
-		if self.element == value.id() || self.elements.is_empty() {
+		if self.can_insert(&value) {
 			self.element = value.id();
 			self.increment(value.height(), value.true_height());
 			unsafe {
@@ -325,7 +331,7 @@ impl NbtList {
 			}
 
 			let pos = ctx.pos();
-			if ctx.draw_held_entry_bar(ctx.pos() + (16, 16), builder, |x, y| pos + (16, 8) == (x, y), |id| (id != NbtChunk::ID) && (id == self.element || self.is_empty())) {} else if self.height() == 1 && ctx.draw_held_entry_bar(ctx.pos() + (16, 16), builder, |x, y| pos + (16, 16) == (x, y), |id| (id != NbtChunk::ID) && (id == self.element || self.is_empty()), ) {}
+			if ctx.draw_held_entry_bar(ctx.pos() + (16, 16), builder, |x, y| pos + (16, 8) == (x, y), |x| self.can_insert(x)) {} else if self.height() == 1 && ctx.draw_held_entry_bar(ctx.pos() + (16, 16), builder, |x, y| pos + (16, 16) == (x, y), |x| self.can_insert(x)) {}
 
 			ctx.y_offset += 16;
 		}
@@ -346,7 +352,7 @@ impl NbtList {
 				}
 
 				let pos = ctx.pos();
-				ctx.draw_held_entry_bar(ctx.pos(), builder, |x, y| pos == (x, y), |id| (id != NbtChunk::ID) && (id == self.element || self.is_empty()));
+				ctx.draw_held_entry_bar(ctx.pos(), builder, |x, y| pos == (x, y), |x| self.can_insert(x));
 
 				if remaining_scroll == 0 {
 					builder.draw_texture(
@@ -368,7 +374,7 @@ impl NbtList {
 				);
 
 				let pos = ctx.pos();
-				ctx.draw_held_entry_bar(ctx.pos(), builder, |x, y| pos == (x, y + 8), |id| (id != NbtChunk::ID) && (id == self.element || self.is_empty()));
+				ctx.draw_held_entry_bar(ctx.pos(), builder, |x, y| pos == (x, y + 8), |x| self.can_insert(x));
 			}
 
 			ctx.x_offset -= 16;
@@ -406,7 +412,7 @@ impl NbtList {
 			}
 
 			let pos = ctx.pos();
-			if ctx.draw_held_entry_bar(ctx.pos() + (16, 16), builder, |x, y| pos + (16, 8) == (x, y), |id| (id != NbtChunk::ID) && (id == self.element || self.is_empty())) {} else if self.height() == 1 && ctx.draw_held_entry_bar(ctx.pos() + (16, 16), builder, |x, y| pos + (16, 16) == (x, y), |id| (id != NbtChunk::ID) && (id == self.element || self.is_empty()), ) {}
+			if ctx.draw_held_entry_bar(ctx.pos() + (16, 16), builder, |x, y| pos + (16, 8) == (x, y), |x| self.can_insert(x)) {} else if self.height() == 1 && ctx.draw_held_entry_bar(ctx.pos() + (16, 16), builder, |x, y| pos + (16, 16) == (x, y), |x| self.can_insert(x)) {}
 
 			ctx.y_offset += 16;
 			y_before += 16;
@@ -430,7 +436,7 @@ impl NbtList {
 				}
 
 				let pos = ctx.pos();
-				ctx.draw_held_entry_bar(ctx.pos(), builder, |x, y| pos == (x, y), |id| (id != NbtChunk::ID) && (id == self.element || self.is_empty()));
+				ctx.draw_held_entry_bar(ctx.pos(), builder, |x, y| pos == (x, y), |x| self.can_insert(x));
 
 				if *remaining_scroll == 0 {
 					builder.draw_texture(
@@ -452,7 +458,7 @@ impl NbtList {
 				);
 
 				let pos = ctx.pos();
-				ctx.draw_held_entry_bar(ctx.pos(), builder, |x, y| pos == (x, y + 8), |id| (id != NbtChunk::ID) && (id == self.element || self.is_empty()));
+				ctx.draw_held_entry_bar(ctx.pos(), builder, |x, y| pos == (x, y + 8), |x| self.can_insert(x));
 			}
 
 			let difference = ctx.y_offset - y_before;

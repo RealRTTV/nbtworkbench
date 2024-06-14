@@ -44,8 +44,8 @@ use winit::window::Window;
 use elements::element::NbtElement;
 use vertex_buffer_builder::VertexBufferBuilder;
 
-use crate::assets::{BASE_TEXT_Z, BASE_Z, BOOKMARK_UV, BOOKMARK_Z, END_LINE_NUMBER_SEPARATOR_UV, HEADER_SIZE, HIDDEN_BOOKMARK_UV, HOVERED_WIDGET_UV, INSERTION_UV, INVALID_STRIPE_UV, LINE_NUMBER_SEPARATOR_UV, LINE_NUMBER_Z, SCROLLBAR_BOOKMARK_Z, SELECTED_TOGGLE_OFF_UV, SELECTED_TOGGLE_ON_UV, SORT_COMPOUND_BY_NAME, SORT_COMPOUND_BY_NOTHING, SORT_COMPOUND_BY_TYPE, TEXT_UNDERLINE_UV, TOGGLE_Z, UNSELECTED_TOGGLE_OFF_UV, UNSELECTED_TOGGLE_ON_UV, UNSELECTED_WIDGET_UV};
-use crate::bookmark::{Bookmark, BookmarkSlice};
+use crate::assets::{BASE_TEXT_Z, BASE_Z, BOOKMARK_UV, BOOKMARK_Z, EDITED_LINE_Z, END_LINE_NUMBER_SEPARATOR_UV, HEADER_SIZE, HIDDEN_BOOKMARK_UV, HOVERED_WIDGET_UV, INSERTION_UV, INVALID_STRIPE_UV, LINE_NUMBER_SEPARATOR_UV, LINE_NUMBER_Z, SCROLLBAR_BOOKMARK_Z, SELECTED_TOGGLE_OFF_UV, SELECTED_TOGGLE_ON_UV, SORT_COMPOUND_BY_NAME, SORT_COMPOUND_BY_NOTHING, SORT_COMPOUND_BY_TYPE, TEXT_UNDERLINE_UV, TOGGLE_Z, UNSELECTED_TOGGLE_OFF_UV, UNSELECTED_TOGGLE_ON_UV, UNSELECTED_WIDGET_UV};
+use crate::marked_line::{MarkedLine, MarkedLineSlice};
 use crate::color::TextColor;
 use crate::elements::compound::{CompoundMap};
 use crate::elements::element::{NbtByteArray, NbtIntArray, NbtLongArray};
@@ -56,7 +56,7 @@ use crate::workbench::Workbench;
 mod alert;
 mod assets;
 mod be_decoder;
-mod bookmark;
+mod marked_line;
 #[cfg(not(target_arch = "wasm32"))]
 mod cli;
 mod color;
@@ -185,6 +185,7 @@ extern "C" {
 pub static mut WORKBENCH: UnsafeCell<Workbench> = UnsafeCell::new(unsafe { Workbench::uninit() });
 pub static mut WINDOW_PROPERTIES: UnsafeCell<WindowProperties> = UnsafeCell::new(WindowProperties::Fake);
 pub const DOUBLE_CLICK_INTERVAL: Duration = Duration::from_millis(500);
+pub const TAB_CLOSE_DOUBLE_CLICK_INTERVAL: Duration = Duration::from_millis(2000);
 
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen]
@@ -654,7 +655,7 @@ impl Display for SortAlgorithm {
 	}
 }
 
-pub struct RenderContext {
+pub struct RenderContext<'a> {
 	selecting_key: bool,
 	selected_y: usize,
 	selected_key: Option<Box<str>>,
@@ -662,7 +663,7 @@ pub struct RenderContext {
 	extend_error: bool,
 	invalid_value_error: bool,
 	key_duplicate_error: bool,
-	ghost: Option<(u8, usize, usize)>,
+	ghost: Option<(&'a NbtElement, usize, usize)>,
 	left_margin: usize,
 	mouse_x: usize,
 	mouse_y: usize,
@@ -675,10 +676,10 @@ pub struct RenderContext {
 	freehand: bool
 }
 
-impl RenderContext {
+impl<'a> RenderContext<'a> {
 	#[must_use]
 	#[allow(clippy::type_complexity)] // forbidden is fine to be like that, c'mon
-	pub fn new(selected_y: usize, selected_key: Option<Box<str>>, selected_value: Option<Box<str>>, selecting_key: bool, ghost: Option<(u8, usize, usize)>, left_margin: usize, mouse: (usize, usize), freehand: bool) -> Self {
+	pub fn new(selected_y: usize, selected_key: Option<Box<str>>, selected_value: Option<Box<str>>, selecting_key: bool, ghost: Option<(&'a NbtElement, usize, usize)>, left_margin: usize, mouse: (usize, usize), freehand: bool) -> Self {
 		Self {
 			selecting_key,
 			selected_y,
@@ -811,7 +812,9 @@ impl RenderContext {
 	}
 
 	#[inline]
-	pub fn render_line_numbers(&self, builder: &mut VertexBufferBuilder, mut bookmarks: &BookmarkSlice) {
+	pub fn render_line_numbers(&self, builder: &mut VertexBufferBuilder, mut bookmarks: &MarkedLineSlice, mut edited_lines: &MarkedLineSlice) {
+		const BOOKMARK_START_X: usize = 4;
+		
 		let start = self.line_numbers.first();
 		while let Some((head, rest)) = bookmarks.split_first() {
 			if start.is_some_and(|&start| start > head.true_line_number()) {
@@ -852,9 +855,9 @@ impl RenderContext {
 			if let Some((first, rest)) = bookmarks.split_first() && render_line_number == first.true_line_number() {
 				bookmarks = rest;
 				builder.draw_texture_region_z(
-					(2, y + 2),
+					(BOOKMARK_START_X, y + 2),
 					BOOKMARK_Z,
-					BOOKMARK_UV,
+					first.uv(),
 					(builder.text_coords.0, 12),
 					(16, 16),
 				);
@@ -864,14 +867,38 @@ impl RenderContext {
 				bookmarks = rest;
 				if hidden_bookmarks < 5 {
 					builder.draw_texture_region_z(
-						(2, y + 15),
+						(BOOKMARK_START_X, y + 15),
 						BOOKMARK_Z,
-						HIDDEN_BOOKMARK_UV,
+						first.uv(),
 						(builder.text_coords.0, 2),
 						(16, 16),
 					);
 				}
 				hidden_bookmarks += 1;
+			}
+			if let Some((first, rest)) = edited_lines.split_first() && render_line_number == first.true_line_number() {
+				edited_lines = rest;
+				builder.draw_texture_region_z(
+					(1, y + 2),
+					EDITED_LINE_Z,
+					first.uv(),
+					(2, 12),
+					(16, 16),
+				);
+			}
+			let mut hidden_edited_lines = 0_usize;
+			while let Some((first, rest)) = edited_lines.split_first() && next_line_number.is_none_or(|next_line_number| render_line_number <= first.true_line_number() && first.true_line_number() < next_line_number) {
+				edited_lines = rest;
+				if hidden_edited_lines < 5 {
+					builder.draw_texture_region_z(
+						(1, y + 15),
+						BOOKMARK_Z,
+						first.uv(),
+						(2, 2),
+						(16, 16),
+					);
+				}
+				hidden_edited_lines += 1;
 			}
 
 			let uv = if idx + 1 == self.line_numbers.len() {
@@ -907,7 +934,7 @@ impl RenderContext {
 	}
 
 	#[inline]
-	pub fn render_scrollbar_bookmarks(&self, builder: &mut VertexBufferBuilder, bookmarks: &BookmarkSlice, root: &NbtElement) {
+	pub fn render_scrollbar_bookmarks(&self, builder: &mut VertexBufferBuilder, bookmarks: &MarkedLineSlice, root: &NbtElement) {
 		let height = root.height();
 		let mut hidden_bookmarks_at_y = 0_usize;
 		let mut hidden_bookmark_y = 0;
@@ -951,9 +978,9 @@ impl RenderContext {
 		}
 	}
 
-	pub fn draw_held_entry_bar<F: FnOnce(usize, usize) -> bool, G: FnOnce(u8) -> bool>(&mut self, pos: impl Into<(usize, usize)>, builder: &mut VertexBufferBuilder, f: F, g: G) -> bool {
+	pub fn draw_held_entry_bar<F: FnOnce(usize, usize) -> bool, G: FnOnce(&NbtElement) -> bool>(&mut self, pos: impl Into<(usize, usize)>, builder: &mut VertexBufferBuilder, f: F, g: G) -> bool {
 		let (x_offset, y_offset) = pos.into();
-		if let Some((id, x, y)) = self.ghost && f(x, y) && g(id) {
+		if let Some((element, x, y)) = self.ghost && f(x, y) && g(element) {
 			builder.draw_texture_region_z((self.left_margin - 2, y_offset - 1), BASE_Z, INSERTION_UV, (x_offset + 18 - self.left_margin, 2), (16, 2));
 			true
 		} else {
@@ -1318,15 +1345,21 @@ impl StrExt for str {
 	fn needs_escape(&self) -> bool { self.as_bytes().first().is_some_and(u8::is_ascii_digit) || !self.bytes().all(valid_unescaped_char) }
 
 	fn width(&self) -> usize {
-		self.chars()
-			.map(|x| {
-				if (x as u32) < 56832 {
-					VertexBufferBuilder::CHAR_WIDTH[x as usize] as usize
-				} else {
-					VertexBufferBuilder::CHAR_WIDTH[56829] as usize
-				}
-			})
-			.sum()
+		self.chars().map(CharExt::width).sum()
+	}
+}
+
+pub trait CharExt {
+	fn width(self) -> usize;
+}
+
+impl CharExt for char {
+	fn width(self) -> usize {
+		if (self as u32) < 56832 {
+			VertexBufferBuilder::CHAR_WIDTH[self as usize] as usize
+		} else {
+			VertexBufferBuilder::CHAR_WIDTH[56829] as usize
+		}
 	}
 }
 

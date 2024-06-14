@@ -8,15 +8,16 @@ use wasm_bindgen::JsValue;
 use wgpu::util::{BufferInitDescriptor, DeviceExt};
 #[allow(clippy::wildcard_imports)]
 use wgpu::*;
+use winit::application::ApplicationHandler;
 use winit::dpi::{PhysicalPosition, PhysicalSize};
 #[allow(clippy::wildcard_imports)]
 use winit::event::*;
-use winit::event_loop::EventLoop;
+use winit::event_loop::{ActiveEventLoop, EventLoop};
 #[cfg(target_os = "windows")]
-use winit::platform::windows::WindowBuilderExtWindows;
+use winit::platform::windows::WindowAttributesExtWindows;
 #[cfg(target_arch = "wasm32")]
 use winit::platform::web::WindowExtWebSys;
-use winit::window::{Icon, Window, WindowBuilder};
+use winit::window::{Icon, Window, WindowAttributes, WindowId};
 use zune_inflate::DeflateOptions;
 
 use crate::alert::Alert;
@@ -32,8 +33,57 @@ pub const MIN_WINDOW_HEIGHT: usize = HEADER_SIZE + 16;
 pub const MIN_WINDOW_WIDTH: usize = 720;
 
 pub async fn run() -> ! {
-	let event_loop = EventLoop::new().expect("Event loop was unconstructable");
-	let builder = WindowBuilder::new()
+	struct Handler<'window> {
+		state: State<'window>,
+		window_properties: &'static mut WindowProperties,
+		workbench: &'static mut Workbench,
+		window: Rc<Window>,
+	}
+
+	impl<'window> ApplicationHandler<()> for Handler<'window> {
+		fn resumed(&mut self, _: &ActiveEventLoop) {
+
+		}
+		fn window_event(&mut self, _: &ActiveEventLoop, window_id: WindowId, event: WindowEvent) {
+			if self.window.id() != window_id {
+				return;
+			}
+
+			#[cfg(target_arch = "wasm32")]
+			crate::on_input();
+			if !State::input(&event, self.workbench, self.window_properties) {
+				match event {
+					WindowEvent::RedrawRequested => {
+						match self.state.render(self.workbench, self.window.as_ref()) {
+							Ok(()) => {}
+							Err(SurfaceError::Lost | SurfaceError::Outdated) => self.state.surface.configure(&self.state.device, &self.state.config),
+							Err(SurfaceError::OutOfMemory) => std::process::exit(1),
+							Err(SurfaceError::Timeout) => { error!("Frame took too long to process") },
+						}
+					}
+					WindowEvent::CloseRequested => if self.workbench.close() == 0 { std::process::exit(0) },
+					WindowEvent::Resized(new_size) => self.state.resize(self.workbench, new_size),
+					_ => {}
+				}
+			}
+		}
+
+		fn about_to_wait(&mut self, _: &ActiveEventLoop) {
+			#[cfg(target_arch = "wasm32")] {
+				let old_size = self.window.inner_size();
+				let scaling_factor = web_sys::window().map_or(1.0, |window| window.device_pixel_ratio());
+				let new_size: PhysicalSize<u32> = web_sys::window().map(|window| PhysicalSize::new((window.inner_width().ok().as_ref().and_then(JsValue::as_f64).expect("Width must exist") * scaling_factor).ceil() as u32, (window.inner_height().ok().as_ref().and_then(JsValue::as_f64).expect("Height must exist") * scaling_factor).ceil() as u32)).expect("Window has dimension properties");
+				if new_size != old_size {
+					let _ = self.window.request_inner_size(new_size);
+					self.state.resize(self.workbench, new_size);
+				}
+			}
+			self.window.request_redraw();
+		}
+	}
+
+	let event_loop = EventLoop::builder().build().expect("Event loop was unconstructable");
+	let builder = WindowAttributes::default()
 		.with_title("NBT Workbench")
 		.with_inner_size(PhysicalSize::new(WINDOW_WIDTH as u32, WINDOW_HEIGHT as u32))
 		.with_min_inner_size(PhysicalSize::new(
@@ -48,13 +98,13 @@ pub async fn run() -> ! {
 			)
 			.expect("valid format"),
 		));
-	let window = Rc::new('a: {
+	let window = Rc::new(event_loop.create_window('a: {
 		#[cfg(target_os = "windows")] {
 			break 'a builder.with_drag_and_drop(true)
 		}
 		#[cfg(not(target_os = "windows"))]
 		break 'a builder
-	}.build(&event_loop).expect("Window was constructable"));
+	}).expect("Unable to construct window"));
 	#[cfg(target_arch = "wasm32")]
 	let window_size = {
 		web_sys::window().and_then(|window| {
@@ -73,45 +123,13 @@ pub async fn run() -> ! {
 	};
 	#[cfg(not(target_arch = "wasm32"))]
 	let window_size = PhysicalSize::new(WINDOW_WIDTH as u32, WINDOW_HEIGHT as u32);
-	let mut state = State::new(&window, window_size).await;
+	let state = State::new(&window, window_size).await;
 	unsafe { std::ptr::write(std::ptr::addr_of_mut!(WINDOW_PROPERTIES), UnsafeCell::new(WindowProperties::new(Rc::clone(&window)))); }
 	let window_properties = unsafe { WINDOW_PROPERTIES.get_mut() };
 	unsafe { std::ptr::write(std::ptr::addr_of_mut!(WORKBENCH), UnsafeCell::new(Workbench::new(window_properties))); }
 	let workbench = unsafe { WORKBENCH.get_mut() };
-	event_loop.run(|event, _| match event {
-		Event::WindowEvent { event, window_id } if window_id == window.id() => {
-			#[cfg(target_arch = "wasm32")]
-			crate::on_input();
-			if !State::input(&event, workbench, window_properties) {
-				match event {
-					WindowEvent::RedrawRequested => {
-						match state.render(workbench, window.as_ref()) {
-							Ok(()) => {}
-							Err(SurfaceError::Lost | SurfaceError::Outdated) => state.surface.configure(&state.device, &state.config),
-							Err(SurfaceError::OutOfMemory) => std::process::exit(1),
-							Err(SurfaceError::Timeout) => { error!("Frame took too long to process") },
-						}
-					}
-					WindowEvent::CloseRequested => if workbench.close() == 0 { std::process::exit(0) },
-					WindowEvent::Resized(new_size) => state.resize(workbench, new_size),
-					_ => {}
-				}
-			}
-		}
-		Event::AboutToWait => {
-			#[cfg(target_arch = "wasm32")] {
-				let old_size = window.inner_size();
-				let scaling_factor = web_sys::window().map_or(1.0, |window| window.device_pixel_ratio());
-				let new_size: PhysicalSize<u32> = web_sys::window().map(|window| PhysicalSize::new((window.inner_width().ok().as_ref().and_then(JsValue::as_f64).expect("Width must exist") * scaling_factor).ceil() as u32, (window.inner_height().ok().as_ref().and_then(JsValue::as_f64).expect("Height must exist") * scaling_factor).ceil() as u32)).expect("Window has dimension properties");
-				if new_size != old_size {
-					let _ = window.request_inner_size(new_size);
-					state.resize(workbench, new_size);
-				}
-			}
-			window.request_redraw();
-		}
-		_ => {}
-	}).expect("Event loop failed");
+	let mut handler = Handler { state, window_properties, workbench, window: Rc::clone(&window) };
+	event_loop.run_app(&mut handler).expect("Event loop failed");
 	loop {}
 }
 
@@ -155,7 +173,10 @@ impl<'window> State<'window> {
 				&DeviceDescriptor {
 					required_features: adapter.features(),
 					required_limits: if cfg!(target_arch = "wasm32") {
-						Limits::downlevel_webgl2_defaults()
+						Limits {
+							max_texture_dimension_2d: 4096,
+							..Limits::downlevel_webgl2_defaults()
+						}
 					} else {
 						Limits::default()
 					},
@@ -273,6 +294,7 @@ impl<'window> State<'window> {
 			vertex: VertexState {
 				module: &shader,
 				entry_point: "vertex",
+				compilation_options: Default::default(),
 				buffers: &[VertexBufferLayout {
 					array_stride: 20,
 					step_mode: VertexStepMode::Vertex,
@@ -282,6 +304,7 @@ impl<'window> State<'window> {
 			fragment: Some(FragmentState {
 				module: &shader,
 				entry_point: "fragment",
+				compilation_options: Default::default(),
 				targets: &[Some(ColorTargetState {
 					format: config.format,
 					blend: Some(BlendState::ALPHA_BLENDING),
@@ -376,6 +399,7 @@ impl<'window> State<'window> {
 			vertex: VertexState {
 				module: &text_shader,
 				entry_point: "vertex",
+				compilation_options: Default::default(),
 				buffers: &[VertexBufferLayout {
 					array_stride: 16,
 					step_mode: VertexStepMode::Vertex,
@@ -385,6 +409,7 @@ impl<'window> State<'window> {
 			fragment: Some(FragmentState {
 				module: &text_shader,
 				entry_point: "fragment",
+				compilation_options: Default::default(),
 				targets: &[Some(ColorTargetState {
 					format: config.format,
 					blend: Some(BlendState::ALPHA_BLENDING),
@@ -452,6 +477,7 @@ impl<'window> State<'window> {
 			vertex: VertexState {
 				module: &tooltip_effect_shader,
 				entry_point: "vertex",
+				compilation_options: Default::default(),
 				buffers: &[VertexBufferLayout {
 					array_stride: 8,
 					step_mode: VertexStepMode::Vertex,
@@ -461,6 +487,7 @@ impl<'window> State<'window> {
 			fragment: Some(FragmentState {
 				module: &tooltip_effect_shader,
 				entry_point: "fragment",
+				compilation_options: Default::default(),
 				targets: &[Some(ColorTargetState {
 					format: config.format,
 					blend: Some(BlendState::REPLACE),
@@ -499,6 +526,7 @@ impl<'window> State<'window> {
 			vertex: VertexState {
 				module: &copy_shader,
 				entry_point: "vertex",
+				compilation_options: Default::default(),
 				buffers: &[VertexBufferLayout {
 					array_stride: 8,
 					step_mode: VertexStepMode::Vertex,
@@ -529,6 +557,7 @@ impl<'window> State<'window> {
 			fragment: Some(FragmentState {
 				module: &copy_shader,
 				entry_point: "fragment",
+				compilation_options: Default::default(),
 				targets: &[Some(ColorTargetState {
 					format: config.format,
 					blend: Some(BlendState::ALPHA_BLENDING),
@@ -627,11 +656,12 @@ impl<'window> State<'window> {
 			WindowEvent::ThemeChanged(_) => false,
 			WindowEvent::Ime(_) => false,
 			WindowEvent::Occluded(_) => false,
-			WindowEvent::TouchpadMagnify { .. } => false,
-			WindowEvent::SmartMagnify { .. } => false,
-			WindowEvent::TouchpadRotate { .. } => false,
 			WindowEvent::ActivationTokenDone { .. } => false,
 			WindowEvent::RedrawRequested => false,
+			WindowEvent::PinchGesture { .. } => false,
+			WindowEvent::PanGesture { .. } => false,
+			WindowEvent::DoubleTapGesture { .. } => false,
+			WindowEvent::RotationGesture { .. } => false,
 		}
 	}
 

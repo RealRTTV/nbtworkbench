@@ -1247,6 +1247,30 @@ impl NbtElement {
 			}
 		}
 	}
+	
+	#[must_use]
+	pub fn can_insert(&self, value: &NbtElement) -> bool {
+		unsafe {
+			match self.id() {
+				NbtByte::ID => false,
+				NbtShort::ID => false,
+				NbtInt::ID => false,
+				NbtLong::ID => false,
+				NbtFloat::ID => false,
+				NbtDouble::ID => false,
+				NbtByteArray::ID => self.byte_array.can_insert(value),
+				NbtString::ID => false,
+				NbtList::ID => self.list.can_insert(value),
+				NbtCompound::ID => self.compound.can_insert(value),
+				NbtIntArray::ID => self.int_array.can_insert(value),
+				NbtLongArray::ID => self.long_array.can_insert(value),
+				NbtChunk::ID => self.chunk.can_insert(value),
+				NbtRegion::ID => self.region.can_insert(value),
+				NbtNull::ID => false,
+				_ => core::hint::unreachable_unchecked(),
+			}
+		}
+	}
 }
 
 impl Display for NbtElement {
@@ -1425,7 +1449,7 @@ impl Drop for NbtElement {
 						}
 					}
 				}
-				NbtNull::ID => {}
+				NbtByte::ID | NbtShort::ID | NbtInt::ID | NbtLong::ID | NbtFloat::ID | NbtDouble::ID | NbtNull::ID => {}
 				_ => core::hint::unreachable_unchecked()
 			}
 		}

@@ -418,7 +418,7 @@ impl NbtRegion {
 			}
 
 			let pos = ctx.pos();
-			if ctx.draw_held_entry_bar(ctx.pos() + (16, 16), builder, |x, y| pos == (x - 16, y - 8), |id| id == NbtChunk::ID) {} else if self.height() == 1 && ctx.draw_held_entry_bar(ctx.pos() + (16, 16), builder, |x, y| pos == (x - 16, y - 16), |id| id == NbtChunk::ID) {}
+			if ctx.draw_held_entry_bar(ctx.pos() + (16, 16), builder, |x, y| pos == (x - 16, y - 8), |x| self.can_insert(x)) {} else if self.height() == 1 && ctx.draw_held_entry_bar(ctx.pos() + (16, 16), builder, |x, y| pos == (x - 16, y - 16), |x| self.can_insert(x)) {}
 
 			ctx.y_offset += 16;
 		}
@@ -482,7 +482,7 @@ impl NbtRegion {
 				}
 
 				let pos = ctx.pos();
-				ctx.draw_held_entry_bar(ctx.pos(), builder, |x, y| pos == (x, y), |id| id == NbtChunk::ID);
+				ctx.draw_held_entry_bar(ctx.pos(), builder, |x, y| pos == (x, y), |x| self.can_insert(x));
 
 				if remaining_scroll == 0 {
 					builder.draw_texture(
@@ -508,7 +508,7 @@ impl NbtRegion {
 				);
 
 				let pos = ctx.pos();
-				ctx.draw_held_entry_bar(ctx.pos(), builder, |x, y| pos == (x, y + 8), |id| id == NbtChunk::ID);
+				ctx.draw_held_entry_bar(ctx.pos(), builder, |x, y| pos == (x, y + 8), |x| self.can_insert(x));
 			}
 		}
 	}
@@ -694,6 +694,12 @@ impl NbtRegion {
 	#[inline]
 	#[must_use]
 	pub const fn max_depth(&self) -> usize { self.max_depth as usize }
+	
+	#[inline]
+	#[must_use]
+	pub fn can_insert(&self, value: &NbtElement) -> bool {
+		value.id() == NbtChunk::ID
+	}
 }
 
 impl NbtRegion {

@@ -2,29 +2,29 @@ use std::cmp::Ordering;
 use std::collections::Bound;
 use std::convert::identity;
 use std::ops::{Deref, DerefMut, Index, IndexMut, RangeBounds};
-use crate::assets::{BOOKMARK_UV, HIDDEN_BOOKMARK_UV};
+use crate::assets::{BOOKMARK_UV, EDITED_LINE_UV, HIDDEN_BOOKMARK_UV};
 use crate::vertex_buffer_builder::Vec2u;
 
 macro_rules! slice {
     ($($t:tt)*) => {
-        unsafe { core::mem::transmute::<&[Bookmark], &BookmarkSlice>(&$($t)*) }
+        unsafe { core::mem::transmute::<&[MarkedLine], &MarkedLineSlice>(&$($t)*) }
     };
 }
 
 macro_rules! slice_mut {
     ($($t:tt)*) => {
-        unsafe { core::mem::transmute::<&mut [Bookmark], &mut BookmarkSlice>(&mut $($t)*) }
+        unsafe { core::mem::transmute::<&mut [MarkedLine], &mut MarkedLineSlice>(&mut $($t)*) }
     };
 }
 
 #[derive(Copy, Clone, Debug)]
-pub struct Bookmark {
+pub struct MarkedLine {
     true_line_number: usize,
     line_number: usize,
     uv: Vec2u,
 }
 
-impl Bookmark {
+impl MarkedLine {
     #[inline]
     pub const fn new(true_line_number: usize, line_number: usize) -> Self {
         Self {
@@ -69,6 +69,15 @@ impl Bookmark {
             uv: BOOKMARK_UV,
         }
     }
+    
+    #[inline]
+    pub const fn edit(self, line_number: usize) -> Self {
+        Self {
+            true_line_number: self.true_line_number,
+            line_number,
+            uv: EDITED_LINE_UV,
+        }
+    }
 
     #[inline]
     pub const fn offset(self, offset: usize, true_offset: usize) -> Self {
@@ -80,24 +89,24 @@ impl Bookmark {
     }
 }
 
-impl PartialEq for Bookmark {
+impl PartialEq for MarkedLine {
     fn eq(&self, other: &Self) -> bool { self.true_line_number == other.true_line_number }
 }
 
-impl Eq for Bookmark {}
+impl Eq for MarkedLine {}
 
-impl PartialOrd<Self> for Bookmark {
+impl PartialOrd<Self> for MarkedLine {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> { Some(self.cmp(other)) }
 }
-impl Ord for Bookmark {
+impl Ord for MarkedLine {
     fn cmp(&self, other: &Self) -> Ordering { self.true_line_number.cmp(&other.true_line_number) }
 }
 
-pub struct Bookmarks {
-    inner: Vec<Bookmark>,
+pub struct MarkedLines {
+    inner: Vec<MarkedLine>,
 }
 
-impl Bookmarks {
+impl MarkedLines {
     #[inline]
     pub const fn new() -> Self {
         Self {
@@ -106,11 +115,22 @@ impl Bookmarks {
     }
 
     #[inline]
-    pub fn toggle(&mut self, bookmark: Bookmark) -> Result<(), Bookmark> {
-        match self.inner.binary_search(&bookmark) {
+    pub fn add(&mut self, marked_line: MarkedLine) -> Result<(), MarkedLine> {
+        match self.inner.binary_search(&marked_line) {
+            Ok(_) => Err(marked_line),
+            Err(idx) => {
+                self.inner.insert(idx, marked_line);
+                Ok(())
+            }
+        }
+    }
+
+    #[inline]
+    pub fn toggle(&mut self, marked_line: MarkedLine) -> Result<(), MarkedLine> {
+        match self.inner.binary_search(&marked_line) {
             Ok(idx) => Err(self.inner.remove(idx)),
             Err(idx) => {
-                self.inner.insert(idx, bookmark);
+                self.inner.insert(idx, marked_line);
                 Ok(())
             }
         }
@@ -124,20 +144,20 @@ impl Bookmarks {
     /// # Safety
     /// `inner` must be sorted least to greatest, i.e.; it is up to the caller to assure `inner.is_sorted()`
     #[inline]
-    pub unsafe fn from_raw(inner: Vec<Bookmark>) -> Self {
+    pub unsafe fn from_raw(inner: Vec<MarkedLine>) -> Self {
         Self {
             inner
         }
     }
 
     #[inline]
-    pub fn into_raw(self) -> Box<[Bookmark]> {
+    pub fn into_raw(self) -> Box<[MarkedLine]> {
         self.inner.into_boxed_slice()
     }
     
     #[inline]
-    pub fn remove<R: RangeBounds<usize>>(&mut self, range: R) -> Vec<Bookmark> {
-        match (range.start_bound().map(|&x| Bookmark::new(x, 0)), range.end_bound().map(|&x| Bookmark::new(x, 0))) {
+    pub fn remove<R: RangeBounds<usize>>(&mut self, range: R) -> Vec<MarkedLine> {
+        match (range.start_bound().map(|&x| MarkedLine::new(x, 0)), range.end_bound().map(|&x| MarkedLine::new(x, 0))) {
             (Bound::Unbounded, Bound::Unbounded) => self.inner.drain(..),
             (Bound::Unbounded, Bound::Included(ref end)) => self.inner.drain(..=self.binary_search(end).unwrap_or_else(identity)),
             (Bound::Unbounded, Bound::Excluded(ref end)) => self.inner.drain(..self.binary_search(end).unwrap_or_else(identity)),
@@ -152,27 +172,27 @@ impl Bookmarks {
 }
 
 #[repr(transparent)]
-pub struct BookmarkSlice([Bookmark]);
+pub struct MarkedLineSlice([MarkedLine]);
 
-impl BookmarkSlice {
+impl MarkedLineSlice {
     #[inline]
     pub fn increment(&mut self, value: usize, true_value: usize) {
-        for bookmark in &mut self.0 {
-            bookmark.line_number = bookmark.line_number.wrapping_add(value);
-            bookmark.true_line_number = bookmark.true_line_number.wrapping_add(true_value);
+        for marked_line in &mut self.0 {
+            marked_line.line_number = marked_line.line_number.wrapping_add(value);
+            marked_line.true_line_number = marked_line.true_line_number.wrapping_add(true_value);
         }
     }
 
     #[inline]
     pub fn decrement(&mut self, value: usize, true_value: usize) {
-        for bookmark in &mut self.0 {
-            bookmark.line_number -= value;
-            bookmark.true_line_number -= true_value;
+        for marked_line in &mut self.0 {
+            marked_line.line_number -= value;
+            marked_line.true_line_number -= true_value;
         }
     }
 
     #[inline]
-    pub fn split_first(&self) -> Option<(Bookmark, &BookmarkSlice)> {
+    pub fn split_first(&self) -> Option<(MarkedLine, &MarkedLineSlice)> {
         if let [head, rest @ ..] = &self.0 {
             Some((*head, slice!(rest)))
         } else {
@@ -191,38 +211,38 @@ impl BookmarkSlice {
     }
 }
 
-impl Deref for Bookmarks {
-    type Target = BookmarkSlice;
+impl Deref for MarkedLines {
+    type Target = MarkedLineSlice;
 
     fn deref(&self) -> &Self::Target {
         unsafe { core::mem::transmute(self.inner.as_slice()) }
     }
 }
 
-impl DerefMut for Bookmarks {
+impl DerefMut for MarkedLines {
     fn deref_mut(&mut self) -> &mut Self::Target {
         unsafe { core::mem::transmute(self.inner.as_mut_slice()) }
     }
 }
 
-impl Deref for BookmarkSlice {
-    type Target = [Bookmark];
+impl Deref for MarkedLineSlice {
+    type Target = [MarkedLine];
 
     fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
-impl DerefMut for BookmarkSlice {
+impl DerefMut for MarkedLineSlice {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
 }
 
-pub struct Iter<'a>(&'a [Bookmark]);
+pub struct Iter<'a>(&'a [MarkedLine]);
 
 impl<'a> Iterator for Iter<'a> {
-    type Item = Bookmark;
+    type Item = MarkedLine;
 
     fn next(&mut self) -> Option<Self::Item> {
         if let Some((&item, rest)) = self.0.split_first() {
@@ -234,10 +254,10 @@ impl<'a> Iterator for Iter<'a> {
     }
 }
 
-pub struct IterMut<'a>(&'a mut [Bookmark]);
+pub struct IterMut<'a>(&'a mut [MarkedLine]);
 
 impl<'a> Iterator for IterMut<'a> {
-    type Item = &'a mut Bookmark;
+    type Item = &'a mut MarkedLine;
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.0.is_empty() {
@@ -253,11 +273,11 @@ impl<'a> Iterator for IterMut<'a> {
     }
 }
 
-impl<R: RangeBounds<usize>> Index<R> for BookmarkSlice {
-    type Output = BookmarkSlice;
+impl<R: RangeBounds<usize>> Index<R> for MarkedLineSlice {
+    type Output = MarkedLineSlice;
 
     fn index(&self, index: R) -> &Self::Output {
-        match (index.start_bound().map(|&x| Bookmark::new(x, 0)), index.end_bound().map(|&x| Bookmark::new(x, 0))) {
+        match (index.start_bound().map(|&x| MarkedLine::new(x, 0)), index.end_bound().map(|&x| MarkedLine::new(x, 0))) {
             (Bound::Unbounded, Bound::Unbounded) => self,
             (Bound::Unbounded, Bound::Included(ref end)) => { let end = self.binary_search(end).unwrap_or_else(identity); if end >= self.len() { slice!([]) } else { slice!(self.0[..=end]) } },
             (Bound::Unbounded, Bound::Excluded(ref end)) => { let end = self.binary_search(end).unwrap_or_else(identity); slice!(self.0[..end]) },
@@ -271,9 +291,9 @@ impl<R: RangeBounds<usize>> Index<R> for BookmarkSlice {
     }
 }
 
-impl<R: RangeBounds<usize>> IndexMut<R> for BookmarkSlice {
+impl<R: RangeBounds<usize>> IndexMut<R> for MarkedLineSlice {
     fn index_mut(&mut self, index: R) -> &mut Self::Output {
-        match (index.start_bound().map(|&x| Bookmark::new(x, 0)), index.end_bound().map(|&x| Bookmark::new(x, 0))) {
+        match (index.start_bound().map(|&x| MarkedLine::new(x, 0)), index.end_bound().map(|&x| MarkedLine::new(x, 0))) {
             (Bound::Unbounded, Bound::Unbounded) => self,
             (Bound::Unbounded, Bound::Included(ref end)) => { let end = self.binary_search(end).unwrap_or_else(identity); if end >= self.len() { slice_mut!([]) } else { slice_mut!(self.0[..=end]) } },
             (Bound::Unbounded, Bound::Excluded(ref end)) => { let end = self.binary_search(end).unwrap_or_else(identity); slice_mut!(self.0[..end]) },

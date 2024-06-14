@@ -3,7 +3,7 @@ use std::ops::{Deref, DerefMut};
 
 use winit::keyboard::KeyCode;
 
-use crate::{flags, OptionExt, StrExt};
+use crate::{CharExt, flags, OptionExt, StrExt};
 use crate::assets::{BASE_TEXT_Z, HEADER_SIZE, SELECTED_TEXT_SELECTION_Z, SELECTED_TEXT_Z, SELECTION_UV};
 use crate::color::TextColor;
 use crate::selected_text::SelectedTextKeyResult::{Down, ForceClose, ForceOpen, Keyfix, ShiftDown, ShiftUp, Up, Valuefix};
@@ -94,7 +94,7 @@ impl SelectedText {
 						((format!("{}{v}", if chunk { ", " } else { ": " }), TextColor::TreeKey), None)
 					}
 				} else {
-					((String::new(), TextColor::White), None)
+					((String::new(), TextColor::Default), None)
 				};
 
 				if mouse_x <= target_x {
@@ -104,7 +104,7 @@ impl SelectedText {
 							indices: indices.into_boxed_slice(),
 							value_color: key_color,
 							keyfix: None,
-							prefix: (String::new(), TextColor::White),
+							prefix: (String::new(), TextColor::Default),
 							suffix,
 							valuefix,
 						})),
@@ -127,7 +127,7 @@ impl SelectedText {
 							indices: indices.into_boxed_slice(),
 							value_color: key_color,
 							keyfix: None,
-							prefix: (String::new(), TextColor::White),
+							prefix: (String::new(), TextColor::Default),
 							suffix,
 							valuefix,
 						})),
@@ -150,7 +150,7 @@ impl SelectedText {
 							indices: indices.into_boxed_slice(),
 							value_color: key_color,
 							keyfix: None,
-							prefix: (String::new(), TextColor::White),
+							prefix: (String::new(), TextColor::Default),
 							suffix,
 							valuefix,
 						})),
@@ -176,7 +176,7 @@ impl SelectedText {
 						(None, (format!("{k}{}", if chunk { ", " } else { ": " }), TextColor::TreeKey))
 					}
 				} else {
-					(None, (String::new(), TextColor::White))
+					(None, (String::new(), TextColor::Default))
 				};
 
 				if mouse_x <= value_x {
@@ -186,7 +186,7 @@ impl SelectedText {
 						value_color: *value_color,
 						keyfix,
 						prefix,
-						suffix: (String::new(), TextColor::White),
+						suffix: (String::new(), TextColor::Default),
 						valuefix: None,
 					})),
 					);
@@ -211,7 +211,7 @@ impl SelectedText {
 						value_color: *value_color,
 						keyfix,
 						prefix,
-						suffix: (String::new(), TextColor::White),
+						suffix: (String::new(), TextColor::Default),
 						valuefix: None,
 					})),
 					);
@@ -234,7 +234,7 @@ impl SelectedText {
 							value_color: *value_color,
 							keyfix,
 							prefix,
-							suffix: (String::new(), TextColor::White),
+							suffix: (String::new(), TextColor::Default),
 							valuefix: None,
 						})),
 						);
@@ -256,8 +256,8 @@ impl SelectedText {
 				indices: indices.into_boxed_slice(),
 				value_color: TextColor::TreeKey,
 				keyfix: key.map(|(x, color, _)| (x.into_string(), color)),
-				prefix: (String::new(), TextColor::White),
-				suffix: (String::new(), TextColor::White),
+				prefix: (String::new(), TextColor::Default),
+				suffix: (String::new(), TextColor::Default),
 				valuefix: value.map(|(x, color, _)| (x.into_string(), color)),
 			})),
 			)
@@ -335,4 +335,17 @@ impl SelectedText {
 			let _ = write!(builder, "{valuefix}");
 		}
 	}
+}
+
+#[inline]
+#[must_use]
+pub fn get_cursor_idx(str: &str, mut x: isize) -> usize {
+	for (i, char) in str.chars().enumerate() {
+		let width = char.width() as isize;
+		if x <= width / 2 {
+			return i
+		}
+		x -= width;
+	}
+	str.len()
 }

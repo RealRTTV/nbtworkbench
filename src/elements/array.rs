@@ -251,7 +251,7 @@ macro_rules! array {
 					}
 
 					let pos = ctx.pos();
-					if ctx.draw_held_entry_bar(ctx.pos() + (16, 16), builder, |x, y| pos == (x - 16, y - 8), |id| id == $id) {} else if self.height() == 1 && ctx.draw_held_entry_bar(ctx.pos() + (16, 16), builder, |x, y| pos == (x - 16, y - 16), |id| id == $id) {}
+					if ctx.draw_held_entry_bar(ctx.pos() + (16, 16), builder, |x, y| pos == (x - 16, y - 8), |x| self.can_insert(x)) {} else if self.height() == 1 && ctx.draw_held_entry_bar(ctx.pos() + (16, 16), builder, |x, y| pos == (x - 16, y - 16), |x| self.can_insert(x)) {}
 
 					ctx.y_offset += 16;
 				}
@@ -271,7 +271,7 @@ macro_rules! array {
 						}
 
 						let pos = ctx.pos();
-						ctx.draw_held_entry_bar(ctx.pos(), builder, |x, y| pos == (x, y), |id| id == $id);
+						ctx.draw_held_entry_bar(ctx.pos(), builder, |x, y| pos == (x, y), |x| self.can_insert(x));
 
 						builder.draw_texture(
 							ctx.pos() - (16, 0),
@@ -299,7 +299,7 @@ macro_rules! array {
 						ctx.y_offset += 16;
 
 						let pos = ctx.pos();
-						ctx.draw_held_entry_bar(ctx.pos(), builder, |x, y| pos == (x, y + 8), |id| id == $id);
+						ctx.draw_held_entry_bar(ctx.pos(), builder, |x, y| pos == (x, y + 8), |x| self.can_insert(x));
 					}
 
 					ctx.x_offset -= 16;
@@ -405,6 +405,12 @@ macro_rules! array {
 
 			#[inline]
 			pub fn render_element_icon(pos: impl Into<(usize, usize)>, builder: &mut VertexBufferBuilder) { builder.draw_texture(pos, $element_uv, (16, 16)); }
+			
+			#[inline]
+			#[must_use]
+            pub fn can_insert(&self, value: &NbtElement) -> bool {
+				value.id() == $id
+			}
 		}
 
 		impl Display for $name {

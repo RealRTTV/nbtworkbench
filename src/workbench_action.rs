@@ -9,7 +9,7 @@ use crate::{encompasses, encompasses_or_equal, FileUpdateSubscription};
 use crate::{panic_unchecked, Position, sum_indices};
 use crate::{Navigate, OptionExt};
 use crate::elements::compound::{CompoundMap, Entry};
-use crate::bookmark::{Bookmark, Bookmarks};
+use crate::marked_line::{MarkedLine, MarkedLines};
 
 pub enum WorkbenchAction {
 	Remove {
@@ -44,7 +44,7 @@ pub enum WorkbenchAction {
 
 impl WorkbenchAction {
 	#[cfg_attr(debug_assertions, inline(never))]
-	pub fn undo(self, root: &mut NbtElement, bookmarks: &mut Bookmarks, subscription: &mut Option<FileUpdateSubscription>, path: &mut Option<PathBuf>, name: &mut Box<str>) -> Self {
+	pub fn undo(self, root: &mut NbtElement, bookmarks: &mut MarkedLines, subscription: &mut Option<FileUpdateSubscription>, path: &mut Option<PathBuf>, name: &mut Box<str>) -> Self {
 		unsafe {
 			self.undo0(root, bookmarks, subscription, path, name)
 				.panic_unchecked("Failed to undo action")
@@ -58,7 +58,7 @@ impl WorkbenchAction {
 		clippy::too_many_lines,
 		clippy::cognitive_complexity
 	)]
-	unsafe fn undo0(self, root: &mut NbtElement, bookmarks: &mut Bookmarks, subscription: &mut Option<FileUpdateSubscription>, path: &mut Option<PathBuf>, name: &mut Box<str>) -> Option<Self> {
+	unsafe fn undo0(self, root: &mut NbtElement, bookmarks: &mut MarkedLines, subscription: &mut Option<FileUpdateSubscription>, path: &mut Option<PathBuf>, name: &mut Box<str>) -> Option<Self> {
 		Some(match self {
 			Self::Remove {
 				element: (key, value),
@@ -361,7 +361,7 @@ impl WorkbenchAction {
 					let mut current_line_number = true_line_number + 1;
 					entries.iter().map(|entry| { let new_line_number = current_line_number; current_line_number += entry.value.true_height(); new_line_number }).collect::<Vec<_>>()
 				};
-				let mut new_bookmarks = Box::<[Bookmark]>::new_uninit_slice(bookmarks[true_line_number..true_line_number + true_height].len());
+				let mut new_bookmarks = Box::<[MarkedLine]>::new_uninit_slice(bookmarks[true_line_number..true_line_number + true_height].len());
 				let mut new_bookmarks_len = 0;
 				let mut previous_entries = core::mem::transmute::<_, Box<[MaybeUninit<Entry>]>>(core::mem::take(entries).into_boxed_slice());
 				let mut new_entries = Box::<[Entry]>::new_uninit_slice(previous_entries.len());
@@ -389,7 +389,7 @@ impl WorkbenchAction {
 					current_line_number += height;
 				}
 				let bookmark_slice = &mut bookmarks[true_line_number..true_line_number + true_height];
-				unsafe { core::ptr::copy_nonoverlapping(new_bookmarks.as_ptr().cast::<Bookmark>(), bookmark_slice.as_mut_ptr(), bookmark_slice.len()); }
+				unsafe { core::ptr::copy_nonoverlapping(new_bookmarks.as_ptr().cast::<MarkedLine>(), bookmark_slice.as_mut_ptr(), bookmark_slice.len()); }
 				*entries = new_entries.assume_init().into_vec();
 				return Some(Self::ReorderCompound {
 					indices: traversal_indices,

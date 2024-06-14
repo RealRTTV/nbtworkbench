@@ -12,21 +12,21 @@ use winit::dpi::PhysicalPosition;
 use winit::event::{ElementState, KeyEvent, MouseButton, MouseScrollDelta};
 use winit::keyboard::{KeyCode, PhysicalKey};
 
-use crate::{Bookmark, DOUBLE_CLICK_INTERVAL, DropFn, encompasses, encompasses_or_equal, FileUpdateSubscription, FileUpdateSubscriptionType, flags, get_clipboard, HeldEntry, LinkedQueue, OptionExt, panic_unchecked, Position, recache_along_indices, RenderContext, set_clipboard, since_epoch, SortAlgorithm, StrExt, sum_indices, tab, tab_mut, WindowProperties};
+use crate::{MarkedLine, DOUBLE_CLICK_INTERVAL, DropFn, encompasses, encompasses_or_equal, FileUpdateSubscription, FileUpdateSubscriptionType, flags, get_clipboard, HeldEntry, LinkedQueue, OptionExt, panic_unchecked, Position, recache_along_indices, RenderContext, set_clipboard, since_epoch, SortAlgorithm, StrExt, sum_indices, tab, TAB_CLOSE_DOUBLE_CLICK_INTERVAL, tab_mut, WindowProperties};
 use crate::alert::Alert;
-use crate::assets::{ACTION_WHEEL_Z, BACKDROP_UV, BASE_TEXT_Z, BASE_Z, BOOKMARK_UV, CLOSED_WIDGET_UV, DARK_STRIPE_UV, SAVE_UV, HEADER_SIZE, HELD_ENTRY_Z, HIDDEN_BOOKMARK_UV, HORIZONTAL_SEPARATOR_UV, HOVERED_STRIPE_UV, HOVERED_WIDGET_UV, JUST_OVERLAPPING_BASE_TEXT_Z, LIGHT_STRIPE_UV, LINE_NUMBER_SEPARATOR_UV, NEW_FILE_UV, OPEN_FOLDER_UV, SELECTED_ACTION_WHEEL, SELECTED_WIDGET_UV, SELECTION_UV, TRAY_UV, JUST_UNDERLAPPING_BASE_Z, SAVE_GRAYSCALE_UV, UNSELECTED_ACTION_WHEEL, UNSELECTED_WIDGET_UV};
-use crate::bookmark::Bookmarks;
+use crate::assets::{ACTION_WHEEL_Z, BACKDROP_UV, BASE_TEXT_Z, BASE_Z, BOOKMARK_UV, CLOSED_WIDGET_UV, DARK_STRIPE_UV, SAVE_UV, HEADER_SIZE, HELD_ENTRY_Z, HIDDEN_BOOKMARK_UV, HORIZONTAL_SEPARATOR_UV, HOVERED_STRIPE_UV, HOVERED_WIDGET_UV, JUST_OVERLAPPING_BASE_TEXT_Z, LIGHT_STRIPE_UV, LINE_NUMBER_SEPARATOR_UV, NEW_FILE_UV, OPEN_FOLDER_UV, SELECTED_ACTION_WHEEL, SELECTED_WIDGET_UV, SELECTION_UV, TRAY_UV, JUST_UNDERLAPPING_BASE_Z, SAVE_GRAYSCALE_UV, UNSELECTED_ACTION_WHEEL, UNSELECTED_WIDGET_UV, EDITED_LINE_UV};
+use crate::marked_line::MarkedLines;
 use crate::color::TextColor;
 use crate::be_decoder::BigEndianDecoder;
 use crate::elements::chunk::{NbtChunk, NbtRegion};
 use crate::elements::compound::NbtCompound;
-use crate::elements::element::{NbtByte, NbtByteArray, NbtDouble, NbtFloat, NbtInt, NbtIntArray, NbtLong, NbtLongArray, NbtShort};
+use crate::elements::element::{id_to_string_name, NbtByte, NbtByteArray, NbtDouble, NbtFloat, NbtInt, NbtIntArray, NbtLong, NbtLongArray, NbtShort};
 use crate::elements::element::NbtElement;
 use crate::elements::list::{NbtList, ValueIterator};
 use crate::elements::string::NbtString;
 use crate::encoder::UncheckedBufWriter;
 use crate::search_box::SearchBox;
-use crate::selected_text::{SelectedText, SelectedTextAdditional};
+use crate::selected_text::{get_cursor_idx, SelectedText, SelectedTextAdditional};
 use crate::tab::{FileFormat, Tab};
 use crate::text::{SearchBoxKeyResult, SelectedTextKeyResult, Text};
 use crate::tree_travel::{Navigate, Traverse, TraverseParents};
@@ -38,6 +38,7 @@ use crate::workbench_action::WorkbenchAction;
 pub struct Workbench {
 	pub tabs: Vec<Tab>,
 	pub tab: usize,
+	last_mouse_state: ElementState,
 	raw_mouse_x: f64,
 	mouse_x: usize,
 	raw_mouse_y: f64,
@@ -69,6 +70,7 @@ impl Workbench {
 		Self {
 			tabs: vec![],
 			tab: 0,
+			last_mouse_state: ElementState::Released,
 			raw_mouse_x: 0.0,
 			mouse_x: 0,
 			raw_mouse_y: 0.0,
@@ -100,6 +102,7 @@ impl Workbench {
 		let mut workbench = Self {
 			tabs: vec![],
 			tab: 0,
+			last_mouse_state: ElementState::Released,
 			raw_mouse_x: 0.0,
 			mouse_x: 0,
 			raw_mouse_y: 0.0,
@@ -152,7 +155,8 @@ impl Workbench {
 				horizontal_scroll: 0,
 				window_height: WINDOW_HEIGHT,
 				window_width: WINDOW_WIDTH,
-				bookmarks: Bookmarks::new(),
+				bookmarks: MarkedLines::new(),
+				edited_lines: MarkedLines::new(),
 				uuid: Uuid::new_v4(),
 				freehand_mode: false,
 				selected_text: None,
@@ -229,6 +233,7 @@ impl Workbench {
 		let shift = self.shift();
 		let x = self.mouse_x;
 		let y = self.mouse_y;
+		self.last_mouse_state = state;
 		match state {
 			ElementState::Pressed => {
 				{
@@ -244,8 +249,65 @@ impl Workbench {
 						self.search_box.deselect();
 					}
 				}
+
+				if let MouseButton::Left | MouseButton::Right = button {
+					let shift = (self.held_keys.contains(&KeyCode::ShiftLeft) || self.held_keys.contains(&KeyCode::ShiftRight)) ^ (button == MouseButton::Right);
+
+					if (self.window_width - 215 - 17 - 16 - 16..self.window_width - 215 - 1 - 16 - 16).contains(&self.mouse_x) & &(26..42).contains(&self.mouse_y) {
+						let tab = tab_mut!( self );
+						self.search_box.on_bookmark_widget(shift, &mut tab.bookmarks, &mut tab.value);
+						return true;
+					}
+
+					if (self.window_width - 215 - 17 - 16..self.window_width - 215 - 1 - 16).contains(&self.mouse_x) & &(26..42).contains(&self.mouse_y) {
+						self.search_box.on_search_widget(shift);
+						return true;
+					}
+
+					if (self.window_width - 215 - 17..self.window_width - 215 - 1).contains(&self.mouse_x) & &(26..42).contains(&self.mouse_y) {
+						self.search_box.on_mode_widget(shift);
+						return true;
+					}
+				}
+
+				if y < 19 && x > 2 && y > 3 {
+					self.click_tab(button, window_properties);
+				} else if y < 42 && y > 26 && x < 16 {
+					self.open_file(window_properties);
+				} else if y < 42 && y > 26 && x < 32 {
+					self.new_tab(window_properties, shift);
+				} else if y < 42 && y > 26 && x >= 296 && x < 312 {
+					if let Err(e) = tab_mut!(self).refresh(self.sort_algorithm) {
+						self.alert(Alert::new("Error!", TextColor::Red, e.to_string()))
+					}
+				}
+
 				'a: {
+					if button == MouseButton::Left {
+						if self.bookmark_line() {
+							break 'a;
+						}
+					}
+
 					if x >= left_margin && y >= HEADER_SIZE {
+						if MouseButton::Left == button {
+							if self.toggle(shift, tab!(self).freehand_mode) {
+								break 'a;
+							}
+						}
+
+						if (y - HEADER_SIZE) < 16 && x > 32 + left_margin {
+							if self.rename(x + horizontal_scroll) {
+								break 'a;
+							}
+						}
+
+						if button == MouseButton::Left {
+							if self.try_select_text(false) {
+								break 'a;
+							}
+						}
+
 						match self.action_wheel.take() {
 							Some(_) => {}
 							None => {
@@ -310,45 +372,11 @@ impl Workbench {
 				if button == MouseButton::Left {
 					self.steal_animation_data = None;
 				}
-				if let MouseButton::Left | MouseButton::Right = button {
-					let shift = (self.held_keys.contains(&KeyCode::ShiftLeft) || self.held_keys.contains(&KeyCode::ShiftRight)) ^ (button == MouseButton::Right);
 
-					if (self.window_width - 215 - 17 - 16 - 16..self.window_width - 215 - 1 - 16 - 16).contains(&self.mouse_x) & &(26..42).contains(&self.mouse_y) {
-						let tab = tab_mut!( self );
-						self.search_box.on_bookmark_widget(shift, &mut tab.bookmarks, &mut tab.value);
-						return true;
-					}
-
-					if (self.window_width - 215 - 17 - 16..self.window_width - 215 - 1 - 16).contains(&self.mouse_x) & &(26..42).contains(&self.mouse_y) {
-						self.search_box.on_search_widget(shift);
-						return true;
-					}
-
-					if (self.window_width - 215 - 17..self.window_width - 215 - 1).contains(&self.mouse_x) & &(26..42).contains(&self.mouse_y) {
-						self.search_box.on_mode_widget(shift);
-						return true;
-					}
-				}
 				self.held_mouse_keys.remove(&button);
-				if y < 19 && x > 2 && y > 3 {
-					self.click_tab(button, window_properties);
-				} else if y < 42 && y > 26 && x < 16 {
-					self.open_file(window_properties);
-				} else if y < 42 && y > 26 && x < 32 {
-					self.new_tab(window_properties, shift);
-				} else if y < 42 && y > 26 && x >= 296 && x < 312 {
-					if let Err(e) = tab_mut!(self).refresh(self.sort_algorithm) {
-						self.alert(Alert::new("Error!", TextColor::Red, e.to_string()))
-					}
-				} else if y >= HEADER_SIZE {
+				if y >= HEADER_SIZE {
 					let left_margin = self.left_margin();
 					'a: {
-						if MouseButton::Left == button {
-							if self.toggle(shift, tab!(self).freehand_mode) {
-								break 'a;
-							}
-						}
-
 						match self.held_entry.take() {
 							HeldEntry::Empty => {}
 							HeldEntry::FromAether(x) => {
@@ -357,24 +385,6 @@ impl Workbench {
 							}
 							HeldEntry::FromKnown(x, indices) => {
 								self.drop(x, Some(indices), left_margin);
-								break 'a;
-							}
-						}
-
-						if (y - HEADER_SIZE) < 16 && x > 32 + left_margin {
-							if self.rename(x + horizontal_scroll) {
-								break 'a;
-							}
-						}
-
-						if button == MouseButton::Left {
-							if self.try_select_text(false) {
-								break 'a;
-							}
-						}
-
-						if button == MouseButton::Left {
-							if self.bookmark_line() {
 								break 'a;
 							}
 						}
@@ -449,12 +459,15 @@ impl Workbench {
 			let Some((key, value)) = core::str::from_utf8(data)
 				.ok()
 				.and_then(|s| NbtElement::from_str(s, SortAlgorithm::None))
-			else {
-				return Err(anyhow!("SNBT failed to parse."));
-			};
+				else {
+					return Err(anyhow!("SNBT failed to parse."));
+				};
 			if value.id() == NbtChunk::ID && tab.value.id() != NbtRegion::ID { return Err(anyhow!("Chunk SNBT is only supported for Region Tabs")) }
 			if let Some((&last, rest)) = subscription.indices.split_last() {
 				let (_, _, parent, mut line_number) = Navigate::new(rest.iter().copied(), &mut tab.value).last();
+				if !parent.can_insert(&value) {
+					return Err(anyhow!("Parent {} cannot hold {}", id_to_string_name(parent.id()).0, id_to_string_name(value.id()).0))
+				}
 				let mut old_key = None;
 				if let Some(key) = key {
 					if let Some(compound) = parent.as_compound_mut() {
@@ -753,7 +766,7 @@ impl Workbench {
 			.as_ref()
 			.and_then(|x| x.to_str())
 			.map_or_else(|| tab.name.clone(), Into::into);
-		tab.selected_text = SelectedText::new(
+		tab.set_selected_text(Some(0), SelectedText::new(
 			36 + left_margin,
 			offset + path_minus_name_width,
 			HEADER_SIZE,
@@ -761,7 +774,7 @@ impl Workbench {
 			None,
 			false,
 			vec![],
-		);
+		));
 		tab.selected_text.is_some()
 	}
 
@@ -794,7 +807,7 @@ impl Workbench {
 								.get(idx)
 								.panic_unchecked("it exists mate, let's stop playing around")
 						}
-						.clone();
+							.clone();
 						if let Some(compound) = element.as_compound_mut() {
 							compound.insert(
 								idx + 1,
@@ -855,7 +868,7 @@ impl Workbench {
 					key.unwrap_or(CompactString::new_inline("")),
 					if key_exists { ": " } else { "" }
 				)
-				.is_err()
+					.is_err()
 				{
 					return false;
 				}
@@ -866,7 +879,7 @@ impl Workbench {
 					key.unwrap_or(CompactString::new_inline("")),
 					if key_exists { ":" } else { "" }
 				)
-				.is_err()
+					.is_err()
 				{
 					return false;
 				}
@@ -901,7 +914,7 @@ impl Workbench {
 						key.as_ref().map_or("", CompactString::as_str),
 						if key.is_some() { ":" } else { "" }
 					)
-					.is_ok()
+						.is_ok()
 					{
 						set_clipboard(buf);
 					}
@@ -1117,7 +1130,8 @@ impl Workbench {
 			horizontal_scroll: 0,
 			window_height: self.window_height,
 			window_width: self.window_width,
-			bookmarks: Bookmarks::new(),
+			bookmarks: MarkedLines::new(),
+			edited_lines: MarkedLines::new(),
 			uuid: Uuid::new_v4(),
 			freehand_mode: false,
 			selected_text: None,
@@ -1128,7 +1142,8 @@ impl Workbench {
 	}
 
 	#[inline]
-	pub fn new_custom_tab(&mut self, window_properties: &mut WindowProperties, tab: Tab) {
+	pub fn new_custom_tab(&mut self, window_properties: &mut WindowProperties, mut tab: Tab) {
+		// let _ = tab.edited_lines.add(MarkedLine::with_uv(1, 1, EDITED_LINE_UV));
 		self.tabs.push(tab);
 		self.set_tab(self.tabs.len() - 1, window_properties);
 	}
@@ -1136,7 +1151,7 @@ impl Workbench {
 	#[inline]
 	pub fn remove_tab(&mut self, idx: usize, window_properties: &mut WindowProperties) -> bool {
 		let tab = unsafe { self.tabs.get_unchecked_mut(idx) };
-		if tab.unsaved_changes && (since_epoch() - core::mem::replace(&mut tab.last_close_attempt, since_epoch())) > DOUBLE_CLICK_INTERVAL {
+		if tab.unsaved_changes && (since_epoch() - core::mem::replace(&mut tab.last_close_attempt, since_epoch())) > TAB_CLOSE_DOUBLE_CLICK_INTERVAL {
 			return false;
 		}
 
@@ -1187,14 +1202,28 @@ impl Workbench {
 
 	#[inline]
 	#[must_use]
+	#[cfg(target_os = "macos")]
 	pub fn ctrl(&self) -> bool {
 		self.held_keys.contains(&KeyCode::ControlLeft) | self.held_keys.contains(&KeyCode::ControlRight) | self.held_keys.contains(&KeyCode::SuperLeft) | self.held_keys.contains(&KeyCode::SuperRight)
 	}
 
 	#[inline]
 	#[must_use]
+	#[cfg(not(target_os = "macos"))]
+	pub fn ctrl(&self) -> bool {
+		self.held_keys.contains(&KeyCode::ControlLeft) | self.held_keys.contains(&KeyCode::ControlRight)
+	}
+
+	#[inline]
+	#[must_use]
 	pub fn shift(&self) -> bool {
 		self.held_keys.contains(&KeyCode::ShiftLeft) | self.held_keys.contains(&KeyCode::ShiftRight)
+	}
+
+	#[inline]
+	#[must_use]
+	pub fn alt(&self) -> bool {
+		self.held_keys.contains(&KeyCode::AltLeft) | self.held_keys.contains(&KeyCode::AltRight)
 	}
 
 	#[inline]
@@ -1240,7 +1269,7 @@ impl Workbench {
 				.last()
 				.panic_unchecked("nothing is wrong i didn't do .next")
 		}
-		.2;
+			.2;
 		let mut next_line_number = line_number;
 		let mut next_line_number_idx = 0;
 		for bookmark in tab.bookmarks[line_number..].iter_mut() {
@@ -1252,12 +1281,12 @@ impl Workbench {
 								.get(next_line_number_idx)
 								.panic_unchecked("expected index to be valid for parent index")
 						}
-						.true_height();
+							.true_height();
 						next_line_number_idx += 1;
 					}
-					Bookmark::with_uv(bookmark.true_line_number(), y + next_line_number_idx + 1, if bookmark.true_line_number() == next_line_number { BOOKMARK_UV } else { HIDDEN_BOOKMARK_UV })
+					MarkedLine::with_uv(bookmark.true_line_number(), y + next_line_number_idx + 1, if bookmark.true_line_number() == next_line_number { BOOKMARK_UV } else { HIDDEN_BOOKMARK_UV })
 				} else {
-					Bookmark::with_uv(bookmark.true_line_number(), y, HIDDEN_BOOKMARK_UV)
+					MarkedLine::with_uv(bookmark.true_line_number(), y, HIDDEN_BOOKMARK_UV)
 				}
 			} else {
 				bookmark.offset(increment, 0)
@@ -1295,7 +1324,7 @@ impl Workbench {
 				let target_x = indices.len() * 16 + 32 + 4 + left_margin;
 				let k = key.map_or_else(|| child.as_chunk().map(|chunk| (chunk.x.to_string().into_boxed_str(), TextColor::TreePrimitive, true)), |x| Some((x.into_string().into_boxed_str(), TextColor::TreeKey, true)));
 				let v = Some(child.value()).map(|(a, c)| (a.into_string().into_boxed_str(), c, c != TextColor::TreeKey));
-				tab.selected_text = SelectedText::new(
+				let selected_text = SelectedText::new(
 					target_x,
 					(self.mouse_x + horizontal_scroll).clamp(if snap_to_ends { target_x } else { 0 }, if snap_to_ends { k.as_ref().map_or(0, |(k, _, b)| (*b as usize) * (k.width() + ": ".width() * v.is_some() as usize)) + v.as_ref().map_or(0, |(v, _, b)| (*b as usize) * v.width()) + target_x } else { usize::MAX }),
 					y * 16 + HEADER_SIZE,
@@ -1304,15 +1333,7 @@ impl Workbench {
 					child.id() == NbtChunk::ID,
 					indices,
 				);
-				if let Some(selected_text) = tab.selected_text.as_mut() {
-					let now = since_epoch();
-					let (old_y, old_cursor, timestamp) = core::mem::replace(&mut tab.last_selected_text_interaction, (y, selected_text.cursor, now));
-					if now - timestamp < DOUBLE_CLICK_INTERVAL && old_y == y && old_cursor == selected_text.cursor && !selected_text.value.is_empty() {
-						tab.last_selected_text_interaction = (0, 0, Duration::ZERO);
-						selected_text.cursor = selected_text.value.len();
-						selected_text.selection = Some(0);
-					}
-				}
+				tab.set_selected_text(Some(y), selected_text);
 				return tab.selected_text.is_some();
 			}
 		}
@@ -1333,8 +1354,8 @@ impl Workbench {
 				.last()
 				.panic_unchecked("Traverse always has something")
 		}
-		.3;
-		let bookmark = Bookmark::new(true_height, (self.mouse_y + scroll - HEADER_SIZE) / 16);
+			.3;
+		let bookmark = MarkedLine::new(true_height, (self.mouse_y + scroll - HEADER_SIZE) / 16);
 		let _ = tab.bookmarks.toggle(bookmark);
 		true
 	}
@@ -1349,15 +1370,15 @@ impl Workbench {
 			&& cursor == 0
 		{
 			if !tab.close_selected_text(false, window_properties) { return }
-			tab.selected_text = Some(SelectedText(Text::new(keyfix.clone(), keyfix.len(), true, SelectedTextAdditional {
+			tab.set_selected_text(None, Some(SelectedText(Text::new(keyfix.clone(), keyfix.len(), true, SelectedTextAdditional {
 				y,
 				indices,
 				value_color: keyfix_color,
 				keyfix: None,
-				prefix: (String::new(), TextColor::White),
+				prefix: (String::new(), TextColor::Default),
 				suffix: prefix,
 				valuefix: Some((value, value_color)),
-			})));
+			}))));
 		}
 	}
 
@@ -1372,15 +1393,15 @@ impl Workbench {
 		{
 			// normally won't occur, but im future proofing
 			if !tab.close_selected_text(false, window_properties) { return }
-			tab.selected_text = Some(SelectedText(Text::new(valuefix, 0, true, SelectedTextAdditional {
+			tab.set_selected_text(None, Some(SelectedText(Text::new(valuefix, 0, true, SelectedTextAdditional {
 				y,
 				indices,
 				value_color: valuefix_color,
 				keyfix: Some((value, value_color)),
 				prefix: suffix,
-				suffix: (String::new(), TextColor::White),
+				suffix: (String::new(), TextColor::Default),
 				valuefix: None,
-			})));
+			}))));
 		}
 	}
 
@@ -1399,8 +1420,8 @@ impl Workbench {
 				indices.iter().copied().take(indices.len() - 1),
 				&mut tab.value,
 			)
-			.last()
-			.2;
+				.last()
+				.2;
 			if child_idx == 0 || parent.len().is_none_or(|x| x == 0) { return }
 			let original_key = parent.as_compound_mut().map(|compound| unsafe {
 				compound
@@ -1414,7 +1435,7 @@ impl Workbench {
 					.get(child_idx - 1)
 					.panic_unchecked("if i exist, the one before me exists")
 			}
-			.height() * 16;
+				.height() * 16;
 			parent.swap(child_idx, child_idx - 1);
 			let from = indices.clone();
 			unsafe {
@@ -1457,8 +1478,8 @@ impl Workbench {
 				indices.iter().copied().take(indices.len() - 1),
 				&mut tab.value,
 			)
-			.last()
-			.2;
+				.last()
+				.2;
 			if parent.len().is_none_or(|x| x == child_idx + 1) { return }
 			let original_key = parent.as_compound_mut().map(|compound| unsafe {
 				compound
@@ -1529,50 +1550,50 @@ impl Workbench {
 					indices.iter().copied().take(original_indices_len - 1),
 					&mut tab.value,
 				)
-				.last()
-				.2
-				.children()
-				.panic_unchecked("we are a child, some must exist")
-				.map_or_else(
-					|mut iter| {
-						let (k, v) = iter
-							.next()
-							.panic_unchecked("we are a child, some must exist");
-						(Some((k.to_compact_string(), TextColor::TreeKey)), Some(v.value()))
-					},
-					|iter| match iter {
-						iter @ ValueIterator::Generic(_) => (
-							None,
-							Some(
-								iter.enumerate()
-									.next()
-									.panic_unchecked("we're the child, it can't be empty")
-									.1
-									.value(),
+					.last()
+					.2
+					.children()
+					.panic_unchecked("we are a child, some must exist")
+					.map_or_else(
+						|mut iter| {
+							let (k, v) = iter
+								.next()
+								.panic_unchecked("we are a child, some must exist");
+							(Some((k.to_compact_string(), TextColor::TreeKey)), Some(v.value()))
+						},
+						|iter| match iter {
+							iter @ ValueIterator::Generic(_) => (
+								None,
+								Some(
+									iter.enumerate()
+										.next()
+										.panic_unchecked("we're the child, it can't be empty")
+										.1
+										.value(),
+								),
 							),
-						),
-						iter @ ValueIterator::Region(_, _) => {
-							let chunk = unsafe {
-								iter.enumerate()
-									.next()
-									.panic_unchecked("we're the child, it can't be empty")
-									.1
-									.as_chunk_unchecked()
-							};
-							(
-								Some((chunk.x.to_compact_string(), TextColor::TreePrimitive)),
-								Some((chunk.z.to_compact_string(), TextColor::TreePrimitive)),
-							)
-						}
-					},
-				);
+							iter @ ValueIterator::Region(_, _) => {
+								let chunk = unsafe {
+									iter.enumerate()
+										.next()
+										.panic_unchecked("we're the child, it can't be empty")
+										.1
+										.as_chunk_unchecked()
+								};
+								(
+									Some((chunk.x.to_compact_string(), TextColor::TreePrimitive)),
+									Some((chunk.z.to_compact_string(), TextColor::TreePrimitive)),
+								)
+							}
+						},
+					);
 				let new_y = sum_indices(indices.iter().copied(), &tab.value) * 16;
 				(k, v, indices, new_y)
 			} else {
 				let total = sum_indices(indices.iter().copied(), &tab.value) - 1;
 				let mut indices = vec![];
 				// SAFETY: total is -1'd means that it's original range of 1..=root.height() is now ..root.height(), which is in range
- 				let (k, v) = 'w: {
+				let (k, v) = 'w: {
 					let mut iter = TraverseParents::new(total, &mut tab.value);
 					while let Some((position, idx, key, value, _)) = iter.next() {
 						indices.push(idx);
@@ -1598,12 +1619,12 @@ impl Workbench {
 			let low = indices.len() * 16 + 32 + 4 + left_margin;
 			let high = low
 				+ k.as_ref()
-					.map_or(0, |(x, _)| x.width())
+				.map_or(0, |(x, _)| x.width())
 				+ (k.is_some() && v.as_ref().is_some_and(|(_, color)| *color != TextColor::TreeKey)) as usize * (": ".width())
 				+ v.as_ref()
-					.map_or(0, |(x, color)| ((*color != TextColor::TreeKey) as usize) * x.width());
+				.map_or(0, |(x, color)| ((*color != TextColor::TreeKey) as usize) * x.width());
 			self.cache_cursor_x = self.cache_cursor_x.or(Some(mouse_x));
-			tab.selected_text = SelectedText::new(
+			tab.set_selected_text(None, SelectedText::new(
 				low,
 				mouse_x.clamp(low, high),
 				new_y + HEADER_SIZE,
@@ -1611,7 +1632,7 @@ impl Workbench {
 				v.map(|(a, c)| (a.into_string().into_boxed_str(), c, c != TextColor::TreeKey)),
 				indices.len() == 1 && tab.value.id() == NbtRegion::ID,
 				indices,
-			);
+			));
 		}
 	}
 
@@ -1643,44 +1664,44 @@ impl Workbench {
 					indices.iter().copied().take(indices.len() - 1),
 					&mut tab.value,
 				)
-				.last()
-				.2
-				.children()
-				.panic_unchecked("we're the child")
-				.map_or_else(
-					|iter| {
-						let tuple = iter
-							.enumerate()
-							.last()
-							.panic_unchecked("we're the child, it can't be empty");
-						(
-							Some((tuple.1.0.to_compact_string(), TextColor::TreeKey)),
-							Some(tuple.1.1.value()),
-							tuple.0,
-						)
-					},
-					|iter| match iter {
-						iter @ ValueIterator::Generic(_) => {
+					.last()
+					.2
+					.children()
+					.panic_unchecked("we're the child")
+					.map_or_else(
+						|iter| {
 							let tuple = iter
 								.enumerate()
 								.last()
 								.panic_unchecked("we're the child, it can't be empty");
-							(None, Some(tuple.1.value()), tuple.0)
-						}
-						iter @ ValueIterator::Region(_, _) => {
-							let (idx, chunk) = iter
-								.enumerate()
-								.last()
-								.panic_unchecked("we're the child, it can't be empty");
-							let chunk = unsafe { chunk.as_chunk_unchecked() };
 							(
-								Some((chunk.x.to_compact_string(), TextColor::TreePrimitive)),
-								Some((chunk.z.to_compact_string(), TextColor::TreePrimitive)),
-								idx,
+								Some((tuple.1.0.to_compact_string(), TextColor::TreeKey)),
+								Some(tuple.1.1.value()),
+								tuple.0,
 							)
-						}
-					},
-				)
+						},
+						|iter| match iter {
+							iter @ ValueIterator::Generic(_) => {
+								let tuple = iter
+									.enumerate()
+									.last()
+									.panic_unchecked("we're the child, it can't be empty");
+								(None, Some(tuple.1.value()), tuple.0)
+							}
+							iter @ ValueIterator::Region(_, _) => {
+								let (idx, chunk) = iter
+									.enumerate()
+									.last()
+									.panic_unchecked("we're the child, it can't be empty");
+								let chunk = unsafe { chunk.as_chunk_unchecked() };
+								(
+									Some((chunk.x.to_compact_string(), TextColor::TreePrimitive)),
+									Some((chunk.z.to_compact_string(), TextColor::TreePrimitive)),
+									idx,
+								)
+							}
+						},
+					)
 			} else {
 				(None, None, 0)
 			};
@@ -1723,16 +1744,16 @@ impl Workbench {
 			let low = indices.len() * 16 + 32 + 4 + left_margin;
 			let high = low
 				+ k.as_ref()
-					.map_or(0, |(x, _)| x.width())
+				.map_or(0, |(x, _)| x.width())
 				+ (k.is_some() && v.as_ref().is_some_and(|(_, color)| *color != TextColor::TreeKey)) as usize * ": ".width()
 				+ v.as_ref()
-					.map_or(0, |(x, color)| ((*color != TextColor::TreeKey) as usize) * x.width());
+				.map_or(0, |(x, color)| ((*color != TextColor::TreeKey) as usize) * x.width());
 			if new_y + 48 > tab.scroll + tab.window_height - HEADER_SIZE {
 				tab.scroll = new_y + 48 - (tab.window_height - HEADER_SIZE);
 				tab.scroll = tab.scroll();
 			}
 			self.cache_cursor_x = self.cache_cursor_x.or(Some(mouse_x));
-			tab.selected_text = SelectedText::new(
+			tab.set_selected_text(None, SelectedText::new(
 				low,
 				mouse_x.clamp(low, high),
 				new_y + HEADER_SIZE,
@@ -1740,7 +1761,7 @@ impl Workbench {
 				v.map(|(a, c)| (a.into_string().into_boxed_str(), c, c != TextColor::TreeKey)),
 				indices.len() == 1 && tab.value.id() == NbtRegion::ID,
 				indices,
-			);
+			));
 		}
 	}
 
@@ -1760,7 +1781,7 @@ impl Workbench {
 				}
 				recache_along_indices(&indices, &mut tab.value);
 				for bookmark in tab.bookmarks[line_number..].iter_mut() {
-					*bookmark = Bookmark::with_uv(bookmark.true_line_number(), (*y - HEADER_SIZE) / 16, HIDDEN_BOOKMARK_UV);
+					*bookmark = MarkedLine::with_uv(bookmark.true_line_number(), (*y - HEADER_SIZE) / 16, HIDDEN_BOOKMARK_UV);
 				}
 			}
 		}
@@ -1798,7 +1819,7 @@ impl Workbench {
 						*bookmark = if bookmark.true_line_number() - line_number < true_height {
 							bookmark.open(parent_line_number + bookmark.true_line_number() - line_number)
 						} else {
-							Bookmark::with_uv(bookmark.true_line_number(), bookmark.line_number() + increment, bookmark.uv())
+							MarkedLine::with_uv(bookmark.true_line_number(), bookmark.line_number() + increment, bookmark.uv())
 						};
 					}
 				} else {
@@ -1815,7 +1836,7 @@ impl Workbench {
 										.get(next_line_number_idx)
 										.panic_unchecked("expected index to be valid for parent index")
 								}
-								.true_height();
+									.true_height();
 								next_line_number_idx += 1;
 							}
 							let new_line_number = y + next_line_number_idx + 1;
@@ -1825,7 +1846,7 @@ impl Workbench {
 								bookmark.hidden(new_line_number)
 							}
 						} else {
-							Bookmark::with_uv(bookmark.true_line_number(), bookmark.line_number() + increment, bookmark.uv())
+							MarkedLine::with_uv(bookmark.true_line_number(), bookmark.line_number() + increment, bookmark.uv())
 						};
 					}
 				}
@@ -1867,7 +1888,7 @@ impl Workbench {
 			if let PhysicalKey::Code(key) = key.physical_key {
 				self.held_keys.insert(key);
 				let char = self.char_from_key(key);
-				let flags = (self.held_keys.contains(&KeyCode::ControlLeft) as u8 | self.held_keys.contains(&KeyCode::ControlRight) as u8 | self.held_keys.contains(&KeyCode::SuperLeft) as u8 | self.held_keys.contains(&KeyCode::SuperRight) as u8) | ((self.held_keys.contains(&KeyCode::ShiftLeft) as u8 | self.held_keys.contains(&KeyCode::ShiftRight) as u8) << 1) | ((self.held_keys.contains(&KeyCode::AltLeft) as u8 | self.held_keys.contains(&KeyCode::AltRight) as u8) << 2);
+				let flags = self.ctrl() as u8 | ((self.shift() as u8) << 1) | ((self.alt() as u8) << 2);
 				let left_margin = self.left_margin();
 				let tab = tab_mut!(self);
 				if self.search_box.is_selected() {
@@ -2190,7 +2211,23 @@ impl Workbench {
 			tab.scroll = (tab.scroll as isize + pixel_delta).max(0) as usize;
 			tab.scroll = tab.scroll();
 		}
+		self.try_extend_drag_selection();
 		true
+	}
+
+	#[inline]
+	pub fn try_extend_drag_selection(&mut self) {
+		let horizontal_scroll = self.horizontal_scroll();
+		let left_margin = self.left_margin();
+		let tab = tab_mut!(self);
+		if self.last_mouse_state == ElementState::Pressed {
+			if let Some(selected_text) = tab.selected_text.as_mut() && tab.last_selected_text_interaction.1 == 0 {
+				let selection = get_cursor_idx(&selected_text.value, (self.mouse_x + horizontal_scroll) as isize - (selected_text.indices.len() * 16 + 32 + 4 + left_margin) as isize);
+				if selection != selected_text.cursor {
+					selected_text.selection = Some(selection)
+				}
+			}
+		}
 	}
 
 	#[inline]
@@ -2291,7 +2328,7 @@ impl Workbench {
 		let ghost = if self.mouse_x + horizontal_scroll >= left_margin && self.mouse_y >= HEADER_SIZE {
 			self.held_entry.element().map(|x| {
 				(
-					x.id(),
+					x,
 					((self.mouse_x + horizontal_scroll - left_margin) & !15) + left_margin,
 					((self.mouse_y - HEADER_SIZE) & !0b0111) + HEADER_SIZE,
 				)
@@ -2384,8 +2421,9 @@ impl Workbench {
 				self.alert(alert);
 			}
 		}
-		if (!self.held_entry.is_empty() || tab!(self).freehand_mode) && self.action_wheel.is_none() && self.scrollbar_offset.is_none() {
+		if (!self.held_entry.is_empty() || tab!(self).freehand_mode || (tab!(self).selected_text.is_some() && self.last_mouse_state == ElementState::Pressed)) && self.action_wheel.is_none() && self.scrollbar_offset.is_none() {
 			self.try_mouse_scroll();
+			self.try_extend_drag_selection()
 		}
 		if self.try_steal(false) {
 			if self.steal_animation_data.as_ref().is_some_and(|x| (since_epoch() - x.0) >= Duration::from_millis(500)) {
@@ -2447,7 +2485,7 @@ impl Workbench {
 		builder.horizontal_scroll = self.tab_scroll;
 		for (idx, tab) in self.tabs.iter().enumerate() {
 			let remaining_width = tab.name.width() + 48 + 3;
-			let uv = if (since_epoch() - tab.last_close_attempt) <= DOUBLE_CLICK_INTERVAL {
+			let uv = if (since_epoch() - tab.last_close_attempt) <= TAB_CLOSE_DOUBLE_CLICK_INTERVAL {
 				CLOSED_WIDGET_UV
 			} else if idx == self.tab {
 				SELECTED_WIDGET_UV

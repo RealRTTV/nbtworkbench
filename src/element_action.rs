@@ -18,7 +18,7 @@ use crate::elements::list::NbtList;
 use crate::elements::string::NbtString;
 use crate::vertex_buffer_builder::VertexBufferBuilder;
 use crate::workbench_action::WorkbenchAction;
-use crate::bookmark::Bookmarks;
+use crate::marked_line::MarkedLines;
 
 #[derive(Copy, Clone)]
 pub enum ElementAction {
@@ -110,7 +110,7 @@ impl ElementAction {
 	}
 
 	#[allow(clippy::too_many_lines)]
-	pub fn apply(self, key: Option<CompactString>, indices: Box<[usize]>, _tab_uuid: Uuid, true_line_number: usize, line_number: usize, element: &mut NbtElement, bookmarks: &mut Bookmarks, _subscription: &mut Option<FileUpdateSubscription>) -> Option<WorkbenchAction> {
+	pub fn apply(self, key: Option<CompactString>, indices: Box<[usize]>, _tab_uuid: Uuid, true_line_number: usize, line_number: usize, element: &mut NbtElement, bookmarks: &mut MarkedLines, _subscription: &mut Option<FileUpdateSubscription>) -> Option<WorkbenchAction> {
 		#[must_use]
 		#[cfg(not(target_arch = "wasm32"))]
 		fn open_file(str: &str) -> bool {

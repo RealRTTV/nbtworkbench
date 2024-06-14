@@ -94,6 +94,7 @@ pub const INSERTION_UV: Vec2u = Vec2u::new(16, 84);
 pub const TOOLTIP_UV: Vec2u = Vec2u::new(96, 144);
 pub const BOOKMARK_UV: Vec2u = Vec2u::new(112, 96);
 pub const HIDDEN_BOOKMARK_UV: Vec2u = Vec2u::new(96, 128);
+pub const EDITED_LINE_UV: Vec2u = Vec2u::new(16, 160);
 pub const LIGHT_STRIPE_UV: Vec2u = Vec2u::new(96, 96);
 pub const DARK_STRIPE_UV: Vec2u = Vec2u::new(96, 112);
 pub const HOVERED_STRIPE_UV: Vec2u = Vec2u::new(112, 128);
@@ -169,6 +170,7 @@ pub enum ZOffset {
     LINE_NUMBER_Z = 130,
     LINE_NUMBER_CONNECTOR_Z = 131,
     BOOKMARK_Z = 140,
+	EDITED_LINE_Z = 141,
     SELECTED_TEXT_Z = 170,
 	SELECTED_TEXT_SELECTION_Z = 171,
     ACTION_WHEEL_Z = 190,

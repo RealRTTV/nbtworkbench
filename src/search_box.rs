@@ -13,7 +13,7 @@ use crate::{combined_two_sorted, create_regex, flags, since_epoch, SortAlgorithm
 use crate::elements::element::NbtElement;
 use crate::text::{Cachelike, SearchBoxKeyResult, Text};
 use crate::vertex_buffer_builder::{Vec2u, VertexBufferBuilder};
-use crate::bookmark::{Bookmark, Bookmarks};
+use crate::marked_line::{MarkedLine, MarkedLines};
 
 pub struct SearchPredicate {
     pub search_flags: u8,
@@ -192,10 +192,10 @@ impl SearchBox {
             });
         }
         if self.is_selected() {
-            self.0.render(builder, TextColor::White, pos + (0, 3), SEARCH_BOX_Z, SEARCH_BOX_SELECTION_Z);
+            self.0.render(builder, TextColor::Default, pos + (0, 3), SEARCH_BOX_Z, SEARCH_BOX_SELECTION_Z);
         } else {
             builder.settings(pos + (0, 3), false, SEARCH_BOX_Z);
-            builder.color = TextColor::White.to_raw();
+            builder.color = TextColor::Default.to_raw();
             let _ = write!(builder, "{}", self.value);
         }
 
@@ -280,7 +280,7 @@ impl SearchBox {
     }
 
     #[inline]
-    pub fn on_bookmark_widget(&mut self, shift: bool, bookmarks: &mut Bookmarks, root: &mut NbtElement) {
+    pub fn on_bookmark_widget(&mut self, shift: bool, bookmarks: &mut MarkedLines, root: &mut NbtElement) {
         if shift {
             bookmarks.clear();
         } else {
@@ -299,7 +299,7 @@ impl SearchBox {
     }
 
     #[inline]
-    pub fn search(&mut self, bookmarks: &mut Bookmarks, root: &NbtElement, count_only: bool) {
+    pub fn search(&mut self, bookmarks: &mut MarkedLines, root: &NbtElement, count_only: bool) {
         if self.value.is_empty() {
             return;
         }
@@ -309,12 +309,12 @@ impl SearchBox {
         let new_bookmarks = Self::search0(root, &predicate);
         self.hits = Some((new_bookmarks.len(), since_epoch() - start));
         if !count_only {
-            let old_bookmarks = core::mem::replace(bookmarks, Bookmarks::new());
-            *bookmarks = unsafe { Bookmarks::from_raw(combined_two_sorted(new_bookmarks.into_raw(), old_bookmarks.into_raw())) };
+            let old_bookmarks = core::mem::replace(bookmarks, MarkedLines::new());
+            *bookmarks = unsafe { MarkedLines::from_raw(combined_two_sorted(new_bookmarks.into_raw(), old_bookmarks.into_raw())) };
         }
     }
 
-    pub fn search0(root: &NbtElement, predicate: &SearchPredicate) -> Bookmarks {
+    pub fn search0(root: &NbtElement, predicate: &SearchPredicate) -> MarkedLines {
         let mut new_bookmarks = Vec::new();
         let mut queue = Vec::new();
         queue.push((None, &*root, true));
@@ -322,7 +322,7 @@ impl SearchBox {
         let mut line_number = 0;
         while let Some((key, element, parent_open)) = queue.pop() {
             if predicate.matches(key, element) {
-                new_bookmarks.push(Bookmark::with_uv(true_line_number, line_number, if parent_open { BOOKMARK_UV } else { HIDDEN_BOOKMARK_UV }));
+                new_bookmarks.push(MarkedLine::with_uv(true_line_number, line_number, if parent_open { BOOKMARK_UV } else { HIDDEN_BOOKMARK_UV }));
             }
 
             match element.children() {
@@ -340,7 +340,7 @@ impl SearchBox {
                 line_number += 1;
             }
         }
-        unsafe { Bookmarks::from_raw(new_bookmarks) }
+        unsafe { MarkedLines::from_raw(new_bookmarks) }
     }
 
     #[inline]
