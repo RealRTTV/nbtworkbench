@@ -1,0 +1,86 @@
+name: Release
+
+on:
+  release:
+    types: [created]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.job.target }} (${{ matrix.job.os }})
+    runs-on: ${{ matrix.job.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        job:
+          - { target: x86_64-apple-darwin         , os: macos-12,                                                  }
+          - { target: aarch64-apple-darwin        , os: macos-14,                                                  }
+          - { target: x86_64-pc-windows-msvc      , os: windows-2019,                                              }
+          - { target: x86_64-unknown-linux-gnu    , os: ubuntu-20.04, dpkg_arch: amd64,            use-cross: true }
+          - { target: x86_64-unknown-linux-musl   , os: ubuntu-20.04, dpkg_arch: musl-linux-amd64, use-cross: true }
+    env:
+      BUILD_CMD: cargo
+    steps:
+    - uses: actions/checkout@v4
+    - name: Install Rust toolchain
+      uses: dtolnay/rust-toolchain@nightly
+      with:
+        targets: ${{ matrix.job.target }}
+    - name: Install Cross
+      if: matrix.job.use-cross
+      uses: taiki-e/install-action@v2
+      with:
+        tool: cross
+    - name: Overwrite build command env variable
+      if: matrix.job.use-cross
+      shell: bash
+      run: echo "BUILD_CMD=cross" >> $GITHUB_ENV
+    - name: Show version information (Rust, Cargo, GCC)
+      shell: bash
+      run: |
+        gcc --version || true
+        rustup -V
+        rustup toolchain list
+        rustup default
+        cargo -V
+        rustc -V
+    - name: Build
+      shell: bash
+      run: $BUILD_CMD build --release --target=${{ matrix.job.target }}
+    - name: Set binary name & path
+      id: bin
+      shell: bash
+      run: |
+        # Figure out suffix of binary
+        EXE_suffix=""
+        case ${{ matrix.job.target }} in
+          *-pc-windows-*) EXE_suffix=".exe" ;;
+        esac;
+
+        # Setup paths
+        BIN_NAME="nbtworkbench${EXE_suffix}"
+        BIN_PATH="target/${{ matrix.job.target }}/release/${BIN_NAME}"
+
+        # Let subsequent steps know where to find the binary
+        echo "BIN_PATH=${BIN_PATH}" >> $GITHUB_OUTPUT
+        echo "BIN_NAME=${BIN_NAME}" >> $GITHUB_OUTPUT
+    - uses: actions/upload-artifact@v4
+      with:
+        name: ${{ matrix.job.target }}-${{ github.ref_name }}
+        path: ${{ steps.bin.outputs.BIN_PATH }}
+        if-no-files-found: error
+        retention-days: 90
+        compression-level: 9
+    - name: ZIP Outputs
+      uses: thedoctor0/zip-release@0.7.5
+      with:
+        command: "mv ${{ steps.bin.outputs.BIN_PATH }} target/${{ matrix.job.target }}/${{ steps.bin.outputs.BIN_NAME }}"
+        filename: ${{ matrix.job.target }}-${{ github.ref_name }}.zip
+        directory: "target"
+        path: ${{ matrix.job.target }}/${{ steps.bin.outputs.BIN_NAME }}
+    - name: Upload files to a GitHub release
+      uses: svenstaro/upload-release-action@2.9.0
+      with:
+        file: target/${{ matrix.job.target }}-${{ github.ref_name }}.zip
