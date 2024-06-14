@@ -14,7 +14,7 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 
 use crate::{MarkedLine, DOUBLE_CLICK_INTERVAL, DropFn, encompasses, encompasses_or_equal, FileUpdateSubscription, FileUpdateSubscriptionType, flags, get_clipboard, HeldEntry, LinkedQueue, OptionExt, panic_unchecked, Position, recache_along_indices, RenderContext, set_clipboard, since_epoch, SortAlgorithm, StrExt, sum_indices, tab, TAB_CLOSE_DOUBLE_CLICK_INTERVAL, tab_mut, WindowProperties};
 use crate::alert::Alert;
-use crate::assets::{ACTION_WHEEL_Z, BACKDROP_UV, BASE_TEXT_Z, BASE_Z, BOOKMARK_UV, CLOSED_WIDGET_UV, DARK_STRIPE_UV, SAVE_UV, HEADER_SIZE, HELD_ENTRY_Z, HIDDEN_BOOKMARK_UV, HORIZONTAL_SEPARATOR_UV, HOVERED_STRIPE_UV, HOVERED_WIDGET_UV, JUST_OVERLAPPING_BASE_TEXT_Z, LIGHT_STRIPE_UV, LINE_NUMBER_SEPARATOR_UV, NEW_FILE_UV, OPEN_FOLDER_UV, SELECTED_ACTION_WHEEL, SELECTED_WIDGET_UV, SELECTION_UV, TRAY_UV, JUST_UNDERLAPPING_BASE_Z, SAVE_GRAYSCALE_UV, UNSELECTED_ACTION_WHEEL, UNSELECTED_WIDGET_UV, EDITED_LINE_UV};
+use crate::assets::{ACTION_WHEEL_Z, BACKDROP_UV, BASE_TEXT_Z, BASE_Z, BOOKMARK_UV, CLOSED_WIDGET_UV, DARK_STRIPE_UV, SAVE_UV, HEADER_SIZE, HELD_ENTRY_Z, HIDDEN_BOOKMARK_UV, HORIZONTAL_SEPARATOR_UV, HOVERED_STRIPE_UV, HOVERED_WIDGET_UV, JUST_OVERLAPPING_BASE_TEXT_Z, LIGHT_STRIPE_UV, LINE_NUMBER_SEPARATOR_UV, NEW_FILE_UV, OPEN_FOLDER_UV, SELECTED_ACTION_WHEEL, SELECTED_WIDGET_UV, SELECTION_UV, TRAY_UV, JUST_UNDERLAPPING_BASE_Z, SAVE_GRAYSCALE_UV, UNSELECTED_ACTION_WHEEL, UNSELECTED_WIDGET_UV};
 use crate::marked_line::MarkedLines;
 use crate::color::TextColor;
 use crate::be_decoder::BigEndianDecoder;
@@ -1142,7 +1142,7 @@ impl Workbench {
 	}
 
 	#[inline]
-	pub fn new_custom_tab(&mut self, window_properties: &mut WindowProperties, mut tab: Tab) {
+	pub fn new_custom_tab(&mut self, window_properties: &mut WindowProperties, tab: Tab) {
 		// let _ = tab.edited_lines.add(MarkedLine::with_uv(1, 1, EDITED_LINE_UV));
 		self.tabs.push(tab);
 		self.set_tab(self.tabs.len() - 1, window_properties);
