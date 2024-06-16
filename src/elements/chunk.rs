@@ -186,7 +186,7 @@ impl NbtRegion {
 			{
 				let timestamp = u32::from_be_bytes(timestamp);
 				let offset = u32::from_be_bytes(offset);
-				threads.push((timestamp, parse(offset, bytes, sort)));
+				threads.push((timestamp, parse(offset, bytes)));
 			}
 
 

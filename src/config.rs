@@ -56,7 +56,7 @@ pub fn write() -> bool {
 
 #[cfg(target_arch = "wasm32")]
 pub fn write() -> bool {
-    let Some(local_storage) = web_sys::window().and_then(|window| window.local_storage().ok()).flatten();
+    let Some(local_storage) = web_sys::window().and_then(|window| window.local_storage().ok()).flatten() else { return false };
     let value = write0();
     local_storage.set_item("config", &value).is_ok()
 }
