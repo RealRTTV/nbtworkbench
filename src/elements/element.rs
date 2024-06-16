@@ -1,3 +1,4 @@
+use std::{fmt, fmt::Write};
 use std::alloc::{alloc, dealloc, Layout};
 use std::fmt::{Debug, Display, Error, Formatter};
 use std::intrinsics::likely;
@@ -5,22 +6,21 @@ use std::mem::{ManuallyDrop, MaybeUninit};
 use std::ops::{Deref, Index, IndexMut};
 #[cfg(not(target_arch = "wasm32"))]
 use std::thread::Scope;
-use std::{fmt, fmt::Write};
 
-use compact_str::{format_compact, CompactString, ToCompactString};
+use compact_str::{CompactString, format_compact, ToCompactString};
 use hashbrown::raw::RawTable;
 use polonius_the_crab::{polonius, polonius_return};
 
+use crate::{array, assets::JUST_OVERLAPPING_BASE_TEXT_Z, DropFn, panic_unchecked, primitive, RenderContext, since_epoch, StrExt, TextColor, VertexBufferBuilder};
 use crate::assets::{BASE_Z, BYTE_ARRAY_UV, BYTE_UV, CONNECTION_UV, DOUBLE_UV, FLOAT_UV, INT_ARRAY_UV, INT_UV, LONG_ARRAY_UV, LONG_UV, SHORT_UV, ZOffset};
 use crate::be_decoder::BigEndianDecoder;
+use crate::element_action::ElementAction;
 use crate::elements::chunk::{NbtChunk, NbtRegion};
 use crate::elements::compound::{CompoundMap, CompoundMapIter, Entry, NbtCompound};
-use crate::element_action::ElementAction;
 use crate::elements::list::{NbtList, ValueIterator, ValueMutIterator};
+use crate::elements::null::NbtNull;
 use crate::elements::string::NbtString;
 use crate::encoder::UncheckedBufWriter;
-use crate::{panic_unchecked, since_epoch, SortAlgorithm, array, primitive, DropFn, RenderContext, StrExt, VertexBufferBuilder, TextColor, assets::JUST_OVERLAPPING_BASE_TEXT_Z};
-use crate::elements::null::NbtNull;
 use crate::formatter::PrettyFormatter;
 use crate::le_decoder::LittleEndianDecoder;
 use crate::tab::FileFormat;
@@ -301,7 +301,7 @@ impl NbtElement {
 impl NbtElement {
 	#[must_use]
 	#[allow(clippy::should_implement_trait)] // i can't, sorry :(
-	pub fn from_str(mut s: &str, sort: SortAlgorithm) -> Option<(Option<CompactString>, Self)> {
+	pub fn from_str(mut s: &str) -> Option<(Option<CompactString>, Self)> {
 		s = s.trim_start();
 
 		if s.is_empty() { return None }
@@ -312,20 +312,20 @@ impl NbtElement {
 				prefix
 			})
 		});
-		let (s, element) = Self::from_str0(s, sort).map(|(s, x)| (s.trim_start(), x))?;
+		let (s, element) = Self::from_str0(s).map(|(s, x)| (s.trim_start(), x))?;
 		if !s.is_empty() { return None }
 		Some((prefix, element))
 	}
 
 	#[allow(clippy::too_many_lines)]
-	pub(in crate::elements) fn from_str0(mut s: &str, sort: SortAlgorithm) -> Option<(&str, Self)> {
+	pub(in crate::elements) fn from_str0(mut s: &str) -> Option<(&str, Self)> {
 		if let Some(s2) = s.strip_prefix("false") { return Some((s2, Self::Byte(NbtByte { value: 0 }))) }
 		if let Some(s2) = s.strip_prefix("true") { return Some((s2, Self::Byte(NbtByte { value: 1 }))) }
-		if s.starts_with("[B;") { return NbtByteArray::from_str0(s, sort).map(|(s, x)| (s, Self::ByteArray(x))) }
-		if s.starts_with("[I;") { return NbtIntArray::from_str0(s, sort).map(|(s, x)| (s, Self::IntArray(x))) }
-		if s.starts_with("[L;") { return NbtLongArray::from_str0(s, sort).map(|(s, x)| (s, Self::LongArray(x))) }
-		if s.starts_with('[') { return NbtList::from_str0(s, sort).map(|(s, x)| (s, Self::List(x))) }
-		if s.starts_with('{') { return NbtCompound::from_str0(s, sort).map(|(s, x)| (s, Self::Compound(x))) }
+		if s.starts_with("[B;") { return NbtByteArray::from_str0(s).map(|(s, x)| (s, Self::ByteArray(x))) }
+		if s.starts_with("[I;") { return NbtIntArray::from_str0(s).map(|(s, x)| (s, Self::IntArray(x))) }
+		if s.starts_with("[L;") { return NbtLongArray::from_str0(s).map(|(s, x)| (s, Self::LongArray(x))) }
+		if s.starts_with('[') { return NbtList::from_str0(s).map(|(s, x)| (s, Self::List(x))) }
+		if s.starts_with('{') { return NbtCompound::from_str0(s).map(|(s, x)| (s, Self::Compound(x))) }
 		if s.starts_with('"') { return NbtString::from_str0(s).map(|(s, x)| (s, Self::String(x))) }
 
 		if let Some(s2) = s.strip_prefix("NaN") {
@@ -457,7 +457,7 @@ impl NbtElement {
 						return None;
 					};
 					s = s[digit_end_idx..].trim_start();
-					let (s, inner) = NbtCompound::from_str0(s, sort)?;
+					let (s, inner) = NbtCompound::from_str0(s)?;
 					(
 						s,
 						Self::Chunk(NbtChunk::from_compound(
@@ -601,8 +601,8 @@ impl NbtElement {
 
 	#[inline]
 	#[must_use]
-	pub fn from_be_file(bytes: &[u8], sort: SortAlgorithm) -> Option<Self> {
-		let mut decoder = BigEndianDecoder::new(bytes, sort);
+	pub fn from_be_file(bytes: &[u8]) -> Option<Self> {
+		let mut decoder = BigEndianDecoder::new(bytes);
 		decoder.assert_len(1)?;
 		unsafe {
 			if decoder.u8() != NbtCompound::ID { return None }
@@ -628,14 +628,14 @@ impl NbtElement {
 
 	#[inline]
 	#[must_use]
-	pub fn from_be_mca(bytes: &[u8], sort: SortAlgorithm) -> Option<Self> {
-		NbtRegion::from_be_bytes(bytes, sort).map(Self::Region)
+	pub fn from_be_mca(bytes: &[u8]) -> Option<Self> {
+		NbtRegion::from_be_bytes(bytes).map(Self::Region)
 	}
 
 	#[inline]
 	#[must_use]
-	pub fn from_le_file(bytes: &[u8], sort: SortAlgorithm) -> Option<(Self, bool)> {
-		let mut decoder = LittleEndianDecoder::new(bytes, sort);
+	pub fn from_le_file(bytes: &[u8]) -> Option<(Self, bool)> {
+		let mut decoder = LittleEndianDecoder::new(bytes);
 		unsafe {
 			decoder.assert_len(1)?;
 			let kind = decoder.u8();

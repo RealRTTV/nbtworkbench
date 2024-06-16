@@ -6,19 +6,19 @@ use std::ops::{Deref, DerefMut};
 #[cfg(not(target_arch = "wasm32"))]
 use std::thread::Scope;
 
-use compact_str::{format_compact, CompactString, ToCompactString};
+use compact_str::{CompactString, format_compact, ToCompactString};
 use zune_inflate::{DeflateDecoder, DeflateOptions};
 
-use crate::assets::{JUST_OVERLAPPING_BASE_TEXT_Z, BASE_Z, CHUNK_UV, CONNECTION_UV, HEADER_SIZE, LINE_NUMBER_CONNECTOR_Z, LINE_NUMBER_SEPARATOR_UV, REGION_UV, ZOffset};
+use crate::{DropFn, RenderContext, StrExt};
+use crate::assets::{BASE_Z, CHUNK_UV, CONNECTION_UV, HEADER_SIZE, JUST_OVERLAPPING_BASE_TEXT_Z, LINE_NUMBER_CONNECTOR_Z, LINE_NUMBER_SEPARATOR_UV, REGION_UV, ZOffset};
+use crate::color::TextColor;
 use crate::elements::compound::NbtCompound;
 use crate::elements::element::NbtElement;
 use crate::elements::list::{ValueIterator, ValueMutIterator};
 use crate::encoder::UncheckedBufWriter;
+use crate::formatter::PrettyFormatter;
 use crate::tab::FileFormat;
 use crate::vertex_buffer_builder::VertexBufferBuilder;
-use crate::{DropFn, RenderContext, SortAlgorithm, StrExt};
-use crate::color::TextColor;
-use crate::formatter::PrettyFormatter;
 
 #[repr(C)]
 pub struct NbtRegion {
@@ -92,8 +92,8 @@ impl NbtRegion {
 	pub fn new() -> Self { Self::default() }
 
 	#[must_use]
-	pub fn from_be_bytes(bytes: &[u8], sort: SortAlgorithm) -> Option<Self> {
-		fn parse(raw: u32, bytes: &[u8], sort: SortAlgorithm) -> Option<(FileFormat, Option<NbtCompound>)> {
+	pub fn from_be_bytes(bytes: &[u8]) -> Option<Self> {
+		fn parse(raw: u32, bytes: &[u8]) -> Option<(FileFormat, Option<NbtCompound>)> {
 			if raw < 512 { return Some((FileFormat::Zlib, None)) }
 
 			let len = (raw as usize & 0xFF) * 4096;
@@ -112,7 +112,6 @@ impl NbtRegion {
 							&DeflateDecoder::new_with_options(data, DeflateOptions::default().set_confirm_checksum(false))
 								.decode_gzip()
 								.ok()?,
-							sort,
 						)?,
 					),
 					2 => (
@@ -121,11 +120,10 @@ impl NbtRegion {
 							&DeflateDecoder::new_with_options(data, DeflateOptions::default().set_confirm_checksum(false))
 								.decode_zlib()
 								.ok()?,
-							sort,
 						)?,
 					),
-					3 => (FileFormat::Nbt, NbtElement::from_be_file(data, sort)?),
-					4 => (FileFormat::Lz4, NbtElement::from_be_file(&lz4_flex::decompress(data, data.len()).ok()?, sort)?),
+					3 => (FileFormat::Nbt, NbtElement::from_be_file(data)?),
+					4 => (FileFormat::Lz4, NbtElement::from_be_file(&lz4_flex::decompress(data, data.len()).ok()?)?),
 					_ => return None,
 				};
 				if let Some(element) = element.into_compound() {
@@ -152,7 +150,7 @@ impl NbtRegion {
 			{
 				let timestamp = u32::from_be_bytes(timestamp);
 				let offset = u32::from_be_bytes(offset);
-				threads.push((timestamp, s.spawn(move || parse(offset, bytes, sort))));
+				threads.push((timestamp, s.spawn(move || parse(offset, bytes))));
 			}
 
 			let mut pos = 0;
@@ -694,7 +692,7 @@ impl NbtRegion {
 	#[inline]
 	#[must_use]
 	pub const fn max_depth(&self) -> usize { self.max_depth as usize }
-	
+
 	#[inline]
 	#[must_use]
 	pub fn can_insert(&self, value: &NbtElement) -> bool {

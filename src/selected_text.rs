@@ -94,7 +94,7 @@ impl SelectedText {
 						((format!("{}{v}", if chunk { ", " } else { ": " }), TextColor::TreeKey), None)
 					}
 				} else {
-					((String::new(), TextColor::Default), None)
+					((String::new(), TextColor::White), None)
 				};
 
 				if mouse_x <= target_x {
@@ -104,7 +104,7 @@ impl SelectedText {
 							indices: indices.into_boxed_slice(),
 							value_color: key_color,
 							keyfix: None,
-							prefix: (String::new(), TextColor::Default),
+							prefix: (String::new(), TextColor::White),
 							suffix,
 							valuefix,
 						})),
@@ -127,7 +127,7 @@ impl SelectedText {
 							indices: indices.into_boxed_slice(),
 							value_color: key_color,
 							keyfix: None,
-							prefix: (String::new(), TextColor::Default),
+							prefix: (String::new(), TextColor::White),
 							suffix,
 							valuefix,
 						})),
@@ -150,7 +150,7 @@ impl SelectedText {
 							indices: indices.into_boxed_slice(),
 							value_color: key_color,
 							keyfix: None,
-							prefix: (String::new(), TextColor::Default),
+							prefix: (String::new(), TextColor::White),
 							suffix,
 							valuefix,
 						})),
@@ -176,7 +176,7 @@ impl SelectedText {
 						(None, (format!("{k}{}", if chunk { ", " } else { ": " }), TextColor::TreeKey))
 					}
 				} else {
-					(None, (String::new(), TextColor::Default))
+					(None, (String::new(), TextColor::White))
 				};
 
 				if mouse_x <= value_x {
@@ -186,7 +186,7 @@ impl SelectedText {
 						value_color: *value_color,
 						keyfix,
 						prefix,
-						suffix: (String::new(), TextColor::Default),
+						suffix: (String::new(), TextColor::White),
 						valuefix: None,
 					})),
 					);
@@ -211,7 +211,7 @@ impl SelectedText {
 						value_color: *value_color,
 						keyfix,
 						prefix,
-						suffix: (String::new(), TextColor::Default),
+						suffix: (String::new(), TextColor::White),
 						valuefix: None,
 					})),
 					);
@@ -219,13 +219,10 @@ impl SelectedText {
 
 				let value_width = value_width as isize;
 				let mut x = (mouse_x - value_x) as isize;
-				let mut cursor = 0;
 
-				for char in value.chars() {
-					let width = VertexBufferBuilder::CHAR_WIDTH[char as usize] as isize;
-					if x * 2 >= width {
-						// algebra, to understand, divide both sides by two
-						cursor += char.len_utf8();
+				for (cursor, char) in value.char_indices() {
+					let width = char.width() as isize;
+					if x >= width / 2 {
 						x -= width;
 					} else if x < value_width {
 						return Some(Self(Text::new(value.as_ref().to_owned(), cursor, true, SelectedTextAdditional {
@@ -234,10 +231,9 @@ impl SelectedText {
 							value_color: *value_color,
 							keyfix,
 							prefix,
-							suffix: (String::new(), TextColor::Default),
+							suffix: (String::new(), TextColor::White),
 							valuefix: None,
-						})),
-						);
+						})));
 					}
 				}
 			}
@@ -256,8 +252,8 @@ impl SelectedText {
 				indices: indices.into_boxed_slice(),
 				value_color: TextColor::TreeKey,
 				keyfix: key.map(|(x, color, _)| (x.into_string(), color)),
-				prefix: (String::new(), TextColor::Default),
-				suffix: (String::new(), TextColor::Default),
+				prefix: (String::new(), TextColor::White),
+				suffix: (String::new(), TextColor::White),
 				valuefix: value.map(|(x, color, _)| (x.into_string(), color)),
 			})),
 			)
@@ -340,7 +336,7 @@ impl SelectedText {
 #[inline]
 #[must_use]
 pub fn get_cursor_idx(str: &str, mut x: isize) -> usize {
-	for (i, char) in str.chars().enumerate() {
+	for (i, char) in str.char_indices() {
 		let width = char.width() as isize;
 		if x <= width / 2 {
 			return i

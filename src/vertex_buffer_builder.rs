@@ -3,7 +3,7 @@ use std::ops::BitAnd;
 
 use winit::dpi::PhysicalSize;
 
-use crate::assets::{BASE_TEXT_Z, BASE_Z, TOOLTIP_Z, TOOLTIP_UV, ZOffset};
+use crate::assets::{BASE_TEXT_Z, BASE_Z, TOOLTIP_UV, TOOLTIP_Z, ZOffset};
 use crate::color::TextColor;
 use crate::StrExt;
 
@@ -72,7 +72,7 @@ impl VertexBufferBuilder {
 			text_coords: (0, 0),
 			dropshadow: false,
 			text_z: BASE_TEXT_Z,
-			color: TextColor::Default.to_raw(),
+			color: TextColor::White.to_raw(),
 			two_over_width: 2.0 / size.width as f32,
 			negative_two_over_height: -2.0 / size.height as f32,
 			owned_tooltip: None,
@@ -137,10 +137,10 @@ impl VertexBufferBuilder {
 	}
 
 	#[inline]
-	pub fn draw_tooltip0(&mut self) -> Option<[f32; 12]> {
+	pub fn draw_tooltip0(&mut self) -> bool {
 		use core::fmt::Write;
 
-		let (text, pos, force_draw_right) = if let Some(tooltip) = self.owned_tooltip.take() { tooltip } else { return None };
+		let (text, pos, force_draw_right) = if let Some(tooltip) = self.owned_tooltip.take() { tooltip } else { return false };
 
 		let (mut x, y) = pos.into();
 		let y = y + 16;
@@ -206,36 +206,7 @@ impl VertexBufferBuilder {
 			(10, 10),
 		);
 
-		let x0 = (x as f32).mul_add(self.two_over_width, -1.0);
-		let x1 = self.two_over_width.mul_add((width + 6) as f32 * self.scale, x0);
-		let y1 = (y as f32).mul_add(self.negative_two_over_height, 1.0);
-		let y0 = self.negative_two_over_height.mul_add((height + 6) as f32 * self.scale, y1);
-
-		Some([
-			// 0
-			x1,
-			y1,
-
-			// 1
-			x0,
-			y1,
-
-			// 2
-			x0,
-			y0,
-
-			// 0
-			x1,
-			y1,
-
-			// 2
-			x0,
-			y0,
-
-			// 3
-			x1,
-			y0,
-		])
+		true
 	}
 
 	#[inline]

@@ -2,11 +2,11 @@ use std::fmt::Formatter;
 use std::fs::{File, read};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
-use compact_str::CompactString;
 
+use compact_str::CompactString;
 use glob::glob;
 
-use crate::{create_regex, error, log, SortAlgorithm, WindowProperties};
+use crate::{create_regex, error, log, WindowProperties};
 use crate::elements::element::NbtElement;
 use crate::search_box::{SearchBox, SearchPredicate, SearchPredicateInner};
 use crate::tab::FileFormat;
@@ -82,7 +82,7 @@ fn get_predicate(args: &mut Vec<String>) -> SearchPredicate {
             error!("Invalid regex, valid regexes look like: `/[0-9]+/g`");
             std::process::exit(1);
         },
-        Some("snbt") => if let Some((key, snbt)) = NbtElement::from_str(&query, SortAlgorithm::Name) {
+        Some("snbt") => if let Some((key, snbt)) = NbtElement::from_str(&query) {
             SearchPredicate {
                 search_flags,
                 inner: SearchPredicateInner::Snbt(key.map(CompactString::into_string), snbt),

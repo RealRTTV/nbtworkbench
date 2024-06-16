@@ -1,15 +1,16 @@
 use std::mem::MaybeUninit;
-use compact_str::{CompactString, ToCompactString};
 use std::path::PathBuf;
 
-use crate::assets::{ADD_TAIL_UV, ADD_UV, BULK_TAIL_UV, BULK_UV, MOVE_TAIL_UV, MOVE_UV, REMOVE_TAIL_UV, REMOVE_UV, RENAME_TAIL_UV, RENAME_UV, REORDER_TAIL_UV, REORDER_UV, REPLACE_TAIL_UV, REPLACE_UV};
-use crate::elements::element::NbtElement;
-use crate::vertex_buffer_builder::VertexBufferBuilder;
+use compact_str::{CompactString, ToCompactString};
+
 use crate::{encompasses, encompasses_or_equal, FileUpdateSubscription};
 use crate::{panic_unchecked, Position, sum_indices};
 use crate::{Navigate, OptionExt};
+use crate::assets::{ADD_TAIL_UV, ADD_UV, BULK_TAIL_UV, BULK_UV, MOVE_TAIL_UV, MOVE_UV, REMOVE_TAIL_UV, REMOVE_UV, RENAME_TAIL_UV, RENAME_UV, REORDER_TAIL_UV, REORDER_UV, REPLACE_TAIL_UV, REPLACE_UV};
 use crate::elements::compound::{CompoundMap, Entry};
+use crate::elements::element::NbtElement;
 use crate::marked_line::{MarkedLine, MarkedLines};
+use crate::vertex_buffer_builder::VertexBufferBuilder;
 
 pub enum WorkbenchAction {
 	Remove {

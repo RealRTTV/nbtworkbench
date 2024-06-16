@@ -37,18 +37,18 @@ use std::time::Duration;
 use compact_str::{CompactString, ToCompactString};
 use regex::{Regex, RegexBuilder};
 use static_assertions::const_assert_eq;
-#[cfg(target_arch = "wasm32")]
-use wasm_bindgen::prelude::wasm_bindgen;
 use winit::window::Window;
 
 use elements::element::NbtElement;
 use vertex_buffer_builder::VertexBufferBuilder;
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen::prelude::wasm_bindgen;
 
-use crate::assets::{BASE_TEXT_Z, BASE_Z, BOOKMARK_UV, BOOKMARK_Z, EDITED_LINE_Z, END_LINE_NUMBER_SEPARATOR_UV, HEADER_SIZE, HIDDEN_BOOKMARK_UV, HOVERED_WIDGET_UV, INSERTION_UV, INVALID_STRIPE_UV, LINE_NUMBER_SEPARATOR_UV, LINE_NUMBER_Z, SCROLLBAR_BOOKMARK_Z, SELECTED_TOGGLE_OFF_UV, SELECTED_TOGGLE_ON_UV, SORT_COMPOUND_BY_NAME, SORT_COMPOUND_BY_NOTHING, SORT_COMPOUND_BY_TYPE, TEXT_UNDERLINE_UV, TOGGLE_Z, UNSELECTED_TOGGLE_OFF_UV, UNSELECTED_TOGGLE_ON_UV, UNSELECTED_WIDGET_UV};
-use crate::marked_line::{MarkedLine, MarkedLineSlice};
+use crate::assets::{BASE_TEXT_Z, BASE_Z, BOOKMARK_UV, BOOKMARK_Z, END_LINE_NUMBER_SEPARATOR_UV, HEADER_SIZE, HIDDEN_BOOKMARK_UV, HOVERED_WIDGET_UV, INSERTION_UV, INVALID_STRIPE_UV, LINE_NUMBER_SEPARATOR_UV, LINE_NUMBER_Z, SCROLLBAR_BOOKMARK_Z, SELECTED_TOGGLE_OFF_UV, SELECTED_TOGGLE_ON_UV, SORT_COMPOUND_BY_NAME, SORT_COMPOUND_BY_NOTHING, SORT_COMPOUND_BY_TYPE, TEXT_UNDERLINE_UV, TOGGLE_Z, UNSELECTED_TOGGLE_OFF_UV, UNSELECTED_TOGGLE_ON_UV, UNSELECTED_WIDGET_UV};
 use crate::color::TextColor;
-use crate::elements::compound::{CompoundMap};
+use crate::elements::compound::CompoundMap;
 use crate::elements::element::{NbtByteArray, NbtIntArray, NbtLongArray};
+use crate::marked_line::{MarkedLine, MarkedLineSlice};
 use crate::tree_travel::Navigate;
 use crate::vertex_buffer_builder::Vec2u;
 use crate::workbench::Workbench;
@@ -60,7 +60,6 @@ mod marked_line;
 #[cfg(not(target_arch = "wasm32"))]
 mod cli;
 mod color;
-mod copy_shader;
 mod element_action;
 mod encoder;
 mod formatter;
@@ -71,12 +70,13 @@ mod shader;
 mod tab;
 mod text;
 mod text_shader;
-mod tooltip_effect_shader;
 mod tree_travel;
 mod vertex_buffer_builder;
 mod window;
 mod workbench;
 mod workbench_action;
+mod notification;
+mod config;
 
 #[macro_export]
 macro_rules! flags {
@@ -184,7 +184,7 @@ extern "C" {
 
 pub static mut WORKBENCH: UnsafeCell<Workbench> = UnsafeCell::new(unsafe { Workbench::uninit() });
 pub static mut WINDOW_PROPERTIES: UnsafeCell<WindowProperties> = UnsafeCell::new(WindowProperties::Fake);
-pub const DOUBLE_CLICK_INTERVAL: Duration = Duration::from_millis(500);
+pub const TEXT_DOUBLE_CLICK_INTERVAL: Duration = Duration::from_millis(250);
 pub const TAB_CLOSE_DOUBLE_CLICK_INTERVAL: Duration = Duration::from_millis(2000);
 
 #[cfg(target_arch = "wasm32")]
@@ -209,6 +209,7 @@ pub fn close() -> usize {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen(start))]
 #[cfg(target_arch = "wasm32")]
 pub fn wasm_main() {
+	config::read();
 	std::panic::set_hook(Box::new(|info| {
 		on_panic(info.to_string());
 	}));
@@ -220,16 +221,16 @@ pub fn wasm_main() {
 /// # Refactor
 /// * render trees using `RenderLine` struct/enum
 /// * rendering code is duplicated af
-/// # Long Term Goals
+/// # Long-Term Goals
 /// * smart screen
 /// * [chunk](elements::chunk::NbtChunk) section rendering
 /// # Minor Features
-/// * [`last_modified`](elements::chunk::NbtChunk) field actually gets some impl
+/// * [`last_modified`](elements::chunk::NbtChunk) field actually gets the ability to be set
 /// # Major Features
 /// * macros
-/// * keyboard-based element dropping (like vim stuff)
 #[cfg(not(target_arch = "wasm32"))]
 pub fn main() -> ! {
+	config::read();
 	#[cfg(target_os = "windows")] unsafe {
 		winapi::um::wincon::AttachConsole(winapi::um::wincon::ATTACH_PARENT_PROCESS);
 	}
@@ -366,7 +367,29 @@ pub fn since_epoch() -> Duration {
 #[must_use]
 #[cfg(target_arch = "wasm32")]
 pub fn since_epoch() -> Duration {
-	Duration::from_nanos((web_sys::js_sys::Date::now() * 1_000_000.0) as u64)
+	Duration::from_millis(web_sys::js_sys::Date::now() as u64)
+}
+
+pub fn split_lines<const MAX_WIDTH: usize>(s: String) -> Vec<String> {
+	let mut lines = Vec::new();
+	let mut current_line = String::new();
+	let mut is_previous_byte_ascii_whitespace = true;
+	for word in s.as_bytes().split_inclusive(|byte| {
+		let is_ascii_whitespace = byte.is_ascii_whitespace();
+		let is_previous_byte_ascii_whitespace = core::mem::replace(&mut is_previous_byte_ascii_whitespace, is_ascii_whitespace);
+		!is_previous_byte_ascii_whitespace && is_ascii_whitespace
+	}).filter(|slice| !slice.is_empty()).map(|slice| unsafe { std::str::from_utf8_unchecked(slice) }) {
+		if current_line.width() + word.width() > MAX_WIDTH {
+			lines.push(current_line.trim_ascii_end().to_string());
+		}
+		current_line += word;
+	}
+	let trimmed = current_line.trim_ascii_end();
+	if !trimmed.is_empty() {
+		lines.push(trimmed.to_string());
+	}
+	
+	lines
 }
 
 pub fn nth(n: usize) -> String {
@@ -520,6 +543,7 @@ pub fn either_encompass<T: Ord>(a: &[T], b: &[T]) -> bool {
 #[must_use]
 pub const fn is_utf8_char_boundary(x: u8) -> bool { (x as i8) >= -0x40 }
 
+// importantly, no underscores
 #[inline]
 #[must_use]
 pub fn is_jump_char_boundary(x: u8) -> bool { b" \t\r\n/\\()\"'-.,:;<>~!@#$%^&*|+=[]{}~?|".contains(&x) }
@@ -540,18 +564,6 @@ impl WindowProperties {
 			#[cfg(target_arch = "wasm32")]
 			if let Some(document) = web_sys::window().and_then(|window| window.document()) {
 				let _ = document.set_title(title);
-			}
-		}
-		self
-	}
-
-	#[cfg(target_arch = "wasm32")]
-	pub fn focus(&mut self) -> &mut Self {
-		use winit::platform::web::WindowExtWebSys;
-
-		if let WindowProperties::Real(window) = self {
-			if let Some(canvas) = window.canvas() {
-				let _ = canvas.focus();
 			}
 		}
 		self
@@ -673,7 +685,7 @@ pub struct RenderContext<'a> {
 	pub y_offset: usize,
 	// must be sorted least to greatest
 	line_numbers: Vec<usize>,
-	freehand: bool
+	freehand: bool,
 }
 
 impl<'a> RenderContext<'a> {
@@ -812,9 +824,7 @@ impl<'a> RenderContext<'a> {
 	}
 
 	#[inline]
-	pub fn render_line_numbers(&self, builder: &mut VertexBufferBuilder, mut bookmarks: &MarkedLineSlice, mut edited_lines: &MarkedLineSlice) {
-		const BOOKMARK_START_X: usize = 4;
-		
+	pub fn render_line_numbers(&self, builder: &mut VertexBufferBuilder, mut bookmarks: &MarkedLineSlice) {
 		let start = self.line_numbers.first();
 		while let Some((head, rest)) = bookmarks.split_first() {
 			if start.is_some_and(|&start| start > head.true_line_number()) {
@@ -855,10 +865,10 @@ impl<'a> RenderContext<'a> {
 			if let Some((first, rest)) = bookmarks.split_first() && render_line_number == first.true_line_number() {
 				bookmarks = rest;
 				builder.draw_texture_region_z(
-					(BOOKMARK_START_X, y + 2),
+					(1, y + 2),
 					BOOKMARK_Z,
 					first.uv(),
-					(builder.text_coords.0, 12),
+					(builder.text_coords.0 + 1, 12),
 					(16, 16),
 				);
 			}
@@ -867,38 +877,14 @@ impl<'a> RenderContext<'a> {
 				bookmarks = rest;
 				if hidden_bookmarks < 5 {
 					builder.draw_texture_region_z(
-						(BOOKMARK_START_X, y + 15),
+						(1, y + 15),
 						BOOKMARK_Z,
 						first.uv(),
-						(builder.text_coords.0, 2),
+						(builder.text_coords.0 + 1, 2),
 						(16, 16),
 					);
 				}
 				hidden_bookmarks += 1;
-			}
-			if let Some((first, rest)) = edited_lines.split_first() && render_line_number == first.true_line_number() {
-				edited_lines = rest;
-				builder.draw_texture_region_z(
-					(1, y + 2),
-					EDITED_LINE_Z,
-					first.uv(),
-					(2, 12),
-					(16, 16),
-				);
-			}
-			let mut hidden_edited_lines = 0_usize;
-			while let Some((first, rest)) = edited_lines.split_first() && next_line_number.is_none_or(|next_line_number| render_line_number <= first.true_line_number() && first.true_line_number() < next_line_number) {
-				edited_lines = rest;
-				if hidden_edited_lines < 5 {
-					builder.draw_texture_region_z(
-						(1, y + 15),
-						BOOKMARK_Z,
-						first.uv(),
-						(2, 2),
-						(16, 16),
-					);
-				}
-				hidden_edited_lines += 1;
 			}
 
 			let uv = if idx + 1 == self.line_numbers.len() {

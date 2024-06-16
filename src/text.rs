@@ -7,7 +7,7 @@ use winit::keyboard::KeyCode;
 use crate::{flags, get_clipboard, is_jump_char_boundary, is_utf8_char_boundary, LinkedQueue, OptionExt, set_clipboard, since_epoch, StrExt};
 use crate::assets::{SELECTION_UV, ZOffset};
 use crate::color::TextColor;
-use crate::text::KeyResult::{Failed, Finish, NothingSpecial, Escape};
+use crate::text::KeyResult::{Escape, Failed, Finish, NothingSpecial};
 use crate::vertex_buffer_builder::{Vec2u, VertexBufferBuilder};
 
 #[repr(u8)]
@@ -78,19 +78,27 @@ pub trait Cachelike<Additional: Clone>: PartialEq + Clone {
 pub fn get_cursor_left_jump_idx(mut cursor: usize, bytes: &[u8]) -> usize {
     if cursor > 0 {
         cursor -= 1;
+        if bytes[cursor].is_ascii_whitespace() {
+            while cursor > 0 {
+                let byte = bytes[cursor];
+                if byte.is_ascii_whitespace() {
+                    cursor -= 1;
+                } else {
+                    break;
+                }
+            }
+        }
+
         let last_byte = bytes[cursor];
-        let is_last_jump_char_boundary = is_jump_char_boundary(last_byte);
         while cursor > 0 {
             let byte = bytes[cursor];
-            if is_utf8_char_boundary(byte) && (!is_last_jump_char_boundary && is_jump_char_boundary(byte) || is_last_jump_char_boundary && byte != last_byte) {
-                // this is to fix "string   |" [CTRL + BACKSPACE] => "strin" instead of "string"
+            if is_jump_char_boundary(byte) != is_jump_char_boundary(last_byte) {
                 cursor += 1;
-                while !is_utf8_char_boundary(bytes[cursor]) {
-                    cursor += 1;
-                }
+                while cursor < bytes.len() && !is_utf8_char_boundary(bytes[cursor]) { cursor += 1; }
                 break;
             }
             cursor -= 1;
+            while !is_utf8_char_boundary(bytes[cursor]) { cursor -= 1; }
         }
     }
     cursor
@@ -98,20 +106,25 @@ pub fn get_cursor_left_jump_idx(mut cursor: usize, bytes: &[u8]) -> usize {
 
 pub fn get_cursor_right_jump_idx(mut cursor: usize, bytes: &[u8]) -> usize {
     if cursor < bytes.len() {
-        cursor += 1;
-        if cursor < bytes.len() {
-            let first_byte = bytes[cursor];
-            let is_first_jump_char_boundary = is_jump_char_boundary(first_byte);
+        if bytes[cursor].is_ascii_whitespace() {
             while cursor < bytes.len() {
                 let byte = bytes[cursor];
-                if is_utf8_char_boundary(byte) && (!is_first_jump_char_boundary && is_jump_char_boundary(byte) || is_first_jump_char_boundary && byte != first_byte) {
-                    while !is_utf8_char_boundary(bytes[cursor]) {
-                        cursor -= 1;
-                    }
+                if byte.is_ascii_whitespace() {
+                    cursor += 1;
+                } else {
                     break;
                 }
-                cursor += 1;
             }
+        }
+
+        let last_byte = bytes[cursor];
+        while cursor < bytes.len() {
+            let byte = bytes[cursor];
+            if is_jump_char_boundary(byte) != is_jump_char_boundary(last_byte) {
+                break;
+            }
+            cursor += 1;
+            while cursor < bytes.len() && !is_utf8_char_boundary(bytes[cursor]) { cursor += 1; }
         }
     }
     cursor
@@ -332,28 +345,10 @@ impl<Additional: Clone, Cache: Cachelike<Additional>> Text<Additional, Cache> {
             let (left, right) = self.value.split_at(self.cursor);
             if flags & flags!(Ctrl) > 0 {
                 if !left.is_empty() {
-                    let mut end = left.len() - 1;
-                    while end > 0 {
-                        if left.as_bytes()[end].is_ascii_whitespace() {
-                            end -= 1;
-                        } else {
-                            break;
-                        }
-                    }
-                    let last_byte = left.as_bytes()[end];
-                    let last_jump_char_boundary = is_jump_char_boundary(last_byte);
-                    while end > 0 {
-                        let byte = left.as_bytes()[end];
-                        if is_utf8_char_boundary(byte) && (!last_jump_char_boundary && is_jump_char_boundary(byte) || last_jump_char_boundary && byte != last_byte) {
-                            // this is to fix "string   |" [CTRL + BACKSPACE] => "strin" instead of "string"
-                            end += 1;
-                            break;
-                        }
-                        end -= 1;
-                    }
-                    let (left, _) = left.split_at(end);
+                    let new = get_cursor_left_jump_idx(self.cursor, self.value.as_bytes());
+                    let (left, _) = left.split_at(new);
                     self.value = format!("{left}{right}");
-                    self.cursor = end;
+                    self.cursor = new;
                 }
             } else {
                 if !left.is_empty() {
@@ -377,27 +372,10 @@ impl<Additional: Clone, Cache: Cachelike<Additional>> Text<Additional, Cache> {
             let (left, right) = self.value.split_at(self.cursor);
             if flags & flags!(Ctrl) > 0 {
                 if !right.is_empty() {
-                    let mut start = 1;
-                    while start < right.len() {
-                        if right.as_bytes()[start].is_ascii_whitespace() {
-                            start += 1;
-                        } else {
-                            break;
-                        }
-                    }
-                    let first_byte = right.as_bytes()[start];
-                    let first_jump_char_boundary = is_jump_char_boundary(first_byte);
-                    while start < right.len() {
-                        let byte = right.as_bytes()[start];
-                        if is_utf8_char_boundary(byte) && (!first_jump_char_boundary && is_jump_char_boundary(byte) || first_jump_char_boundary && byte != first_byte) {
-                            start -= 1;
-                            break;
-                        }
-                        start += 1;
-                    }
-                    let (_, right) = right.split_at(start);
-                    self.cursor = left.len();
+                    let new = get_cursor_right_jump_idx(self.cursor, self.value.as_bytes());
+                    let (_, right) = right.split_at(new);
                     self.value = format!("{left}{right}");
+                    self.cursor = new;
                 }
             } else {
                 if !right.is_empty() {

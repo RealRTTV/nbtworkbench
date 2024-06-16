@@ -1,19 +1,24 @@
 use std::fmt::Display;
 use std::ops::{Deref, DerefMut};
 use std::time::Duration;
+
 use compact_str::CompactString;
 use regex::Regex;
 use winit::event::MouseButton;
-
 use winit::keyboard::KeyCode;
-use crate::assets::{ADD_SEARCH_BOOKMARKS_UV, BASE_Z, BOOKMARK_UV, DARK_STRIPE_UV, HIDDEN_BOOKMARK_UV, HOVERED_WIDGET_UV, REGEX_SEARCH_MODE_UV, REMOVE_SEARCH_BOOKMARKS_UV, SEARCH_KEYS_UV, SEARCH_KEYS_AND_VALUES_UV, SEARCH_VALUES_UV, SNBT_SEARCH_MODE_UV, STRING_SEARCH_MODE_UV, UNSELECTED_WIDGET_UV, SEARCH_BOX_Z, SEARCH_BOX_SELECTION_Z};
+use winit::window::Theme;
 
+use crate::{combined_two_sorted, config, create_regex, flags, since_epoch, SortAlgorithm, StrExt};
+use crate::assets::{ADD_SEARCH_BOOKMARKS_UV, BASE_Z, BOOKMARK_UV, DARK_STRIPE_UV, HIDDEN_BOOKMARK_UV, HOVERED_WIDGET_UV, REGEX_SEARCH_MODE_UV, REMOVE_SEARCH_BOOKMARKS_UV, SEARCH_BOX_SELECTION_Z, SEARCH_BOX_Z, SEARCH_KEYS_AND_VALUES_UV, SEARCH_KEYS_UV, SEARCH_VALUES_UV, SNBT_SEARCH_MODE_UV, STRING_SEARCH_MODE_UV, UNSELECTED_WIDGET_UV};
 use crate::color::TextColor;
-use crate::{combined_two_sorted, create_regex, flags, since_epoch, SortAlgorithm, StrExt};
 use crate::elements::element::NbtElement;
+use crate::marked_line::{MarkedLine, MarkedLines};
+use crate::selected_text::get_cursor_idx;
 use crate::text::{Cachelike, SearchBoxKeyResult, Text};
 use crate::vertex_buffer_builder::{Vec2u, VertexBufferBuilder};
-use crate::marked_line::{MarkedLine, MarkedLines};
+
+pub const SEARCH_BOX_START_X: usize = 332;
+pub const SEARCH_BOX_END_X: usize = 215;
 
 pub struct SearchPredicate {
     pub search_flags: u8,
@@ -72,7 +77,12 @@ impl SearchMode {
         Some(match self {
             Self::String => SearchPredicate { inner: SearchPredicateInner::String(value), search_flags },
             Self::Regex => if let Some(regex) = create_regex(value) { SearchPredicate { inner: SearchPredicateInner::Regex(regex), search_flags } } else { return None },
-            Self::Snbt => if let Some((key, value)) = NbtElement::from_str(&value, SortAlgorithm::None) { SearchPredicate { inner: SearchPredicateInner::Snbt(key.map(CompactString::into_string), value), search_flags } } else { return None },
+            Self::Snbt => if let Some((key, value)) = {
+                let sort = config::set_sort_algorithm(SortAlgorithm::None);
+                let result = NbtElement::from_str(&value);
+                config::set_sort_algorithm(sort);
+                result
+            } { SearchPredicate { inner: SearchPredicateInner::Snbt(key.map(CompactString::into_string), value), search_flags } } else { return None },
         })
     }
 }
@@ -133,7 +143,7 @@ impl Cachelike<SearchBoxAdditional> for SearchBoxCache {
 #[derive(Clone)]
 pub struct SearchBoxAdditional {
     selected: bool,
-    horizontal_scroll: usize,
+    pub horizontal_scroll: usize,
     pub hits: Option<(usize, Duration)>,
     pub flags: u8,
     pub mode: SearchMode,
@@ -167,18 +177,18 @@ impl SearchBox {
     pub fn render(&self, builder: &mut VertexBufferBuilder, shift: bool, mouse: (usize, usize)) {
         use std::fmt::Write;
 
-        let pos = Vec2u::new(316, 23);
+        let pos = Vec2u::new(SEARCH_BOX_START_X, 23);
         let (mouse_x, mouse_y) = mouse;
 
         builder.draw_texture_region_z(
             pos,
             SEARCH_BOX_Z,
             DARK_STRIPE_UV,
-            (builder.window_width() - 215 - pos.x, 22),
+            (builder.window_width() - SEARCH_BOX_END_X - pos.x, 22),
             (16, 16),
         );
 
-        let hover = (pos.x..builder.window_width() - 215 - 17 - 16 - 16).contains(&mouse_x) && (23..46).contains(&mouse_y);
+        let hover = (pos.x..builder.window_width() - SEARCH_BOX_END_X - 17 - 16 - 16).contains(&mouse_x) && (23..46).contains(&mouse_y);
 
         builder.horizontal_scroll = self.horizontal_scroll;
 
@@ -191,57 +201,58 @@ impl SearchBox {
                 SearchMode::Snbt => r#"{dialog: "search", ...}"#,
             });
         }
+        let color = match config::get_theme() { Theme::Light => TextColor::Black, Theme::Dark => TextColor::White };
         if self.is_selected() {
-            self.0.render(builder, TextColor::Default, pos + (0, 3), SEARCH_BOX_Z, SEARCH_BOX_SELECTION_Z);
+            self.0.render(builder, color, pos + (0, 3), SEARCH_BOX_Z, SEARCH_BOX_SELECTION_Z);
         } else {
             builder.settings(pos + (0, 3), false, SEARCH_BOX_Z);
-            builder.color = TextColor::Default.to_raw();
+            builder.color = color.to_raw();
             let _ = write!(builder, "{}", self.value);
         }
 
         if let Some((hits, stat)) = self.hits && (self.is_selected() || hover) {
-            builder.draw_tooltip(&[&format!("{hits} hit{s} for \"{arg}\" ({ms}ms)", s = if hits == 1 { "" } else { "s" }, arg = self.value, ms = stat.as_millis())], if !self.is_selected() && hover { mouse } else { (316, 30) }, true);
+            builder.draw_tooltip(&[&format!("{hits} hit{s} for \"{arg}\" ({ms}ms)", s = if hits == 1 { "" } else { "s" }, arg = self.value, ms = stat.as_millis())], if !self.is_selected() && hover { mouse } else { (SEARCH_BOX_START_X, 30) }, true);
         }
 
         builder.horizontal_scroll = 0;
 
         {
             let bookmark_uv = if shift { REMOVE_SEARCH_BOOKMARKS_UV } else { ADD_SEARCH_BOOKMARKS_UV };
-            let widget_uv = if (builder.window_width() - 215 - 17 - 16 - 16..builder.window_width() - 215 - 1 - 16 - 16).contains(&mouse_x) && (26..42).contains(&mouse_y) {
+            let widget_uv = if (builder.window_width() - SEARCH_BOX_END_X - 17 - 16 - 16..builder.window_width() - SEARCH_BOX_END_X - 1 - 16 - 16).contains(&mouse_x) && (26..42).contains(&mouse_y) {
                 builder.draw_tooltip(&[if shift { "Remove all bookmarks (Shift + Enter)" } else { "Add search bookmarks (Enter)" }], mouse, false);
                 HOVERED_WIDGET_UV
             } else {
                 UNSELECTED_WIDGET_UV
             };
 
-            builder.draw_texture_z((builder.window_width() - 215 - 17 - 16 - 16, 26), BASE_Z, widget_uv, (16, 16));
-            builder.draw_texture_z((builder.window_width() - 215 - 17 - 16 - 16, 26), BASE_Z, bookmark_uv, (16, 16));
+            builder.draw_texture_z((builder.window_width() - SEARCH_BOX_END_X - 17 - 16 - 16, 26), BASE_Z, widget_uv, (16, 16));
+            builder.draw_texture_z((builder.window_width() - SEARCH_BOX_END_X - 17 - 16 - 16, 26), BASE_Z, bookmark_uv, (16, 16));
         }
 
         {
             let search_uv = match self.flags { 0b01 => SEARCH_VALUES_UV, 0b10 => SEARCH_KEYS_UV, _ => SEARCH_KEYS_AND_VALUES_UV };
-            let widget_uv = if (builder.window_width() - 215 - 17 - 16..builder.window_width() - 215 - 1 - 16).contains(&mouse_x) && (26..42).contains(&mouse_y) {
+            let widget_uv = if (builder.window_width() - SEARCH_BOX_END_X - 17 - 16..builder.window_width() - SEARCH_BOX_END_X - 1 - 16).contains(&mouse_x) && (26..42).contains(&mouse_y) {
                 builder.draw_tooltip(&[match self.flags { 0b01 => "Values only", 0b10 => "Keys only", _ => "Keys + Values" }], mouse, false);
                 HOVERED_WIDGET_UV
             } else {
                 UNSELECTED_WIDGET_UV
             };
 
-            builder.draw_texture_z((builder.window_width() - 215 - 17 - 16, 26), BASE_Z, widget_uv, (16, 16));
-            builder.draw_texture_z((builder.window_width() - 215 - 17 - 16, 26), BASE_Z, search_uv, (16, 16));
+            builder.draw_texture_z((builder.window_width() - SEARCH_BOX_END_X - 17 - 16, 26), BASE_Z, widget_uv, (16, 16));
+            builder.draw_texture_z((builder.window_width() - SEARCH_BOX_END_X - 17 - 16, 26), BASE_Z, search_uv, (16, 16));
         }
 
         {
             let mode_uv = self.mode.uv();
-            let widget_uv = if (builder.window_width() - 215 - 17..builder.window_width() - 215 - 1).contains(&mouse_x) && (26..42).contains(&mouse_y) {
+            let widget_uv = if (builder.window_width() - SEARCH_BOX_END_X - 17..builder.window_width() - SEARCH_BOX_END_X - 1).contains(&mouse_x) && (26..42).contains(&mouse_y) {
                 builder.draw_tooltip(&[&format!("{mode} Mode", mode = self.mode)], mouse, false);
                 HOVERED_WIDGET_UV
             } else {
                 UNSELECTED_WIDGET_UV
             };
 
-            builder.draw_texture_z((builder.window_width() - 215 - 17, 26), BASE_Z, widget_uv, (16, 16));
-            builder.draw_texture_z((builder.window_width() - 215 - 17, 26), BASE_Z, mode_uv, (16, 16));
+            builder.draw_texture_z((builder.window_width() - SEARCH_BOX_END_X - 17, 26), BASE_Z, widget_uv, (16, 16));
+            builder.draw_texture_z((builder.window_width() - SEARCH_BOX_END_X - 17, 26), BASE_Z, mode_uv, (16, 16));
         }
     }
 
@@ -262,18 +273,8 @@ impl SearchBox {
             self.horizontal_scroll = 0;
             self.0.post_input();
         } else {
-            let x = x + self.horizontal_scroll;
-            self.cursor = 'a: {
-                let mut current_x = 0;
-                for (idx, char) in self.value.char_indices() {
-                    let width = if (x as u32) < 56832 { VertexBufferBuilder::CHAR_WIDTH[char as usize] as usize } else { 0 };
-                    if current_x + width / 2 >= x {
-                        break 'a idx;
-                    }
-                    current_x += width;
-                }
-                self.value.len()
-            };
+            self.cursor = get_cursor_idx(&self.value, (x + self.horizontal_scroll) as isize);
+            self.selection = None;
         }
         self.selected = true;
         self.interact();
@@ -353,7 +354,7 @@ impl SearchBox {
     pub fn post_input(&mut self, window_dims: (usize, usize)) {
         let (window_width, _) = window_dims;
         self.0.post_input();
-        let field_width = window_width - 215 - 316 - 17 - 16 - 16;
+        let field_width = window_width - SEARCH_BOX_END_X - SEARCH_BOX_START_X - 17 - 16 - 16;
         let precursor_width = self.value.split_at(self.cursor).0.width();
         // 8px space just to look cleaner
         let horizontal_scroll = (precursor_width + 8).saturating_sub(field_width);

@@ -1,8 +1,9 @@
-use compact_str::{CompactString, ToCompactString};
 use std::iter::Peekable;
 
+use compact_str::{CompactString, ToCompactString};
+
+use crate::{OptionExt, panic_unchecked, Position};
 use crate::elements::element::{NbtByteArray, NbtElement, NbtIntArray, NbtLongArray, NbtPatternMut};
-use crate::{panic_unchecked, OptionExt, Position};
 
 /// Navigates a tree from the given route of an indices list, will cause UB on invalid lists. Typically used for operations which are saved and not direct clicking interaction.
 #[must_use]

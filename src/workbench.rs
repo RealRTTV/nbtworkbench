@@ -6,18 +6,19 @@ use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
 use compact_str::{CompactString, format_compact, ToCompactString};
+use enum_map::{enum_map, EnumMap};
 use fxhash::{FxBuildHasher, FxHashSet};
 use uuid::Uuid;
 use winit::dpi::PhysicalPosition;
 use winit::event::{ElementState, KeyEvent, MouseButton, MouseScrollDelta};
 use winit::keyboard::{KeyCode, PhysicalKey};
+use winit::window::Theme;
 
-use crate::{MarkedLine, DOUBLE_CLICK_INTERVAL, DropFn, encompasses, encompasses_or_equal, FileUpdateSubscription, FileUpdateSubscriptionType, flags, get_clipboard, HeldEntry, LinkedQueue, OptionExt, panic_unchecked, Position, recache_along_indices, RenderContext, set_clipboard, since_epoch, SortAlgorithm, StrExt, sum_indices, tab, TAB_CLOSE_DOUBLE_CLICK_INTERVAL, tab_mut, WindowProperties};
+use crate::{config, DropFn, encompasses, encompasses_or_equal, FileUpdateSubscription, FileUpdateSubscriptionType, flags, get_clipboard, HeldEntry, LinkedQueue, MarkedLine, OptionExt, panic_unchecked, Position, recache_along_indices, RenderContext, set_clipboard, since_epoch, SortAlgorithm, StrExt, sum_indices, tab, TAB_CLOSE_DOUBLE_CLICK_INTERVAL, tab_mut, TEXT_DOUBLE_CLICK_INTERVAL, WindowProperties};
 use crate::alert::Alert;
-use crate::assets::{ACTION_WHEEL_Z, BACKDROP_UV, BASE_TEXT_Z, BASE_Z, BOOKMARK_UV, CLOSED_WIDGET_UV, DARK_STRIPE_UV, SAVE_UV, HEADER_SIZE, HELD_ENTRY_Z, HIDDEN_BOOKMARK_UV, HORIZONTAL_SEPARATOR_UV, HOVERED_STRIPE_UV, HOVERED_WIDGET_UV, JUST_OVERLAPPING_BASE_TEXT_Z, LIGHT_STRIPE_UV, LINE_NUMBER_SEPARATOR_UV, NEW_FILE_UV, OPEN_FOLDER_UV, SELECTED_ACTION_WHEEL, SELECTED_WIDGET_UV, SELECTION_UV, TRAY_UV, JUST_UNDERLAPPING_BASE_Z, SAVE_GRAYSCALE_UV, UNSELECTED_ACTION_WHEEL, UNSELECTED_WIDGET_UV};
-use crate::marked_line::MarkedLines;
-use crate::color::TextColor;
+use crate::assets::{ACTION_WHEEL_Z, BACKDROP_UV, BASE_TEXT_Z, BASE_Z, BOOKMARK_UV, CLOSED_WIDGET_UV, DARK_STRIPE_UV, HEADER_SIZE, HELD_ENTRY_Z, HIDDEN_BOOKMARK_UV, HORIZONTAL_SEPARATOR_UV, HOVERED_STRIPE_UV, HOVERED_WIDGET_UV, JUST_OVERLAPPING_BASE_TEXT_Z, JUST_UNDERLAPPING_BASE_Z, LIGHT_STRIPE_UV, LINE_NUMBER_SEPARATOR_UV, NEW_FILE_UV, OPEN_FOLDER_UV, SAVE_GRAYSCALE_UV, SAVE_UV, SELECTED_ACTION_WHEEL, SELECTED_WIDGET_UV, SELECTION_UV, TRAY_UV, UNSELECTED_ACTION_WHEEL, UNSELECTED_WIDGET_UV};
 use crate::be_decoder::BigEndianDecoder;
+use crate::color::TextColor;
 use crate::elements::chunk::{NbtChunk, NbtRegion};
 use crate::elements::compound::NbtCompound;
 use crate::elements::element::{id_to_string_name, NbtByte, NbtByteArray, NbtDouble, NbtFloat, NbtInt, NbtIntArray, NbtLong, NbtLongArray, NbtShort};
@@ -25,10 +26,12 @@ use crate::elements::element::NbtElement;
 use crate::elements::list::{NbtList, ValueIterator};
 use crate::elements::string::NbtString;
 use crate::encoder::UncheckedBufWriter;
-use crate::search_box::SearchBox;
+use crate::marked_line::MarkedLines;
+use crate::notification::{Notification, NotificationKind};
+use crate::search_box::{SEARCH_BOX_END_X, SEARCH_BOX_START_X, SearchBox};
 use crate::selected_text::{get_cursor_idx, SelectedText, SelectedTextAdditional};
 use crate::tab::{FileFormat, Tab};
-use crate::text::{SearchBoxKeyResult, SelectedTextKeyResult, Text};
+use crate::text::{get_cursor_left_jump_idx, get_cursor_right_jump_idx, SearchBoxKeyResult, SelectedTextKeyResult, Text};
 use crate::tree_travel::{Navigate, Traverse, TraverseParents};
 use crate::vertex_buffer_builder::Vec2u;
 use crate::vertex_buffer_builder::VertexBufferBuilder;
@@ -57,10 +60,12 @@ pub struct Workbench {
 	subscription: Option<FileUpdateSubscription>,
 	pub cursor_visible: bool,
 	alerts: Vec<Alert>,
+	notifications: EnumMap<NotificationKind, Option<Notification>>,
 	pub scale: usize,
 	steal_animation_data: Option<(Duration, Vec2u)>,
-	sort_algorithm: SortAlgorithm,
 	search_box: SearchBox,
+	last_search_box_interaction: (usize, Duration),
+	ignore_event_end: Duration,
 }
 
 impl Workbench {
@@ -89,10 +94,12 @@ impl Workbench {
 			subscription: None,
 			cursor_visible: false,
 			alerts: vec![],
+			notifications: EnumMap::from_array([None]),
 			scale: 0,
 			steal_animation_data: None,
-			sort_algorithm: SortAlgorithm::None,
 			search_box: SearchBox::uninit(),
+			last_search_box_interaction: (0, Duration::ZERO),
+			ignore_event_end: Duration::ZERO
 		}
 	}
 
@@ -121,10 +128,12 @@ impl Workbench {
 			subscription: None,
 			cursor_visible: true,
 			alerts: vec![],
+			notifications: enum_map! { NotificationKind::Scale => None, },
 			scale: 1,
 			steal_animation_data: None,
-			sort_algorithm: SortAlgorithm::Type,
 			search_box: SearchBox::new(),
+			last_search_box_interaction: (0, Duration::ZERO),
+			ignore_event_end: Duration::ZERO,
 		};
 		'create_tab: {
 			if let Some(path) = &std::env::args()
@@ -139,7 +148,12 @@ impl Workbench {
 			}
 			workbench.new_custom_tab(window_properties, Tab {
 				#[cfg(debug_assertions)]
-				value: Box::new(NbtElement::from_be_file(include_bytes!("assets/test.nbt"), SortAlgorithm::None).expect("Included debug nbt contains valid data")),
+				value: Box::new({
+					let sort = config::set_sort_algorithm(SortAlgorithm::None);
+					let result = NbtElement::from_be_file(include_bytes!("assets/test.nbt"));
+					config::set_sort_algorithm(sort);
+					result.expect("Included debug nbt contains valid data")
+				}),
 				#[cfg(debug_assertions)]
 				name: "test.nbt".into(),
 				#[cfg(not(debug_assertions))]
@@ -156,7 +170,6 @@ impl Workbench {
 				window_height: WINDOW_HEIGHT,
 				window_width: WINDOW_WIDTH,
 				bookmarks: MarkedLines::new(),
-				edited_lines: MarkedLines::new(),
 				uuid: Uuid::new_v4(),
 				freehand_mode: false,
 				selected_text: None,
@@ -172,9 +185,17 @@ impl Workbench {
 	pub fn alert(&mut self, alert: Alert) { self.alerts.insert(0, alert); }
 
 	#[inline]
+	pub fn notify(&mut self, kind: NotificationKind, message: impl Into<String>, color: TextColor) {
+		match self.notifications[kind].as_mut() {
+			Some(notification) => notification.update(message, color),
+			None => self.notifications[kind] = Some(Notification::new(message, color)),
+		}
+	}
+
+	#[inline]
 	#[allow(clippy::equatable_if_let)]
 	pub fn on_open_file(&mut self, path: &Path, buf: Vec<u8>, window_properties: &mut WindowProperties) -> Result<()> {
-		let (nbt, format) = Tab::parse_raw(path, buf, self.sort_algorithm)?;
+		let (nbt, format) = Tab::parse_raw(path, buf)?;
 		let mut tab = Tab::new(nbt, path, format, self.window_height, self.window_width)?;
 		if !tab.close_selected_text(false, window_properties) {
 			tab.selected_text = None;
@@ -253,18 +274,18 @@ impl Workbench {
 				if let MouseButton::Left | MouseButton::Right = button {
 					let shift = (self.held_keys.contains(&KeyCode::ShiftLeft) || self.held_keys.contains(&KeyCode::ShiftRight)) ^ (button == MouseButton::Right);
 
-					if (self.window_width - 215 - 17 - 16 - 16..self.window_width - 215 - 1 - 16 - 16).contains(&self.mouse_x) & &(26..42).contains(&self.mouse_y) {
+					if (self.window_width - SEARCH_BOX_END_X - 17 - 16 - 16..self.window_width - SEARCH_BOX_END_X - 1 - 16 - 16).contains(&self.mouse_x) & &(26..42).contains(&self.mouse_y) {
 						let tab = tab_mut!( self );
 						self.search_box.on_bookmark_widget(shift, &mut tab.bookmarks, &mut tab.value);
 						return true;
 					}
 
-					if (self.window_width - 215 - 17 - 16..self.window_width - 215 - 1 - 16).contains(&self.mouse_x) & &(26..42).contains(&self.mouse_y) {
+					if (self.window_width - SEARCH_BOX_END_X - 17 - 16..self.window_width - SEARCH_BOX_END_X - 1 - 16).contains(&self.mouse_x) & &(26..42).contains(&self.mouse_y) {
 						self.search_box.on_search_widget(shift);
 						return true;
 					}
 
-					if (self.window_width - 215 - 17..self.window_width - 215 - 1).contains(&self.mouse_x) & &(26..42).contains(&self.mouse_y) {
+					if (self.window_width - SEARCH_BOX_END_X - 17..self.window_width - SEARCH_BOX_END_X - 1).contains(&self.mouse_x) & &(26..42).contains(&self.mouse_y) {
 						self.search_box.on_mode_widget(shift);
 						return true;
 					}
@@ -277,7 +298,7 @@ impl Workbench {
 				} else if y < 42 && y > 26 && x < 32 {
 					self.new_tab(window_properties, shift);
 				} else if y < 42 && y > 26 && x >= 296 && x < 312 {
-					if let Err(e) = tab_mut!(self).refresh(self.sort_algorithm) {
+					if let Err(e) = tab_mut!(self).refresh() {
 						self.alert(Alert::new("Error!", TextColor::Red, e.to_string()))
 					}
 				}
@@ -359,7 +380,12 @@ impl Workbench {
 								break 'a;
 							}
 							if (280..296).contains(&x) && (26..42).contains(&y) {
-								self.sort_algorithm = if (button == MouseButton::Right) ^ shift { self.sort_algorithm.rev_cycle() } else { self.sort_algorithm.cycle() };
+								let sort_algorithm = config::get_sort_algorithm();
+								config::set_sort_algorithm(if (button == MouseButton::Right) ^ shift { sort_algorithm.rev_cycle() } else { sort_algorithm.cycle() });
+								break 'a;
+							}
+							if (312..328).contains(&x) && (26..42).contains(&y) {
+								config::set_theme(match config::get_theme() { Theme::Light => Theme::Dark, Theme::Dark => Theme::Light });
 								break 'a;
 							}
 						}
@@ -458,7 +484,12 @@ impl Workbench {
 		fn write_snbt(subscription: &FileUpdateSubscription, data: &[u8], tab: &mut Tab) -> Result<()> {
 			let Some((key, value)) = core::str::from_utf8(data)
 				.ok()
-				.and_then(|s| NbtElement::from_str(s, SortAlgorithm::None))
+				.and_then(|s| {
+					let sort = config::set_sort_algorithm(SortAlgorithm::None);
+					let result = NbtElement::from_str(s);
+					config::set_sort_algorithm(sort);
+					result
+				})
 				else {
 					return Err(anyhow!("SNBT failed to parse."));
 				};
@@ -662,7 +693,7 @@ impl Workbench {
 							};
 							buf.write(&data);
 							let buf = buf.finish();
-							let mut decoder = BigEndianDecoder::new(&buf, SortAlgorithm::None);
+							let mut decoder = BigEndianDecoder::new(&buf);
 							NbtElement::from_be_bytes(id, &mut decoder).context("Could not read bytes for array")?
 						})?,
 					},
@@ -1038,7 +1069,7 @@ impl Workbench {
 			let tab = tab!(self);
 			let x = self.mouse_x - (16 + 16 + 4);
 			if x / 16 == 13 {
-				match NbtElement::from_str(&get_clipboard().ok_or_else(|| anyhow!("Failed to get clipboard"))?, self.sort_algorithm) {
+				match NbtElement::from_str(&get_clipboard().ok_or_else(|| anyhow!("Failed to get clipboard"))?) {
 					Some((key, element)) => {
 						if element.id() == NbtChunk::ID && tab.value.id() != NbtRegion::ID {
 							return Err(anyhow!("Chunks are not supported for non-region tabs"));
@@ -1131,7 +1162,6 @@ impl Workbench {
 			window_height: self.window_height,
 			window_width: self.window_width,
 			bookmarks: MarkedLines::new(),
-			edited_lines: MarkedLines::new(),
 			uuid: Uuid::new_v4(),
 			freehand_mode: false,
 			selected_text: None,
@@ -1143,7 +1173,6 @@ impl Workbench {
 
 	#[inline]
 	pub fn new_custom_tab(&mut self, window_properties: &mut WindowProperties, tab: Tab) {
-		// let _ = tab.edited_lines.add(MarkedLine::with_uv(1, 1, EDITED_LINE_UV));
 		self.tabs.push(tab);
 		self.set_tab(self.tabs.len() - 1, window_properties);
 	}
@@ -1176,7 +1205,9 @@ impl Workbench {
 	#[inline]
 	#[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
 	fn open_file(&mut self, window_properties: &mut WindowProperties) {
-		match Tab::FILE_TYPE_FILTERS.iter().fold(native_dialog::FileDialog::new().set_location("~/Downloads"), |builder, filter| builder.add_filter(filter.0, filter.1)).show_open_single_file() {
+		let dialog_result = Tab::FILE_TYPE_FILTERS.iter().fold(native_dialog::FileDialog::new().set_location("~/Downloads"), |builder, filter| builder.add_filter(filter.0, filter.1)).show_open_single_file();
+		self.ignore_event_end = since_epoch() + Duration::from_millis(50);
+		match dialog_result {
 			Err(e) => self.alert(Alert::new("Error!", TextColor::Red, e.to_string())),
 			Ok(None) => {},
 			Ok(Some(path)) => match std::fs::read(&path) {
@@ -1297,8 +1328,27 @@ impl Workbench {
 
 	#[inline]
 	fn try_select_search_box(&mut self, button: MouseButton) -> bool {
-		if (316..self.window_width - 215 - 17 - 16 - 16).contains(&self.mouse_x) && (23..45).contains(&self.mouse_y) {
-			self.search_box.select(self.mouse_x - 316, button);
+		if (SEARCH_BOX_START_X..self.window_width - SEARCH_BOX_END_X - 17 - 16 - 16).contains(&self.mouse_x) && (23..45).contains(&self.mouse_y) {
+			self.search_box.select(self.mouse_x - SEARCH_BOX_START_X, button);
+
+			let now = since_epoch();
+			let (times_clicked, timestamp) = self.last_search_box_interaction;
+			if now - timestamp < TEXT_DOUBLE_CLICK_INTERVAL && !self.search_box.value.is_empty() {
+				self.last_search_box_interaction = (times_clicked + 1, now);
+				// the previous click count was divisible by 1
+				let (left, right) = if times_clicked % 2 == 1 {
+					(0, self.search_box.value.len())
+				} else {
+					(get_cursor_left_jump_idx(self.search_box.cursor, self.search_box.value.as_bytes()), get_cursor_right_jump_idx(self.search_box.cursor, self.search_box.value.as_bytes()))
+				};
+				// if they're == it's also false, just being careful here
+				if right > left {
+					self.search_box.selection = Some(left);
+				}
+				self.search_box.cursor = right;
+			} else {
+				self.last_search_box_interaction = (0, now);
+			}
 			true
 		} else {
 			false
@@ -1375,7 +1425,7 @@ impl Workbench {
 				indices,
 				value_color: keyfix_color,
 				keyfix: None,
-				prefix: (String::new(), TextColor::Default),
+				prefix: (String::new(), TextColor::White),
 				suffix: prefix,
 				valuefix: Some((value, value_color)),
 			}))));
@@ -1399,7 +1449,7 @@ impl Workbench {
 				value_color: valuefix_color,
 				keyfix: Some((value, value_color)),
 				prefix: suffix,
-				suffix: (String::new(), TextColor::Default),
+				suffix: (String::new(), TextColor::White),
 				valuefix: None,
 			}))));
 		}
@@ -2050,13 +2100,17 @@ impl Workbench {
 					}
 				}
 				if key == KeyCode::KeyR && flags == flags!(Ctrl) {
-					if let Err(e) = tab.refresh(self.sort_algorithm) {
+					if let Err(e) = tab.refresh() {
 						self.alert(Alert::new("Error!", TextColor::Red, e.to_string()))
 					}
 					return true;
 				}
 				if key == KeyCode::KeyF && flags == flags!(Ctrl + Shift) {
 					tab.freehand_mode = !tab.freehand_mode;
+					return true;
+				}
+				if key == KeyCode::KeyT && flags == flags!(Ctrl + Alt) {
+					config::set_theme(match config::get_theme() { Theme::Light => Theme::Dark, Theme::Dark => Theme::Light });
 					return true;
 				}
 				if key == KeyCode::KeyN && flags & (!flags!(Shift)) == flags!(Ctrl) {
@@ -2165,7 +2219,7 @@ impl Workbench {
 							self.alert(Alert::new("Error!", TextColor::Red, "Failed to get clipboard"));
 							return true;
 						};
-						if let Some((key, value)) = NbtElement::from_str(&clipboard, self.sort_algorithm) {
+						if let Some((key, value)) = NbtElement::from_str(&clipboard) {
 							(key, value)
 						} else {
 							self.alert(Alert::new("Error!", TextColor::Red, "Could not parse clipboard as SNBT"));
@@ -2222,10 +2276,19 @@ impl Workbench {
 		let tab = tab_mut!(self);
 		if self.last_mouse_state == ElementState::Pressed {
 			if let Some(selected_text) = tab.selected_text.as_mut() && tab.last_selected_text_interaction.1 == 0 {
+				let cursor = selected_text.selection.unwrap_or(selected_text.cursor);
 				let selection = get_cursor_idx(&selected_text.value, (self.mouse_x + horizontal_scroll) as isize - (selected_text.indices.len() * 16 + 32 + 4 + left_margin) as isize);
-				if selection != selected_text.cursor {
-					selected_text.selection = Some(selection)
-				}
+				selected_text.cursor = selection;
+				selected_text.selection = Some(cursor).filter(|cursor| *cursor != selected_text.cursor);
+				selected_text.interact();
+			}
+
+			if self.search_box.is_selected() && self.last_search_box_interaction.0 == 0 {
+				let cursor = self.search_box.selection.unwrap_or(self.search_box.cursor);
+				let selection = get_cursor_idx(&self.search_box.value, (self.mouse_x.saturating_sub(SEARCH_BOX_START_X) + self.search_box.horizontal_scroll) as isize);
+				self.search_box.cursor = selection;
+				self.search_box.selection = Some(cursor).filter(|cursor| *cursor != self.search_box.cursor);
+				self.search_box.interact();
 			}
 		}
 	}
@@ -2242,8 +2305,9 @@ impl Workbench {
 	}
 
 	#[inline]
-	fn set_scale(&mut self, scale: usize) {
-		let scale = scale.min(usize::min(self.raw_window_width / MIN_WINDOW_WIDTH, self.raw_window_height / MIN_WINDOW_HEIGHT)).max(1);
+	pub fn set_scale(&mut self, scale: usize) {
+		let max_scale = usize::min(self.raw_window_width / MIN_WINDOW_WIDTH, self.raw_window_height / MIN_WINDOW_HEIGHT);
+		let scale = scale.min(max_scale).max(1);
 
 		self.scale = scale;
 		self.mouse_x = (self.raw_mouse_x / self.scale as f64) as usize;
@@ -2254,6 +2318,8 @@ impl Workbench {
 			tab.window_width = self.window_width;
 			tab.window_height = self.window_height;
 		}
+
+		self.notify(NotificationKind::Scale, format!("Scale: {scale}x (Max {max_scale})"), TextColor::White)
 	}
 
 	#[inline]
@@ -2282,7 +2348,7 @@ impl Workbench {
 
 		{
 			builder.draw_texture_region_z(
-				(313, 22),
+				(SEARCH_BOX_START_X - 3, 22),
 				BASE_Z,
 				LINE_NUMBER_SEPARATOR_UV,
 				(2, 23),
@@ -2295,15 +2361,15 @@ impl Workbench {
 			(0, 23),
 			JUST_UNDERLAPPING_BASE_Z,
 			BACKDROP_UV,
-			(283, 22),
+			(SEARCH_BOX_START_X - 1, 22),
 			(16, 16),
 		);
 
 		builder.draw_texture_region_z(
-			(self.window_width - 215, 23),
+			(self.window_width - SEARCH_BOX_END_X, 23),
 			JUST_UNDERLAPPING_BASE_Z,
 			BACKDROP_UV,
-			(215, 22),
+			(SEARCH_BOX_END_X, 22),
 			(16, 16),
 		);
 
@@ -2395,7 +2461,7 @@ impl Workbench {
 			self.action_wheel.is_some(),
 			self.steal_animation_data.as_ref().map(|x| (since_epoch() - x.0).min(Duration::from_millis(500)).as_millis() as f32 / 500.0).unwrap_or(0.0)
 		);
-		self.sort_algorithm.render(builder, &mut ctx);
+		config::get_sort_algorithm().render(builder, &mut ctx);
 		if let Some(selected_text) = &tab.selected_text {
 			builder.horizontal_scroll = horizontal_scroll;
 			selected_text.render(builder, left_margin);
@@ -2403,7 +2469,8 @@ impl Workbench {
 		}
 		self.render_action_wheel(builder);
 		self.render_held_entry(builder);
-		self.render_alerts(builder);
+		self.render_notifications_and_alerts(builder);
+		builder.draw_tooltip0();
 	}
 
 	#[inline]
@@ -2421,9 +2488,10 @@ impl Workbench {
 				self.alert(alert);
 			}
 		}
-		if (!self.held_entry.is_empty() || tab!(self).freehand_mode || (tab!(self).selected_text.is_some() && self.last_mouse_state == ElementState::Pressed)) && self.action_wheel.is_none() && self.scrollbar_offset.is_none() {
+		if (!self.held_entry.is_empty() || tab!(self).freehand_mode || ((tab!(self).selected_text.is_some() || self.search_box.is_selected()) && self.last_mouse_state == ElementState::Pressed)) && self.action_wheel.is_none() && self.scrollbar_offset.is_none() {
 			self.try_mouse_scroll();
-			self.try_extend_drag_selection()
+			self.try_search_box_scroll();
+			self.try_extend_drag_selection();
 		}
 		if self.try_steal(false) {
 			if self.steal_animation_data.as_ref().is_some_and(|x| (since_epoch() - x.0) >= Duration::from_millis(500)) {
@@ -2440,7 +2508,7 @@ impl Workbench {
 		let mut failed_tabs = 0_usize;
 
 		for tab in &mut self.tabs {
-			if tab.unsaved_changes && (since_epoch() - core::mem::replace(&mut tab.last_close_attempt, since_epoch())) > DOUBLE_CLICK_INTERVAL {
+			if tab.unsaved_changes && (since_epoch() - core::mem::replace(&mut tab.last_close_attempt, since_epoch())) > TAB_CLOSE_DOUBLE_CLICK_INTERVAL {
 				failed_tabs += 1;
 			}
 		}
@@ -2467,14 +2535,30 @@ impl Workbench {
 	}
 
 	#[inline]
-	fn render_alerts(&mut self, builder: &mut VertexBufferBuilder) {
-		let mut idx = 0;
-		while let Some(alert) = self.alerts.get_mut(idx) {
-			if alert.is_invisible() {
-				self.alerts.remove(idx);
-			} else {
-				alert.render(builder, idx);
-				idx += 1;
+	fn render_notifications_and_alerts(&mut self, builder: &mut VertexBufferBuilder) {
+		let mut y = HEADER_SIZE;
+		{
+			for (_, notification_slot) in self.notifications.iter_mut() {
+				if let Some(notification) = notification_slot {
+					if notification.is_invisible() {
+						*notification_slot = None;
+					} else {
+						notification.render(builder, y);
+						y += notification.height();
+					}
+				}
+			}
+		}
+		{
+			let mut idx = 0;
+			while let Some(alert) = self.alerts.get_mut(idx) {
+				if alert.is_invisible() {
+					self.alerts.remove(idx);
+				} else {
+					alert.render(builder, y);
+					y += alert.height();
+					idx += 1;
+				}
 			}
 		}
 	}
@@ -2509,6 +2593,7 @@ impl Workbench {
 				(10, 16),
 			);
 			builder.settings((offset + 16, 3), false, BASE_TEXT_Z);
+			builder.color = match config::get_theme() { Theme::Light => TextColor::DarkGray, Theme::Dark => TextColor::White }.to_raw();
 			let _ = write!(builder, "{}", tab.name);
 			offset += remaining_width;
 			builder.draw_texture((offset, 3), uv + (13, 0), (3, 16));
@@ -2641,6 +2726,21 @@ impl Workbench {
 			tab.scroll += 16;
 			tab.scroll = tab.scroll();
 		}
+	}
+
+	pub fn try_search_box_scroll(&mut self) {
+		let search_box_x = (SEARCH_BOX_START_X + 16)..(self.window_width - (SEARCH_BOX_END_X + 16 + 48));
+		if self.last_mouse_state == ElementState::Pressed && self.search_box.is_selected() && !search_box_x.contains(&self.mouse_x) {
+			if self.mouse_x < search_box_x.start {
+				self.search_box.horizontal_scroll = self.search_box.horizontal_scroll.saturating_sub(4);
+			} else {
+				self.search_box.horizontal_scroll = (self.search_box.horizontal_scroll + 4).min(self.search_box.value.width().saturating_sub(search_box_x.end - search_box_x.start));
+			}
+		}
+	}
+
+	pub fn should_ignore_event(&self) -> bool {
+		since_epoch() < self.ignore_event_end
 	}
 
 	#[inline]

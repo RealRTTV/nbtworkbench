@@ -7,20 +7,20 @@ use std::ops::Deref;
 #[cfg(not(target_arch = "wasm32"))]
 use std::thread::Scope;
 
-use compact_str::{format_compact, CompactString, ToCompactString};
+use compact_str::{CompactString, format_compact, ToCompactString};
 use fxhash::FxHasher;
 use hashbrown::raw::RawTable;
 
-use crate::assets::{JUST_OVERLAPPING_BASE_TEXT_Z, BASE_Z, COMPOUND_ROOT_UV, COMPOUND_UV, CONNECTION_UV, HEADER_SIZE, LINE_NUMBER_CONNECTOR_Z, LINE_NUMBER_SEPARATOR_UV, ZOffset};
+use crate::{config, DropFn, OptionExt, RenderContext, StrExt, VertexBufferBuilder};
+use crate::assets::{BASE_Z, COMPOUND_ROOT_UV, COMPOUND_UV, CONNECTION_UV, HEADER_SIZE, JUST_OVERLAPPING_BASE_TEXT_Z, LINE_NUMBER_CONNECTOR_Z, LINE_NUMBER_SEPARATOR_UV, ZOffset};
 use crate::be_decoder::BigEndianDecoder;
+use crate::color::TextColor;
 use crate::elements::chunk::NbtChunk;
 use crate::elements::element::NbtElement;
 use crate::encoder::UncheckedBufWriter;
-use crate::{DropFn, OptionExt, RenderContext, SortAlgorithm, StrExt, VertexBufferBuilder};
-use crate::color::TextColor;
 use crate::formatter::PrettyFormatter;
-use crate::marked_line::{MarkedLine, MarkedLineSlice};
 use crate::le_decoder::LittleEndianDecoder;
+use crate::marked_line::{MarkedLine, MarkedLineSlice};
 
 #[allow(clippy::module_name_repetitions)]
 #[repr(C)]
@@ -58,13 +58,13 @@ impl Clone for NbtCompound {
 impl NbtCompound {
 	pub const ID: u8 = 10;
 	#[optimize(speed)]
-	pub(in crate::elements) fn from_str0(mut s: &str, sort: SortAlgorithm) -> Option<(&str, Self)> {
+	pub(in crate::elements) fn from_str0(mut s: &str) -> Option<(&str, Self)> {
 		s = s.strip_prefix('{')?.trim_start();
 		let mut compound = Self::new();
 		while !s.starts_with('}') {
 			let (key, s2) = s.snbt_string_read()?;
 			s = s2.trim_start().strip_prefix(':')?.trim_start();
-			let (s2, value) = NbtElement::from_str0(s, sort)?;
+			let (s2, value) = NbtElement::from_str0(s)?;
 			compound.insert_replacing(key, value);
 			s = s2.trim_start();
 			if let Some(s2) = s.strip_prefix(',') {
@@ -74,7 +74,7 @@ impl NbtCompound {
 			}
 		}
 		let s = s.strip_prefix('}')?;
-		sort.sort(&mut compound.entries);
+		config::get_sort_algorithm().sort(&mut compound.entries);
 		Some((s, compound))
 	}
 
@@ -395,7 +395,7 @@ impl NbtCompound {
 	#[inline]
 	#[must_use]
 	pub const fn max_depth(&self) -> usize { self.max_depth as usize }
-	
+
 	#[inline]
 	#[must_use]
 	pub fn can_insert(&self, value: &NbtElement) -> bool {

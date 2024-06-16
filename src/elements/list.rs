@@ -1,4 +1,3 @@
-use compact_str::{format_compact, CompactString};
 use std::alloc::{alloc, Layout};
 use std::fmt::{Display, Formatter, Write};
 use std::intrinsics::likely;
@@ -6,13 +5,15 @@ use std::slice::{Iter, IterMut};
 #[cfg(not(target_arch = "wasm32"))]
 use std::thread::Scope;
 
-use crate::assets::{JUST_OVERLAPPING_BASE_TEXT_Z, BASE_Z, CONNECTION_UV, LIST_UV, ZOffset};
+use compact_str::{CompactString, format_compact};
+
+use crate::{DropFn, OptionExt, RenderContext, StrExt, VertexBufferBuilder};
+use crate::assets::{BASE_Z, CONNECTION_UV, JUST_OVERLAPPING_BASE_TEXT_Z, LIST_UV, ZOffset};
 use crate::be_decoder::BigEndianDecoder;
+use crate::color::TextColor;
 use crate::elements::chunk::NbtChunk;
 use crate::elements::element::{id_to_string_name, NbtElement};
 use crate::encoder::UncheckedBufWriter;
-use crate::{DropFn, OptionExt, RenderContext, SortAlgorithm, StrExt, VertexBufferBuilder};
-use crate::color::TextColor;
 use crate::formatter::PrettyFormatter;
 use crate::le_decoder::LittleEndianDecoder;
 
@@ -63,11 +64,11 @@ impl Clone for NbtList {
 
 impl NbtList {
 	pub const ID: u8 = 9;
-	pub(in crate::elements) fn from_str0(mut s: &str, sort: SortAlgorithm) -> Option<(&str, Self)> {
+	pub(in crate::elements) fn from_str0(mut s: &str) -> Option<(&str, Self)> {
 		s = s.strip_prefix('[')?.trim_start();
 		let mut list = Self::new(vec![], 0);
 		while !s.starts_with(']') {
-			let (s2, element) = NbtElement::from_str0(s, sort)?;
+			let (s2, element) = NbtElement::from_str0(s)?;
 			list.insert(list.len(), element).ok()?;
 			s = s2.trim_start();
 			if let Some(s2) = s.strip_prefix(',') {

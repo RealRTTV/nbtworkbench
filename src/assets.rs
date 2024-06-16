@@ -1,14 +1,19 @@
 use std::cell::LazyCell;
 use std::mem::ManuallyDrop;
 use std::ops::Deref;
-use zune_png::zune_core::options::DecoderOptions;
-use crate::since_epoch;
 
+use winit::window::Theme;
+use zune_png::zune_core::options::DecoderOptions;
+
+pub use ZOffset::*;
+
+use crate::since_epoch;
 use crate::vertex_buffer_builder::Vec2u;
 
 pub const HEADER_SIZE: usize = 48;
 
-pub const ATLAS_ENCODED: &[u8] = include_bytes!("assets/atlas.png");
+pub const DARK_ATLAS_ENCODED: &[u8] = include_bytes!("assets/dark_atlas.png");
+pub const LIGHT_ATLAS_ENCODED: &[u8] = include_bytes!("assets/light_atlas.png");
 pub const ATLAS_WIDTH: usize = 256;
 pub const ATLAS_HEIGHT: usize = 256;
 pub const UNICODE_LEN: usize = 1_818_624;
@@ -94,7 +99,6 @@ pub const INSERTION_UV: Vec2u = Vec2u::new(16, 84);
 pub const TOOLTIP_UV: Vec2u = Vec2u::new(96, 144);
 pub const BOOKMARK_UV: Vec2u = Vec2u::new(112, 96);
 pub const HIDDEN_BOOKMARK_UV: Vec2u = Vec2u::new(96, 128);
-pub const EDITED_LINE_UV: Vec2u = Vec2u::new(16, 160);
 pub const LIGHT_STRIPE_UV: Vec2u = Vec2u::new(96, 96);
 pub const DARK_STRIPE_UV: Vec2u = Vec2u::new(96, 112);
 pub const HOVERED_STRIPE_UV: Vec2u = Vec2u::new(112, 128);
@@ -142,7 +146,8 @@ pub const INT_ARRAY_GHOST_UV: Vec2u = Vec2u::new(112, 16);
 pub const LONG_ARRAY_GHOST_UV: Vec2u = Vec2u::new(0, 48);
 pub const CHUNK_GHOST_UV: Vec2u = Vec2u::new(64, 48);
 pub const ALERT_UV: Vec2u = Vec2u::new(112, 144);
-pub const BACKDROP_UV: Vec2u = Vec2u::new(32, 160);
+pub const NOTIFICATION_UV: Vec2u = Vec2u::new(112, 184);
+pub const BACKDROP_UV: Vec2u = Vec2u::new(16, 160);
 pub const ADD_SEARCH_BOOKMARKS_UV: Vec2u = Vec2u::new(48, 160);
 pub const REMOVE_SEARCH_BOOKMARKS_UV: Vec2u = Vec2u::new(64, 160);
 pub const SEARCH_KEYS_UV: Vec2u = Vec2u::new(80, 160);
@@ -154,6 +159,8 @@ pub const SNBT_SEARCH_MODE_UV: Vec2u = Vec2u::new(96, 192);
 pub const NEW_FILE_UV: Vec2u = Vec2u::new(96, 48);
 pub const REFRESH_UV: Vec2u = Vec2u::new(152, 144);
 pub const DISABLED_REFRESH_UV: Vec2u = Vec2u::new(168, 144);
+pub const LIGHTBULB_UV: Vec2u = Vec2u::new(32, 160);
+pub const DIM_LIGHTBULB_UV: Vec2u = Vec2u::new(32, 176);
 
 #[repr(u8)]
 #[allow(non_camel_case_types)]
@@ -170,25 +177,25 @@ pub enum ZOffset {
     LINE_NUMBER_Z = 130,
     LINE_NUMBER_CONNECTOR_Z = 131,
     BOOKMARK_Z = 140,
-	EDITED_LINE_Z = 141,
     SELECTED_TEXT_Z = 170,
 	SELECTED_TEXT_SELECTION_Z = 171,
     ACTION_WHEEL_Z = 190,
     SCROLLBAR_BOOKMARK_Z = 199,
     SCROLLBAR_Z = 200,
     HELD_ENTRY_Z = 210,
-    ALERT_Z = 240,
-    ALERT_TEXT_Z = 241,
-	TOOLTIP_BLUR_Z = 254,
+    NOTIFICATION_Z = 240,
+    NOTIFICATION_TEXT_Z = 241,
     TOOLTIP_Z = 255,
 }
 
-pub use ZOffset::*;
+static mut DARK_ATLAS_CELL: LazyCell<Vec<u8>> = LazyCell::new(|| zune_png::PngDecoder::new_with_options(DARK_ATLAS_ENCODED, DecoderOptions::new_fast().png_set_confirm_crc(false)).decode_raw().unwrap());
+static mut LIGHT_ATLAS_CELL: LazyCell<Vec<u8>> = LazyCell::new(|| zune_png::PngDecoder::new_with_options(LIGHT_ATLAS_ENCODED, DecoderOptions::new_fast().png_set_confirm_crc(false)).decode_raw().unwrap());
 
-static mut ATLAS_CELL: LazyCell<Vec<u8>> = LazyCell::new(|| zune_png::PngDecoder::new_with_options(ATLAS_ENCODED, DecoderOptions::new_fast().png_set_confirm_crc(false)).decode_raw().unwrap());
-
-pub fn atlas() -> &'static [u8] {
-	unsafe { ATLAS_CELL.deref().as_slice() }
+pub fn atlas(theme: Theme) -> &'static [u8] {
+	match theme {
+		Theme::Light => unsafe { LIGHT_ATLAS_CELL.deref().as_slice() }
+		Theme::Dark => unsafe { DARK_ATLAS_CELL.deref().as_slice() }
+	}
 }
 
 #[allow(clippy::cast_ptr_alignment)]

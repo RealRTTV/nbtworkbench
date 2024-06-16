@@ -2,13 +2,13 @@ use std::intrinsics::likely;
 use std::marker::PhantomData;
 
 use compact_str::CompactString;
+
+use crate::config;
 use crate::elements::compound::CompoundMap;
-use crate::SortAlgorithm;
 
 pub struct LittleEndianDecoder<'a> {
 	pub data: *const u8,
 	end: *const u8,
-	sort: SortAlgorithm,
 	_marker: PhantomData<&'a ()>,
 	header: bool,
 }
@@ -17,11 +17,10 @@ pub struct LittleEndianDecoder<'a> {
 impl<'a> LittleEndianDecoder<'a> {
 	#[inline]
 	#[optimize(speed)]
-	pub fn new(data: &'a [u8], sort: SortAlgorithm) -> Self {
+	pub fn new(data: &'a [u8]) -> Self {
 		let mut this = Self {
 			end: unsafe { data.as_ptr().add(data.len()) },
 			data: data.as_ptr(),
-			sort,
 			_marker: PhantomData,
 			header: false,
 		};
@@ -38,7 +37,7 @@ impl<'a> LittleEndianDecoder<'a> {
 
 	#[inline]
 	pub fn sort(&self, map: &mut CompoundMap) {
-		self.sort.sort(map)
+		config::get_sort_algorithm().sort(map)
 	}
 
 	#[inline]

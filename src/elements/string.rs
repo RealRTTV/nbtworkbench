@@ -6,11 +6,11 @@ use std::ptr::NonNull;
 
 use compact_str::CompactString;
 
+use crate::{RenderContext, StrExt, VertexBufferBuilder};
 use crate::assets::{BASE_Z, JUST_OVERLAPPING_BASE_TEXT_Z, STRING_UV, ZOffset};
 use crate::be_decoder::BigEndianDecoder;
-use crate::encoder::UncheckedBufWriter;
-use crate::{RenderContext, StrExt, VertexBufferBuilder};
 use crate::color::TextColor;
+use crate::encoder::UncheckedBufWriter;
 use crate::formatter::PrettyFormatter;
 use crate::le_decoder::LittleEndianDecoder;
 

@@ -2,7 +2,8 @@ use std::cmp::Ordering;
 use std::collections::Bound;
 use std::convert::identity;
 use std::ops::{Deref, DerefMut, Index, IndexMut, RangeBounds};
-use crate::assets::{BOOKMARK_UV, EDITED_LINE_UV, HIDDEN_BOOKMARK_UV};
+
+use crate::assets::{BOOKMARK_UV, HIDDEN_BOOKMARK_UV};
 use crate::vertex_buffer_builder::Vec2u;
 
 macro_rules! slice {
@@ -71,15 +72,6 @@ impl MarkedLine {
     }
     
     #[inline]
-    pub const fn edit(self, line_number: usize) -> Self {
-        Self {
-            true_line_number: self.true_line_number,
-            line_number,
-            uv: EDITED_LINE_UV,
-        }
-    }
-
-    #[inline]
     pub const fn offset(self, offset: usize, true_offset: usize) -> Self {
         Self {
             true_line_number: self.true_line_number.wrapping_add(true_offset),
@@ -111,17 +103,6 @@ impl MarkedLines {
     pub const fn new() -> Self {
         Self {
             inner: vec![]
-        }
-    }
-
-    #[inline]
-    pub fn add(&mut self, marked_line: MarkedLine) -> Result<(), MarkedLine> {
-        match self.inner.binary_search(&marked_line) {
-            Ok(_) => Err(marked_line),
-            Err(idx) => {
-                self.inner.insert(idx, marked_line);
-                Ok(())
-            }
         }
     }
 

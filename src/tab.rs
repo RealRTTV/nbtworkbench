@@ -10,16 +10,17 @@ use flate2::Compression;
 use uuid::Uuid;
 use zune_inflate::DeflateDecoder;
 
-use crate::{DOUBLE_CLICK_INTERVAL, LinkedQueue, OptionExt, panic_unchecked, RenderContext, since_epoch, SortAlgorithm, StrExt, TAB_CLOSE_DOUBLE_CLICK_INTERVAL, WindowProperties};
-use crate::assets::{BASE_Z, BYTE_ARRAY_GHOST_UV, BYTE_ARRAY_UV, BYTE_GRAYSCALE_UV, BYTE_UV, CHUNK_GHOST_UV, CHUNK_UV, COMPOUND_GHOST_UV, COMPOUND_ROOT_UV, COMPOUND_UV, DISABLED_REFRESH_UV, DOUBLE_GRAYSCALE_UV, DOUBLE_UV, ENABLED_FREEHAND_MODE_UV, FLOAT_GRAYSCALE_UV, FLOAT_UV, FREEHAND_MODE_UV, GZIP_FILE_TYPE_UV, HEADER_SIZE, HELD_SCROLLBAR_UV, HOVERED_WIDGET_UV, INT_ARRAY_GHOST_UV, INT_ARRAY_UV, INT_GRAYSCALE_UV, INT_UV, JUST_OVERLAPPING_BASE_Z, LITTLE_ENDIAN_NBT_FILE_TYPE_UV, LINE_NUMBER_SEPARATOR_UV, LIST_GHOST_UV, LIST_UV, LONG_ARRAY_GHOST_UV, LONG_ARRAY_UV, LONG_GRAYSCALE_UV, LONG_UV, MCA_FILE_TYPE_UV, NBT_FILE_TYPE_UV, REDO_UV, REFRESH_UV, REGION_UV, SCROLLBAR_Z, SHORT_GRAYSCALE_UV, SHORT_UV, SNBT_FILE_TYPE_UV, STEAL_ANIMATION_OVERLAY_UV, STRING_GHOST_UV, STRING_UV, UNDO_UV, UNHELD_SCROLLBAR_UV, UNKNOWN_NBT_GHOST_UV, UNKNOWN_NBT_UV, UNSELECTED_WIDGET_UV, ZLIB_FILE_TYPE_UV, ZOffset, LITTLE_ENDIAN_HEADER_NBT_FILE_TYPE_UV};
+use crate::{LinkedQueue, OptionExt, panic_unchecked, RenderContext, since_epoch, StrExt, TAB_CLOSE_DOUBLE_CLICK_INTERVAL, TEXT_DOUBLE_CLICK_INTERVAL, WindowProperties};
+use crate::assets::{BASE_Z, BYTE_ARRAY_GHOST_UV, BYTE_ARRAY_UV, BYTE_GRAYSCALE_UV, BYTE_UV, CHUNK_GHOST_UV, CHUNK_UV, COMPOUND_GHOST_UV, COMPOUND_ROOT_UV, COMPOUND_UV, DIM_LIGHTBULB_UV, DISABLED_REFRESH_UV, DOUBLE_GRAYSCALE_UV, DOUBLE_UV, ENABLED_FREEHAND_MODE_UV, FLOAT_GRAYSCALE_UV, FLOAT_UV, FREEHAND_MODE_UV, GZIP_FILE_TYPE_UV, HEADER_SIZE, HELD_SCROLLBAR_UV, HOVERED_WIDGET_UV, INT_ARRAY_GHOST_UV, INT_ARRAY_UV, INT_GRAYSCALE_UV, INT_UV, JUST_OVERLAPPING_BASE_Z, LIGHTBULB_UV, LINE_NUMBER_SEPARATOR_UV, LIST_GHOST_UV, LIST_UV, LITTLE_ENDIAN_HEADER_NBT_FILE_TYPE_UV, LITTLE_ENDIAN_NBT_FILE_TYPE_UV, LONG_ARRAY_GHOST_UV, LONG_ARRAY_UV, LONG_GRAYSCALE_UV, LONG_UV, MCA_FILE_TYPE_UV, NBT_FILE_TYPE_UV, REDO_UV, REFRESH_UV, REGION_UV, SCROLLBAR_Z, SHORT_GRAYSCALE_UV, SHORT_UV, SNBT_FILE_TYPE_UV, STEAL_ANIMATION_OVERLAY_UV, STRING_GHOST_UV, STRING_UV, UNDO_UV, UNHELD_SCROLLBAR_UV, UNKNOWN_NBT_GHOST_UV, UNKNOWN_NBT_UV, UNSELECTED_WIDGET_UV, ZLIB_FILE_TYPE_UV, ZOffset};
 use crate::color::TextColor;
 use crate::elements::chunk::NbtRegion;
 use crate::elements::compound::NbtCompound;
 use crate::elements::element::NbtElement;
+use crate::elements::list::NbtList;
+use crate::marked_line::MarkedLines;
+use crate::search_box::SEARCH_BOX_END_X;
 use crate::selected_text::{SelectedText, SelectedTextAdditional};
 use crate::text::{get_cursor_left_jump_idx, get_cursor_right_jump_idx, Text};
-use crate::marked_line::MarkedLines;
-use crate::elements::list::NbtList;
 use crate::tree_travel::Navigate;
 use crate::vertex_buffer_builder::{Vec2u, VertexBufferBuilder};
 use crate::workbench_action::WorkbenchAction;
@@ -37,7 +38,6 @@ pub struct Tab {
 	pub window_height: usize,
 	pub window_width: usize,
 	pub bookmarks: MarkedLines,
-	pub edited_lines: MarkedLines,
 	pub uuid: Uuid,
 	pub freehand_mode: bool,
 	pub selected_text: Option<SelectedText>,
@@ -74,7 +74,6 @@ impl Tab {
 			window_height,
 			window_width,
 			bookmarks: MarkedLines::new(),
-			edited_lines: MarkedLines::new(),
 			uuid: Uuid::new_v4(),
 			freehand_mode: false,
 			selected_text: None,
@@ -135,8 +134,8 @@ impl Tab {
 		} else if let Some(list) = self.value.as_list() {
 			list.render_root(builder, &self.name, ctx);
 		}
-		builder.color = TextColor::Default.to_raw();
-		ctx.render_line_numbers(builder, &self.bookmarks, &self.edited_lines);
+		builder.color = TextColor::White.to_raw();
+		ctx.render_line_numbers(builder, &self.bookmarks);
 		ctx.render_key_value_errors(builder);
 		builder.horizontal_scroll = horizontal_scroll_before;
 
@@ -205,7 +204,7 @@ impl Tab {
 		{
 			let mut tail = self.redos.tail.as_deref();
 			builder.draw_texture_region_z(
-				(builder.window_width() - 215, 22),
+				(builder.window_width() - SEARCH_BOX_END_X, 22),
 				BASE_Z,
 				LINE_NUMBER_SEPARATOR_UV,
 				(2, 23),
@@ -270,6 +269,13 @@ impl Tab {
 
 			builder.draw_texture((296, 26), widget_uv, (16, 16));
 			builder.draw_texture((296, 26), if enabled { REFRESH_UV } else { DISABLED_REFRESH_UV }, (16, 16));
+		}
+		{
+			let hovering = (312..328).contains(&mouse_x) && (26..42).contains(&mouse_y);
+			if hovering {
+				builder.draw_tooltip(&["Change Theme (Ctrl + Alt + T)"], (mouse_x, mouse_y), false);
+			}
+			builder.draw_texture((312, 26), if hovering { DIM_LIGHTBULB_UV } else { LIGHTBULB_UV }, (16, 16));
 		}
 
 		{
@@ -343,13 +349,13 @@ impl Tab {
 			builder.draw_texture_z(pos, z, LIST_UV, (16, 16));
 		}
 	}
-	
+
 	pub fn set_selected_text(&mut self, line_number: Option<usize>, selected_text: Option<SelectedText>) {
 		self.selected_text = selected_text;
 		let now = since_epoch();
 		if let Some(selected_text) = self.selected_text.as_mut() && let Some(line_number) = line_number {
 			let (old_y, times_clicked, timestamp) = core::mem::replace(&mut self.last_selected_text_interaction, (line_number, 0, now));
-			if now - timestamp < DOUBLE_CLICK_INTERVAL && old_y == line_number && !selected_text.value.is_empty() {
+			if now - timestamp < TEXT_DOUBLE_CLICK_INTERVAL && old_y == line_number && !selected_text.value.is_empty() {
 				self.last_selected_text_interaction = (line_number, times_clicked + 1, now);
 				// the previous click count was divisible by 1
 				let (left, right) = if times_clicked % 2 == 1 {
@@ -367,7 +373,7 @@ impl Tab {
 			self.last_selected_text_interaction = (0, 0, Duration::ZERO);
 		}
 	}
-	
+
 	pub fn append_to_history(&mut self, action: WorkbenchAction) {
 		self.undos.push(action);
 		self.redos.clear();
@@ -625,10 +631,10 @@ impl Tab {
 	}
 
 	#[inline]
-	pub fn parse_raw(path: &Path, buf: Vec<u8>, sort_algorithm: SortAlgorithm) -> Result<(NbtElement, FileFormat)> {
+	pub fn parse_raw(path: &Path, buf: Vec<u8>) -> Result<(NbtElement, FileFormat)> {
 		Ok(if let Some("mca" | "mcr") = path.extension().and_then(OsStr::to_str) {
 			(
-				NbtElement::from_be_mca(buf.as_slice(), sort_algorithm).context("Failed to parse MCA file")?,
+				NbtElement::from_be_mca(buf.as_slice()).context("Failed to parse MCA file")?,
 				FileFormat::Mca,
 			)
 		} else if let Some(0x1F8B) = buf.first_chunk::<2>().copied().map(u16::from_be_bytes) {
@@ -637,7 +643,6 @@ impl Tab {
 					&DeflateDecoder::new(buf.as_slice())
 						.decode_gzip()
 						.context("Failed to decode gzip compressed NBT")?,
-					sort_algorithm,
 				)
 					.context("Failed to parse NBT")?,
 				FileFormat::Gzip,
@@ -648,20 +653,19 @@ impl Tab {
 					&DeflateDecoder::new(buf.as_slice())
 						.decode_zlib()
 						.context("Failed to decode zlib compressed NBT")?,
-					sort_algorithm,
 				)
 					.context("Failed to parse NBT")?,
 				FileFormat::Zlib,
 			)
-		} else if let Some(nbt) = NbtElement::from_be_file(buf.as_slice(), sort_algorithm) {
+		} else if let Some(nbt) = NbtElement::from_be_file(buf.as_slice()) {
 			(nbt, FileFormat::Nbt)
-		} else if let Some((nbt, header)) = NbtElement::from_le_file(buf.as_slice(), sort_algorithm) {
+		} else if let Some((nbt, header)) = NbtElement::from_le_file(buf.as_slice()) {
 			(nbt, if header { FileFormat::LittleEndianHeaderNbt } else { FileFormat::LittleEndianNbt })
 		} else {
 			(
 				core::str::from_utf8(&buf)
 					.ok()
-					.and_then(|s| NbtElement::from_str(s, sort_algorithm))
+					.and_then(|s| NbtElement::from_str(s))
 					.context(anyhow!(
 							"Failed to find file type for file {}",
 							path.file_name()
@@ -675,7 +679,7 @@ impl Tab {
 	}
 
 	#[cfg(not(target_arch = "wasm32"))]
-	pub fn refresh(&mut self, sort_algorithm: SortAlgorithm) -> Result<()> {
+	pub fn refresh(&mut self) -> Result<()> {
 		let Some(path) = self.path.as_deref() else { return Err(anyhow!("File path was not present in tab")) };
 
 		if self.unsaved_changes && (since_epoch() - core::mem::replace(&mut self.last_close_attempt, since_epoch())) > TAB_CLOSE_DOUBLE_CLICK_INTERVAL {
@@ -683,7 +687,7 @@ impl Tab {
 		}
 
 		let bytes = std::fs::read(path)?;
-		let (value, format) = Tab::parse_raw(path, bytes, sort_algorithm)?;
+		let (value, format) = Tab::parse_raw(path, bytes)?;
 
 		self.bookmarks.clear();
 		self.scroll = 0;
@@ -699,7 +703,7 @@ impl Tab {
 	}
 
 	#[cfg(target_arch = "wasm32")]
-	pub fn refresh(&mut self, _: SortAlgorithm) -> Result<()> {
+	pub fn refresh(&mut self) -> Result<()> {
 		Ok(())
 	}
 }

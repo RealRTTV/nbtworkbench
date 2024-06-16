@@ -1,24 +1,24 @@
-use std::cmp::Ordering;
 #[cfg(not(target_arch = "wasm32"))]
 use std::{fs::OpenOptions, process::Command};
+use std::cmp::Ordering;
 
 use compact_str::CompactString;
 #[cfg(not(target_arch = "wasm32"))]
 use notify::{EventKind, PollWatcher, RecursiveMode, Watcher};
 use uuid::Uuid;
 
-use crate::{panic_unchecked, set_clipboard, FileUpdateSubscription};
+use crate::{FileUpdateSubscription, panic_unchecked, set_clipboard};
 #[cfg(not(target_arch = "wasm32"))]
-use crate::{FileUpdateSubscriptionType, assets::{OPEN_ARRAY_IN_HEX_UV, OPEN_IN_TXT}, since_epoch, StrExt};
+use crate::{assets::{OPEN_ARRAY_IN_HEX_UV, OPEN_IN_TXT}, FileUpdateSubscriptionType, since_epoch, StrExt};
 use crate::assets::{ACTION_WHEEL_Z, COPY_FORMATTED_UV, COPY_RAW_UV, SORT_COMPOUND_BY_NAME, SORT_COMPOUND_BY_TYPE};
 use crate::elements::chunk::NbtChunk;
 use crate::elements::compound::NbtCompound;
 use crate::elements::element::{NbtByte, NbtByteArray, NbtDouble, NbtElement, NbtFloat, NbtInt, NbtIntArray, NbtLong, NbtLongArray, NbtShort};
 use crate::elements::list::NbtList;
 use crate::elements::string::NbtString;
+use crate::marked_line::MarkedLines;
 use crate::vertex_buffer_builder::VertexBufferBuilder;
 use crate::workbench_action::WorkbenchAction;
-use crate::marked_line::MarkedLines;
 
 #[derive(Copy, Clone)]
 pub enum ElementAction {

@@ -2,13 +2,13 @@ use std::intrinsics::likely;
 use std::marker::PhantomData;
 
 use compact_str::CompactString;
+
+use crate::config;
 use crate::elements::compound::CompoundMap;
-use crate::SortAlgorithm;
 
 pub struct BigEndianDecoder<'a> {
 	pub data: *const u8,
 	end: *const u8,
-	sort: SortAlgorithm,
 	_marker: PhantomData<&'a ()>,
 }
 
@@ -16,18 +16,17 @@ pub struct BigEndianDecoder<'a> {
 impl<'a> BigEndianDecoder<'a> {
 	#[inline]
 	#[optimize(speed)]
-	pub const fn new(data: &'a [u8], sort: SortAlgorithm) -> Self {
+	pub const fn new(data: &'a [u8]) -> Self {
 		Self {
 			end: unsafe { data.as_ptr().add(data.len()) },
 			data: data.as_ptr(),
-			sort,
 			_marker: PhantomData,
 		}
 	}
 
 	#[inline]
 	pub fn sort(&self, map: &mut CompoundMap) {
-		self.sort.sort(map)
+		config::get_sort_algorithm().sort(map)
 	}
 
 	#[optimize(speed)]
