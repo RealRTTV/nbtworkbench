@@ -108,10 +108,10 @@ macro_rules! flags {
 
 #[macro_export]
 macro_rules! hash {
-	($key:expr) => {{
-		let mut hasher = FxHasher::default();
-		hasher.write($key.as_bytes());
-		hasher.finish()
+	($data:expr) => {{
+		let mut hasher = ::fxhash::FxHasher::default();
+		::std::hash::Hasher::write(&mut hasher, $data.as_bytes());
+		::std::hash::Hasher::finish(&hasher)
 	}};
 }
 
@@ -633,25 +633,25 @@ impl SortAlgorithm {
 		}
 	}
 
-	pub fn sort(self, map: &mut CompoundMap) {
+	/// # Safety
+	///
+	/// * Data must be created before any modifications as to eliminate the possibility of bookmarks, history, etc.
+	pub unsafe fn sort(self, map: &mut CompoundMap) {
 		if let Self::None = self { return; }
-		let hashes = map.entries.iter().map(|entry| entry.hash).collect::<Vec<_>>();
 		// yeah, it's hacky... but there's not much else I *can* do. plus: it works extremely well.
 		for (idx, entry) in map.entries.iter_mut().enumerate() {
-			entry.hash = idx as u64;
+			entry.additional = idx;
 		}
 		match self {
 			Self::Name => map.entries.sort_by(|a, b| element_action::ElementAction::by_name((&a.key, &a.value), (&b.key, &b.value))),
 			_ => map.entries.sort_by(|a, b| element_action::ElementAction::by_type((&a.key, &a.value), (&b.key, &b.value))),
 		}
-		let indices = map.entries.iter().map(|entry| entry.hash as usize).collect::<Vec<_>>();
+		let indices = map.entries.iter().map(|entry| entry.additional).collect::<Vec<_>>();
 		for (new_idx, &idx) in indices.iter().enumerate() {
 			// SAFETY: these indices are valid since the length did not change and since the values written were indexes
 			unsafe {
-				let hash = *hashes.get_unchecked(idx);
 				let entry = map.entries.get_unchecked_mut(new_idx);
-				entry.hash = hash;
-				*map.indices.find(hash, |&x| x == idx).panic_unchecked("index obviously exists").as_mut() = new_idx;
+				*map.indices.find(hash!(entry.key), |&target_idx| target_idx == idx).panic_unchecked("index obviously exists").as_mut() = new_idx;
 			}
 		}
 	}

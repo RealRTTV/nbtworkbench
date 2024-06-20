@@ -11,14 +11,13 @@ use uuid::Uuid;
 use zune_inflate::DeflateDecoder;
 
 use crate::{LinkedQueue, OptionExt, panic_unchecked, RenderContext, since_epoch, StrExt, TAB_CLOSE_DOUBLE_CLICK_INTERVAL, TEXT_DOUBLE_CLICK_INTERVAL, WindowProperties};
-use crate::assets::{BASE_Z, BYTE_ARRAY_GHOST_UV, BYTE_ARRAY_UV, BYTE_GRAYSCALE_UV, BYTE_UV, CHUNK_GHOST_UV, CHUNK_UV, COMPOUND_GHOST_UV, COMPOUND_ROOT_UV, COMPOUND_UV, DIM_LIGHTBULB_UV, DISABLED_REFRESH_UV, DOUBLE_GRAYSCALE_UV, DOUBLE_UV, ENABLED_FREEHAND_MODE_UV, FLOAT_GRAYSCALE_UV, FLOAT_UV, FREEHAND_MODE_UV, GZIP_FILE_TYPE_UV, HEADER_SIZE, HELD_SCROLLBAR_UV, HOVERED_WIDGET_UV, INT_ARRAY_GHOST_UV, INT_ARRAY_UV, INT_GRAYSCALE_UV, INT_UV, JUST_OVERLAPPING_BASE_Z, LIGHTBULB_UV, LINE_NUMBER_SEPARATOR_UV, LIST_GHOST_UV, LIST_UV, LITTLE_ENDIAN_HEADER_NBT_FILE_TYPE_UV, LITTLE_ENDIAN_NBT_FILE_TYPE_UV, LONG_ARRAY_GHOST_UV, LONG_ARRAY_UV, LONG_GRAYSCALE_UV, LONG_UV, MCA_FILE_TYPE_UV, NBT_FILE_TYPE_UV, REDO_UV, REFRESH_UV, REGION_UV, SCROLLBAR_Z, SHORT_GRAYSCALE_UV, SHORT_UV, SNBT_FILE_TYPE_UV, STEAL_ANIMATION_OVERLAY_UV, STRING_GHOST_UV, STRING_UV, UNDO_UV, UNHELD_SCROLLBAR_UV, UNKNOWN_NBT_GHOST_UV, UNKNOWN_NBT_UV, UNSELECTED_WIDGET_UV, ZLIB_FILE_TYPE_UV, ZOffset};
+use crate::assets::{BASE_Z, BYTE_ARRAY_GHOST_UV, BYTE_ARRAY_UV, BYTE_GRAYSCALE_UV, BYTE_UV, CHUNK_GHOST_UV, CHUNK_UV, COMPOUND_GHOST_UV, COMPOUND_ROOT_UV, COMPOUND_UV, DIM_LIGHTBULB_UV, DISABLED_REFRESH_UV, DOUBLE_GRAYSCALE_UV, DOUBLE_UV, ENABLED_FREEHAND_MODE_UV, FLOAT_GRAYSCALE_UV, FLOAT_UV, FREEHAND_MODE_UV, GZIP_FILE_TYPE_UV, HEADER_SIZE, HELD_SCROLLBAR_UV, HOVERED_WIDGET_UV, INT_ARRAY_GHOST_UV, INT_ARRAY_UV, INT_GRAYSCALE_UV, INT_UV, JUST_OVERLAPPING_BASE_Z, LIGHTBULB_UV, LINE_NUMBER_SEPARATOR_UV, LIST_GHOST_UV, LIST_UV, LITTLE_ENDIAN_HEADER_NBT_FILE_TYPE_UV, LITTLE_ENDIAN_NBT_FILE_TYPE_UV, LONG_ARRAY_GHOST_UV, LONG_ARRAY_UV, LONG_GRAYSCALE_UV, LONG_UV, MCA_FILE_TYPE_UV, NBT_FILE_TYPE_UV, REFRESH_UV, REGION_UV, SCROLLBAR_Z, SHORT_GRAYSCALE_UV, SHORT_UV, SNBT_FILE_TYPE_UV, STEAL_ANIMATION_OVERLAY_UV, STRING_GHOST_UV, STRING_UV, UNHELD_SCROLLBAR_UV, UNKNOWN_NBT_GHOST_UV, UNKNOWN_NBT_UV, UNSELECTED_WIDGET_UV, ZLIB_FILE_TYPE_UV, ZOffset};
 use crate::color::TextColor;
 use crate::elements::chunk::NbtRegion;
 use crate::elements::compound::NbtCompound;
 use crate::elements::element::NbtElement;
 use crate::elements::list::NbtList;
 use crate::marked_line::MarkedLines;
-use crate::search_box::SEARCH_BOX_END_X;
 use crate::selected_text::{SelectedText, SelectedTextAdditional};
 use crate::text::{get_cursor_left_jump_idx, get_cursor_right_jump_idx, Text};
 use crate::tree_travel::Navigate;
@@ -178,50 +177,6 @@ impl Tab {
 		}
 
 		ctx.render_scrollbar_bookmarks(builder, &self.bookmarks, &self.value);
-
-		{
-			let mut tail = self.undos.tail.as_deref();
-			builder.draw_texture_region_z(
-				(builder.window_width() - 109, 22),
-				BASE_Z,
-				LINE_NUMBER_SEPARATOR_UV,
-				(2, 23),
-				(2, 16),
-			);
-			builder.draw_texture((builder.window_width() - 105, 26), UNDO_UV, (16, 16));
-			let mut x = builder.window_width() - 84;
-			for _ in 0..5_usize {
-				if let Some(t) = tail {
-					t.value.render((x, 26), builder, t.prev.is_none());
-					x += 16;
-					tail = t.prev.as_deref();
-				} else {
-					break;
-				}
-			}
-		}
-
-		{
-			let mut tail = self.redos.tail.as_deref();
-			builder.draw_texture_region_z(
-				(builder.window_width() - SEARCH_BOX_END_X, 22),
-				BASE_Z,
-				LINE_NUMBER_SEPARATOR_UV,
-				(2, 23),
-				(2, 16),
-			);
-			builder.draw_texture((builder.window_width() - 211, 26), REDO_UV, (16, 16));
-			let mut x = builder.window_width() - 190;
-			for _ in 0..5_usize {
-				if let Some(t) = tail {
-					t.value.render((x, 26), builder, t.prev.is_none());
-					x += 16;
-					tail = t.prev.as_deref();
-				} else {
-					break;
-				}
-			}
-		}
 
 		{
 			// shifted one left to center between clipboard and freehand

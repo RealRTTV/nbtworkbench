@@ -37,7 +37,8 @@ impl<'a> LittleEndianDecoder<'a> {
 
 	#[inline]
 	pub fn sort(&self, map: &mut CompoundMap) {
-		config::get_sort_algorithm().sort(map)
+		// SAFETY: we can only call this on init of the compound
+		unsafe { config::get_sort_algorithm().sort(map) }
 	}
 
 	#[inline]

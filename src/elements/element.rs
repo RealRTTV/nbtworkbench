@@ -479,6 +479,7 @@ impl NbtElement {
 
 		NbtString::from_str0(s).map(|(s, x)| (s, Self::String(x)))
 	}
+	
 	#[inline(never)]
 	pub fn from_be_bytes(element: u8, decoder: &mut BigEndianDecoder) -> Option<Self> {
 		Some(match element {

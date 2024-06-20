@@ -3,14 +3,12 @@ use std::path::PathBuf;
 
 use compact_str::{CompactString, ToCompactString};
 
-use crate::{encompasses, encompasses_or_equal, FileUpdateSubscription};
+use crate::{encompasses, encompasses_or_equal, FileUpdateSubscription, hash};
 use crate::{panic_unchecked, Position, sum_indices};
 use crate::{Navigate, OptionExt};
-use crate::assets::{ADD_TAIL_UV, ADD_UV, BULK_TAIL_UV, BULK_UV, MOVE_TAIL_UV, MOVE_UV, REMOVE_TAIL_UV, REMOVE_UV, RENAME_TAIL_UV, RENAME_UV, REORDER_TAIL_UV, REORDER_UV, REPLACE_TAIL_UV, REPLACE_UV};
 use crate::elements::compound::{CompoundMap, Entry};
 use crate::elements::element::NbtElement;
 use crate::marked_line::{MarkedLine, MarkedLines};
-use crate::vertex_buffer_builder::VertexBufferBuilder;
 
 pub enum WorkbenchAction {
 	Remove {
@@ -371,7 +369,7 @@ impl WorkbenchAction {
 				let mut current_true_line_number = true_line_number + 1;
 				for (idx, &new_idx) in reordering_indices.iter().enumerate() {
 					let entry = core::mem::replace(previous_entries.get_unchecked_mut(new_idx), MaybeUninit::uninit()).assume_init();
-					*indices.find(entry.hash, |&x| x == new_idx).panic_unchecked("index obviously exists").as_mut() = idx;
+					*indices.find(hash!(entry.key), |&x| x == new_idx).panic_unchecked("index obviously exists").as_mut() = idx;
 					let line_number = *line_numbers.get_unchecked(new_idx);
 					let true_line_number = *true_line_numbers.get_unchecked(new_idx);
 					let height = entry.value.height();
@@ -409,18 +407,5 @@ impl WorkbenchAction {
 				})
 			}
 		})
-	}
-
-	#[inline]
-	pub fn render(&self, pos: impl Into<(usize, usize)>, builder: &mut VertexBufferBuilder, tail: bool) {
-		match self {
-			Self::Remove { .. } => builder.draw_texture(pos, if tail { REMOVE_TAIL_UV } else { REMOVE_UV }, (16, 16)),
-			Self::Add { .. } => builder.draw_texture(pos, if tail { ADD_TAIL_UV } else { ADD_UV }, (16, 16)),
-			Self::Rename { .. } => builder.draw_texture(pos, if tail { RENAME_TAIL_UV } else { RENAME_UV }, (16, 16)),
-			Self::Move { .. } => builder.draw_texture(pos, if tail { MOVE_TAIL_UV } else { MOVE_UV }, (16, 16)),
-			Self::Replace { .. } => builder.draw_texture(pos, if tail { REPLACE_TAIL_UV } else { REPLACE_UV }, (16, 16)),
-			Self::ReorderCompound { .. } => builder.draw_texture(pos, if tail { REORDER_TAIL_UV } else { REORDER_UV }, (16, 16)),
-			Self::Bulk { .. } => builder.draw_texture(pos, if tail { BULK_TAIL_UV } else { BULK_UV }, (16, 16)),
-		}
 	}
 }

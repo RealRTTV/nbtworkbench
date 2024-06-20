@@ -18,10 +18,10 @@ use crate::text::{Cachelike, SearchBoxKeyResult, Text};
 use crate::vertex_buffer_builder::{Vec2u, VertexBufferBuilder};
 
 pub const SEARCH_BOX_START_X: usize = 332;
-pub const SEARCH_BOX_END_X: usize = 215;
+pub const SEARCH_BOX_END_X: usize = 2;
 
 pub struct SearchPredicate {
-    pub search_flags: u8,
+    pub search_flags: SearchFlags,
     pub inner: SearchPredicateInner,
 }
 
@@ -29,6 +29,50 @@ pub enum SearchPredicateInner {
     String(String),
     Regex(Regex),
     Snbt(Option<String>, NbtElement),
+}
+
+#[repr(u8)]
+#[derive(Copy, Clone)]
+pub enum SearchFlags {
+    Values = 0,
+    Keys = 1,
+    KeysValues = 2,
+}
+
+impl Display for SearchFlags {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", match self {
+            Self::Values => "Values only",
+            Self::Keys => "Keys only",
+            Self::KeysValues => "Keys + Values",
+        })
+    }
+}
+
+impl SearchFlags {
+    pub fn cycle(self) -> Self {
+        match self {
+            Self::Values => Self::Keys,
+            Self::Keys => Self::KeysValues,
+            Self::KeysValues => Self::Values,
+        }
+    }
+
+    pub fn rev_cycle(self) -> Self {
+        match self {
+            Self::Values => Self::KeysValues,
+            Self::Keys => Self::Values,
+            Self::KeysValues => Self::Keys,
+        }
+    }
+
+    pub fn uv(self) -> Vec2u {
+        match self {
+            SearchFlags::Values => SEARCH_VALUES_UV,
+            SearchFlags::Keys => SEARCH_KEYS_UV,
+            SearchFlags::KeysValues => SEARCH_KEYS_AND_VALUES_UV
+        }
+    }
 }
 
 #[derive(Copy, Clone)]
@@ -73,7 +117,8 @@ impl SearchMode {
         }
     }
 
-    pub fn into_predicate(self, value: String, search_flags: u8) -> Option<SearchPredicate> {
+    pub fn into_predicate(self, value: String) -> Option<SearchPredicate> {
+        let search_flags = config::get_search_flags();
         Some(match self {
             Self::String => SearchPredicate { inner: SearchPredicateInner::String(value), search_flags },
             Self::Regex => if let Some(regex) = create_regex(value) { SearchPredicate { inner: SearchPredicateInner::Regex(regex), search_flags } } else { return None },
@@ -89,20 +134,18 @@ impl SearchMode {
 
 impl SearchPredicate {
     fn matches(&self, key: Option<&str>, value: &NbtElement) -> bool {
+        let flags = self.search_flags as u8 + 1;
         match &self.inner {
             SearchPredicateInner::String(str) => {
                 let (value, color) = value.value();
-                ((self.search_flags & 0b01) > 0 && color != TextColor::TreeKey && value.contains(str)) || ((self.search_flags & 0b10) > 0 && key.is_some_and(|k| k.contains(str)))
+                ((flags & 0b01) > 0 && color != TextColor::TreeKey && value.contains(str)) || ((flags & 0b10) > 0 && key.is_some_and(|k| k.contains(str)))
             }
             SearchPredicateInner::Regex(regex) => {
                 let (value, color) = value.value();
-                ((self.search_flags & 0b01) > 0 && color != TextColor::TreeKey && regex.is_match(&value)) || ((self.search_flags & 0b10) > 0 && key.is_some_and(|k| regex.is_match(k)))
+                ((flags & 0b01) > 0 && color != TextColor::TreeKey && regex.is_match(&value)) || ((flags & 0b10) > 0 && key.is_some_and(|k| regex.is_match(k)))
             }
             SearchPredicateInner::Snbt(k, element) => {
-                // cmp order does matter
-                let a = element.matches(value);
-                let b = k.as_deref() == key;
-                ((self.search_flags == 0b11) & a & b) | ((self.search_flags == 0b01) & a) | ((self.search_flags == 0b10) & b)
+                (!((flags & 0b01) > 0 && !element.matches(value))) && (!((flags & 0b10) > 0 && k.as_deref() != key))
             },
         }
     }
@@ -145,8 +188,6 @@ pub struct SearchBoxAdditional {
     selected: bool,
     pub horizontal_scroll: usize,
     pub hits: Option<(usize, Duration)>,
-    pub flags: u8,
-    pub mode: SearchMode,
 }
 
 pub struct SearchBox(Text<SearchBoxAdditional, SearchBoxCache>);
@@ -167,7 +208,7 @@ impl DerefMut for SearchBox {
 
 impl SearchBox {
     pub fn new() -> Self {
-        Self(Text::new(String::new(), 0, true, SearchBoxAdditional { selected: false, horizontal_scroll: 0, hits: None, flags: 0b01, mode: SearchMode::String }))
+        Self(Text::new(String::new(), 0, true, SearchBoxAdditional { selected: false, horizontal_scroll: 0, hits: None }))
     }
 
     pub const fn uninit() -> Self {
@@ -195,7 +236,7 @@ impl SearchBox {
         if self.value.is_empty() {
             builder.settings(pos + (0, 3), false, SEARCH_BOX_Z);
             builder.color = TextColor::Gray.to_raw();
-            let _ = write!(builder, "{}", match self.mode {
+            let _ = write!(builder, "{}", match config::get_search_mode() {
                 SearchMode::String => r#"Search..."#,
                 SearchMode::Regex => r#"/[Ss]earch\.*/g"#,
                 SearchMode::Snbt => r#"{dialog: "search", ...}"#,
@@ -230,9 +271,9 @@ impl SearchBox {
         }
 
         {
-            let search_uv = match self.flags { 0b01 => SEARCH_VALUES_UV, 0b10 => SEARCH_KEYS_UV, _ => SEARCH_KEYS_AND_VALUES_UV };
+            let search_uv = config::get_search_flags().uv();
             let widget_uv = if (builder.window_width() - SEARCH_BOX_END_X - 17 - 16..builder.window_width() - SEARCH_BOX_END_X - 1 - 16).contains(&mouse_x) && (26..42).contains(&mouse_y) {
-                builder.draw_tooltip(&[match self.flags { 0b01 => "Values only", 0b10 => "Keys only", _ => "Keys + Values" }], mouse, false);
+                builder.draw_tooltip(&[&config::get_search_flags().to_string()], mouse, false);
                 HOVERED_WIDGET_UV
             } else {
                 UNSELECTED_WIDGET_UV
@@ -243,9 +284,9 @@ impl SearchBox {
         }
 
         {
-            let mode_uv = self.mode.uv();
+            let mode_uv = config::get_search_mode().uv();
             let widget_uv = if (builder.window_width() - SEARCH_BOX_END_X - 17..builder.window_width() - SEARCH_BOX_END_X - 1).contains(&mouse_x) && (26..42).contains(&mouse_y) {
-                builder.draw_tooltip(&[&format!("{mode} Mode", mode = self.mode)], mouse, false);
+                builder.draw_tooltip(&[&format!("{mode} Mode", mode = config::get_search_mode())], mouse, false);
                 HOVERED_WIDGET_UV
             } else {
                 UNSELECTED_WIDGET_UV
@@ -291,12 +332,12 @@ impl SearchBox {
 
     #[inline]
     pub fn on_search_widget(&mut self, shift: bool) {
-        self.flags = ((self.flags as i8 - 1).wrapping_add((!shift) as i8 * 2 - 1).rem_euclid(3) + 1) as u8;
+        config::set_search_flags(if shift { config::get_search_flags().rev_cycle() } else { config::get_search_flags().cycle() });
     }
 
     #[inline]
     pub fn on_mode_widget(&mut self, shift: bool) {
-        self.mode = if shift { self.mode.rev_cycle() } else { self.mode.cycle() };
+        config::set_search_mode(if shift { config::get_search_mode().rev_cycle() } else { config::get_search_mode().cycle() });
     }
 
     #[inline]
@@ -305,7 +346,7 @@ impl SearchBox {
             return;
         }
 
-        let Some(predicate) = self.mode.into_predicate(self.value.clone(), self.flags) else { return };
+        let Some(predicate) = config::get_search_mode().into_predicate(self.value.clone()) else { return };
         let start = since_epoch();
         let new_bookmarks = Self::search0(root, &predicate);
         self.hits = Some((new_bookmarks.len(), since_epoch() - start));

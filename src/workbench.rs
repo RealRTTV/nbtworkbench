@@ -272,7 +272,7 @@ impl Workbench {
 				}
 
 				if let MouseButton::Left | MouseButton::Right = button {
-					let shift = (self.held_keys.contains(&KeyCode::ShiftLeft) || self.held_keys.contains(&KeyCode::ShiftRight)) ^ (button == MouseButton::Right);
+					let shift = (self.shift()) ^ (button == MouseButton::Right);
 
 					if (self.window_width - SEARCH_BOX_END_X - 17 - 16 - 16..self.window_width - SEARCH_BOX_END_X - 1 - 16 - 16).contains(&self.mouse_x) & &(26..42).contains(&self.mouse_y) {
 						let tab = tab_mut!( self );
@@ -304,6 +304,20 @@ impl Workbench {
 				}
 
 				'a: {
+					if button == MouseButton::Left && y >= HEADER_SIZE {
+						match self.held_entry.take() {
+							HeldEntry::Empty => {}
+							HeldEntry::FromAether(x) => {
+								self.drop(x, None, left_margin);
+								break 'a;
+							}
+							HeldEntry::FromKnown(x, indices) => {
+								self.drop(x, Some(indices), left_margin);
+								break 'a;
+							}
+						}
+					}
+
 					if button == MouseButton::Left {
 						if self.bookmark_line() {
 							break 'a;
@@ -332,8 +346,8 @@ impl Workbench {
 						match self.action_wheel.take() {
 							Some(_) => {}
 							None => {
-								if button == MouseButton::Right {
-									let tab = tab_mut!(self);
+								let tab = tab_mut!(self);
+								if button == MouseButton::Right && y >= HEADER_SIZE && (y - HEADER_SIZE) / 16 + tab.scroll() / 16 < tab.value.height() {
 									let depth = Traverse::new(tab.scroll() / 16 + (y - HEADER_SIZE) / 16, &mut tab.value).enumerate().last().0;
 									self.action_wheel = Some((left_margin + depth * 16 + 16 + 6, ((y - HEADER_SIZE) & !15) + HEADER_SIZE + 7));
 									break 'a;
@@ -401,7 +415,6 @@ impl Workbench {
 
 				self.held_mouse_keys.remove(&button);
 				if y >= HEADER_SIZE {
-					let left_margin = self.left_margin();
 					'a: {
 						match self.held_entry.take() {
 							HeldEntry::Empty => {}
@@ -1107,6 +1120,8 @@ impl Workbench {
 		let mouse_x = self.mouse_x + self.tab_scroll;
 		if mouse_x < 2 { return }
 
+		let shift = self.shift();
+
 		let mut x = mouse_x - 2;
 		'a: {
 			for (idx, tab) in self.tabs.iter_mut().enumerate() {
@@ -1122,7 +1137,7 @@ impl Workbench {
 							tab.format = tab.format.rev_cycle();
 						}
 					} else if idx == self.tab && x + 1 >= width - 32 && x < width - 16 {
-						if let Err(e) = tab.save(self.held_keys.contains(&KeyCode::ShiftLeft) || self.held_keys.contains(&KeyCode::ShiftRight)) {
+						if let Err(e) = tab.save(shift) {
 							self.alert(Alert::new("Error!", TextColor::Red, e.to_string()));
 						}
 					} else if button == MouseButton::Left {
@@ -1142,7 +1157,7 @@ impl Workbench {
 			}
 
 			if button == MouseButton::Middle {
-				self.new_tab(window_properties, self.held_keys.contains(&KeyCode::ShiftLeft) | self.held_keys.contains(&KeyCode::ShiftRight));
+				self.new_tab(window_properties, self.shift());
 			}
 		}
 	}
@@ -1955,6 +1970,7 @@ impl Workbench {
 						}
 						SearchBoxKeyResult::ClearAllBookmarks => {
 							tab.bookmarks.clear();
+							self.search_box.hits = None;
 							self.search_box.post_input((self.window_width, self.window_height));
 							return true;
 						}
@@ -2344,7 +2360,7 @@ impl Workbench {
 	pub fn render(&mut self, builder: &mut VertexBufferBuilder) {
 		if self.raw_window_width < MIN_WINDOW_WIDTH || self.raw_window_height < MIN_WINDOW_HEIGHT { return; }
 
-		let shift = self.held_keys.contains(&KeyCode::ShiftLeft) || self.held_keys.contains(&KeyCode::ShiftRight);
+		let shift = self.shift();
 
 		{
 			builder.draw_texture_region_z(
@@ -2354,7 +2370,14 @@ impl Workbench {
 				(2, 23),
 				(2, 16),
 			);
-			self.search_box.render(builder, self.held_keys.contains(&KeyCode::ShiftLeft) || self.held_keys.contains(&KeyCode::ShiftRight), (self.mouse_x, self.mouse_y));
+			self.search_box.render(builder, self.shift(), (self.mouse_x, self.mouse_y));
+			builder.draw_texture_region_z(
+				(builder.window_width() - SEARCH_BOX_END_X, 22),
+				BASE_Z,
+				LINE_NUMBER_SEPARATOR_UV,
+				(2, 23),
+				(2, 16),
+			);
 		}
 
 		builder.draw_texture_region_z(
@@ -2751,7 +2774,7 @@ impl Workbench {
 	)]
 	fn char_from_key(&self, key: KeyCode) -> Option<char> {
 		if self.ctrl() { return None }
-		let shift = self.held_keys.contains(&KeyCode::ShiftLeft) || self.held_keys.contains(&KeyCode::ShiftRight);
+		let shift = self.shift();
 		Some(match key {
 			KeyCode::Digit1 => if shift { '!' } else { '1' },
 			KeyCode::Digit2 => if shift { '@' } else { '2' },

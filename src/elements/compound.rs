@@ -1,14 +1,12 @@
 use std::alloc::{alloc, Layout};
 use std::cmp::Ordering;
 use std::fmt::{Display, Formatter, Write};
-use std::hash::Hasher;
 use std::intrinsics::likely;
 use std::ops::Deref;
 #[cfg(not(target_arch = "wasm32"))]
 use std::thread::Scope;
 
 use compact_str::{CompactString, format_compact, ToCompactString};
-use fxhash::FxHasher;
 use hashbrown::raw::RawTable;
 
 use crate::{config, DropFn, OptionExt, RenderContext, StrExt, VertexBufferBuilder};
@@ -74,7 +72,8 @@ impl NbtCompound {
 			}
 		}
 		let s = s.strip_prefix('}')?;
-		config::get_sort_algorithm().sort(&mut compound.entries);
+		// SAFETY: we can only call this on init of the compound
+		unsafe { config::get_sort_algorithm().sort(&mut compound.entries); }
 		Some((s, compound))
 	}
 
@@ -452,24 +451,6 @@ impl NbtCompound {
 	}
 }
 
-// impl Debug for NbtCompound {
-// 	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-// 		if self.is_empty() {
-// 			write!(f, "{{}}")
-// 		} else {
-// 			let mut debug = f.debug_struct("");
-// 			for (key, element) in self.children() {
-// 				if key.needs_escape() {
-// 					debug.field(&format!("{key:?}"), element);
-// 				} else {
-// 					debug.field(key, element);
-// 				}
-// 			}
-// 			debug.finish()
-// 		}
-// 	}
-// }
-
 impl NbtCompound {
 	#[inline]
 	#[allow(clippy::too_many_lines)]
@@ -795,7 +776,7 @@ impl Clone for CompoundMap {
 		unsafe {
 			let mut table = RawTable::try_with_capacity(self.indices.len()).unwrap_unchecked();
 			for (idx, bucket) in self.indices.iter().enumerate() {
-				let hash = hash!(self.entries.get_unchecked(idx).key.as_str());
+				let hash = hash!(self.entries.get_unchecked(idx).key);
 				let _ = table.insert_in_slot(hash, core::mem::transmute(idx), *bucket.as_ref());
 			}
 			Self {
@@ -809,8 +790,8 @@ impl Clone for CompoundMap {
 #[derive(Clone)]
 pub struct Entry {
 	pub value: NbtElement,
-	pub hash: u64,
 	pub key: CompactString,
+	pub additional: usize,
 }
 
 impl Default for CompoundMap {
@@ -826,9 +807,7 @@ impl CompoundMap {
 	#[must_use]
 	pub fn idx_of(&self, key: &str) -> Option<usize> {
 		self.indices
-			.get(hash!(key), |&idx| unsafe {
-				self.entries.get_unchecked(idx).key.as_str() == key
-			})
+			.get(hash!(key), |&idx| unsafe { self.entries.get_unchecked(idx).key.as_str() == key })
 			.copied()
 	}
 
@@ -845,12 +824,8 @@ impl CompoundMap {
 
 	pub fn insert_full(&mut self, key: CompactString, element: NbtElement) -> (usize, Option<NbtElement>) {
 		unsafe {
-			let hash = hash!(key.as_str());
-			match self.indices.find_or_find_insert_slot(
-				hash,
-				|&idx| self.entries.get_unchecked(idx).key.as_str() == key.as_str(),
-				|&idx| hash!(self.entries.get_unchecked(idx).key.as_str()),
-			) {
+			let hash = hash!(key);
+			match self.indices.find_or_find_insert_slot(hash, |&idx| self.entries.get_unchecked(idx).key == key, |&idx| hash!(self.entries.get_unchecked(idx).key), ) {
 				Ok(bucket) => {
 					let idx = *bucket.as_ref();
 					(
@@ -867,7 +842,7 @@ impl CompoundMap {
 					self.entries.as_mut_ptr().add(len).write(Entry {
 						key,
 						value: element,
-						hash,
+						additional: 0,
 					});
 					self.entries.set_len(len + 1);
 					self.indices.insert_in_slot(hash, slot, len);
@@ -879,16 +854,8 @@ impl CompoundMap {
 
 	pub fn insert_at(&mut self, key: CompactString, element: NbtElement, idx: usize) -> Option<(CompactString, NbtElement)> {
 		unsafe {
-			let hash = hash!(key.as_str());
-			let (prev, end, bucket) = match self.indices.find_or_find_insert_slot(
-				hash,
-				|&idx| self.entries.get_unchecked(idx).key.as_str() == key.as_str(),
-				|&idx| {
-					let mut hasher = FxHasher::default();
-					hasher.write(self.entries.get_unchecked(idx).key.as_str().as_bytes());
-					hasher.finish()
-				},
-			) {
+			let hash = hash!(key);
+			let (prev, end, bucket) = match self.indices.find_or_find_insert_slot(hash, |&idx| self.entries.get_unchecked(idx).key == key, |&idx| hash!(self.entries.get_unchecked(idx).key)) {
 				Ok(bucket) => {
 					let before = core::mem::replace(bucket.as_mut(), idx);
 					let Entry {
@@ -899,7 +866,7 @@ impl CompoundMap {
 						Entry {
 							key,
 							value: element,
-							hash,
+							additional: 0,
 						},
 					);
 					(Some((k, v)), before, bucket)
@@ -912,7 +879,7 @@ impl CompoundMap {
 					self.entries.as_mut_ptr().add(idx).write(Entry {
 						key,
 						value: element,
-						hash,
+						additional: 0,
 					});
 					self.entries.set_len(len + 1);
 					let bucket = self.indices.insert_in_slot(hash, slot, idx);
@@ -952,30 +919,17 @@ impl CompoundMap {
 	///
 	/// * idx must be valid
 	pub unsafe fn update_key_idx_unchecked(&mut self, idx: usize, key: CompactString) -> CompactString {
-		let old_key = self.entries.get_unchecked(idx).key.as_str();
-		let hash = hash!(old_key);
-		let _ = self
-			.indices
-			.remove_entry(hash, |&idx| {
-				self.entries.get_unchecked(idx).key.as_str() == old_key
-			})
-			.unwrap_unchecked();
+		let new_hash = hash!(key);
 		let old_key = core::mem::replace(&mut self.entries.get_unchecked_mut(idx).key, key);
-		self.indices.insert(
-			hash!(self.entries.get_unchecked(idx).key.as_str()),
-			idx,
-			|&idx| hash!(self.entries.get_unchecked(idx).key.as_str()),
-		);
+		self.indices.remove_entry(hash!(old_key), |&target_idx| target_idx == idx).unwrap_unchecked();
+		self.indices.insert(new_hash, idx, |&idx| hash!(self.entries.get_unchecked(idx).key));
 		old_key
 	}
 
 	pub fn shift_remove_idx(&mut self, idx: usize) -> Option<(CompactString, NbtElement)> {
 		if idx > self.entries.len() { return None }
 		unsafe {
-			let Entry { key, hash, .. } = &self.entries.get_unchecked(idx);
-			let _ = self.indices.remove_entry(*hash, |&idx| {
-				self.entries.get_unchecked(idx).key.as_str() == key.as_str()
-			});
+			self.indices.remove_entry(hash!(self.entries.get_unchecked(idx).key), |&found_idx| found_idx == idx);
 			for bucket in self.indices.iter() {
 				if *bucket.as_ref() > idx {
 					*bucket.as_mut() -= 1;
@@ -989,18 +943,11 @@ impl CompoundMap {
 
 	pub fn swap_remove_idx(&mut self, idx: usize) -> Option<(CompactString, NbtElement)> {
 		if idx > self.entries.len() { return None }
-		let Entry { key, value, hash } = self.entries.swap_remove(idx);
+		let Entry { key, value, .. } = self.entries.swap_remove(idx);
+		let hash = hash!(key);
 		unsafe {
-			let tail = self
-				.indices
-				.remove_entry(hash, |&idx| idx + 1 == self.entries.len())
-				.unwrap_unchecked();
-			*self
-				.indices
-				.get_mut(hash, |&idx| {
-					self.entries.get_unchecked(idx).key.as_str() == key.as_str()
-				})
-				.unwrap_unchecked() = tail;
+			let tail = self.indices.remove_entry(hash, |&idx| idx + 1 == self.entries.len()).unwrap_unchecked();
+			*self.indices.get_mut(hash, |&idx| self.entries.get_unchecked(idx).key == key).unwrap_unchecked() = tail;
 		}
 		Some((key, value))
 	}
@@ -1008,17 +955,11 @@ impl CompoundMap {
 	pub fn swap(&mut self, a: usize, b: usize) {
 		if a >= self.entries.len() || b >= self.entries.len() { return; }
 		unsafe {
-			let a_hash = self.entries.get_unchecked(a).hash;
-			let b_hash = self.entries.get_unchecked(b).hash;
+			let a_hash = hash!(self.entries.get_unchecked(a).key);
+			let b_hash = hash!(self.entries.get_unchecked(b).key);
 			self.entries.swap(a, b);
-			let a = self
-				.indices
-				.get_mut(a_hash, |&idx| idx == a)
-				.unwrap_unchecked() as *mut usize;
-			let b = self
-				.indices
-				.get_mut(b_hash, |&idx| idx == b)
-				.unwrap_unchecked() as *mut usize;
+			let a = self.indices.get_mut(a_hash, |&idx| idx == a).unwrap_unchecked() as *mut usize;
+			let b = self.indices.get_mut(b_hash, |&idx| idx == b).unwrap_unchecked() as *mut usize;
 			core::ptr::swap(a, b);
 		}
 	}
@@ -1026,18 +967,16 @@ impl CompoundMap {
 	#[must_use]
 	pub fn get_idx(&self, idx: usize) -> Option<(&str, &NbtElement)> {
 		let Entry { key, value, .. } = self.entries.get(idx)?;
-		let key = key.as_ref();
-		Some((key, value))
+		Some((key.as_str(), value))
 	}
 
 	#[must_use]
 	pub fn get_idx_mut(&mut self, idx: usize) -> Option<(&str, &mut NbtElement)> {
 		let entry = self.entries.get_mut(idx)?;
-		Some((entry.key.as_ref(), &mut entry.value))
+		Some((entry.key.as_str(), &mut entry.value))
 	}
 
-	pub fn sort_by<F: FnMut((&str, &NbtElement), (&str, &NbtElement)) -> Ordering>(&mut self, mut f: F, line_number: usize, true_line_number: usize, true_height: usize, open: bool, bookmarks: &mut MarkedLineSlice) -> Box<[usize]> {
-		let hashes = self.entries.iter().map(|entry| entry.hash).collect::<Vec<_>>();
+	pub fn sort_by<F: Fn((&str, &NbtElement), (&str, &NbtElement)) -> Ordering>(&mut self, f: F, line_number: usize, true_line_number: usize, true_height: usize, open: bool, bookmarks: &mut MarkedLineSlice) -> Box<[usize]> {
 		let true_line_numbers = {
 			let mut current_line_number = true_line_number + 1;
 			self.entries.iter().map(|entry| { let new_line_number = current_line_number; current_line_number += entry.value.true_height(); new_line_number }).collect::<Vec<_>>()
@@ -1050,20 +989,18 @@ impl CompoundMap {
 		let mut new_bookmarks_len = 0;
 		// yeah, it's hacky... but there's not much else I *can* do. plus: it works extremely well.
 		for (idx, entry) in self.entries.iter_mut().enumerate() {
-			entry.hash = idx as u64;
+			entry.additional = idx;
 		}
 		self.entries.sort_by(|a, b| f((&a.key, &a.value), (&b.key, &b.value)));
-		let indices = self.entries.iter().map(|entry| entry.hash as usize).collect::<Vec<_>>();
+		let indices = self.entries.iter().map(|entry| entry.additional).collect::<Vec<_>>();
 		let mut inverted_indices = Box::<[usize]>::new_uninit_slice(self.len());
 		let mut current_true_line_number = true_line_number + 1;
 		let mut current_line_number = line_number + 1;
 		for (new_idx, &idx) in indices.iter().enumerate() {
 			// SAFETY: these indices are valid since the length did not change and since the values written were indexes
 			unsafe {
-				let hash = *hashes.get_unchecked(idx);
 				let entry = self.entries.get_unchecked_mut(new_idx);
-				entry.hash = hash;
-				*self.indices.find(hash, |&x| x == idx).panic_unchecked("index obviously exists").as_mut() = new_idx;
+				*self.indices.find(hash!(entry.key), |&target_idx| target_idx == idx).panic_unchecked("index obviously exists").as_mut() = new_idx;
 
 				let true_line_number = *true_line_numbers.get_unchecked(idx);
 				let line_number = *line_numbers.get_unchecked(idx);
@@ -1101,17 +1038,13 @@ impl<'a> Iterator for CompoundMapIter<'a> {
 	type Item = (&'a str, &'a NbtElement);
 
 	fn next(&mut self) -> Option<Self::Item> {
-		self.0
-			.next()
-			.map(|Entry { key, value, .. }| (key.as_ref(), value))
+		self.0.next().map(|Entry { key, value, .. }| (key.as_ref(), value))
 	}
 }
 
 impl<'a> DoubleEndedIterator for CompoundMapIter<'a> {
 	fn next_back(&mut self) -> Option<Self::Item> {
-		self.0
-			.next_back()
-			.map(|Entry { key, value, .. }| (key.as_ref(), value))
+		self.0.next_back().map(|Entry { key, value, .. }| (key.as_ref(), value))
 	}
 }
 
@@ -1126,17 +1059,13 @@ impl<'a> Iterator for CompoundMapIterMut<'a> {
 	type Item = (&'a str, &'a mut NbtElement);
 
 	fn next(&mut self) -> Option<Self::Item> {
-		self.0
-			.next()
-			.map(|entry| (entry.key.as_str(), &mut entry.value))
+		self.0.next().map(|entry| (entry.key.as_str(), &mut entry.value))
 	}
 }
 
 impl<'a> DoubleEndedIterator for CompoundMapIterMut<'a> {
 	fn next_back(&mut self) -> Option<Self::Item> {
-		self.0
-			.next_back()
-			.map(|entry| (entry.key.as_str(), &mut entry.value))
+		self.0.next_back().map(|entry| (entry.key.as_str(), &mut entry.value))
 	}
 }
 

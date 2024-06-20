@@ -59,7 +59,8 @@ NBT Workbench is written completely from scratch in [Rust](https://www.rust-lang
 * ☆ \[1 to 8\] Jump to nth tab.
 * ☆ \[9\] Jump to last tab.
 * \[Ctrl + R\] Reload tab.
-* ☆ \[Ctrl + Shift + R\] Toggle freehand mode. (Disables selecting text and makes toggle button extend horizontally to make for quick maneuvering)
+* ☆ \[Ctrl + Shift + F\] Toggle freehand mode. (Disables selecting text and makes toggle button extend horizontally to make for quick maneuvering)
+* ☆ \[Ctrl + Alt + T\] Change theme.
 * \[Ctrl + N\] New tab.
 * \[Ctrl + Shift + N\] New region file tab.
 * \[Ctrl + O\] Open file.

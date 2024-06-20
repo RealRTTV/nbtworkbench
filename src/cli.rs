@@ -8,7 +8,7 @@ use glob::glob;
 
 use crate::{create_regex, error, log, WindowProperties};
 use crate::elements::element::NbtElement;
-use crate::search_box::{SearchBox, SearchPredicate, SearchPredicateInner};
+use crate::search_box::{SearchBox, SearchFlags, SearchPredicate, SearchPredicateInner};
 use crate::tab::FileFormat;
 use crate::workbench::Workbench;
 
@@ -59,9 +59,9 @@ fn get_predicate(args: &mut Vec<String>) -> SearchPredicate {
     };
 
     let search_flags = match get_argument("--search", args).or_else(|| get_argument("-s", args)).as_deref() {
-        Some("key") => 0b10_u8,
-        Some("value") => 0b01_u8,
-        Some("all") | None => 0b11_u8,
+        Some("key") => SearchFlags::Keys,
+        Some("value") => SearchFlags::Values,
+        Some("all") | None => SearchFlags::KeysValues,
         Some(x) => {
             error!("Invalid search kind '{x}', valid ones are: `key`, `value`, and `all`.");
             std::process::exit(1);

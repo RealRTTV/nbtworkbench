@@ -29,7 +29,7 @@ impl NbtNull {
             builder.settings(ctx.pos() + (20, 0), false, JUST_OVERLAPPING_BASE_TEXT_Z);
             if let Some(key) = name {
                 builder.color = TextColor::TreeKey.to_raw();
-                let _ = write!(builder, "{key}: null ");
+                let _ = write!(builder, "{key}: null");
             };
 
             builder.color = TextColor::TreeKey.to_raw();

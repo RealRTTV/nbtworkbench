@@ -75,25 +75,9 @@ pub const SELECTED_TOGGLE_ON_UV: Vec2u = Vec2u::new(0, 72);
 pub const SELECTED_TOGGLE_OFF_UV: Vec2u = Vec2u::new(8, 72);
 pub const UNHELD_SCROLLBAR_UV: Vec2u = Vec2u::new(48, 64);
 pub const HELD_SCROLLBAR_UV: Vec2u = Vec2u::new(54, 64);
-pub const REMOVE_UV: Vec2u = Vec2u::new(0, 96);
-pub const ADD_UV: Vec2u = Vec2u::new(16, 96);
-pub const RENAME_UV: Vec2u = Vec2u::new(32, 96);
-pub const MOVE_UV: Vec2u = Vec2u::new(48, 96);
-pub const REPLACE_UV: Vec2u = Vec2u::new(64, 96);
-pub const REORDER_UV: Vec2u = Vec2u::new(80, 96);
-pub const REMOVE_TAIL_UV: Vec2u = Vec2u::new(0, 112);
-pub const ADD_TAIL_UV: Vec2u = Vec2u::new(16, 112);
-pub const RENAME_TAIL_UV: Vec2u = Vec2u::new(32, 112);
-pub const MOVE_TAIL_UV: Vec2u = Vec2u::new(48, 112);
-pub const REPLACE_TAIL_UV: Vec2u = Vec2u::new(64, 112);
-pub const REORDER_TAIL_UV: Vec2u = Vec2u::new(80, 112);
-pub const BULK_UV: Vec2u = Vec2u::new(240, 240);
-pub const BULK_TAIL_UV: Vec2u = Vec2u::new(240, 240);
-pub const UNDO_UV: Vec2u = Vec2u::new(32, 144);
-pub const REDO_UV: Vec2u = Vec2u::new(48, 144);
 pub const LINE_NUMBER_SEPARATOR_UV: Vec2u = Vec2u::new(60, 64);
 pub const END_LINE_NUMBER_SEPARATOR_UV: Vec2u = Vec2u::new(62, 64);
-pub const HORIZONTAL_SEPARATOR_UV: Vec2u = Vec2u::new(17, 80); // (14 by 2)
+pub const HORIZONTAL_SEPARATOR_UV: Vec2u = Vec2u::new(17, 80);
 pub const TEXT_UNDERLINE_UV: Vec2u = Vec2u::new(16, 82);
 pub const INSERTION_UV: Vec2u = Vec2u::new(16, 84);
 pub const TOOLTIP_UV: Vec2u = Vec2u::new(96, 144);
@@ -200,7 +184,6 @@ pub fn atlas(theme: Theme) -> &'static [u8] {
 
 #[allow(clippy::cast_ptr_alignment)]
 pub fn icon() -> Vec<u8> {
-	// error!("Hello, world!");
 	let original = match (since_epoch().as_millis() & 7) as u8 {
 		// it's a good random only because its used once
 		0 => OTHERSIDE_MUSIC_DISC_ICON,
