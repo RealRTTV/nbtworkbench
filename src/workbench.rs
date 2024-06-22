@@ -747,8 +747,8 @@ impl Workbench {
 			let target_depth = (self.mouse_x + horizontal_scroll - left_margin - 16) / 16;
 			let (depth, (_, _, _, _)) = Traverse::new(y, &mut tab.value).enumerate().last();
 			if tab.last_double_click_expand.0 == (target_depth, y) && now - tab.last_double_click_expand.1 <= LINE_DOUBLE_CLICK_INTERVAL {
-				self.toggle(shift, true);
 				tab.last_double_click_expand = (Vec2u::new(depth, y), now);
+				self.toggle(shift, true);
 				return true;
 			} else {
 				tab.last_double_click_expand = (Vec2u::new(depth, y), now);
