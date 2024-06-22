@@ -185,6 +185,7 @@ extern "C" {
 pub static mut WORKBENCH: UnsafeCell<Workbench> = UnsafeCell::new(unsafe { Workbench::uninit() });
 pub static mut WINDOW_PROPERTIES: UnsafeCell<WindowProperties> = UnsafeCell::new(WindowProperties::Fake);
 pub const TEXT_DOUBLE_CLICK_INTERVAL: Duration = Duration::from_millis(250);
+pub const LINE_DOUBLE_CLICK_INTERVAL: Duration = Duration::from_millis(500);
 pub const TAB_CLOSE_DOUBLE_CLICK_INTERVAL: Duration = Duration::from_millis(2000);
 
 #[cfg(target_arch = "wasm32")]
@@ -381,6 +382,7 @@ pub fn split_lines<const MAX_WIDTH: usize>(s: String) -> Vec<String> {
 	}).filter(|slice| !slice.is_empty()).map(|slice| unsafe { std::str::from_utf8_unchecked(slice) }) {
 		if current_line.width() + word.width() > MAX_WIDTH {
 			lines.push(current_line.trim_ascii_end().to_string());
+			current_line = String::new();
 		}
 		current_line += word;
 	}
@@ -1134,7 +1136,7 @@ pub fn combined_two_sorted<T: Ord>(a: Box<[T]>, b: Box<[T]>) -> Vec<T> {
 }
 
 pub trait StrExt {
-	fn snbt_string_read(&self) -> Option<(CompactString, &str)>;
+	fn snbt_string_read(&self) -> Result<(CompactString, &str), usize>;
 
 	fn needs_escape(&self) -> bool;
 
@@ -1145,7 +1147,7 @@ impl StrExt for str {
 	#[inline]
 	#[optimize(speed)]
 	#[allow(clippy::too_many_lines)]
-	fn snbt_string_read(mut self: &Self) -> Option<(CompactString, &Self)> {
+	fn snbt_string_read(mut self: &Self) -> Result<(CompactString, &Self), usize> {
 		const MAPPING: [Option<u8>; 256] = {
 			let mut initial = [Option::<u8>::None; 256];
 			initial[b'0' as usize] = Some(0);
@@ -1184,10 +1186,10 @@ impl StrExt for str {
 					self.get_unchecked(end_idx..self.len()),
 				)
 			};
-			if s.needs_escape() { return None }
-			Some((s.to_compact_string(), s2))
+			if s.needs_escape() { return Err(s2.len()) }
+			Ok((s.to_compact_string(), s2))
 		} else {
-			let enclosing = self.as_bytes().first().copied()?;
+			let enclosing = self.as_bytes().first().copied().ok_or(self.len())?;
 			self = unsafe { self.get_unchecked(1..) };
 			let (end, len) = 'a: {
 				let mut backslash = false;
@@ -1205,7 +1207,7 @@ impl StrExt for str {
 									sub += 2;
 								}
 							} else {
-								return None;
+								return Err(self.len() - idx);
 							}
 						} else if byte == b'u' {
 							if let Ok([(_, _), (_, b), (_, c), _]) = iter.next_chunk::<4>()
@@ -1222,7 +1224,7 @@ impl StrExt for str {
 									sub += 3;
 								}
 							} else {
-								return None;
+								return Err(self.len() - idx);
 							}
 						} else {
 							sub += 1;
@@ -1240,7 +1242,7 @@ impl StrExt for str {
 						backslash = false;
 					}
 				}
-				return None;
+				return Err(self.len());
 			};
 			let mut out = CompactString::with_capacity(len);
 			let ptr = out.as_mut_ptr();
@@ -1292,7 +1294,7 @@ impl StrExt for str {
 							buf_len += len;
 							continue;
 						} else {
-							return None;
+							return Err(self.len());
 						}
 					}
 				} else if byte == b'u' {
@@ -1310,11 +1312,11 @@ impl StrExt for str {
 							buf_len += len;
 							continue;
 						} else {
-							return None;
+							return Err(self.len());
 						}
 					}
 				} else if backslash {
-					return None;
+					return Err(self.len());
 				}
 
 				unsafe {
@@ -1323,8 +1325,8 @@ impl StrExt for str {
 				}
 			}
 
-			if self.len() < end + 1 { return None };
-			unsafe { Some((out, self.get_unchecked((end + 1)..))) }
+			if self.len() < end + 1 { return Err(self.len()) };
+			unsafe { Ok((out, self.get_unchecked((end + 1)..))) }
 		}
 	}
 

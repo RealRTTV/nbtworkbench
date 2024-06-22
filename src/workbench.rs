@@ -14,7 +14,7 @@ use winit::event::{ElementState, KeyEvent, MouseButton, MouseScrollDelta};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::Theme;
 
-use crate::{config, DropFn, encompasses, encompasses_or_equal, FileUpdateSubscription, FileUpdateSubscriptionType, flags, get_clipboard, HeldEntry, LinkedQueue, MarkedLine, OptionExt, panic_unchecked, Position, recache_along_indices, RenderContext, set_clipboard, since_epoch, SortAlgorithm, StrExt, sum_indices, tab, TAB_CLOSE_DOUBLE_CLICK_INTERVAL, tab_mut, TEXT_DOUBLE_CLICK_INTERVAL, WindowProperties};
+use crate::{config, DropFn, encompasses, encompasses_or_equal, FileUpdateSubscription, FileUpdateSubscriptionType, flags, get_clipboard, HeldEntry, LINE_DOUBLE_CLICK_INTERVAL, LinkedQueue, MarkedLine, OptionExt, panic_unchecked, Position, recache_along_indices, RenderContext, set_clipboard, since_epoch, SortAlgorithm, StrExt, sum_indices, tab, TAB_CLOSE_DOUBLE_CLICK_INTERVAL, tab_mut, TEXT_DOUBLE_CLICK_INTERVAL, WindowProperties};
 use crate::alert::Alert;
 use crate::assets::{ACTION_WHEEL_Z, BACKDROP_UV, BASE_TEXT_Z, BASE_Z, BOOKMARK_UV, CLOSED_WIDGET_UV, DARK_STRIPE_UV, HEADER_SIZE, HELD_ENTRY_Z, HIDDEN_BOOKMARK_UV, HORIZONTAL_SEPARATOR_UV, HOVERED_STRIPE_UV, HOVERED_WIDGET_UV, JUST_OVERLAPPING_BASE_TEXT_Z, JUST_UNDERLAPPING_BASE_Z, LIGHT_STRIPE_UV, LINE_NUMBER_SEPARATOR_UV, NEW_FILE_UV, OPEN_FOLDER_UV, SAVE_GRAYSCALE_UV, SAVE_UV, SELECTED_ACTION_WHEEL, SELECTED_WIDGET_UV, SELECTION_UV, TRAY_UV, UNSELECTED_ACTION_WHEEL, UNSELECTED_WIDGET_UV};
 use crate::be_decoder::BigEndianDecoder;
@@ -176,6 +176,7 @@ impl Workbench {
 				last_close_attempt: Duration::ZERO,
 				last_selected_text_interaction: (0, 0, Duration::ZERO),
 				last_interaction: since_epoch(),
+				last_double_click_expand: (Vec2u::new(0, 0), Duration::ZERO),
 			});
 		}
 		workbench
@@ -356,8 +357,14 @@ impl Workbench {
 						}
 
 						if button == MouseButton::Left {
+							if self.try_double_click_expand() {
+								break 'a;
+							}
+						}
+
+						if button == MouseButton::Left {
 							if self.try_steal(true) {
-								if self.steal_animation_data.as_ref().is_some_and(|x| (since_epoch() - x.0) >= Duration::from_millis(500)) && self.steal() {
+								if self.steal_animation_data.as_ref().is_some_and(|x| (since_epoch() - x.0) >= LINE_DOUBLE_CLICK_INTERVAL) && self.steal() {
 									break 'a;
 								}
 							} else {
@@ -447,7 +454,7 @@ impl Workbench {
 					if cy + scroll > HEADER_SIZE + tab.value.height() * 16 {
 						break 'a;
 					};
-					let highlight_idx = (((cy as f64 - self.mouse_y as f64).atan2(cx as f64 - self.mouse_x as f64) + core::f64::consts::FRAC_PI_8 - core::f64::consts::FRAC_PI_2).rem_euclid(core::f64::consts::TAU) * core::f64::consts::FRAC_2_PI * 2.0) as usize;
+					let highlight_idx = (((cy as f64 - self.mouse_y as f64).atan2(cx as f64 - self.mouse_x as f64) + core::f64::consts::FRAC_PI_8 + core::f64::consts::FRAC_PI_2 + core::f64::consts::FRAC_PI_4).rem_euclid(core::f64::consts::TAU) * core::f64::consts::FRAC_2_PI * 2.0) as usize;
 					let mut indices = Vec::new();
 					let mut depth = 0;
 					if (cy & !15) + scroll == HEADER_SIZE {
@@ -495,17 +502,14 @@ impl Workbench {
 	#[allow(clippy::too_many_lines)]
 	pub fn try_subscription(&mut self) -> Result<()> {
 		fn write_snbt(subscription: &FileUpdateSubscription, data: &[u8], tab: &mut Tab) -> Result<()> {
-			let Some((key, value)) = core::str::from_utf8(data)
-				.ok()
-				.and_then(|s| {
-					let sort = config::set_sort_algorithm(SortAlgorithm::None);
-					let result = NbtElement::from_str(s);
-					config::set_sort_algorithm(sort);
-					result
-				})
-				else {
-					return Err(anyhow!("SNBT failed to parse."));
-				};
+			let Ok(s) = core::str::from_utf8(data) else { return Err(anyhow!("File was not a valid UTF8 string")) };
+			let sort = config::set_sort_algorithm(SortAlgorithm::None);
+			let result = NbtElement::from_str(s);
+			config::set_sort_algorithm(sort);
+			let (key, value) = match result {
+				Ok((key, value)) => (key, value),
+				Err(idx) => return Err(anyhow!("SNBT failed to parse at index {idx}"))
+			};
 			if value.id() == NbtChunk::ID && tab.value.id() != NbtRegion::ID { return Err(anyhow!("Chunk SNBT is only supported for Region Tabs")) }
 			if let Some((&last, rest)) = subscription.indices.split_last() {
 				let (_, _, parent, mut line_number) = Navigate::new(rest.iter().copied(), &mut tab.value).last();
@@ -728,11 +732,39 @@ impl Workbench {
 	}
 
 	#[inline]
+	fn try_double_click_expand(&mut self) -> bool {
+		let left_margin = self.left_margin();
+		let horizontal_scroll = self.horizontal_scroll();
+		let scroll = self.scroll();
+		let shift = self.shift();
+		let tab = tab_mut!(self);
+		let now = since_epoch();
+
+		if self.mouse_x + horizontal_scroll < left_margin + 16 || self.mouse_y < HEADER_SIZE || !self.held_entry.is_empty() || tab.freehand_mode { return false };
+
+		let y = (self.mouse_y - HEADER_SIZE) / 16 + scroll / 16;
+		if y < tab.value.height() && y > 0 {
+			let target_depth = (self.mouse_x + horizontal_scroll - left_margin - 16) / 16;
+			let (depth, (_, _, _, _)) = Traverse::new(y, &mut tab.value).enumerate().last();
+			if tab.last_double_click_expand.0 == (target_depth, y) && now - tab.last_double_click_expand.1 <= LINE_DOUBLE_CLICK_INTERVAL {
+				self.toggle(shift, true);
+				tab.last_double_click_expand = (Vec2u::new(depth, y), now);
+				return true;
+			} else {
+				tab.last_double_click_expand = (Vec2u::new(depth, y), now);
+			}
+		}
+
+		false
+	}
+
+	#[inline]
 	fn try_steal(&mut self, initialize: bool) -> bool {
 		let left_margin = self.left_margin();
 		let horizontal_scroll = self.horizontal_scroll();
 		let scroll = self.scroll();
 		let tab = tab_mut!(self);
+		let now = since_epoch();
 
 		if self.mouse_x + horizontal_scroll < left_margin + 16 || self.mouse_y < HEADER_SIZE || !self.held_entry.is_empty() || tab.freehand_mode { return false };
 
@@ -741,10 +773,10 @@ impl Workbench {
 			let target_depth = (self.mouse_x + horizontal_scroll - left_margin - 16) / 16;
 			let (depth, (_, _, _, _)) = Traverse::new(y, &mut tab.value).enumerate().last();
 			if initialize {
-				self.steal_animation_data.get_or_insert((since_epoch(), (target_depth, y).into()));
+				self.steal_animation_data.get_or_insert((now, (target_depth, y).into()));
 			}
-			if let Some((_, Vec2u { x: expected_depth, y: expected_y })) = self.steal_animation_data.clone() {
-				return depth == expected_depth && y == expected_y
+			if let Some((_, expected)) = self.steal_animation_data.clone() {
+				return expected == (depth, y)
 			}
 		}
 		false
@@ -1083,14 +1115,14 @@ impl Workbench {
 			let x = self.mouse_x - (16 + 16 + 4);
 			if x / 16 == 13 {
 				match NbtElement::from_str(&get_clipboard().ok_or_else(|| anyhow!("Failed to get clipboard"))?) {
-					Some((key, element)) => {
+					Ok((key, element)) => {
 						if element.id() == NbtChunk::ID && tab.value.id() != NbtRegion::ID {
 							return Err(anyhow!("Chunks are not supported for non-region tabs"));
 						} else {
 							self.held_entry = HeldEntry::FromAether((key, element))
 						}
 					}
-					None => return Err(anyhow!("Could not parse clipboard as SNBT")),
+					Err(idx) => return Err(anyhow!("Could not parse clipboard as SNBT (failed at index {idx})")),
 				}
 			} else {
 				self.held_entry = HeldEntry::FromAether((None, NbtElement::from_id(match x / 16 {
@@ -1183,6 +1215,7 @@ impl Workbench {
 			last_close_attempt: Duration::ZERO,
 			last_selected_text_interaction: (0, 0, Duration::ZERO),
 			last_interaction: since_epoch(),
+			last_double_click_expand: (Vec2u::new(0, 0), Duration::ZERO)
 		});
 	}
 
@@ -2235,11 +2268,12 @@ impl Workbench {
 							self.alert(Alert::new("Error!", TextColor::Red, "Failed to get clipboard"));
 							return true;
 						};
-						if let Some((key, value)) = NbtElement::from_str(&clipboard) {
-							(key, value)
-						} else {
-							self.alert(Alert::new("Error!", TextColor::Red, "Could not parse clipboard as SNBT"));
-							return true;
+						match NbtElement::from_str(&clipboard) {
+							Ok((key, value)) => (key, value),
+							Err(idx) => {
+								self.alert(Alert::new("Error!", TextColor::Red, format!("Could not parse clipboard as SNBT (failed at index {idx})")));
+								return true;
+							}
 						}
 					} else {
 						return true;
@@ -2482,7 +2516,7 @@ impl Workbench {
 			self.scrollbar_offset.is_some(),
 			self.held_entry.element(),
 			self.action_wheel.is_some(),
-			self.steal_animation_data.as_ref().map(|x| (since_epoch() - x.0).min(Duration::from_millis(500)).as_millis() as f32 / 500.0).unwrap_or(0.0)
+			self.steal_animation_data.as_ref().map(|x| (since_epoch() - x.0).min(LINE_DOUBLE_CLICK_INTERVAL).as_millis() as f32 / 500.0).unwrap_or(0.0)
 		);
 		config::get_sort_algorithm().render(builder, &mut ctx);
 		if let Some(selected_text) = &tab.selected_text {
@@ -2517,7 +2551,7 @@ impl Workbench {
 			self.try_extend_drag_selection();
 		}
 		if self.try_steal(false) {
-			if self.steal_animation_data.as_ref().is_some_and(|x| (since_epoch() - x.0) >= Duration::from_millis(500)) {
+			if self.steal_animation_data.as_ref().is_some_and(|x| (since_epoch() - x.0) >= LINE_DOUBLE_CLICK_INTERVAL) {
 				self.steal();
 			}
 		} else {
@@ -2664,7 +2698,7 @@ impl Workbench {
 		let cy = cy.saturating_sub(31) + 31;
 		let left_margin = self.left_margin();
 		let tab = tab_mut!(self);
-		let highlight_idx = (((cy as f64 - self.mouse_y as f64).atan2(cx as f64 - self.mouse_x as f64) + core::f64::consts::FRAC_PI_8 - core::f64::consts::FRAC_PI_2).rem_euclid(core::f64::consts::TAU) * core::f64::consts::FRAC_2_PI * 2.0) as usize;
+		let highlight_idx = (((cy as f64 - self.mouse_y as f64).atan2(cx as f64 - self.mouse_x as f64) + core::f64::consts::FRAC_PI_8 + core::f64::consts::FRAC_PI_2 + core::f64::consts::FRAC_PI_4).rem_euclid(core::f64::consts::TAU) * core::f64::consts::FRAC_2_PI * 2.0) as usize;
 		let squared_distance_from_origin = (cy as isize - self.mouse_y as isize).pow(2) + (cx as isize - self.mouse_x as isize).pow(2);
 		if cy >= HEADER_SIZE {
 			if cy > tab.value.height() * 16 + HEADER_SIZE { return };
@@ -2678,14 +2712,14 @@ impl Workbench {
 			builder.draw_texture_z((cx - 31, cy - 31), ACTION_WHEEL_Z, TRAY_UV, (64, 64));
 			for (n, &action) in element.actions().iter().enumerate().take(8) {
 				let (x, y) = [
-					Vec2u::new(-9_isize as usize, -29_isize as usize),
-					Vec2u::new(9, -26_isize as usize),
-					Vec2u::new(11, -9_isize as usize),
 					Vec2u::new(9, 9),
 					Vec2u::new(-9_isize as usize, 11),
 					Vec2u::new(-26_isize as usize, 9),
 					Vec2u::new(-29_isize as usize, -9_isize as usize),
 					Vec2u::new(-26_isize as usize, -26_isize as usize),
+					Vec2u::new(-9_isize as usize, -29_isize as usize),
+					Vec2u::new(9, -26_isize as usize),
+					Vec2u::new(11, -9_isize as usize),
 				][n]
 					.into();
 				let mut hovered = false;
@@ -2696,19 +2730,19 @@ impl Workbench {
 					UNSELECTED_ACTION_WHEEL[n]
 				};
 				let offset = [
-					Vec2u::new(5, 3),
-					Vec2u::new(5, 4),
-					Vec2u::new(6, 5),
 					Vec2u::new(5, 5),
 					Vec2u::new(5, 6),
 					Vec2u::new(4, 5),
 					Vec2u::new(3, 5),
 					Vec2u::new(4, 4),
+					Vec2u::new(5, 3),
+					Vec2u::new(5, 4),
+					Vec2u::new(6, 5),
 				][n];
 				let dims = if n % 2 == 0 {
-					Vec2u::new(20, 20)
-				} else {
 					Vec2u::new(19, 19)
+				} else {
+					Vec2u::new(20, 20)
 				};
 				builder.draw_texture_z(
 					(cx.wrapping_add(x), cy.wrapping_add(y)),

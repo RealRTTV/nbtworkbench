@@ -39,24 +39,24 @@ pub const SELECTED_WIDGET_UV: Vec2u = Vec2u::new(96, 64);
 pub const HOVERED_WIDGET_UV: Vec2u = Vec2u::new(112, 64);
 pub const CLOSED_WIDGET_UV: Vec2u = Vec2u::new(80, 144);
 pub const UNSELECTED_ACTION_WHEEL: [Vec2u; 8] = [
-	Vec2u::new(128, 0),
-	Vec2u::new(168, 0),
-	Vec2u::new(128, 20),
 	Vec2u::new(168, 19),
 	Vec2u::new(128, 40),
 	Vec2u::new(168, 38),
 	Vec2u::new(128, 60),
 	Vec2u::new(168, 57),
+	Vec2u::new(128, 0),
+	Vec2u::new(168, 0),
+	Vec2u::new(128, 20),
 ];
 pub const SELECTED_ACTION_WHEEL: [Vec2u; 8] = [
-	Vec2u::new(148, 0),
-	Vec2u::new(187, 0),
-	Vec2u::new(148, 20),
 	Vec2u::new(187, 19),
 	Vec2u::new(148, 40),
 	Vec2u::new(187, 38),
 	Vec2u::new(148, 60),
 	Vec2u::new(187, 57),
+	Vec2u::new(148, 0),
+	Vec2u::new(187, 0),
+	Vec2u::new(148, 20),
 ];
 pub const TRAY_UV: Vec2u = Vec2u::new(128, 80);
 pub const SAVE_UV: Vec2u = Vec2u::new(16, 64);

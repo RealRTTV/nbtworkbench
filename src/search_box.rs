@@ -122,7 +122,7 @@ impl SearchMode {
         Some(match self {
             Self::String => SearchPredicate { inner: SearchPredicateInner::String(value), search_flags },
             Self::Regex => if let Some(regex) = create_regex(value) { SearchPredicate { inner: SearchPredicateInner::Regex(regex), search_flags } } else { return None },
-            Self::Snbt => if let Some((key, value)) = {
+            Self::Snbt => if let Ok((key, value)) = {
                 let sort = config::set_sort_algorithm(SortAlgorithm::None);
                 let result = NbtElement::from_str(&value);
                 config::set_sort_algorithm(sort);

@@ -22,7 +22,7 @@ impl Alert {
 			timestamp: None,
 			title_color: title_color.to_raw(),
 			message_len: lines.iter().map(String::len).sum(),
-			width: usize::max(title.len(), lines.iter().map(|s| s.width()).max().unwrap_or(0)),
+			width: usize::max(title.width(), lines.iter().map(|s| s.width()).max().unwrap_or(0)),
 			title,
 			lines: lines.into_boxed_slice(),
 		}

@@ -82,14 +82,15 @@ fn get_predicate(args: &mut Vec<String>) -> SearchPredicate {
             error!("Invalid regex, valid regexes look like: `/[0-9]+/g`");
             std::process::exit(1);
         },
-        Some("snbt") => if let Some((key, snbt)) = NbtElement::from_str(&query) {
-            SearchPredicate {
+        Some("snbt") => match NbtElement::from_str(&query) {
+            Ok((key, snbt)) => SearchPredicate {
                 search_flags,
                 inner: SearchPredicateInner::Snbt(key.map(CompactString::into_string), snbt),
+            },
+            Err(idx) => {
+                error!(r#"Invalid snbt at index {idx}, valid snbt look like: `key:"minecraft:air"` or `{{id:"minecraft:looting",lvl:3s}}` (note that some terminals use "" to contain one parameter and that inner ones will have to be escaped)"#);
+                std::process::exit(1);
             }
-        } else {
-            error!(r#"Invalid snbt, valid snbt look like: `key:"minecraft:air"` or `{{id:"minecraft:looting",lvl:3s}}` (note that some terminals use "" to contain one parameter and that inner ones will have to be escaped)"#);
-            std::process::exit(1);
         },
         Some(x) => {
             error!("Invalid mode '{x}', valid ones are: `normal', `regex`, and `snbt`.");

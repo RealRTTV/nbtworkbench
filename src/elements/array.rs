@@ -57,16 +57,17 @@ macro_rules! array {
 			pub const ID: u8 = $my_id;
 
 			#[inline]
-			pub(in $crate::elements) fn from_str0(mut s: &str) -> Option<(&str, Self)> {
+			pub(in $crate::elements) fn from_str0(mut s: &str) -> Result<(&str, Self), usize> {
 				s = s
-					.strip_prefix('[')?
-					.trim_start()
-					.strip_prefix(concat!($char, ";"))?
+					.strip_prefix('[').ok_or(s.len())?
+					.trim_start();
+				s = s
+					.strip_prefix(concat!($char, ";")).ok_or(s.len())?
 					.trim_start();
 				let mut array = Self::new();
 				while !s.starts_with(']') {
 					let (s2, element) = NbtElement::from_str0(s)?;
-					array.insert(array.len(), element).ok()?;
+					array.insert(array.len(), element).map_err(|_| s.len())?;
 					s = s2.trim_start();
 					if let Some(s2) = s.strip_prefix(',') {
 						s = s2.trim_start();
@@ -75,7 +76,7 @@ macro_rules! array {
 					}
 				}
 				array.values.shrink_to_fit();
-				Some((s.strip_prefix(']')?, array))
+				Ok((s.strip_prefix(']').ok_or(s.len())?, array))
 			}
 
 			#[inline]

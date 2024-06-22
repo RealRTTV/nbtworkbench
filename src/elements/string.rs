@@ -29,9 +29,9 @@ impl NbtString {
 
 impl NbtString {
 	pub const ID: u8 = 8;
-	pub(in crate::elements) fn from_str0(s: &str) -> Option<(&str, Self)> {
+	pub(in crate::elements) fn from_str0(s: &str) -> Result<(&str, Self), usize> {
 		let (str, s) = s.snbt_string_read()?;
-		Some((
+		Ok((
 			s,
 			Self {
 				str: TwentyThree::new(str),

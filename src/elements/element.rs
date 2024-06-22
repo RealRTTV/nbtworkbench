@@ -301,26 +301,27 @@ impl NbtElement {
 impl NbtElement {
 	#[must_use]
 	#[allow(clippy::should_implement_trait)] // i can't, sorry :(
-	pub fn from_str(mut s: &str) -> Option<(Option<CompactString>, Self)> {
-		s = s.trim_start();
+	pub fn from_str(mut s: &str) -> Result<(Option<CompactString>, Self), usize> {
+		let total_len = s.len();
+		s = s.trim();
 
-		if s.is_empty() { return None }
+		if s.is_empty() { return Err(total_len - s.len()) }
 
-		let prefix = s.snbt_string_read().and_then(|(prefix, s2)| {
+		let prefix = s.snbt_string_read().ok().and_then(|(prefix, s2)| {
 			s2.trim_start().strip_prefix(':').filter(|s| !s.is_empty()).map(|s2| {
 				s = s2.trim_start();
 				prefix
 			})
 		});
-		let (s, element) = Self::from_str0(s).map(|(s, x)| (s.trim_start(), x))?;
-		if !s.is_empty() { return None }
-		Some((prefix, element))
+		let (s, element) = Self::from_str0(s).map(|(s, x)| (s.trim_start(), x)).map_err(|x| total_len - x)?;
+		if !s.is_empty() { return Err(total_len - s.len()) }
+		Ok((prefix, element))
 	}
 
 	#[allow(clippy::too_many_lines)]
-	pub(in crate::elements) fn from_str0(mut s: &str) -> Option<(&str, Self)> {
-		if let Some(s2) = s.strip_prefix("false") { return Some((s2, Self::Byte(NbtByte { value: 0 }))) }
-		if let Some(s2) = s.strip_prefix("true") { return Some((s2, Self::Byte(NbtByte { value: 1 }))) }
+	pub(in crate::elements) fn from_str0(mut s: &str) -> Result<(&str, Self), usize> {
+		if let Some(s2) = s.strip_prefix("false") { return Ok((s2, Self::Byte(NbtByte { value: 0 }))) }
+		if let Some(s2) = s.strip_prefix("true") { return Ok((s2, Self::Byte(NbtByte { value: 1 }))) }
 		if s.starts_with("[B;") { return NbtByteArray::from_str0(s).map(|(s, x)| (s, Self::ByteArray(x))) }
 		if s.starts_with("[I;") { return NbtIntArray::from_str0(s).map(|(s, x)| (s, Self::IntArray(x))) }
 		if s.starts_with("[L;") { return NbtLongArray::from_str0(s).map(|(s, x)| (s, Self::LongArray(x))) }
@@ -331,23 +332,23 @@ impl NbtElement {
 		if let Some(s2) = s.strip_prefix("NaN") {
 			s = s2.trim_start();
 			return if let Some(s2) = s.strip_prefix('f') {
-				Some((s2.trim_start(), Self::Float(NbtFloat { value: f32::NAN })))
+				Ok((s2.trim_start(), Self::Float(NbtFloat { value: f32::NAN })))
 			} else {
-				Some((s2.strip_prefix('d').unwrap_or(s2).trim_start(), Self::Double(NbtDouble { value: f64::NAN })))
+				Ok((s2.strip_prefix('d').unwrap_or(s2).trim_start(), Self::Double(NbtDouble { value: f64::NAN })))
 			};
 		}
 
 		if let Some(s2) = s.strip_prefix("Infinity").or_else(|| s.strip_prefix("inf")) {
 			s = s2.trim_start();
 			return if let Some(s2) = s.strip_prefix('f') {
-				Some((
+				Ok((
 					s2.trim_start(),
 					Self::Float(NbtFloat {
 						value: f32::INFINITY,
 					}),
 				))
 			} else {
-				Some((
+				Ok((
 					s2.strip_prefix('d').unwrap_or(s2).trim_start(),
 					Self::Double(NbtDouble {
 						value: f64::INFINITY,
@@ -362,21 +363,21 @@ impl NbtElement {
 		{
 			s = s2.trim_start();
 			return if let Some(s2) = s.strip_prefix('f') {
-				Some((
+				Ok((
 					s2.trim_start(),
 					Self::Float(NbtFloat {
 						value: f32::NEG_INFINITY,
 					}),
 				))
 			} else if let Some(s2) = s.strip_prefix('d') {
-				Some((
+				Ok((
 					s2.trim_start(),
 					Self::Double(NbtDouble {
 						value: f64::NEG_INFINITY,
 					}),
 				))
 			} else {
-				Some((
+				Ok((
 					s2.trim_start(),
 					Self::Double(NbtDouble {
 						value: f64::NEG_INFINITY,
@@ -416,45 +417,45 @@ impl NbtElement {
 				.first()
 				.map(u8::to_ascii_lowercase);
 			return match suffix {
-				Some(b'b') => Some((
+				Some(b'b') => Ok((
 					&s[(digit_end_idx + 1)..],
 					Self::Byte(NbtByte {
-						value: s[..digit_end_idx].parse().ok()?,
+						value: s[..digit_end_idx].parse().map_err(|_| s.len())?,
 					}),
 				)),
-				Some(b's') => Some((
+				Some(b's') => Ok((
 					&s[(digit_end_idx + 1)..],
 					Self::Short(NbtShort {
-						value: s[..digit_end_idx].parse().ok()?,
+						value: s[..digit_end_idx].parse().map_err(|_| s.len())?,
 					}),
 				)),
-				Some(b'l') => Some((
+				Some(b'l') => Ok((
 					&s[(digit_end_idx + 1)..],
 					Self::Long(NbtLong {
-						value: s[..digit_end_idx].parse().ok()?,
+						value: s[..digit_end_idx].parse().map_err(|_| s.len())?,
 					}),
 				)),
-				Some(b'f') => Some((
+				Some(b'f') => Ok((
 					&s[(digit_end_idx + 1)..],
 					Self::Float(NbtFloat {
-						value: s[..digit_end_idx].parse().ok()?,
+						value: s[..digit_end_idx].parse().map_err(|_| s.len())?,
 					}),
 				)),
-				Some(b'd') => Some((
+				Some(b'd') => Ok((
 					&s[(digit_end_idx + 1)..],
 					Self::Double(NbtDouble {
-						value: s[..digit_end_idx].parse().ok()?,
+						value: s[..digit_end_idx].parse().map_err(|_| s.len())?,
 					}),
 				)),
-				Some(b'|') => Some({
+				Some(b'|') => Ok({
 					let mut s = s;
 					let Ok(x @ 0..=31) = s[..digit_end_idx].parse::<u8>() else {
-						return None;
+						return Err(s.len());
 					};
 					s = s[digit_end_idx..].trim_start().split_at(1).1.trim_start();
-					let digit_end_idx = s.bytes().position(|x| !x.is_ascii_digit())?;
+					let digit_end_idx = s.bytes().position(|x| !x.is_ascii_digit()).ok_or(s.len())?;
 					let Ok(z @ 0..=31) = s[..digit_end_idx].parse::<u8>() else {
-						return None;
+						return Err(s.len());
 					};
 					s = s[digit_end_idx..].trim_start();
 					let (s, inner) = NbtCompound::from_str0(s)?;
@@ -468,10 +469,10 @@ impl NbtElement {
 						)),
 					)
 				}),
-				_ => Some((
+				_ => Ok((
 					&s[digit_end_idx..],
 					Self::Int(NbtInt {
-						value: s[..digit_end_idx].parse().ok()?,
+						value: s[..digit_end_idx].parse().map_err(|_| s.len())?,
 					}),
 				)),
 			};

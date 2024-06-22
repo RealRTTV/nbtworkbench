@@ -64,12 +64,12 @@ impl Clone for NbtList {
 
 impl NbtList {
 	pub const ID: u8 = 9;
-	pub(in crate::elements) fn from_str0(mut s: &str) -> Option<(&str, Self)> {
-		s = s.strip_prefix('[')?.trim_start();
+	pub(in crate::elements) fn from_str0(mut s: &str) -> Result<(&str, Self), usize> {
+		s = s.strip_prefix('[').ok_or(s.len())?.trim_start();
 		let mut list = Self::new(vec![], 0);
 		while !s.starts_with(']') {
 			let (s2, element) = NbtElement::from_str0(s)?;
-			list.insert(list.len(), element).ok()?;
+			list.insert(list.len(), element).map_err(|_| s.len())?;
 			s = s2.trim_start();
 			if let Some(s2) = s.strip_prefix(',') {
 				s = s2.trim_start();
@@ -77,9 +77,9 @@ impl NbtList {
 				break;
 			}
 		}
-		let s = s.strip_prefix(']')?;
+		let s = s.strip_prefix(']').ok_or(s.len())?;
 		list.elements.shrink_to_fit();
-		Some((s, list))
+		Ok((s, list))
 	}
 	#[allow(clippy::cast_ptr_alignment)]
 	#[inline]

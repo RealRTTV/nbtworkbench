@@ -43,6 +43,7 @@ pub struct Tab {
 	pub last_close_attempt: Duration,
 	pub last_selected_text_interaction: (usize, usize, Duration),
 	pub last_interaction: Duration,
+	pub last_double_click_expand: (Vec2u, Duration),
 }
 
 impl Tab {
@@ -79,6 +80,7 @@ impl Tab {
 			last_close_attempt: Duration::ZERO,
 			last_selected_text_interaction: (0, 0, Duration::ZERO),
 			last_interaction: since_epoch(),
+			last_double_click_expand: (Vec2u::new(0, 0), Duration::ZERO),
 		})
 	}
 
@@ -620,7 +622,7 @@ impl Tab {
 			(
 				core::str::from_utf8(&buf)
 					.ok()
-					.and_then(|s| NbtElement::from_str(s))
+					.and_then(|s| NbtElement::from_str(s).ok())
 					.context(anyhow!(
 							"Failed to find file type for file {}",
 							path.file_name()
@@ -635,7 +637,7 @@ impl Tab {
 
 	#[cfg(not(target_arch = "wasm32"))]
 	pub fn refresh(&mut self) -> Result<()> {
-		let Some(path) = self.path.as_deref() else { return Err(anyhow!("File path was not present in tab")) };
+		let Some(path) = self.path.as_deref() else { return Ok(()) };
 
 		if self.unsaved_changes && (since_epoch() - core::mem::replace(&mut self.last_close_attempt, since_epoch())) > TAB_CLOSE_DOUBLE_CLICK_INTERVAL {
 			return Ok(());

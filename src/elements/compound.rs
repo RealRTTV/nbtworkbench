@@ -56,12 +56,12 @@ impl Clone for NbtCompound {
 impl NbtCompound {
 	pub const ID: u8 = 10;
 	#[optimize(speed)]
-	pub(in crate::elements) fn from_str0(mut s: &str) -> Option<(&str, Self)> {
-		s = s.strip_prefix('{')?.trim_start();
+	pub(in crate::elements) fn from_str0(mut s: &str) -> Result<(&str, Self), usize> {
+		s = s.strip_prefix('{').ok_or(s.len())?.trim_start();
 		let mut compound = Self::new();
 		while !s.starts_with('}') {
 			let (key, s2) = s.snbt_string_read()?;
-			s = s2.trim_start().strip_prefix(':')?.trim_start();
+			s = s2.trim_start().strip_prefix(':').ok_or(s2.len())?.trim_start();
 			let (s2, value) = NbtElement::from_str0(s)?;
 			compound.insert_replacing(key, value);
 			s = s2.trim_start();
@@ -71,10 +71,10 @@ impl NbtCompound {
 				break;
 			}
 		}
-		let s = s.strip_prefix('}')?;
+		let s = s.strip_prefix('}').ok_or(s.len())?;
 		// SAFETY: we can only call this on init of the compound
 		unsafe { config::get_sort_algorithm().sort(&mut compound.entries); }
-		Some((s, compound))
+		Ok((s, compound))
 	}
 
 	#[inline]
