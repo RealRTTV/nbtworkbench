@@ -22,6 +22,7 @@
 	panic_update_hook,
     stmt_expr_attributes
 )]
+#![feature(float_next_up_down)]
 #![windows_subsystem = "windows"]
 
 extern crate core;
@@ -185,7 +186,7 @@ extern "C" {
 pub static mut WORKBENCH: UnsafeCell<Workbench> = UnsafeCell::new(unsafe { Workbench::uninit() });
 pub static mut WINDOW_PROPERTIES: UnsafeCell<WindowProperties> = UnsafeCell::new(WindowProperties::Fake);
 pub const TEXT_DOUBLE_CLICK_INTERVAL: Duration = Duration::from_millis(250);
-pub const LINE_DOUBLE_CLICK_INTERVAL: Duration = Duration::from_millis(500);
+pub const LINE_DOUBLE_CLICK_INTERVAL: Duration = Duration::from_millis(250);
 pub const TAB_CLOSE_DOUBLE_CLICK_INTERVAL: Duration = Duration::from_millis(2000);
 
 #[cfg(target_arch = "wasm32")]
@@ -220,13 +221,14 @@ pub fn wasm_main() {
 }
 
 /// # Refactor
-/// * render trees using `RenderLine` struct/enum
+/// * render trees using [`RenderLine`](RenderLine) struct/enum
 /// * rendering code is duplicated af
 /// # Long-Term Goals
 /// * smart screen
 /// * [chunk](elements::chunk::NbtChunk) section rendering
 /// # Minor Features
 /// * [`last_modified`](elements::chunk::NbtChunk) field actually gets the ability to be set
+/// * sort for regions
 /// # Major Features
 /// * macros
 #[cfg(not(target_arch = "wasm32"))]
@@ -312,7 +314,7 @@ impl HeldEntry {
 #[must_use]
 #[cfg(not(target_arch = "wasm32"))]
 pub fn get_clipboard() -> Option<String> {
-	return cli_clipboard::get_contents().ok();
+	cli_clipboard::get_contents().ok()
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -356,7 +358,8 @@ pub fn create_regex(mut str: String) -> Option<Regex> {
 		.dot_matches_new_line(flags & 0b1000 > 0)
 		.unicode(flags & 0b10000 > 0)
 		.swap_greed(flags & 0b10000 > 0)
-		.build().ok()
+		.build()
+		.ok()
 }
 
 #[must_use]
@@ -675,6 +678,7 @@ pub struct RenderContext<'a> {
 	selected_key: Option<Box<str>>,
 	selected_value: Option<Box<str>>,
 	extend_error: bool,
+	invalid_key_error: bool,
 	invalid_value_error: bool,
 	key_duplicate_error: bool,
 	ghost: Option<(&'a NbtElement, usize, usize)>,
@@ -682,6 +686,7 @@ pub struct RenderContext<'a> {
 	mouse_x: usize,
 	mouse_y: usize,
 	line_number: usize,
+	// if you can only select one line at a time, the most that we can have is two red line numbers (from a duplicate key)
 	red_line_numbers: [usize; 2],
 	pub x_offset: usize,
 	pub y_offset: usize,
@@ -700,6 +705,7 @@ impl<'a> RenderContext<'a> {
 			selected_key,
 			selected_value,
 			extend_error: false,
+			invalid_key_error: false,
 			invalid_value_error: false,
 			key_duplicate_error: false,
 			ghost,
@@ -725,6 +731,16 @@ impl<'a> RenderContext<'a> {
 		{
 			self.key_duplicate_error = f(selected_key, self.selected_value.as_ref().map(Box::as_ref));
 			self.extend_error = extend;
+		}
+	}
+
+	#[inline]
+	pub fn check_for_invalid_key<F: FnOnce(&str) -> bool>(&mut self, f: F) {
+		let (_, y) = self.pos().into();
+		if let Some(selected_key) = self.selected_key.as_ref()
+			&& self.selected_y == y
+			&& self.selecting_key {
+			self.invalid_key_error = f(selected_key);
 		}
 	}
 
@@ -772,7 +788,7 @@ impl<'a> RenderContext<'a> {
 	#[inline]
 	pub fn render_errors(&mut self, pos: impl Into<(usize, usize)>, builder: &mut VertexBufferBuilder) {
 		let (x, y) = pos.into();
-		if (self.key_duplicate_error | self.invalid_value_error) && self.selected_y == y {
+		if (self.key_duplicate_error | self.invalid_key_error | self.invalid_value_error) && self.selected_y == y {
 			self.red_line_numbers[0] = self.selected_y;
 			self.draw_error_underline(x, y, builder);
 		}
@@ -911,6 +927,9 @@ impl<'a> RenderContext<'a> {
 			let mut errors = vec![];
 			if self.invalid_value_error {
 				errors.push("Error! The currently entered value is not valid for this type.");
+			}
+			if self.invalid_key_error {
+				errors.push("Error! The currently entered key is not valid for this type.");
 			}
 			if self.key_duplicate_error {
 				errors.push("Error! The current key is a duplicate of another one.");

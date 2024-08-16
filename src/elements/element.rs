@@ -586,7 +586,7 @@ impl NbtElement {
 			NbtFloat::ID => Self::Float(NbtFloat::default()),
 			NbtDouble::ID => Self::Double(NbtDouble::default()),
 			NbtByteArray::ID => Self::ByteArray(NbtByteArray::new()),
-			NbtString::ID => Self::String(NbtString::new(CompactString::new_inline(""))),
+			NbtString::ID => Self::String(NbtString::new(CompactString::const_new(""))),
 			NbtList::ID => Self::List(NbtList::new(vec![], 0x00)),
 			NbtCompound::ID => Self::Compound(NbtCompound::new()),
 			NbtIntArray::ID => Self::IntArray(NbtIntArray::new()),
@@ -947,7 +947,7 @@ impl NbtElement {
 				NbtLongArray::ID => (self.long_array.value(), TextColor::TreeKey),
 				NbtChunk::ID => (self.chunk.z.to_compact_string(), TextColor::TreePrimitive),
 				NbtRegion::ID => (self.region.value(), TextColor::TreeKey),
-				NbtNull::ID => (CompactString::new_inline("null"), TextColor::TreeKey),
+				NbtNull::ID => (CompactString::const_new("null"), TextColor::TreeKey),
 				_ => core::hint::unreachable_unchecked(),
 			}
 		}
@@ -1055,7 +1055,7 @@ impl NbtElement {
 				NbtList::ID => self.list.insert(idx, value),
 				NbtCompound::ID => {
 					self.compound
-						.insert(idx, CompactString::new_inline("_"), value);
+						.insert(idx, CompactString::const_new("_"), value);
 					Ok(())
 				}
 				NbtIntArray::ID => self.int_array.insert(idx, value),
@@ -1063,7 +1063,7 @@ impl NbtElement {
 				NbtRegion::ID => self.region.insert(idx, value),
 				NbtChunk::ID => {
 					self.chunk
-						.insert(idx, CompactString::new_inline("_"), value);
+						.insert(idx, CompactString::const_new("_"), value);
 					Ok(())
 				}
 				_ => Err(value),

@@ -312,8 +312,14 @@ impl NbtRegion {
 		if let Some(chunk) = value.as_chunk_mut() {
 			let mut pos = ((chunk.x as u16) << 5) | (chunk.z as u16);
 			let (map, chunks) = &mut *self.chunks;
-			while pos < chunks.len() as u16 && !chunks[pos as usize].is_null() {
-				pos += 1;
+			if !chunks[pos as usize].is_null() {
+				pos = 0;
+				while !chunks[pos as usize].is_null() {
+					pos += 1;
+					if pos >= chunks.len() as u16 {
+						return Err(value);
+					}
+				}
 			}
 			chunk.x = (pos >> 5) as u8 & 31;
 			chunk.z = pos as u8 & 31;
@@ -825,6 +831,8 @@ impl NbtChunk {
 			if !self.is_empty() {
 				ctx.draw_toggle(ctx.pos() - (16, 0), self.open(), builder);
 			}
+			ctx.check_for_invalid_key(|key| !key.parse::<usize>().is_ok_and(|x| (0..=31).contains(&x)));
+			ctx.check_for_invalid_value(|value| !value.parse::<usize>().is_ok_and(|z| (0..=31).contains(&z)));
 			ctx.render_errors(ctx.pos(), builder);
 			if ctx.forbid(ctx.pos()) {
 				builder.settings(ctx.pos() + (20, 0), false, JUST_OVERLAPPING_BASE_TEXT_Z);

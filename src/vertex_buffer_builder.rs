@@ -1,4 +1,5 @@
 use std::fmt::{Debug, Formatter};
+use std::intrinsics::unlikely;
 use std::ops::BitAnd;
 
 use winit::dpi::PhysicalSize;
@@ -16,8 +17,6 @@ pub struct VertexBufferBuilder {
 	text_vertices_len: u32,
 	window_width: f32,
 	window_height: f32,
-	recip_texture_width: f32,
-	recip_texture_height: f32,
 	scroll: usize,
 	pub horizontal_scroll: usize,
 	pub text_coords: (usize, usize),
@@ -26,7 +25,7 @@ pub struct VertexBufferBuilder {
 	pub color: u32,
 	two_over_width: f32,
 	negative_two_over_height: f32,
-	owned_tooltip: Option<(Box<[String]>, Vec2u, bool)>,
+	owned_tooltip: Option<(Box<[String]>, Vec2u, bool, u32)>,
 	scale: f32,
 }
 
@@ -55,7 +54,7 @@ impl core::fmt::Write for VertexBufferBuilder {
 impl VertexBufferBuilder {
 	pub const CHAR_WIDTH: &'static [u8] = include_bytes!("assets/char_widths.hex");
 
-	pub fn new(size: PhysicalSize<u32>, texture_width: usize, texture_height: usize, scroll: usize, scale: usize) -> Self {
+	pub fn new(size: PhysicalSize<u32>, scroll: usize, scale: f32) -> Self {
 		Self {
 			vertices: Vec::with_capacity(98304),
 			indices: Vec::with_capacity(65536),
@@ -65,8 +64,6 @@ impl VertexBufferBuilder {
 			text_vertices_len: 0,
 			window_width: size.width as f32,
 			window_height: size.height as f32,
-			recip_texture_width: (texture_width as f32).recip(),
-			recip_texture_height: (texture_height as f32).recip(),
 			scroll,
 			horizontal_scroll: 0,
 			text_coords: (0, 0),
@@ -76,7 +73,7 @@ impl VertexBufferBuilder {
 			two_over_width: 2.0 / size.width as f32,
 			negative_two_over_height: -2.0 / size.height as f32,
 			owned_tooltip: None,
-			scale: scale as f32,
+			scale
 		}
 	}
 
@@ -124,7 +121,8 @@ impl VertexBufferBuilder {
 
 	#[inline]
 	pub fn draw_tooltip(&mut self, text: &[&str], pos: impl Into<(usize, usize)>, force_draw_right: bool) {
-		self.owned_tooltip.get_or_insert_with(move || (text.iter().map(|s| s.to_string()).collect::<Vec<_>>().into_boxed_slice(), Vec2u::from(pos.into()), force_draw_right));
+		let color = self.color;
+		self.owned_tooltip.get_or_insert_with(move || (text.iter().map(|s| s.to_string()).collect::<Vec<_>>().into_boxed_slice(), Vec2u::from(pos.into()), force_draw_right, color));
 	}
 
 	pub fn clear_buffers(&mut self) {
@@ -140,13 +138,17 @@ impl VertexBufferBuilder {
 	pub fn draw_tooltip0(&mut self) -> bool {
 		use core::fmt::Write;
 
-		let (text, pos, force_draw_right) = if let Some(tooltip) = self.owned_tooltip.take() { tooltip } else { return false };
+		let (text, pos, no_tooltip_repositioning, color) = if let Some(tooltip) = self.owned_tooltip.take() { tooltip } else { return false };
+		self.color = color;
 
 		let (mut x, y) = pos.into();
-		let y = y + 16;
+		let mut y = y + 16;
 		let text_width = text.iter().map(|x| x.width()).max().unwrap_or(0);
-		if x >= self.window_width() / 2 && !force_draw_right {
-			x = x.saturating_sub(text_width + 3);
+		if !no_tooltip_repositioning && x + text_width + 6 > self.window_width() {
+			x = usize::max(x.saturating_sub(text_width + 30), 4)
+		}
+		if !no_tooltip_repositioning && y + text.len() * 16 + 9 > self.window_height() {
+			y = self.window_height().saturating_sub(text.len() * 16 + 9);
 		}
 		self.text_z = TOOLTIP_Z;
 		self.text_coords = (x + 3, y + 3);
@@ -212,9 +214,8 @@ impl VertexBufferBuilder {
 	#[inline]
 	pub fn draw_unicode_z_color(&mut self, x: usize, y: usize, z: ZOffset, char: u16, color: u32) {
 		unsafe {
-			if self.text_vertices.capacity() - self.text_vertices.len() < 16 {
-				self.text_vertices.reserve_exact(98304);
-				self.text_indices.reserve_exact(36864);
+			if unlikely(self.text_vertices.capacity() - self.text_vertices.len() < 16) {
+				self.extend_text_buffers();
 			}
 			let x = (x as isize - self.horizontal_scroll as isize) as f32 * self.scale;
 			let y = y as f32 * self.scale;
@@ -271,6 +272,12 @@ impl VertexBufferBuilder {
 
 			self.text_vertices_len += 4;
 		}
+	}
+
+	#[cold]
+	pub fn extend_text_buffers(&mut self) {
+		self.text_vertices.reserve_exact(98304);
+		self.text_indices.reserve_exact(36864);
 	}
 
 	#[inline]
@@ -340,12 +347,12 @@ impl VertexBufferBuilder {
 
 			let x0 = self.two_over_width.mul_add(x, -1.0);
 			let y1 = self.negative_two_over_height.mul_add(y, 1.0);
-			let u0 = self.recip_texture_width * u;
-			let v0 = self.recip_texture_height * v;
+			let u0 = u.next_up();
+			let v0 = v.next_up();
 			let x1 = self.two_over_width.mul_add(width, x0);
 			let y0 = self.negative_two_over_height.mul_add(height, y1);
-			let u1 = self.recip_texture_width.mul_add(uv_width, u0);
-			let v1 = self.recip_texture_height.mul_add(uv_height, v0);
+			let u1 = u + uv_width.next_down();
+			let v1 = v + uv_height.next_down();
 
 			let len = self.vertices_len;
 			let vec = &mut self.vertices;

@@ -589,7 +589,7 @@ impl NbtCompound {
 		if *y < 16 && *y >= 8 && depth == target_depth {
 			let before = (self.height(), self.true_height());
 			self.open = true;
-			self.insert(0, key.unwrap_or(CompactString::new_inline("_")), element);
+			self.insert(0, key.unwrap_or(CompactString::const_new("_")), element);
 			indices.push(0);
 			return DropFn::Dropped(
 				self.height as usize - before.0,
@@ -612,7 +612,7 @@ impl NbtCompound {
 			indices.push(self.len());
 			self.insert(
 				self.len(),
-				key.unwrap_or(CompactString::new_inline("_")),
+				key.unwrap_or(CompactString::const_new("_")),
 				element,
 			);
 			return DropFn::Dropped(
@@ -644,7 +644,7 @@ impl NbtCompound {
 				let heights = (element.height(), element.true_height());
 				if *y < 8 && depth == target_depth {
 					*y = 0;
-					self.insert(idx, key.unwrap_or(CompactString::new_inline("_")), element);
+					self.insert(idx, key.unwrap_or(CompactString::const_new("_")), element);
 					return DropFn::Dropped(
 						heights.0,
 						heights.1,
@@ -664,7 +664,7 @@ impl NbtCompound {
 					line_number += value.true_height();
 					self.insert(
 						idx + 1,
-						key.unwrap_or(CompactString::new_inline("_")),
+						key.unwrap_or(CompactString::const_new("_")),
 						element,
 					);
 					return DropFn::Dropped(

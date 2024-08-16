@@ -31,7 +31,7 @@ use crate::workbench::Workbench;
 pub const WINDOW_HEIGHT: usize = 420;
 pub const WINDOW_WIDTH: usize = 720;
 pub const MIN_WINDOW_HEIGHT: usize = HEADER_SIZE + 16;
-pub const MIN_WINDOW_WIDTH: usize = 720;
+pub const MIN_WINDOW_WIDTH: usize = 480;
 
 pub async fn run() -> ! {
 	struct Handler<'window> {
@@ -135,7 +135,7 @@ pub async fn run() -> ! {
 	let window_properties = unsafe { WINDOW_PROPERTIES.get_mut() };
 	unsafe { std::ptr::write(std::ptr::addr_of_mut!(WORKBENCH), UnsafeCell::new(Workbench::new(window_properties))); }
 	let workbench = unsafe { WORKBENCH.get_mut() };
-	workbench.set_scale(99);
+	workbench.set_scale(99.0);
 	let mut handler = Handler { state, window_properties, workbench, window: Rc::clone(&window) };
 	event_loop.run_app(&mut handler).expect("Event loop failed");
 	loop {}
@@ -187,6 +187,7 @@ impl<'window> State<'window> {
 						Limits::default()
 					},
 					label: None,
+					memory_hints: Default::default(),
 				},
 				None,
 			)
@@ -339,6 +340,7 @@ impl<'window> State<'window> {
 				alpha_to_coverage_enabled: false,
 			},
 			multiview: None,
+			cache: None,
 		});
 		let unicode_texture = device.create_texture(&TextureDescriptor {
 			label: Some("Unicode Texture Array"),
@@ -444,8 +446,9 @@ impl<'window> State<'window> {
 				alpha_to_coverage_enabled: false,
 			},
 			multiview: None,
+			cache: None,
 		});
-		
+
 		Self {
 			surface,
 			device,
@@ -608,8 +611,6 @@ impl<'window> State<'window> {
 
 		let mut builder = VertexBufferBuilder::new(
 			self.size,
-			assets::ATLAS_WIDTH,
-			assets::ATLAS_HEIGHT,
 			workbench.scroll(),
 			workbench.scale,
 		);

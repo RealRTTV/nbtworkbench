@@ -61,7 +61,7 @@ pub struct Workbench {
 	pub cursor_visible: bool,
 	alerts: Vec<Alert>,
 	notifications: EnumMap<NotificationKind, Option<Notification>>,
-	pub scale: usize,
+	pub scale: f32,
 	steal_animation_data: Option<(Duration, Vec2u)>,
 	search_box: SearchBox,
 	last_search_box_interaction: (usize, Duration),
@@ -95,7 +95,7 @@ impl Workbench {
 			cursor_visible: false,
 			alerts: vec![],
 			notifications: EnumMap::from_array([None]),
-			scale: 0,
+			scale: 0.0,
 			steal_animation_data: None,
 			search_box: SearchBox::uninit(),
 			last_search_box_interaction: (0, Duration::ZERO),
@@ -129,7 +129,7 @@ impl Workbench {
 			cursor_visible: true,
 			alerts: vec![],
 			notifications: enum_map! { NotificationKind::Scale => None, },
-			scale: 1,
+			scale: 1.0,
 			steal_animation_data: None,
 			search_box: SearchBox::new(),
 			last_search_box_interaction: (0, Duration::ZERO),
@@ -217,7 +217,7 @@ impl Workbench {
 		};
 		let ctrl = self.ctrl();
 		if ctrl {
-			self.set_scale(self.scale.wrapping_add(v.signum() as isize as usize));
+			self.set_scale(self.scale + v.signum() * 0.1);
 			return true;
 		}
 		let shift = self.shift();
@@ -326,24 +326,6 @@ impl Workbench {
 					}
 
 					if x >= left_margin && y >= HEADER_SIZE {
-						if MouseButton::Left == button {
-							if self.toggle(shift, tab!(self).freehand_mode) {
-								break 'a;
-							}
-						}
-
-						if (y - HEADER_SIZE) < 16 && x > 32 + left_margin {
-							if self.rename(x + horizontal_scroll) {
-								break 'a;
-							}
-						}
-
-						if button == MouseButton::Left {
-							if self.try_select_text(false) {
-								break 'a;
-							}
-						}
-
 						match self.action_wheel.take() {
 							Some(_) => {}
 							None => {
@@ -356,8 +338,26 @@ impl Workbench {
 							}
 						}
 
+						if MouseButton::Left == button {
+							if self.toggle(shift, tab!(self).freehand_mode) {
+								break 'a;
+							}
+						}
+
+						if MouseButton::Left == button && (y - HEADER_SIZE) < 16 && x > 32 + left_margin {
+							if self.rename(x + horizontal_scroll) {
+								break 'a;
+							}
+						}
+
 						if button == MouseButton::Left {
 							if self.try_double_click_expand() {
+								break 'a;
+							}
+						}
+
+						if button == MouseButton::Left {
+							if self.try_select_text(false) {
 								break 'a;
 							}
 						}
@@ -577,7 +577,7 @@ impl Workbench {
 				recache_along_indices(rest, &mut tab.value);
 				tab.append_to_history(WorkbenchAction::Replace {
 					indices: subscription.indices.clone(),
-					value: (old_key.or(Some(CompactString::new_inline("_"))), old_value),
+					value: (old_key.or(Some(CompactString::const_new("_"))), old_value),
 				});
 			} else {
 				if tab.value.id() == value.id() {
@@ -941,7 +941,7 @@ impl Workbench {
 				if write!(
 					&mut buf,
 					"{}{}{element:#?}",
-					key.unwrap_or(CompactString::new_inline("")),
+					key.unwrap_or(CompactString::const_new("")),
 					if key_exists { ": " } else { "" }
 				)
 					.is_err()
@@ -952,7 +952,7 @@ impl Workbench {
 				if write!(
 					&mut buf,
 					"{}{}{element}",
-					key.unwrap_or(CompactString::new_inline("")),
+					key.unwrap_or(CompactString::const_new("")),
 					if key_exists { ":" } else { "" }
 				)
 					.is_err()
@@ -2086,12 +2086,12 @@ impl Workbench {
 					self.search_box.select(0, MouseButton::Left);
 					return true;
 				}
-				if key == KeyCode::Equal && flags == flags!(Ctrl) {
-					self.set_scale(self.scale + 1);
+				if key == KeyCode::Equal && flags & !flags!(Shift) == flags!(Ctrl) {
+					self.set_scale(self.scale + if flags == flags!(Ctrl + Shift) { 1.0 } else { 0.1 });
 					return true;
 				}
-				if key == KeyCode::Minus && flags == flags!(Ctrl) {
-					self.set_scale(self.scale - 1);
+				if key == KeyCode::Minus && flags & !flags!(Shift) == flags!(Ctrl) {
+					self.set_scale(self.scale - if flags == flags!(Ctrl + Shift) { 1.0 } else { 0.1 });
 					return true;
 				}
 				if self.action_wheel.is_some() && key == KeyCode::Escape && flags == flags!() {
@@ -2355,21 +2355,22 @@ impl Workbench {
 	}
 
 	#[inline]
-	pub fn set_scale(&mut self, scale: usize) {
-		let max_scale = usize::min(self.raw_window_width / MIN_WINDOW_WIDTH, self.raw_window_height / MIN_WINDOW_HEIGHT);
-		let scale = scale.min(max_scale).max(1);
+	pub fn set_scale(&mut self, scale: f32) {
+		let scale = (scale * 10.0).round() / 10.0;
+		let max_scale = usize::min(self.raw_window_width / MIN_WINDOW_WIDTH, self.raw_window_height / MIN_WINDOW_HEIGHT) as f32;
+		let scale = scale.min(max_scale).max(1.0);
 
 		self.scale = scale;
 		self.mouse_x = (self.raw_mouse_x / self.scale as f64) as usize;
 		self.mouse_y = (self.raw_mouse_y / self.scale as f64) as usize;
-		self.window_width = self.raw_window_width / self.scale;
-		self.window_height = self.raw_window_height / self.scale;
+		self.window_width = (self.raw_window_width as f32 / self.scale).round() as usize;
+		self.window_height = (self.raw_window_height as f32 / self.scale).round() as usize;
 		for tab in &mut self.tabs {
 			tab.window_width = self.window_width;
 			tab.window_height = self.window_height;
 		}
 
-		self.notify(NotificationKind::Scale, format!("Scale: {scale}x (Max {max_scale})"), TextColor::White)
+		self.notify(NotificationKind::Scale, format!("Scale: {scale:.1}x (Max {max_scale}.0)"), TextColor::White)
 	}
 
 	#[inline]
