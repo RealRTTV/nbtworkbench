@@ -7,7 +7,7 @@ use std::thread::Scope;
 
 use compact_str::{CompactString, format_compact};
 
-use crate::{DropFn, OptionExt, RenderContext, StrExt, VertexBufferBuilder};
+use crate::{DropFn, RenderContext, StrExt, VertexBufferBuilder};
 use crate::assets::{BASE_Z, CONNECTION_UV, JUST_OVERLAPPING_BASE_TEXT_Z, LIST_UV, ZOffset};
 use crate::be_decoder::BigEndianDecoder;
 use crate::color::TextColor;
@@ -228,7 +228,7 @@ impl NbtList {
 	///
 	/// * `NbtElement::id` of `value` != `self.id()`
 	#[inline]
-	pub fn insert(&mut self, idx: usize, value: NbtElement) -> Result<(), NbtElement> {
+	pub fn insert(&mut self, idx: usize, value: NbtElement) -> Result<Option<NbtElement>, NbtElement> {
 		if self.can_insert(&value) {
 			self.element = value.id();
 			self.increment(value.height(), value.true_height());
@@ -236,7 +236,7 @@ impl NbtList {
 				self.elements.try_reserve_exact(1).unwrap_unchecked();
 			}
 			self.elements.insert(idx, value);
-			Ok(())
+			Ok(None)
 		} else {
 			Err(value)
 		}
@@ -248,6 +248,13 @@ impl NbtList {
 		let removed = self.elements.remove(idx);
 		self.elements.shrink_to_fit();
 		removed
+	}
+
+	#[inline]
+	pub fn replace(&mut self, idx: usize, value: NbtElement) -> Option<NbtElement> {
+		if !self.can_insert(&value) || idx >= self.len() { return None; }
+
+		Some(core::mem::replace(&mut self.elements[idx], value))
 	}
 
 	#[inline]
@@ -476,10 +483,10 @@ impl NbtList {
 	}
 
 	#[inline]
-	pub fn children(&self) -> ValueIterator { ValueIterator::Generic(self.elements.iter()) }
+	pub fn children(&self) -> Iter<'_, NbtElement> { self.elements.iter() }
 
 	#[inline]
-	pub fn children_mut(&mut self) -> ValueMutIterator { ValueMutIterator::Generic(self.elements.iter_mut()) }
+	pub fn children_mut(&mut self) -> IterMut<'_, NbtElement> { self.elements.iter_mut() }
 
 	pub fn drop(&mut self, mut key: Option<CompactString>, mut element: NbtElement, y: &mut usize, depth: usize, target_depth: usize, mut line_number: usize, indices: &mut Vec<usize>) -> DropFn {
 		if *y < 16 && *y >= 8 && depth == target_depth {
@@ -492,6 +499,7 @@ impl NbtList {
 				self.true_height as usize - before.1,
 				None,
 				line_number + 1,
+				None,
 			);
 		} else if self.height() == 1 && *y < 24 && *y >= 16 && depth == target_depth {
 			let before = self.true_height();
@@ -506,6 +514,7 @@ impl NbtList {
 				self.true_height as usize - before,
 				None,
 				line_number + before + 1,
+				None,
 			);
 		}
 
@@ -523,12 +532,12 @@ impl NbtList {
 				let heights = (element.height(), element.true_height());
 				if *y < 8 && depth == target_depth {
 					if let Err(element) = self.insert(idx, element) { return DropFn::InvalidType(key, element) }
-					return DropFn::Dropped(heights.0, heights.1, None, line_number + 1);
+					return DropFn::Dropped(heights.0, heights.1, None, line_number + 1, None);
 				} else if *y >= value.height() * 16 - 8 && *y < value.height() * 16 && depth == target_depth {
 					*ptr = idx + 1;
 					let true_height = value.true_height();
 					if let Err(element) = self.insert(idx + 1, element) { return DropFn::InvalidType(key, element) }
-					return DropFn::Dropped(heights.0, heights.1, None, line_number + true_height + 1);
+					return DropFn::Dropped(heights.0, heights.1, None, line_number + true_height + 1, None);
 				}
 
 				match value.drop(
@@ -545,9 +554,9 @@ impl NbtList {
 						key = k;
 						element = e;
 					}
-					DropFn::Dropped(increment, true_increment, key, line_number) => {
+					DropFn::Dropped(increment, true_increment, key, line_number, value) => {
 						self.increment(increment, true_increment);
-						return DropFn::Dropped(increment, true_increment, key, line_number);
+						return DropFn::Dropped(increment, true_increment, key, line_number, value);
 					}
 				}
 
@@ -591,7 +600,7 @@ impl NbtList {
 	pub fn render_icon(pos: impl Into<(usize, usize)>, z: ZOffset, builder: &mut VertexBufferBuilder) { builder.draw_texture_z(pos, z, LIST_UV, (16, 16)); }
 
 	#[inline]
-	pub fn recache_depth(&mut self) {
+	pub fn recache(&mut self) {
 		let mut max_depth = 0;
 		if self.open() {
 			for child in self.children() {
@@ -605,112 +614,4 @@ impl NbtList {
 	#[inline]
 	#[must_use]
 	pub const fn max_depth(&self) -> usize { self.max_depth as usize }
-}
-
-#[must_use]
-pub enum ValueIterator<'a> {
-	Generic(Iter<'a, NbtElement>),
-	Region(&'a [NbtElement; 32 * 32], Iter<'a, u16>),
-}
-
-impl<'a> Iterator for ValueIterator<'a> {
-	type Item = &'a NbtElement;
-
-	fn next(&mut self) -> Option<Self::Item> {
-		match self {
-			Self::Generic(iter) => iter.next(),
-			Self::Region(array, iter) => unsafe {
-				iter.next().map(|&x| {
-					array
-						.get(x as usize)
-						.panic_unchecked("Map index out of bounds")
-				})
-			},
-		}
-	}
-}
-
-impl<'a> ExactSizeIterator for ValueIterator<'a> {
-	fn len(&self) -> usize {
-		match self {
-			Self::Generic(generic) => generic.len(),
-			Self::Region(_, iter) => iter.len(),
-		}
-	}
-}
-
-impl<'a> DoubleEndedIterator for ValueIterator<'a> {
-	fn next_back(&mut self) -> Option<Self::Item> {
-		match self {
-			Self::Generic(iter) => iter.next_back(),
-			Self::Region(array, iter) => unsafe {
-				iter.next_back().map(|&x| {
-					array
-						.get(x as usize)
-						.panic_unchecked("Map index out of bounds")
-				})
-			},
-		}
-	}
-}
-
-#[must_use]
-pub enum ValueMutIterator<'a> {
-	Generic(IterMut<'a, NbtElement>),
-	Region(&'a mut [NbtElement; 32 * 32], Iter<'a, u16>),
-}
-
-impl<'a> Iterator for ValueMutIterator<'a> {
-	type Item = &'a mut NbtElement;
-
-	fn next(&mut self) -> Option<Self::Item> {
-		match self {
-			Self::Generic(iter) => iter.next(),
-			// SAFETY: the only problem here is aliasing,
-			// which is assumed to not occur due to `map` indices not being identical
-			// (if they are identical it's UB).
-			// so all we need is to check if we have two pointers to the same data,
-			// which doesn't occur in mutation
-			Self::Region(array, iter) => unsafe {
-				let chunk = iter.next().map(|&x| {
-					array
-						.get_mut(x as usize)
-						.panic_unchecked("Map index out of bounds")
-				});
-				let ptr = core::mem::transmute::<_, *mut NbtElement>(chunk);
-				core::mem::transmute::<_, Option<&mut NbtElement>>(ptr)
-			},
-		}
-	}
-}
-
-impl<'a> ExactSizeIterator for ValueMutIterator<'a> {
-	fn len(&self) -> usize {
-		match self {
-			Self::Generic(generic) => generic.len(),
-			Self::Region(_, iter) => iter.len(),
-		}
-	}
-}
-
-impl<'a> DoubleEndedIterator for ValueMutIterator<'a> {
-	fn next_back(&mut self) -> Option<Self::Item> {
-		match self {
-			Self::Generic(iter) => iter.next_back(),
-			// SAFETY: the only problem here is aliasing,
-			// which is assumed to not occur due to `map` indices not being identical
-			// (if they are identical it's UB).
-			// so all we need is to check if we have two pointers to the same data,
-			// which doesn't occur in mutation
-			Self::Region(array, iter) => unsafe {
-				let chunk = iter.next_back().map(|&x| {
-					array
-						.get_mut(x as usize)
-						.panic_unchecked("Map index out of bounds")
-				});
-				let ptr = core::mem::transmute::<_, *mut NbtElement>(chunk);
-				core::mem::transmute::<_, Option<&mut NbtElement>>(ptr)
-			},
-		}
-	}
 }

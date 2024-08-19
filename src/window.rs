@@ -135,7 +135,7 @@ pub async fn run() -> ! {
 	let window_properties = unsafe { WINDOW_PROPERTIES.get_mut() };
 	unsafe { std::ptr::write(std::ptr::addr_of_mut!(WORKBENCH), UnsafeCell::new(Workbench::new(window_properties))); }
 	let workbench = unsafe { WORKBENCH.get_mut() };
-	workbench.set_scale(99.0);
+	workbench.set_scale(100.0);
 	let mut handler = Handler { state, window_properties, workbench, window: Rc::clone(&window) };
 	event_loop.run_app(&mut handler).expect("Event loop failed");
 	loop {}

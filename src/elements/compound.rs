@@ -188,6 +188,15 @@ impl NbtCompound {
 	pub fn remove_idx(&mut self, idx: usize) -> Option<(CompactString, NbtElement)> { self.entries.shift_remove_idx(idx) }
 
 	#[inline]
+	pub fn replace(&mut self, idx: usize, str: CompactString, value: NbtElement) -> Option<NbtElement> {
+		if !self.can_insert(&value) || idx >= self.len() { return None; }
+
+		let (_, removed) = self.remove_idx(idx)?;
+		self.insert(idx, str, value);
+		Some(removed)
+	}
+
+	#[inline]
 	pub fn increment(&mut self, amount: usize, true_amount: usize) {
 		self.height = self.height.wrapping_add(amount as u32);
 		self.true_height = self.true_height.wrapping_add(true_amount as u32);
@@ -225,16 +234,6 @@ impl NbtCompound {
 	#[inline]
 	#[must_use]
 	pub const fn open(&self) -> bool { self.open }
-
-	pub fn update_key(&mut self, idx: usize, key: CompactString) -> Option<CompactString> {
-		if self.entries.get_idx(idx).is_some_and(|(k, _)| k == key) {
-			Some(key)
-		} else if self.entries.has(key.as_ref()) {
-			None
-		} else {
-			Some(unsafe { self.entries.update_key_idx_unchecked(idx, key) })
-		}
-	}
 
 	#[inline]
 	#[must_use]
@@ -377,7 +376,7 @@ impl NbtCompound {
 	}
 
 	#[inline]
-	pub fn recache_depth(&mut self) {
+	pub fn recache(&mut self) {
 		let mut max_depth = 0;
 		if self.open() {
 			for (key, child) in self.children() {
@@ -603,6 +602,7 @@ impl NbtCompound {
 					)
 				},
 				line_number + 1,
+				None,
 			);
 		}
 
@@ -627,6 +627,7 @@ impl NbtCompound {
 					)
 				},
 				line_number + before + 1,
+				None,
 			);
 		}
 
@@ -657,6 +658,7 @@ impl NbtCompound {
 							)
 						},
 						line_number + 1,
+						None,
 					);
 				} else if *y >= value.height() * 16 - 8 && *y < value.height() * 16 && depth == target_depth {
 					*y = 0;
@@ -679,6 +681,7 @@ impl NbtCompound {
 							)
 						},
 						line_number + 1,
+						None,
 					);
 				}
 
@@ -696,9 +699,9 @@ impl NbtCompound {
 						key = k;
 						element = e;
 					}
-					DropFn::Dropped(increment, true_increment, key, line_number) => {
+					DropFn::Dropped(increment, true_increment, key, line_number, value) => {
 						self.increment(increment, true_increment);
-						return DropFn::Dropped(increment, true_increment, key, line_number);
+						return DropFn::Dropped(increment, true_increment, key, line_number, value);
 					}
 				}
 
@@ -1020,6 +1023,17 @@ impl CompoundMap {
 		let bookmark_slice = &mut bookmarks[true_line_number..true_line_number + true_height];
 		unsafe { core::ptr::copy_nonoverlapping(new_bookmarks.as_ptr().cast::<MarkedLine>(), bookmark_slice.as_mut_ptr(), bookmark_slice.len()); }
 		unsafe { inverted_indices.assume_init() }
+	}
+
+	#[inline]
+	pub fn update_key(&mut self, idx: usize, key: CompactString) -> Option<CompactString> {
+		if self.get_idx(idx).is_some_and(|(k, _)| k == key) {
+			Some(key)
+		} else if self.has(key.as_ref()) {
+			None
+		} else {
+			Some(unsafe { self.update_key_idx_unchecked(idx, key) })
+		}
 	}
 
 	#[must_use]

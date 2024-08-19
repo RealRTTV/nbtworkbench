@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use compact_str::{CompactString, ToCompactString};
 
-use crate::{encompasses, encompasses_or_equal, FileUpdateSubscription, hash};
+use crate::{encompasses, encompasses_or_equal, FileUpdateSubscription, hash, HeldEntry};
 use crate::{panic_unchecked, Position, sum_indices};
 use crate::{Navigate, OptionExt};
 use crate::elements::compound::{CompoundMap, Entry};
@@ -36,6 +36,23 @@ pub enum WorkbenchAction {
 		indices: Box<[usize]>,
 		reordering_indices: Box<[usize]>,
 	},
+	HeldEntrySwap {
+		indices: Box<[usize]>,
+		original_key: Option<CompactString>,
+	},
+	HeldEntryDrop {
+		from_indices: Box<[usize]>,
+		to_indices: Box<[usize]>,
+		original_key: Option<CompactString>,
+	},
+	HeldEntrySteal {
+		to_indices: Box<[usize]>,
+		original_key: Option<CompactString>,
+	},
+	CreateHeldEntry,
+	DeleteHeldEntry {
+		held_entry: HeldEntry,
+	},
 	Bulk {
 		actions: Box<[WorkbenchAction]>,
 	}
@@ -43,9 +60,9 @@ pub enum WorkbenchAction {
 
 impl WorkbenchAction {
 	#[cfg_attr(debug_assertions, inline(never))]
-	pub fn undo(self, root: &mut NbtElement, bookmarks: &mut MarkedLines, subscription: &mut Option<FileUpdateSubscription>, path: &mut Option<PathBuf>, name: &mut Box<str>) -> Self {
+	pub fn undo(self, root: &mut NbtElement, bookmarks: &mut MarkedLines, subscription: &mut Option<FileUpdateSubscription>, path: &mut Option<PathBuf>, name: &mut Box<str>, held_entry: &mut HeldEntry) -> Self {
 		unsafe {
-			self.undo0(root, bookmarks, subscription, path, name)
+			self.undo0(root, bookmarks, subscription, path, name, held_entry)
 				.panic_unchecked("Failed to undo action")
 		}
 	}
@@ -57,7 +74,7 @@ impl WorkbenchAction {
 		clippy::too_many_lines,
 		clippy::cognitive_complexity
 	)]
-	unsafe fn undo0(self, root: &mut NbtElement, bookmarks: &mut MarkedLines, subscription: &mut Option<FileUpdateSubscription>, path: &mut Option<PathBuf>, name: &mut Box<str>) -> Option<Self> {
+	unsafe fn undo0(self, root: &mut NbtElement, bookmarks: &mut MarkedLines, subscription: &mut Option<FileUpdateSubscription>, path: &mut Option<PathBuf>, name: &mut Box<str>, held_entry: &mut HeldEntry) -> Option<Self> {
 		Some(match self {
 			Self::Remove {
 				element: (key, value),
@@ -140,34 +157,24 @@ impl WorkbenchAction {
 				value,
 			} => {
 				if let Some((&last, rem)) = indices.split_last() {
-					let mut override_value = None;
 					let key = if let Some(key) = key {
 						let parent = Navigate::new(rem.iter().copied(), root).last().2;
-						Some(if let Some(region) = parent.as_region_mut() {
-							let (map, chunks) = &mut *region.chunks;
-							let from = map.get(last).copied()? as usize;
-							let to = ((key.parse::<u8>().ok()? as usize) << 5) | (value.as_ref()?.parse::<u8>().ok()? as usize);
-							chunks.swap(from, to);
-							override_value = Some((from & 31).to_compact_string());
-							(from >> 5).to_compact_string()
-						} else if let Some(compound) = parent.as_compound_mut() {
-							compound.update_key(last, key)?
+						Some(if let Some(compound) = parent.as_compound_mut() {
+							compound.entries.update_key(last, key)?
 						} else if let Some(chunk) = parent.as_chunk_mut() {
-							chunk.update_key(last, key)?
+							chunk.entries.update_key(last, key)?
 						} else {
 							key
 						})
 					} else {
 						None
 					};
-					let value = override_value.or_else(|| {
-						value.and_then(|value| {
-							Navigate::new(indices.iter().copied(), root)
-								.last()
-								.2
-								.set_value(value)
-								.map(|x| x.0)
-						})
+					let value = value.and_then(|value| {
+						Navigate::new(indices.iter().copied(), root)
+							.last()
+							.2
+							.set_value(value)
+							.map(|x| x.0)
 					});
 					if key.is_some() || value.is_some() {
 						crate::recache_along_indices(rem, root);
@@ -395,11 +402,38 @@ impl WorkbenchAction {
 					reordering_indices: inverted_indices.assume_init(),
 				})
 			},
+			Self::HeldEntrySwap { indices, original_key } => {
+				let ((new_key, value), known_data) = match core::mem::replace(held_entry, HeldEntry::Empty) {
+					HeldEntry::Empty => panic_unchecked("this shouldnt.. happen"),
+					HeldEntry::FromAether(value) => (value, None),
+					HeldEntry::FromKnown(value, indices, is_swap) => (value, Some((indices, is_swap))),
+				};
+				let Self::Replace { value, indices } = Self::Replace { indices, value: (original_key, value) }.undo0(root, bookmarks, subscription, path, name, held_entry)? else { return None };
+				*held_entry = if let Some((held_entry_indices, is_swap)) = known_data { HeldEntry::FromKnown(value, held_entry_indices, is_swap) } else { HeldEntry::FromAether(value) };
+				Self::HeldEntrySwap { indices, original_key: new_key }
+			},
+			Self::HeldEntryDrop { from_indices, to_indices, original_key } => {
+				let Self::Remove { element: (new_key, value), indices } = Self::Add { indices: to_indices }.undo0(root, bookmarks, subscription, path, name, held_entry)? else { return None };
+				*held_entry = HeldEntry::FromKnown((original_key, value), from_indices, false);
+				Self::HeldEntrySteal { to_indices: indices, original_key: new_key }
+			}
+			Self::HeldEntrySteal { to_indices, original_key } => {
+				let HeldEntry::FromKnown((new_key, value), indices, _) = core::mem::replace(held_entry, HeldEntry::Empty) else { return None };
+				let Self::Add { indices } = Self::Remove { element: (original_key, value), indices }.undo0(root, bookmarks, subscription, path, name, held_entry)? else { return None };
+				Self::HeldEntryDrop { from_indices: to_indices, to_indices: indices, original_key: new_key }
+			},
+			Self::CreateHeldEntry => {
+				Self::DeleteHeldEntry { held_entry: core::mem::replace(held_entry, HeldEntry::Empty) }
+			},
+			Self::DeleteHeldEntry { held_entry: new_held_entry } => {
+				*held_entry = new_held_entry;
+				Self::CreateHeldEntry
+			},
 			Self::Bulk { actions } => {
 				let mut array = Box::new_uninit_slice(actions.len());
 
 				for (idx, action) in actions.into_vec().into_iter().rev().enumerate() {
-					array[idx].write(action.undo(root, bookmarks, subscription, path, name));
+					array[idx].write(action.undo(root, bookmarks, subscription, path, name, held_entry));
 				}
 
 				return Some(Self::Bulk {

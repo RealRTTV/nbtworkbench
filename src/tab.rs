@@ -1,6 +1,5 @@
 use std::ffi::OsStr;
 use std::io::Read;
-use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -404,9 +403,9 @@ impl Tab {
 	#[inline]
 	#[must_use]
 	#[allow(clippy::too_many_lines)]
-	pub fn close_selected_text(&mut self, ignore_invalid_format: bool, window_properties: &mut WindowProperties) -> bool {
+	pub fn close_selected_text(&mut self, on_invalid_format: bool, window_properties: &mut WindowProperties) -> bool {
 		unsafe {
-			if let Some(SelectedText(Text { value, editable: true, additional: SelectedTextAdditional { indices, keyfix, prefix, suffix, valuefix, .. }, .. })) = self.selected_text.clone() {
+			if let Some(SelectedText(Text { value, editable: true, additional: SelectedTextAdditional { indices, prefix, suffix, .. }, .. })) = self.selected_text.clone() {
 				if let Some((&last, rem)) = indices.split_last() {
 					let value = CompactString::from(value);
 					let key = prefix.0.is_empty() && !suffix.0.is_empty();
@@ -420,11 +419,11 @@ impl Tab {
 										self.selected_text = None;
 										true
 									} else {
-										ignore_invalid_format
+										on_invalid_format
 									};
 								}
 								(
-									Some(compound.update_key(last, value.clone()).unwrap_or(value)),
+									Some(compound.entries.update_key(last, value.clone()).unwrap_or(value)),
 									None,
 								)
 							} else if let Some(chunk) = element.as_chunk_mut() {
@@ -434,114 +433,30 @@ impl Tab {
 										self.selected_text = None;
 										true
 									} else {
-										ignore_invalid_format
+										on_invalid_format
 									};
 								}
 								(
-									Some(chunk.update_key(last, value.clone()).unwrap_or(value)),
+									Some(chunk.entries.update_key(last, value.clone()).unwrap_or(value)),
 									None,
-								)
-							} else if let Some(region) = element.as_region_mut() {
-								let (Ok(x @ 0..=31), Ok(z @ 0..=31)) = (
-									value.parse::<u8>(),
-									valuefix
-										.panic_unchecked("A chunk has a key and value")
-										.0
-										.parse::<u8>(),
-								) else {
-									return ignore_invalid_format;
-								};
-								let (old_x, old_z) = {
-									let chunk = region
-										.get_mut(last)
-										.panic_unchecked("Last index was valid")
-										.as_chunk_unchecked_mut();
-									(
-										core::mem::replace(&mut chunk.x, x),
-										core::mem::replace(&mut chunk.z, z),
-									)
-								};
-								let new_idx = ((x as usize) << 5) | (z as usize);
-								if old_x == x && old_z == z {
-									self.selected_text = None;
-									return true;
-								}
-								if !region.chunks.deref().1[new_idx].is_null() {
-									let chunk = region
-										.get_mut(last)
-										.panic_unchecked("Last index was valid")
-										.as_chunk_unchecked_mut();
-									chunk.x = old_x;
-									chunk.z = old_z;
-									return ignore_invalid_format;
-								}
-								let (map, chunks) = &mut *region.chunks;
-								let from = core::mem::replace(&mut map[last], new_idx as u16) as usize;
-								chunks.swap(from, new_idx);
-								(
-									Some(old_x.to_compact_string()),
-									Some(old_z.to_compact_string()),
 								)
 							} else {
 								panic_unchecked("Expected key-value indices chain tail to be of type compound")
 							}
 						} else {
-							if let Some(region) = element.as_region_mut() {
-								let (Ok(x @ 0..=31), Ok(z @ 0..=31)) = (
-									keyfix
-										.panic_unchecked("A chunk always has a key and value")
-										.0
-										.parse::<u8>(),
-									value.parse::<u8>(),
-								) else {
-									return ignore_invalid_format;
-								};
-								let (old_x, old_z) = {
-									let chunk = region
-										.get_mut(last)
-										.panic_unchecked("Last index was valid")
-										.as_chunk_unchecked_mut();
-									(
-										core::mem::replace(&mut chunk.x, x),
-										core::mem::replace(&mut chunk.z, z),
-									)
-								};
-								let new_idx = ((x as usize) << 5) | (z as usize);
-								if old_x == x && old_z == z {
-									self.selected_text = None;
-									return true;
-								}
-								if !region.chunks.deref().1[new_idx].is_null() {
-									let chunk = region
-										.get_mut(last)
-										.panic_unchecked("Last index was valid")
-										.as_chunk_unchecked_mut();
-									chunk.x = old_x;
-									chunk.z = old_z;
-									return ignore_invalid_format;
-								};
-								let (map, chunks) = &mut *region.chunks;
-								let from = core::mem::replace(&mut map[last], new_idx as u16) as usize;
-								chunks.swap(from, new_idx);
-								(
-									Some(old_x.to_compact_string()),
-									Some(old_z.to_compact_string()),
-								)
-							} else {
-								// no drops dw, well except for the value, but that's a simple thing dw
-								let child = element
-									.get_mut(last)
-									.panic_unchecked("Last index was valid");
-								let (previous, success) = child
-									.set_value(value)
-									.panic_unchecked("Type of indices tail can accept value writes");
-								if !success { return ignore_invalid_format }
-								if previous == child.value().0 {
-									self.selected_text = None;
-									return true
-								}
-								(None, Some(previous))
+							// no drops dw, well except for the value, but that's a simple thing dw
+							let child = element
+								.get_mut(last)
+								.panic_unchecked("Last index was valid");
+							let (previous, success) = child
+								.set_value(value)
+								.panic_unchecked("Type of indices tail can accept value writes");
+							if !success { return on_invalid_format }
+							if previous == child.value().0 {
+								self.selected_text = None;
+								return true
 							}
+							(None, Some(previous))
 						}
 					};
 

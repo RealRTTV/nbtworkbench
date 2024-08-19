@@ -45,7 +45,7 @@ use vertex_buffer_builder::VertexBufferBuilder;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::wasm_bindgen;
 
-use crate::assets::{BASE_TEXT_Z, BASE_Z, BOOKMARK_UV, BOOKMARK_Z, END_LINE_NUMBER_SEPARATOR_UV, HEADER_SIZE, HIDDEN_BOOKMARK_UV, HOVERED_WIDGET_UV, INSERTION_UV, INVALID_STRIPE_UV, LINE_NUMBER_SEPARATOR_UV, LINE_NUMBER_Z, SCROLLBAR_BOOKMARK_Z, SELECTED_TOGGLE_OFF_UV, SELECTED_TOGGLE_ON_UV, SORT_COMPOUND_BY_NAME, SORT_COMPOUND_BY_NOTHING, SORT_COMPOUND_BY_TYPE, TEXT_UNDERLINE_UV, TOGGLE_Z, UNSELECTED_TOGGLE_OFF_UV, UNSELECTED_TOGGLE_ON_UV, UNSELECTED_WIDGET_UV};
+use crate::assets::{BASE_TEXT_Z, BASE_Z, BOOKMARK_UV, BOOKMARK_Z, END_LINE_NUMBER_SEPARATOR_UV, HEADER_SIZE, HIDDEN_BOOKMARK_UV, HOVERED_WIDGET_UV, INSERTION_CHUNK_UV, INSERTION_UV, INVALID_STRIPE_UV, LINE_NUMBER_SEPARATOR_UV, LINE_NUMBER_Z, SCROLLBAR_BOOKMARK_Z, SELECTED_TOGGLE_OFF_UV, SELECTED_TOGGLE_ON_UV, SORT_COMPOUND_BY_NAME, SORT_COMPOUND_BY_NOTHING, SORT_COMPOUND_BY_TYPE, TEXT_UNDERLINE_UV, TOGGLE_Z, UNSELECTED_TOGGLE_OFF_UV, UNSELECTED_TOGGLE_ON_UV, UNSELECTED_WIDGET_UV};
 use crate::color::TextColor;
 use crate::elements::compound::CompoundMap;
 use crate::elements::element::{NbtByteArray, NbtIntArray, NbtLongArray};
@@ -271,7 +271,7 @@ Options:
 }
 
 pub enum DropFn {
-	Dropped(usize, usize, Option<CompactString>, usize),
+	Dropped(usize, usize, Option<CompactString>, usize, Option<(Option<CompactString>, NbtElement)>),
 	Missed(Option<CompactString>, NbtElement),
 	InvalidType(Option<CompactString>, NbtElement),
 }
@@ -288,21 +288,21 @@ pub enum Position {
 pub enum HeldEntry {
 	Empty,
 	FromAether((Option<CompactString>, NbtElement)),
-	FromKnown((Option<CompactString>, NbtElement), Box<[usize]>),
+	FromKnown((Option<CompactString>, NbtElement), Box<[usize]>, bool),
 }
 
 impl HeldEntry {
-	#[must_use]
 	#[inline]
+	#[must_use]
 	pub const fn element(&self) -> Option<&NbtElement> {
 		match self {
 			Self::Empty => None,
-			Self::FromAether((_, element)) | Self::FromKnown((_, element), _) => Some(element),
+			Self::FromAether((_, element)) | Self::FromKnown((_, element), _, _) => Some(element),
 		}
 	}
 
-	#[must_use]
 	#[inline]
+	#[must_use]
 	pub const fn is_empty(&self) -> bool { matches!(self, Self::Empty) }
 
 	#[inline]
@@ -480,48 +480,33 @@ pub fn sum_indices<I: Iterator<Item = usize>>(indices: I, mut root: &NbtElement)
 	}
 }
 
-pub fn recache_along_indices(indices: &[usize], root: &mut NbtElement) {
-	if let Some(region) = root.as_region_mut() {
+pub fn recache_along_indices(indices: &[usize], parent: &mut NbtElement) {
+	if let Some(region) = parent.as_region_mut() {
 		if let Some((&idx, rest)) = indices.split_first() {
-			recache_along_indices(rest, unsafe {
-				region.get_mut(idx).panic_unchecked("expected valid index")
-			});
+			recache_along_indices(rest, unsafe { region.get_mut(idx).panic_unchecked("expected valid index") });
 		}
-		region.recache_depth();
-	} else if let Some(array) = root.as_byte_array_mut() {
-		array.recache_depth();
-	} else if let Some(array) = root.as_int_array_mut() {
-		array.recache_depth();
-	} else if let Some(array) = root.as_long_array_mut() {
-		array.recache_depth();
-	} else if let Some(list) = root.as_list_mut() {
+		region.recache();
+	} else if let Some(array) = parent.as_byte_array_mut() {
+		array.recache();
+	} else if let Some(array) = parent.as_int_array_mut() {
+		array.recache();
+	} else if let Some(array) = parent.as_long_array_mut() {
+		array.recache();
+	} else if let Some(list) = parent.as_list_mut() {
 		if let Some((&idx, rest)) = indices.split_first() {
-			recache_along_indices(rest, unsafe {
-				list.get_mut(idx).panic_unchecked("expected valid index")
-			});
+			recache_along_indices(rest, unsafe { list.get_mut(idx).panic_unchecked("expected valid index") });
 		}
-		list.recache_depth();
-	} else if let Some(compound) = root.as_compound_mut() {
+		list.recache();
+	} else if let Some(compound) = parent.as_compound_mut() {
 		if let Some((&idx, rest)) = indices.split_first() {
-			recache_along_indices(
-				rest,
-				unsafe {
-					compound
-						.get_mut(idx)
-						.panic_unchecked("expected valid index")
-				}
-				.1,
-			);
+			recache_along_indices(rest, unsafe { compound.get_mut(idx).panic_unchecked("expected valid index") }.1, );
 		}
-		compound.recache_depth();
-	} else if let Some(chunk) = root.as_chunk_mut() {
+		compound.recache();
+	} else if let Some(chunk) = parent.as_chunk_mut() {
 		if let Some((&idx, rest)) = indices.split_first() {
-			recache_along_indices(
-				rest,
-				unsafe { chunk.get_mut(idx).panic_unchecked("expected valid index") }.1,
-			);
+			recache_along_indices(rest, unsafe { chunk.get_mut(idx).panic_unchecked("expected valid index") }.1, );
 		}
-		chunk.recache_depth();
+		chunk.recache();
 	}
 }
 
@@ -989,6 +974,16 @@ impl<'a> RenderContext<'a> {
 		let (x_offset, y_offset) = pos.into();
 		if let Some((element, x, y)) = self.ghost && f(x, y) && g(element) {
 			builder.draw_texture_region_z((self.left_margin - 2, y_offset - 1), BASE_Z, INSERTION_UV, (x_offset + 18 - self.left_margin, 2), (16, 2));
+			true
+		} else {
+			false
+		}
+	}
+
+	pub fn draw_held_entry_chunk<F: FnOnce(usize, usize) -> bool, G: FnOnce(&NbtElement) -> bool>(&mut self, pos: impl Into<(usize, usize)>, builder: &mut VertexBufferBuilder, f: F, g: G) -> bool {
+		let (x_offset, y_offset) = pos.into();
+		if let Some((element, x, y)) = self.ghost && f(x, y) && g(element) {
+			builder.draw_texture_region_z((self.left_margin - 2, y_offset), BASE_Z, INSERTION_CHUNK_UV, (x_offset + 18 - self.left_margin, 16), (16, 16));
 			true
 		} else {
 			false

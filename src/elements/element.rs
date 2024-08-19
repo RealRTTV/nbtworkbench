@@ -4,6 +4,7 @@ use std::fmt::{Debug, Display, Error, Formatter};
 use std::intrinsics::likely;
 use std::mem::{ManuallyDrop, MaybeUninit};
 use std::ops::{Deref, Index, IndexMut};
+use std::slice::{Iter, IterMut};
 #[cfg(not(target_arch = "wasm32"))]
 use std::thread::Scope;
 
@@ -17,7 +18,7 @@ use crate::be_decoder::BigEndianDecoder;
 use crate::element_action::ElementAction;
 use crate::elements::chunk::{NbtChunk, NbtRegion};
 use crate::elements::compound::{CompoundMap, CompoundMapIter, Entry, NbtCompound};
-use crate::elements::list::{NbtList, ValueIterator, ValueMutIterator};
+use crate::elements::list::NbtList;
 use crate::elements::null::NbtNull;
 use crate::elements::string::NbtString;
 use crate::encoder::UncheckedBufWriter;
@@ -759,7 +760,7 @@ impl NbtElement {
 			NbtCompound::ID => NbtCompound::render_icon(pos, z, builder),
 			NbtIntArray::ID => NbtIntArray::render_icon(pos, z, builder),
 			NbtLongArray::ID => NbtLongArray::render_icon(pos, z, builder),
-			NbtChunk::ID => NbtChunk::render_icon(pos, z, builder),
+			NbtChunk::ID => NbtChunk::render_icon(pos, false, z, builder),
 			NbtRegion::ID => NbtRegion::render_icon(pos, z, builder),
 			NbtNull::ID => NbtNull::render_icon(pos, z, builder),
 			_ => unsafe { panic_unchecked("Invalid element id") },
@@ -788,7 +789,7 @@ impl NbtElement {
 				NbtByteArray::ID | NbtIntArray::ID | NbtLongArray::ID | NbtList::ID => self.list.elements.swap(a, b),
 				NbtCompound::ID => self.compound.entries.swap(a, b),
 				NbtChunk::ID => self.chunk.entries.swap(a, b),
-				NbtRegion::ID => self.region.chunks.as_mut().0.swap(a, b),
+				NbtRegion::ID => self.region.swap(a, b),
 				_ => {}
 			}
 		}
@@ -796,8 +797,17 @@ impl NbtElement {
 
 	#[inline]
 	#[must_use]
+	pub fn has_keys(&self) -> bool {
+		match self.id() {
+			NbtCompound::ID | NbtChunk::ID => true,
+			_ => false,
+		}
+	}
+
+	#[inline]
+	#[must_use]
 	#[allow(clippy::type_complexity)] // a type probably shouldn't abstract what this is, like... yeah
-	pub fn children(&self) -> Option<Result<ValueIterator, CompoundMapIter<'_>>> {
+	pub fn children(&self) -> Option<Result<Iter<'_, NbtElement>, CompoundMapIter<'_>>> {
 		unsafe {
 			Some(match self.id() {
 				NbtByteArray::ID | NbtIntArray::ID | NbtLongArray::ID | NbtList::ID => Ok(self.list.children()),
@@ -945,7 +955,7 @@ impl NbtElement {
 				NbtCompound::ID => (self.compound.value(), TextColor::TreeKey),
 				NbtIntArray::ID => (self.int_array.value(), TextColor::TreeKey),
 				NbtLongArray::ID => (self.long_array.value(), TextColor::TreeKey),
-				NbtChunk::ID => (self.chunk.z.to_compact_string(), TextColor::TreePrimitive),
+				NbtChunk::ID => (self.chunk.value(), TextColor::TreeKey),
 				NbtRegion::ID => (self.region.value(), TextColor::TreeKey),
 				NbtNull::ID => (CompactString::const_new("null"), TextColor::TreeKey),
 				_ => core::hint::unreachable_unchecked(),
@@ -1048,25 +1058,37 @@ impl NbtElement {
 	///
 	/// If any changes are made to this error list, then the duplicate may have to be updated as it relies on this never occurring
 	#[inline]
-	pub fn insert(&mut self, idx: usize, value: Self) -> Result<(), Self> {
+	pub fn insert(&mut self, idx: usize, value: Self) -> Result<Option<Self>, Self> {
 		unsafe {
 			match self.id() {
 				NbtByteArray::ID => self.byte_array.insert(idx, value),
 				NbtList::ID => self.list.insert(idx, value),
 				NbtCompound::ID => {
-					self.compound
-						.insert(idx, CompactString::const_new("_"), value);
-					Ok(())
+					self.compound.insert(idx, CompactString::const_new("_"), value);
+					Ok(None)
 				}
 				NbtIntArray::ID => self.int_array.insert(idx, value),
 				NbtLongArray::ID => self.long_array.insert(idx, value),
 				NbtRegion::ID => self.region.insert(idx, value),
 				NbtChunk::ID => {
-					self.chunk
-						.insert(idx, CompactString::const_new("_"), value);
-					Ok(())
+					self.chunk.insert(idx, CompactString::const_new("_"), value);
+					Ok(None)
 				}
 				_ => Err(value),
+			}
+		}
+	}
+
+	#[inline]
+	pub fn replace(&mut self, idx: usize, value: NbtElement) -> Option<NbtElement> {
+		unsafe {
+			match self.id() {
+				NbtByteArray::ID | NbtIntArray::ID | NbtLongArray::ID => self.byte_array.replace(idx, value),
+				NbtList::ID => self.list.replace(idx, value),
+				NbtCompound::ID => self.compound.replace(idx, CompactString::const_new("_"), value),
+				NbtChunk::ID => self.chunk.replace(idx, CompactString::const_new("_"), value),
+				NbtRegion::ID => self.region.replace(idx, value).ok().flatten(),
+				_ => None,
 			}
 		}
 	}
@@ -1078,7 +1100,7 @@ impl NbtElement {
 				NbtByteArray::ID | NbtIntArray::ID | NbtLongArray::ID => (None, self.byte_array.remove(idx)),
 				NbtList::ID => (None, self.list.remove(idx)),
 				NbtCompound::ID => return self.compound.remove_idx(idx).map(|(a, b)| (Some(a), b)),
-				NbtRegion::ID => (None, self.region.remove(idx)),
+				NbtRegion::ID => (None, self.region.replace_with_empty(idx)),
 				NbtChunk::ID => return self.chunk.remove_idx(idx).map(|(a, b)| (Some(a), b)),
 				_ => return None,
 			})
@@ -1417,38 +1439,35 @@ impl Drop for NbtElement {
 				}
 				// no real speedup from using threads, seems to be memory-bound, or dealloc-call-bound
 				NbtRegion::ID => {
-					let (map, chunks) = *core::ptr::addr_of_mut!(self.region.chunks).read();
-					drop(map);
+					let chunks = *core::ptr::addr_of_mut!(self.region.chunks).read();
 					for mut chunk in core::mem::transmute::<_, [ManuallyDrop<Self>; 1024]>(chunks) {
-						if !chunk.is_null() {
-							let ptr = &mut **chunk.as_chunk_unchecked_mut();
-							let map = &mut *ptr.entries;
-							let CompoundMap { indices, entries } = map;
-							(indices as *mut RawTable<usize>).drop_in_place();
-							for Entry { value, key, .. } in &mut *entries {
-								(value as *mut Self).drop_in_place();
-								if key.is_heap_allocated() {
-									dealloc(
-										key.as_mut_ptr(),
-										Layout::array::<u8>(key.len()).unwrap_unchecked(),
-									);
-								}
-							}
-							if !entries.is_empty() {
+						let ptr = &mut **chunk.as_chunk_unchecked_mut();
+						let map = &mut *ptr.entries;
+						let CompoundMap { indices, entries } = map;
+						(indices as *mut RawTable<usize>).drop_in_place();
+						for Entry { value, key, .. } in &mut *entries {
+							(value as *mut Self).drop_in_place();
+							if key.is_heap_allocated() {
 								dealloc(
-									entries.as_mut_ptr().cast(),
-									Layout::array::<Entry>(entries.capacity()).unwrap_unchecked(),
+									key.as_mut_ptr(),
+									Layout::array::<u8>(key.len()).unwrap_unchecked(),
 								);
 							}
+						}
+						if !entries.is_empty() {
 							dealloc(
-								(map as *mut CompoundMap).cast(),
-								Layout::new::<CompoundMap>(),
-							);
-							dealloc(
-								(ptr as *mut NbtCompound).cast(),
-								Layout::new::<NbtCompound>(),
+								entries.as_mut_ptr().cast(),
+								Layout::array::<Entry>(entries.capacity()).unwrap_unchecked(),
 							);
 						}
+						dealloc(
+							(map as *mut CompoundMap).cast(),
+							Layout::new::<CompoundMap>(),
+						);
+						dealloc(
+							(ptr as *mut NbtCompound).cast(),
+							Layout::new::<NbtCompound>(),
+						);
 					}
 				}
 				NbtByte::ID | NbtShort::ID | NbtInt::ID | NbtLong::ID | NbtFloat::ID | NbtDouble::ID | NbtNull::ID => {}

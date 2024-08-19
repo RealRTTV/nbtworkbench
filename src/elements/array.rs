@@ -204,7 +204,7 @@ macro_rules! array {
 			///
 			/// * Element type was not supported for `$name`
 			#[inline]
-			pub fn insert(&mut self, idx: usize, value: NbtElement) -> Result<(), NbtElement> {
+			pub fn insert(&mut self, idx: usize, value: NbtElement) -> Result<Option<NbtElement>, NbtElement> {
 				if value.id() == $id {
 					// the time complexity is fine here
 					unsafe {
@@ -212,7 +212,7 @@ macro_rules! array {
 					}
 					self.values.insert(idx, value);
 					self.increment(1, 1);
-					Ok(())
+					Ok(None)
 				} else {
 					Err(value)
 				}
@@ -223,6 +223,13 @@ macro_rules! array {
 				let removed = self.values.remove(idx);
 				self.values.shrink_to_fit();
 				removed
+			}
+
+			#[inline]
+			pub fn replace(&mut self, idx: usize, value: NbtElement) -> Option<NbtElement> {
+				if !self.can_insert(&value) || idx >= self.len() { return None; }
+
+				Some(core::mem::replace(&mut self.values[idx], value))
 			}
 
 			#[inline]
@@ -329,24 +336,24 @@ macro_rules! array {
 			}
 
 			#[inline] // ret type is #[must_use]
-			pub fn children(&self) -> ValueIterator { ValueIterator::Generic(self.values.iter()) }
+			pub fn children(&self) -> Iter<'_, NbtElement> { self.values.iter() }
 
 			#[inline] // ret type is #[must_use]
-			pub fn children_mut(&mut self) -> ValueMutIterator { ValueMutIterator::Generic(self.values.iter_mut()) }
+			pub fn children_mut(&mut self) -> IterMut<'_, NbtElement> { self.values.iter_mut() }
 
 			pub fn drop(&mut self, key: Option<CompactString>, element: NbtElement, y: &mut usize, depth: usize, target_depth: usize, line_number: usize, indices: &mut Vec<usize>) -> DropFn {
 				if 8 <= *y && *y < 16 && depth == target_depth {
 					indices.push(0);
 					if let Err(element) = self.insert(0, element) { return DropFn::InvalidType(key, element) }
 					self.open = true;
-					return DropFn::Dropped(1, 1, None, line_number + 1);
+					return DropFn::Dropped(1, 1, None, line_number + 1, None);
 				}
 
 				if self.height() * 16 <= *y && *y < self.height() * 16 + 8 && depth == target_depth {
 					indices.push(self.len());
 					if let Err(element) = self.insert(self.len(), element) { return DropFn::InvalidType(key, element) }
 					self.open = true;
-					return DropFn::Dropped(1, 1, None, line_number + self.len());
+					return DropFn::Dropped(1, 1, None, line_number + self.len(), None);
 				}
 
 				if *y < 16 {
@@ -363,11 +370,11 @@ macro_rules! array {
 							*ptr = idx;
 							if *y < 8 && depth == target_depth {
 								if let Err(element) = self.insert(idx, element) { return DropFn::InvalidType(key, element) }
-								return DropFn::Dropped(1, 1, None, line_number + idx + 1);
+								return DropFn::Dropped(1, 1, None, line_number + idx + 1, None);
 							} else if *y < 16 && depth == target_depth {
 								*ptr = idx + 1;
 								if let Err(element) = self.insert(idx + 1, element) { return DropFn::InvalidType(key, element) }
-								return DropFn::Dropped(1, 1, None, line_number + idx + 1 + 1);
+								return DropFn::Dropped(1, 1, None, line_number + idx + 1 + 1, None);
 							}
 
 							*y -= 16;
@@ -387,7 +394,7 @@ macro_rules! array {
 			pub fn expand(&mut self) { self.open = !self.is_empty(); }
 
 			#[inline]
-			pub fn recache_depth(&mut self) {
+			pub fn recache(&mut self) {
 				let mut max_depth = 0;
 				if self.open() {
 					for child in self.children() {

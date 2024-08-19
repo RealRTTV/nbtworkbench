@@ -79,7 +79,7 @@ impl SelectedText {
 	#[inline]
 	#[must_use]
 	#[allow(clippy::too_many_lines)]
-	pub fn new(target_x: usize, mouse_x: usize, y: usize, key: Option<(Box<str>, TextColor, bool)>, value: Option<(Box<str>, TextColor, bool)>, chunk: bool, indices: Vec<usize>) -> Option<Self> {
+	pub fn new(target_x: usize, mouse_x: usize, y: usize, key: Option<(Box<str>, TextColor, bool)>, value: Option<(Box<str>, TextColor, bool)>, indices: Vec<usize>) -> Option<Self> {
 		let key_width = if let Some((key, key_color, true)) = key.clone() {
 			let key_width = key.width();
 
@@ -87,11 +87,11 @@ impl SelectedText {
 				let (suffix, valuefix) = if let Some((v, valuefix_color, b)) = &value {
 					if *b {
 						(
-							(if chunk { ", " } else { ": " }.to_owned(), TextColor::TreeKey),
+							(": " .to_owned(), TextColor::TreeKey),
 							Some((v.clone().into_string(), *valuefix_color)),
 						)
 					} else {
-						((format!("{}{v}", if chunk { ", " } else { ": " }), TextColor::TreeKey), None)
+						((format!(": {v}"), TextColor::TreeKey), None)
 					}
 				} else {
 					((String::new(), TextColor::White), None)
@@ -170,10 +170,10 @@ impl SelectedText {
 					if *b {
 						(
 							Some((k.as_ref().to_owned(), *key_color)),
-							(if chunk { ", " } else { ": " }.to_owned(), TextColor::TreeKey),
+							(": ".to_owned(), TextColor::TreeKey),
 						)
 					} else {
-						(None, (format!("{k}{}", if chunk { ", " } else { ": " }), TextColor::TreeKey))
+						(None, (format!("{k}: "), TextColor::TreeKey))
 					}
 				} else {
 					(None, (String::new(), TextColor::White))
@@ -247,7 +247,7 @@ impl SelectedText {
 				0
 			};
 		if key.as_ref().is_none_or(|(_, _, display)| !*display) && value.as_ref().is_none_or(|(_, _, display)| !*display) && mouse_x <= target_x + full_width && mouse_x + 16 >= target_x {
-			Some(Self(Text::new(if key.is_some() { if chunk { ", " } else { ": " }.to_owned() } else { String::new() }, 0, false, SelectedTextAdditional {
+			Some(Self(Text::new(if key.is_some() { ": ".to_owned() } else { String::new() }, 0, false, SelectedTextAdditional {
 				y,
 				indices: indices.into_boxed_slice(),
 				value_color: TextColor::TreeKey,

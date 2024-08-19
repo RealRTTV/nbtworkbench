@@ -26,7 +26,7 @@ impl<'a> LittleEndianDecoder<'a> {
 		};
 		unsafe {
 			if this.assert_len(8).is_some() && this.data.add(4).cast::<u32>().read_unaligned() as usize == this.remaining_len() - 8 {
-				// todo, what the hell is this version for
+				// what the hell is this version for
 				let _version = this.u32();
 				let _remaining_length = this.u32() as usize;
 				this.header = true;

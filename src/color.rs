@@ -16,9 +16,11 @@ pub enum TextColor {
 	LightPurple,
 	Yellow,
 	White,
+
 	TreeString,
 	TreeKey,
 	TreePrimitive,
+
 	Custom(u32),
 }
 
@@ -41,9 +43,11 @@ impl TextColor {
 			Self::LightPurple => 0xFF55FF,
 			Self::Yellow => 0xFFFF55,
 			Self::White => 0xFFFFFF,
+
 			Self::TreeString => 0xDB6AC0,
 			Self::TreeKey => 0x8BC3F3,
 			Self::TreePrimitive => 0xF1B073,
+
 			Self::Custom(value) => value & 0xFFFFFF,
 		}
 	}
