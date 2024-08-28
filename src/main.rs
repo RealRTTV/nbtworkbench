@@ -29,7 +29,7 @@ use std::fmt::{Display, Formatter, Write};
 use std::mem::MaybeUninit;
 use std::rc::Rc;
 use std::time::Duration;
-use anyhow::Context;
+use anyhow::{anyhow, Context};
 use compact_str::{CompactString, ToCompactString};
 use regex::{Regex, RegexBuilder};
 use static_assertions::const_assert_eq;
@@ -40,7 +40,7 @@ use vertex_buffer_builder::VertexBufferBuilder;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::wasm_bindgen;
 
-use crate::assets::{BASE_TEXT_Z, BASE_Z, BOOKMARK_UV, BOOKMARK_Z, END_LINE_NUMBER_SEPARATOR_UV, HEADER_SIZE, HIDDEN_BOOKMARK_UV, HOVERED_WIDGET_UV, INSERTION_CHUNK_UV, INSERTION_UV, INVALID_STRIPE_UV, LINE_NUMBER_SEPARATOR_UV, LINE_NUMBER_Z, SCROLLBAR_BOOKMARK_Z, SELECTED_TOGGLE_OFF_UV, SELECTED_TOGGLE_ON_UV, SORT_COMPOUND_BY_NAME, SORT_COMPOUND_BY_NOTHING, SORT_COMPOUND_BY_TYPE, TEXT_UNDERLINE_UV, TOGGLE_Z, UNSELECTED_TOGGLE_OFF_UV, UNSELECTED_TOGGLE_ON_UV, UNSELECTED_WIDGET_UV};
+use crate::assets::{BASE_TEXT_Z, BASE_Z, BOOKMARK_UV, BOOKMARK_Z, END_LINE_NUMBER_SEPARATOR_UV, HEADER_SIZE, HIDDEN_BOOKMARK_UV, HOVERED_WIDGET_UV, INSERTION_CHUNK_UV, INSERTION_UV, INVALID_STRIPE_UV, LINE_NUMBER_SEPARATOR_UV, LINE_NUMBER_Z, SCROLLBAR_BOOKMARK_Z, SELECTED_TOGGLE_OFF_UV, SELECTED_TOGGLE_ON_UV, SORT_COMPOUND_BY_NAME_UV, SORT_COMPOUND_BY_NOTHING_UV, SORT_COMPOUND_BY_TYPE_UV, TEXT_UNDERLINE_UV, TOGGLE_Z, UNSELECTED_TOGGLE_OFF_UV, UNSELECTED_TOGGLE_ON_UV, UNSELECTED_WIDGET_UV};
 use crate::color::TextColor;
 use crate::elements::compound::CompoundMap;
 use crate::elements::element::{NbtByteArray, NbtIntArray, NbtLongArray};
@@ -604,9 +604,9 @@ pub enum SortAlgorithm {
 impl SortAlgorithm {
 	pub fn render(self, builder: &mut VertexBufferBuilder, ctx: &mut RenderContext) {
 		let uv = match self {
-			Self::None => SORT_COMPOUND_BY_NOTHING,
-			Self::Name => SORT_COMPOUND_BY_NAME,
-			Self::Type => SORT_COMPOUND_BY_TYPE,
+			Self::None => SORT_COMPOUND_BY_NOTHING_UV,
+			Self::Name => SORT_COMPOUND_BY_NAME_UV,
+			Self::Type => SORT_COMPOUND_BY_TYPE_UV,
 		};
 
 		let widget_uv = if (280..296).contains(&ctx.mouse_x) && (26..42).contains(&ctx.mouse_y) {
@@ -1210,16 +1210,16 @@ pub fn add_element(root: &mut NbtElement, key: Option<CompactString>, value: Nbt
 
 	let (_, _, parent, mut line_number) = Navigate::new(rem.iter().copied(), root).last();
 	let old_heights = if let Some(compound) = parent.as_compound_mut() {
-		compound.insert(last, key.context("Expected a key with a compound tag under the indices")?, value);
+		compound.insert(last, key.unwrap_or(CompactString::const_new("_")), value);
 		None
 	} else if let Some(chunk) = parent.as_chunk_mut() {
-		chunk.insert(last, key.context("Expected a key with a chunk tag under the indices")?, value);
+		chunk.insert(last, key.unwrap_or(CompactString::const_new("_")), value);
 		None
 	} else {
-		if let Ok(Some(old)) = parent.insert(last, value) {
-			Some((old.height(), old.true_height()))
-		} else {
-			None
+		match parent.insert(last, value) {
+			Ok(Some(old)) => Some((old.height(), old.true_height())),
+			Ok(None) => None,
+			Err(_) => return Err(anyhow!("Invalid type to insert into parent")),
 		}
 	};
 	let (diff, true_diff) = Vec2u::from((height, true_height)).wrapping_sub(old_heights.unwrap_or((0, 0)).into()).into();

@@ -454,7 +454,7 @@ impl Workbench {
 					let mut depth = 0;
 					if (cy & !15) + scroll == HEADER_SIZE {
 						if let Some(action) = tab.value.actions().get(highlight_idx) {
-							if let Some(action) = action.apply(None, indices.into_boxed_slice(), tab.uuid, 1, 0, &mut tab.value, &mut tab.bookmarks, &mut self.subscription) {
+							if let Some(action) = action.apply(None, indices.into_boxed_slice(), tab.uuid, 1, 0, &mut tab.value, &mut tab.bookmarks, &mut self.subscription, &mut self.alerts) {
 								tab.append_to_history(action);
 							}
 						}
@@ -478,7 +478,7 @@ impl Workbench {
 							if !(min_x..max_x).contains(&cx) {
 								break 'a;
 							};
-							if let Some(action) = action.apply(key, indices.into_boxed_slice(), tab.uuid, true_line_number, y, element, &mut tab.bookmarks, &mut self.subscription) {
+							if let Some(action) = action.apply(key, indices.into_boxed_slice(), tab.uuid, true_line_number, y, element, &mut tab.bookmarks, &mut self.subscription, &mut self.alerts) {
 								tab.append_to_history(action);
 							}
 							return true;

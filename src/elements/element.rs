@@ -1259,6 +1259,7 @@ impl NbtElement {
 					ElementAction::OpenInTxt,
 					#[cfg(not(target_arch = "wasm32"))]
 					ElementAction::OpenArrayInHex,
+					ElementAction::InsertFromClipboard,
 				],
 				NbtString::ID => &[
 					ElementAction::CopyRaw,
@@ -1268,11 +1269,12 @@ impl NbtElement {
 				],
 				#[cfg(not(target_arch = "wasm32"))]
 				NbtList::ID => {
-					const FULL: [ElementAction; 4] = [
+					const FULL: [ElementAction; 5] = [
 						ElementAction::CopyRaw,
 						ElementAction::CopyFormatted,
 						ElementAction::OpenInTxt,
-						ElementAction::OpenArrayInHex
+						ElementAction::InsertFromClipboard,
+						ElementAction::OpenArrayInHex,
 					];
 					let id = self.as_list_unchecked().element;
 					if matches!(id, NbtByte::ID | NbtShort::ID | NbtInt::ID | NbtLong::ID) {
@@ -1285,6 +1287,7 @@ impl NbtElement {
 				NbtList::ID => &[
 					ElementAction::CopyRaw,
 					ElementAction::CopyFormatted,
+					ElementAction::InsertFromClipboard,
 				],
 				NbtCompound::ID => &[
 					ElementAction::CopyRaw,
@@ -1293,6 +1296,7 @@ impl NbtElement {
 					ElementAction::OpenInTxt,
 					ElementAction::SortCompoundByName,
 					ElementAction::SortCompoundByType,
+					ElementAction::InsertFromClipboard,
 				],
 				NbtIntArray::ID => &[
 					ElementAction::CopyRaw,
@@ -1301,6 +1305,7 @@ impl NbtElement {
 					ElementAction::OpenInTxt,
 					#[cfg(not(target_arch = "wasm32"))]
 					ElementAction::OpenArrayInHex,
+					ElementAction::InsertFromClipboard,
 				],
 				NbtLongArray::ID => &[
 					ElementAction::CopyRaw,
@@ -1309,6 +1314,7 @@ impl NbtElement {
 					ElementAction::OpenInTxt,
 					#[cfg(not(target_arch = "wasm32"))]
 					ElementAction::OpenArrayInHex,
+					ElementAction::InsertFromClipboard,
 				],
 				NbtChunk::ID => &[
 					ElementAction::CopyRaw,
@@ -1317,6 +1323,7 @@ impl NbtElement {
 					ElementAction::OpenInTxt,
 					ElementAction::SortCompoundByName,
 					ElementAction::SortCompoundByType,
+					ElementAction::InsertFromClipboard,
 				],
 				NbtRegion::ID => &[
 					ElementAction::CopyRaw,

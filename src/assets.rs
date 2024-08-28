@@ -93,10 +93,11 @@ pub const COPY_FORMATTED_UV: Vec2u = Vec2u::new(19, 131);
 #[cfg(not(target_arch = "wasm32"))]
 pub const OPEN_ARRAY_IN_HEX_UV: Vec2u = Vec2u::new(35, 131);
 #[cfg(not(target_arch = "wasm32"))]
-pub const OPEN_IN_TXT: Vec2u = Vec2u::new(51, 131);
-pub const SORT_COMPOUND_BY_NAME: Vec2u = Vec2u::new(67, 131);
-pub const SORT_COMPOUND_BY_TYPE: Vec2u = Vec2u::new(83, 131);
-pub const SORT_COMPOUND_BY_NOTHING: Vec2u = Vec2u::new(3, 163);
+pub const OPEN_IN_TXT_UV: Vec2u = Vec2u::new(51, 131);
+pub const SORT_COMPOUND_BY_NAME_UV: Vec2u = Vec2u::new(67, 131);
+pub const SORT_COMPOUND_BY_TYPE_UV: Vec2u = Vec2u::new(83, 131);
+pub const SORT_COMPOUND_BY_NOTHING_UV: Vec2u = Vec2u::new(3, 163);
+pub const INSERT_FROM_CLIPBOARD_UV: Vec2u = Vec2u::new(19, 163);
 pub const FREEHAND_MODE_UV: Vec2u = Vec2u::new(0, 144);
 pub const ENABLED_FREEHAND_MODE_UV: Vec2u = Vec2u::new(16, 144);
 pub const STEAL_ANIMATION_OVERLAY_UV: Vec2u = Vec2u::new(64, 144);
@@ -135,7 +136,7 @@ pub const ALERT_UV: Vec2u = Vec2u::new(112, 144);
 pub const NOTIFICATION_UV: Vec2u = Vec2u::new(112, 184);
 pub const NOTIFICATION_BAR_UV: Vec2u = Vec2u::new(112, 204);
 pub const NOTIFICATION_BAR_BACKDROP_UV: Vec2u = Vec2u::new(112, 205);
-pub const BACKDROP_UV: Vec2u = Vec2u::new(16, 160);
+pub const BACKDROP_UV: Vec2u = Vec2u::new(32, 160);
 pub const ADD_SEARCH_BOOKMARKS_UV: Vec2u = Vec2u::new(48, 160);
 pub const REMOVE_SEARCH_BOOKMARKS_UV: Vec2u = Vec2u::new(64, 160);
 pub const SEARCH_KEYS_UV: Vec2u = Vec2u::new(80, 160);
@@ -147,8 +148,8 @@ pub const SNBT_SEARCH_MODE_UV: Vec2u = Vec2u::new(96, 192);
 pub const NEW_FILE_UV: Vec2u = Vec2u::new(16, 96);
 pub const REFRESH_UV: Vec2u = Vec2u::new(152, 144);
 pub const DISABLED_REFRESH_UV: Vec2u = Vec2u::new(168, 144);
-pub const LIGHTBULB_UV: Vec2u = Vec2u::new(32, 160);
-pub const DIM_LIGHTBULB_UV: Vec2u = Vec2u::new(32, 176);
+pub const LIGHTBULB_UV: Vec2u = Vec2u::new(32, 144);
+pub const DIM_LIGHTBULB_UV: Vec2u = Vec2u::new(48, 144);
 
 #[repr(u8)]
 #[allow(non_camel_case_types)]
