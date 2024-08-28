@@ -4,37 +4,32 @@
 	incomplete_features,
 )]
 #![feature(
-    adt_const_params,
     array_chunks,
     box_patterns,
-    const_black_box,
     const_collections_with_hasher,
-    const_mut_refs,
     core_intrinsics,
     iter_array_chunks,
     iter_next_chunk,
     lazy_cell,
     let_chains,
-    maybe_uninit_array_assume_init,
-    maybe_uninit_uninit_array,
-    new_uninit,
     optimize_attribute,
 	panic_update_hook,
-    stmt_expr_attributes
+    stmt_expr_attributes,
+	float_next_up_down,
+	variant_count
 )]
-#![feature(float_next_up_down)]
+#![feature(sync_unsafe_cell)]
 #![windows_subsystem = "windows"]
 
 extern crate core;
 
 use std::cell::UnsafeCell;
 use std::cmp::Ordering;
-use std::convert::identity;
 use std::fmt::{Display, Formatter, Write};
 use std::mem::MaybeUninit;
 use std::rc::Rc;
 use std::time::Duration;
-
+use anyhow::Context;
 use compact_str::{CompactString, ToCompactString};
 use regex::{Regex, RegexBuilder};
 use static_assertions::const_assert_eq;
@@ -49,7 +44,7 @@ use crate::assets::{BASE_TEXT_Z, BASE_Z, BOOKMARK_UV, BOOKMARK_Z, END_LINE_NUMBE
 use crate::color::TextColor;
 use crate::elements::compound::CompoundMap;
 use crate::elements::element::{NbtByteArray, NbtIntArray, NbtLongArray};
-use crate::marked_line::{MarkedLine, MarkedLineSlice};
+use crate::marked_line::{MarkedLine, MarkedLineSlice, MarkedLines};
 use crate::tree_travel::Navigate;
 use crate::vertex_buffer_builder::Vec2u;
 use crate::workbench::Workbench;
@@ -78,6 +73,16 @@ mod workbench;
 mod workbench_action;
 mod notification;
 mod config;
+pub mod elements {
+	pub mod array;
+	pub mod chunk;
+	pub mod compound;
+	pub mod element;
+	pub mod list;
+	pub mod primitive;
+	pub mod string;
+	pub mod null;
+}
 
 #[macro_export]
 macro_rules! flags {
@@ -130,6 +135,16 @@ macro_rules! tab_mut {
 		#[allow(unused_unsafe)]
 		unsafe { $self.tabs.get_unchecked_mut($self.tab) }
 	};
+}
+
+#[macro_export]
+macro_rules! get_interaction_information {
+    ($self:ident) => {{
+		let left_margin = $self.left_margin();
+		let horizontal_scroll = $self.horizontal_scroll();
+		let scroll = $self.scroll();
+		$crate::workbench::Workbench::get_interaction_information_raw(left_margin, horizontal_scroll, scroll, $self.mouse_x, $self.mouse_y, &mut tab_mut!($self).value)
+	}};
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -285,6 +300,7 @@ pub enum Position {
 	Last,
 }
 
+#[derive(Debug)]
 pub enum HeldEntry {
 	Empty,
 	FromAether((Option<CompactString>, NbtElement)),
@@ -414,76 +430,74 @@ pub fn nth(n: usize) -> String {
 }
 
 pub fn sum_indices<I: Iterator<Item = usize>>(indices: I, mut root: &NbtElement) -> usize {
-	unsafe {
-		let mut total = 0;
-		let mut indices = indices.peekable();
-		while let Some(idx) = indices.next() {
-			root = if let NbtByteArray::ID | NbtIntArray::ID | NbtLongArray::ID = root.id() {
-				total += 1 + idx;
-				break;
-			} else if let Some(list) = root.as_list() {
-				total += 1 + list
-					.children()
-					.take(idx)
-					.map(NbtElement::height)
-					.sum::<usize>();
-				if let Some(root) = list.get(idx) {
-					root
-				} else {
-					break;
-				}
-			} else if let Some(compound) = root.as_compound() {
-				total += 1 + compound
-					.children()
-					.take(idx)
-					.map(|(_, b)| b)
-					.map(NbtElement::height)
-					.sum::<usize>();
-				if let Some((_, root)) = compound.get(idx) {
-					root
-				} else {
-					break;
-				}
-			} else if let Some(chunk) = root.as_chunk() {
-				total += 1 + chunk
-					.children()
-					.take(idx)
-					.map(|(_, b)| b)
-					.map(NbtElement::height)
-					.sum::<usize>();
-				if let Some((_, root)) = chunk.get(idx) {
-					root
-				} else {
-					break;
-				}
-			} else if let Some(region) = root.as_region() {
-				total += 1 + region
-					.children()
-					.take(idx)
-					.map(NbtElement::height)
-					.sum::<usize>();
-				if let Some(root) = region.get(idx) {
-					root
-				} else {
-					break;
-				}
+	let mut total = 0;
+	let mut indices = indices.peekable();
+	while let Some(idx) = indices.next() {
+		root = if let NbtByteArray::ID | NbtIntArray::ID | NbtLongArray::ID = root.id() {
+			total += 1 + idx;
+			break;
+		} else if let Some(list) = root.as_list() {
+			total += 1 + list
+				.children()
+				.take(idx)
+				.map(NbtElement::height)
+				.sum::<usize>();
+			if let Some(root) = list.get(idx) {
+				root
 			} else {
-				total += root.height();
-				if indices.peek().is_some() {
-					panic_unchecked("tried to index non-indexable")
-				} else {
-					break;
-				}
-			};
-		}
-		total
+				break;
+			}
+		} else if let Some(compound) = root.as_compound() {
+			total += 1 + compound
+				.children()
+				.take(idx)
+				.map(|(_, b)| b)
+				.map(NbtElement::height)
+				.sum::<usize>();
+			if let Some((_, root)) = compound.get(idx) {
+				root
+			} else {
+				break;
+			}
+		} else if let Some(chunk) = root.as_chunk() {
+			total += 1 + chunk
+				.children()
+				.take(idx)
+				.map(|(_, b)| b)
+				.map(NbtElement::height)
+				.sum::<usize>();
+			if let Some((_, root)) = chunk.get(idx) {
+				root
+			} else {
+				break;
+			}
+		} else if let Some(region) = root.as_region() {
+			total += 1 + region
+				.children()
+				.take(idx)
+				.map(NbtElement::height)
+				.sum::<usize>();
+			if let Some(root) = region.get(idx) {
+				root
+			} else {
+				break;
+			}
+		} else {
+			total += root.height();
+			if indices.peek().is_some() {
+				panic!("tried to index non-indexable")
+			} else {
+				break;
+			}
+		};
 	}
+	total
 }
 
 pub fn recache_along_indices(indices: &[usize], parent: &mut NbtElement) {
 	if let Some(region) = parent.as_region_mut() {
 		if let Some((&idx, rest)) = indices.split_first() {
-			recache_along_indices(rest, unsafe { region.get_mut(idx).panic_unchecked("expected valid index") });
+			recache_along_indices(rest, region.get_mut(idx).expect("expected valid index"));
 		}
 		region.recache();
 	} else if let Some(array) = parent.as_byte_array_mut() {
@@ -494,17 +508,17 @@ pub fn recache_along_indices(indices: &[usize], parent: &mut NbtElement) {
 		array.recache();
 	} else if let Some(list) = parent.as_list_mut() {
 		if let Some((&idx, rest)) = indices.split_first() {
-			recache_along_indices(rest, unsafe { list.get_mut(idx).panic_unchecked("expected valid index") });
+			recache_along_indices(rest, list.get_mut(idx).expect("expected valid index"));
 		}
 		list.recache();
 	} else if let Some(compound) = parent.as_compound_mut() {
 		if let Some((&idx, rest)) = indices.split_first() {
-			recache_along_indices(rest, unsafe { compound.get_mut(idx).panic_unchecked("expected valid index") }.1, );
+			recache_along_indices(rest, compound.get_mut(idx).expect("expected valid index").1, );
 		}
 		compound.recache();
 	} else if let Some(chunk) = parent.as_chunk_mut() {
 		if let Some((&idx, rest)) = indices.split_first() {
-			recache_along_indices(rest, unsafe { chunk.get_mut(idx).panic_unchecked("expected valid index") }.1, );
+			recache_along_indices(rest, chunk.get_mut(idx).expect("expected valid index").1, );
 		}
 		chunk.recache();
 	}
@@ -641,7 +655,7 @@ impl SortAlgorithm {
 			// SAFETY: these indices are valid since the length did not change and since the values written were indexes
 			unsafe {
 				let entry = map.entries.get_unchecked_mut(new_idx);
-				*map.indices.find(hash!(entry.key), |&target_idx| target_idx == idx).panic_unchecked("index obviously exists").as_mut() = new_idx;
+				*map.indices.find(hash!(entry.key), |&target_idx| target_idx == idx).expect("index obviously exists").as_mut() = new_idx;
 			}
 		}
 	}
@@ -655,6 +669,11 @@ impl Display for SortAlgorithm {
 			Self::Type => "Type-Based",
 		})
 	}
+}
+
+pub enum LineNumberKind {
+	Generic,
+	Grid(usize, usize),
 }
 
 pub struct RenderContext<'a> {
@@ -818,7 +837,7 @@ impl<'a> RenderContext<'a> {
 	}
 
 	#[inline]
-	pub fn skip_line_numbers(&mut self, n: usize) { self.line_number += n; }
+	pub fn skip_line_numbers(&mut self, n: usize) { self.line_number = self.line_number.wrapping_add(n); }
 
 	#[inline]
 	pub fn line_number(&mut self) {
@@ -837,7 +856,7 @@ impl<'a> RenderContext<'a> {
 			}
 		}
 		let mut y = HEADER_SIZE;
-		for (idx, &render_line_number) in self.line_numbers.iter().enumerate() {
+		for (idx, &line_number) in self.line_numbers.iter().enumerate() {
 			let next_line_number = self.line_numbers.get(idx + 1).copied();
 
 			let color = if (self.red_line_numbers[0] == y) | (self.red_line_numbers[1] == y) {
@@ -856,16 +875,16 @@ impl<'a> RenderContext<'a> {
 			let color = core::mem::replace(&mut builder.color, color);
 			builder.settings(
 				(
-					self.left_margin - render_line_number.ilog10() as usize * 8 - 16,
+					self.left_margin - line_number.ilog10() as usize * 8 - 16,
 					y,
 				),
 				false,
 				BASE_TEXT_Z,
 			);
-			let _ = write!(builder, "{render_line_number}");
+			let _ = write!(builder, "{line_number}");
 			builder.color = color;
 
-			if let Some((first, rest)) = bookmarks.split_first() && render_line_number == first.true_line_number() {
+			if let Some((first, rest)) = bookmarks.split_first() && line_number == first.true_line_number() {
 				bookmarks = rest;
 				builder.draw_texture_region_z(
 					(1, y + 2),
@@ -876,7 +895,7 @@ impl<'a> RenderContext<'a> {
 				);
 			}
 			let mut hidden_bookmarks = 0_usize;
-			while let Some((first, rest)) = bookmarks.split_first() && next_line_number.is_none_or(|next_line_number| render_line_number <= first.true_line_number() && first.true_line_number() < next_line_number) {
+			while let Some((first, rest)) = bookmarks.split_first() && next_line_number.is_none_or(|next_line_number| line_number <= first.true_line_number() && first.true_line_number() < next_line_number) {
 				bookmarks = rest;
 				if hidden_bookmarks < 5 {
 					builder.draw_texture_region_z(
@@ -897,6 +916,87 @@ impl<'a> RenderContext<'a> {
 			};
 			builder.draw_texture_z((builder.text_coords.0 + 4, y), LINE_NUMBER_Z, uv, (2, 16));
 			y += 16;
+		}
+	}
+
+	#[inline]
+	pub fn render_grid_line_numbers(&self, builder: &mut VertexBufferBuilder, mut bookmarks: &MarkedLineSlice) {
+		let scroll = builder.scroll();
+
+		let last_line_number = (self.line_numbers.len() > 1) as usize * 32 + 1;
+		for line_number in 1..=last_line_number {
+			if 16 * line_number - 16 >= scroll {
+				let color = if line_number % 2 == 1 {
+					0x777777
+				} else {
+					TextColor::Gray.to_raw()
+				};
+				let color = core::mem::replace(&mut builder.color, color);
+				builder.settings(
+					(
+						self.left_margin - line_number.ilog10() as usize * 8 - 16,
+						HEADER_SIZE + 16 * line_number - 16 - scroll,
+					),
+					false,
+					BASE_TEXT_Z,
+				);
+				let _ = write!(builder, "{line_number}");
+				builder.color = color;
+			}
+			let uv = if line_number == last_line_number {
+				END_LINE_NUMBER_SEPARATOR_UV
+			} else {
+				LINE_NUMBER_SEPARATOR_UV
+			};
+			builder.draw_texture_z((builder.text_coords.0 + 4, HEADER_SIZE + 16 * line_number - 16 - scroll), LINE_NUMBER_Z, uv, (2, 16));
+		}
+
+		if let Some((first, rest)) = bookmarks.split_first() && first.true_line_number() == 1 {
+			bookmarks = rest;
+			if scroll < 16 {
+				builder.draw_texture_region_z(
+					(1, HEADER_SIZE + 2),
+					BOOKMARK_Z,
+					first.uv(),
+					(self.left_margin - 7, 12),
+					(16, 16),
+				);
+			}
+		}
+
+		for (idx, &line_number) in self.line_numbers.iter().enumerate() {
+			let next_line_number = self.line_numbers.get(idx + 1).copied();
+			let x = idx % 32;
+			let z = idx / 32;
+			let pos = Vec2u::new(self.left_margin + 16 + 16 + x * 16, HEADER_SIZE + 16 + z * 16);
+			if let Some((first, rest)) = bookmarks.split_first() && first.true_line_number() == line_number {
+				bookmarks = rest;
+				if pos.y >= scroll + HEADER_SIZE {
+					builder.draw_texture_region_z(
+						pos - (0, scroll),
+						BOOKMARK_Z,
+						first.uv(),
+						(16, 16),
+						(16, 16),
+					);
+				}
+			}
+			let mut hidden_bookmarks = 0_usize;
+			while let Some((first, rest)) = bookmarks.split_first() && next_line_number.is_none_or(|next_line_number| line_number <= first.true_line_number() && first.true_line_number() < next_line_number) {
+				bookmarks = rest;
+				if hidden_bookmarks < 5 {
+					if pos.y >= scroll + HEADER_SIZE {
+						builder.draw_texture_region_z(
+							pos + (0, 14) - (0, scroll),
+							BOOKMARK_Z,
+							first.uv(),
+							(16, 2),
+							(16, 16),
+						);
+					}
+				}
+				hidden_bookmarks += 1;
+			}
 		}
 	}
 
@@ -984,6 +1084,16 @@ impl<'a> RenderContext<'a> {
 		let (x_offset, y_offset) = pos.into();
 		if let Some((element, x, y)) = self.ghost && f(x, y) && g(element) {
 			builder.draw_texture_region_z((self.left_margin - 2, y_offset), BASE_Z, INSERTION_CHUNK_UV, (x_offset + 18 - self.left_margin, 16), (16, 16));
+			true
+		} else {
+			false
+		}
+	}
+
+	pub fn draw_held_entry_grid_chunk<F: FnOnce(usize, usize) -> bool, G: FnOnce(&NbtElement) -> bool>(&mut self, pos: impl Into<(usize, usize)>, builder: &mut VertexBufferBuilder, f: F, g: G) -> bool {
+		let (x_offset, y_offset) = pos.into();
+		if let Some((element, x, y)) = self.ghost && f(x, y) && g(element) {
+			builder.draw_texture_region_z((x_offset, y_offset), BASE_Z, INSERTION_CHUNK_UV, (16, 16), (16, 16));
 			true
 		} else {
 			false
@@ -1091,13 +1201,94 @@ pub fn smoothstep64(x: f64) -> f64 {
 	3.0 * x * x - 2.0 * x * x * x
 }
 
-pub fn smoothstep32(x: f32) -> f32 {
-	let x = x.clamp(0.0, 1.0);
-	3.0 * x * x - 2.0 * x * x * x
-}
-
 #[must_use]
 pub const fn valid_unescaped_char(byte: u8) -> bool { matches!(byte, b'0'..=b'9' | b'A'..=b'Z' | b'a'..=b'z' | b'_' | b'-' | b'.' | b'+') }
+
+pub fn add_element(root: &mut NbtElement, key: Option<CompactString>, value: NbtElement, indices: &[usize], bookmarks: &mut MarkedLines, subscription: &mut Option<FileUpdateSubscription>) -> anyhow::Result<()> {
+	let (&last, rem) = indices.split_last().expect("You can't remove the head!");
+	let (height, true_height) = (value.height(), value.true_height());
+
+	let (_, _, parent, mut line_number) = Navigate::new(rem.iter().copied(), root).last();
+	let old_heights = if let Some(compound) = parent.as_compound_mut() {
+		compound.insert(last, key.context("Expected a key with a compound tag under the indices")?, value);
+		None
+	} else if let Some(chunk) = parent.as_chunk_mut() {
+		chunk.insert(last, key.context("Expected a key with a chunk tag under the indices")?, value);
+		None
+	} else {
+		if let Ok(Some(old)) = parent.insert(last, value) {
+			Some((old.height(), old.true_height()))
+		} else {
+			None
+		}
+	};
+	let (diff, true_diff) = Vec2u::from((height, true_height)).wrapping_sub(old_heights.unwrap_or((0, 0)).into()).into();
+
+	for n in 0..last {
+		line_number += parent.get(n).expect("What the fuck???").true_height();
+	}
+	line_number += 1;
+	if let Some((_, old_true_height)) = old_heights {
+		bookmarks.remove(line_number..line_number + old_true_height);
+		line_number += old_true_height;
+	}
+
+	bookmarks[line_number..].increment(diff, true_diff);
+
+	let mut iter = Navigate::new(rem.iter().copied(), root);
+	while let Some((position, _, _, element, _)) = iter.next() {
+		if let Position::Middle | Position::First = position {
+			element.increment(height, true_height);
+		}
+	}
+
+	if let Some(subscription) = subscription && encompasses_or_equal(rem, &subscription.indices) {
+		if subscription.indices[rem.len()] <= last && old_heights.is_none() {
+			subscription.indices[rem.len()] += 1;
+		}
+	}
+
+	recache_along_indices(rem, root);
+
+	Ok(())
+}
+
+pub fn remove_element(root: &mut NbtElement, indices: &[usize], bookmarks: &mut MarkedLines, subscription: &mut Option<FileUpdateSubscription>) -> anyhow::Result<(Option<CompactString>, NbtElement)> {
+	let (&last, rem) = indices.split_last().context("Cannot remove the root")?;
+	let (_, _, parent, mut line_number) = Navigate::new(rem.iter().copied(), root).last();
+	for n in 0..last {
+		line_number += parent.get(n).expect("What the fuck").true_height();
+	}
+	line_number += 1;
+	let old_len = parent.len();
+	let (key, value) = parent.remove(last).context("Could not remove element")?;
+	let (height, true_height) = (value.height(), value.true_height());
+	let replacement_heights = if let Some(replacement) = parent.get(last) && parent.len() == old_len { Some((replacement.height(), replacement.true_height())) } else { None };
+	let (diff, true_diff) = if let Some((replacement_height, replacement_true_height)) = replacement_heights { (height.saturating_sub(replacement_height), true_height.saturating_sub(replacement_true_height)) } else { (height, true_height) };
+	let mut iter = Navigate::new(rem.iter().copied(), root);
+	while let Some((_, _, _, element, _)) = iter.next() {
+		element.decrement(diff, true_diff);
+	}
+	if let Some((_, replacement_true_height)) = replacement_heights {
+		bookmarks.remove(line_number..line_number + replacement_true_height);
+		line_number += replacement_true_height;
+	}
+	bookmarks[line_number..].decrement(diff, true_diff);
+
+	if let Some(inner_subscription) = subscription {
+		if *rem == *inner_subscription.indices {
+			*subscription = None;
+		} else if encompasses(rem, &inner_subscription.indices) {
+			if inner_subscription.indices[rem.len()] >= last && replacement_heights.is_none() {
+				inner_subscription.indices[rem.len()] -= 1;
+			}
+		}
+	}
+
+	recache_along_indices(rem, root);
+
+	Ok((key, value))
+}
 
 #[must_use]
 pub fn combined_two_sorted<T: Ord>(a: Box<[T]>, b: Box<[T]>) -> Vec<T> {
@@ -1366,18 +1557,11 @@ impl CharExt for char {
 }
 
 pub trait OptionExt<T> {
-	/// # Safety
-	///
-	/// * This code better be unreachable otherwise it's UB without `debug_assertions`, just a panic with them, however.
-	unsafe fn panic_unchecked(self, msg: &str) -> T;
-
 	#[allow(clippy::wrong_self_convention)] // then why is is_some_and like that, huh?
 	fn is_none_or(self, f: impl FnOnce(T) -> bool) -> bool;
 }
 
 impl<T> OptionExt<T> for Option<T> {
-	unsafe fn panic_unchecked(self, msg: &str) -> T { self.map_or_else(|| panic_unchecked(msg), identity) }
-
 	fn is_none_or(self, f: impl FnOnce(T) -> bool) -> bool { self.map_or(true, f) }
 }
 
@@ -1395,17 +1579,6 @@ pub unsafe fn panic_unchecked(msg: &str) -> ! {
 
 	#[cfg(not(debug_assertions))]
 	core::hint::unreachable_unchecked()
-}
-
-pub mod elements {
-	pub mod array;
-	pub mod chunk;
-	pub mod compound;
-	pub mod element;
-	pub mod list;
-	pub mod primitive;
-	pub mod string;
-	pub mod null;
 }
 
 const_assert_eq!(

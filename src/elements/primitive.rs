@@ -42,7 +42,7 @@ macro_rules! primitive {
 			#[inline]
 			pub fn render(&self, builder: &mut VertexBufferBuilder, name: Option<&str>, ctx: &mut RenderContext) {
 				ctx.line_number();
-				Self::render_icon(ctx.pos(), BASE_Z, builder);
+				self.render_icon(ctx.pos(), BASE_Z, builder);
 				ctx.check_for_invalid_value(|value| value.parse::<$t>().is_err());
 				ctx.render_errors(ctx.pos(), builder);
 				let str = $compact_format(self.value);
@@ -61,7 +61,7 @@ macro_rules! primitive {
 			}
 
 			#[inline]
-			pub fn render_icon(pos: impl Into<(usize, usize)>, z: ZOffset, builder: &mut VertexBufferBuilder) { builder.draw_texture_z(pos, z, $uv, (16, 16)); }
+			pub fn render_icon(&self, pos: impl Into<(usize, usize)>, z: ZOffset, builder: &mut VertexBufferBuilder) { builder.draw_texture_z(pos, z, $uv, (16, 16)); }
 
 			#[inline]
 			pub fn value(&self) -> CompactString { $compact_format(self.value) }

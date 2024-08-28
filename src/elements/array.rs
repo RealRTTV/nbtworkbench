@@ -242,7 +242,7 @@ macro_rules! array {
 					}
 
 					ctx.line_number();
-					Self::render_icon(ctx.pos(), BASE_Z, builder);
+					self.render_icon(ctx.pos(), BASE_Z, builder);
 					if !self.is_empty() {
 						ctx.draw_toggle(ctx.pos() - (16, 0), self.open, builder);
 					}
@@ -409,7 +409,7 @@ macro_rules! array {
 			pub const fn max_depth(&self) -> usize { self.max_depth as usize }
 
 			#[inline]
-			pub fn render_icon(pos: impl Into<(usize, usize)>, z: ZOffset, builder: &mut VertexBufferBuilder) { builder.draw_texture_z(pos, z, $uv, (16, 16)); }
+			pub fn render_icon(&self, pos: impl Into<(usize, usize)>, z: ZOffset, builder: &mut VertexBufferBuilder) { builder.draw_texture_z(pos, z, $uv, (16, 16)); }
 
 			#[inline]
 			pub fn render_element_icon(pos: impl Into<(usize, usize)>, builder: &mut VertexBufferBuilder) { builder.draw_texture(pos, $element_uv, (16, 16)); }

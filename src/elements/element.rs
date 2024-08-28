@@ -12,7 +12,7 @@ use compact_str::{CompactString, format_compact, ToCompactString};
 use hashbrown::raw::RawTable;
 use polonius_the_crab::{polonius, polonius_return};
 
-use crate::{array, assets::JUST_OVERLAPPING_BASE_TEXT_Z, DropFn, panic_unchecked, primitive, RenderContext, since_epoch, StrExt, TextColor, VertexBufferBuilder};
+use crate::{array, assets::JUST_OVERLAPPING_BASE_TEXT_Z, DropFn, primitive, RenderContext, since_epoch, StrExt, TextColor, VertexBufferBuilder};
 use crate::assets::{BASE_Z, BYTE_ARRAY_UV, BYTE_UV, CONNECTION_UV, DOUBLE_UV, FLOAT_UV, INT_ARRAY_UV, INT_UV, LONG_ARRAY_UV, LONG_UV, SHORT_UV, ZOffset};
 use crate::be_decoder::BigEndianDecoder;
 use crate::element_action::ElementAction;
@@ -24,6 +24,7 @@ use crate::elements::string::NbtString;
 use crate::encoder::UncheckedBufWriter;
 use crate::formatter::PrettyFormatter;
 use crate::le_decoder::LittleEndianDecoder;
+use crate::marked_line::MarkedLines;
 use crate::tab::FileFormat;
 
 primitive!(BYTE_UV, { Some('b') }, NbtByte, i8, 1);
@@ -741,29 +742,41 @@ impl NbtElement {
 			NbtChunk::ID => "Chunk",
 			NbtRegion::ID => "Region",
 			NbtNull::ID => "null",
-			_ => unsafe { panic_unchecked("Invalid element id") },
+			_ => panic!("Invalid element id"),
 		}
 	}
 
 	#[inline]
-	pub fn render_icon(id: u8, pos: impl Into<(usize, usize)>, z: ZOffset, builder: &mut VertexBufferBuilder) {
-		match id {
-			NbtByte::ID => NbtByte::render_icon(pos, z, builder),
-			NbtShort::ID => NbtShort::render_icon(pos, z, builder),
-			NbtInt::ID => NbtInt::render_icon(pos, z, builder),
-			NbtLong::ID => NbtLong::render_icon(pos, z, builder),
-			NbtFloat::ID => NbtFloat::render_icon(pos, z, builder),
-			NbtDouble::ID => NbtDouble::render_icon(pos, z, builder),
-			NbtByteArray::ID => NbtByteArray::render_icon(pos, z, builder),
-			NbtString::ID => NbtString::render_icon(pos, z, builder),
-			NbtList::ID => NbtList::render_icon(pos, z, builder),
-			NbtCompound::ID => NbtCompound::render_icon(pos, z, builder),
-			NbtIntArray::ID => NbtIntArray::render_icon(pos, z, builder),
-			NbtLongArray::ID => NbtLongArray::render_icon(pos, z, builder),
-			NbtChunk::ID => NbtChunk::render_icon(pos, false, z, builder),
-			NbtRegion::ID => NbtRegion::render_icon(pos, z, builder),
-			NbtNull::ID => NbtNull::render_icon(pos, z, builder),
-			_ => unsafe { panic_unchecked("Invalid element id") },
+	pub fn render_icon(&self, pos: impl Into<(usize, usize)>, z: ZOffset, builder: &mut VertexBufferBuilder) {
+		unsafe {
+			match self.id() {
+				NbtByte::ID => self.byte.render_icon(pos, z, builder),
+				NbtShort::ID => self.short.render_icon(pos, z, builder),
+				NbtInt::ID => self.int.render_icon(pos, z, builder),
+				NbtLong::ID => self.long.render_icon(pos, z, builder),
+				NbtFloat::ID => self.float.render_icon(pos, z, builder),
+				NbtDouble::ID => self.double.render_icon(pos, z, builder),
+				NbtByteArray::ID => self.byte_array.render_icon(pos, z, builder),
+				NbtString::ID => self.string.render_icon(pos, z, builder),
+				NbtList::ID => self.list.render_icon(pos, z, builder),
+				NbtCompound::ID => self.compound.render_icon(pos, z, builder),
+				NbtIntArray::ID => self.int_array.render_icon(pos, z, builder),
+				NbtLongArray::ID => self.long_array.render_icon(pos, z, builder),
+				NbtChunk::ID => self.chunk.render_icon(pos, z, builder),
+				NbtRegion::ID => self.region.render_icon(pos, z, builder),
+				NbtNull::ID => self.null.render_icon(pos, z, builder),
+				_ => panic!("Invalid element id"),
+			}
+		}
+	}
+
+	#[inline]
+	pub fn on_root_style_change(&mut self, bookmarks: &mut MarkedLines) {
+		unsafe {
+			match self.id() {
+				NbtRegion::ID => self.region.on_root_style_change(bookmarks),
+				_ => {}
+			}
 		}
 	}
 
@@ -903,7 +916,7 @@ impl NbtElement {
 				NbtByteArray::ID | NbtIntArray::ID | NbtLongArray::ID => self.byte_array.open(),
 				NbtList::ID => self.list.open(),
 				NbtCompound::ID => self.compound.open(),
-				NbtRegion::ID => self.region.open(),
+				NbtRegion::ID => self.region.is_open(),
 				NbtChunk::ID => self.chunk.open(),
 				_ => false,
 			}
@@ -958,7 +971,52 @@ impl NbtElement {
 				NbtChunk::ID => (self.chunk.value(), TextColor::TreeKey),
 				NbtRegion::ID => (self.region.value(), TextColor::TreeKey),
 				NbtNull::ID => (CompactString::const_new("null"), TextColor::TreeKey),
-				_ => core::hint::unreachable_unchecked(),
+				_ => panic!("Unknown element id"),
+			}
+		}
+	}
+
+	#[inline]
+	#[must_use]
+	pub fn is_primitive(&self) -> bool {
+		match self.id() {
+			NbtByte::ID | NbtShort::ID | NbtInt::ID | NbtLong::ID | NbtFloat::ID | NbtDouble::ID | NbtString::ID => true,
+			_ => false,
+		}
+	}
+
+	#[inline]
+	#[must_use]
+	pub fn is_default_state(&self) -> bool {
+		unsafe {
+			match self.id() {
+				NbtByte::ID => self.byte.value == 0,
+				NbtShort::ID => self.short.value == 0,
+				NbtInt::ID => self.int.value == 0,
+				NbtLong::ID => self.long.value == 0,
+				NbtFloat::ID => self.float.value == 0.0,
+				NbtDouble::ID => self.double.value == 0.0,
+				NbtByteArray::ID => self.byte_array.is_empty(),
+				NbtString::ID => self.string.str.as_str().is_empty(),
+				NbtList::ID => self.list.is_empty(),
+				NbtCompound::ID => self.compound.is_empty(),
+				NbtIntArray::ID => self.int_array.is_empty(),
+				NbtLongArray::ID => self.long_array.is_empty(),
+				NbtChunk::ID => self.chunk.is_unloaded(),
+				NbtRegion::ID => self.region.loaded_chunks() == 0,
+				NbtNull::ID => true,
+				_ => panic!("Unknown element id"),
+			}
+		}
+	}
+
+	#[inline]
+	#[must_use]
+	pub fn should_render_description(&self) -> bool {
+		unsafe {
+			match self.id() {
+				NbtChunk::ID => self.chunk.is_loaded() && !(self.chunk.x == 0 && self.chunk.z == 0 && self.chunk.is_empty()),
+				_ => true,
 			}
 		}
 	}
@@ -1560,7 +1618,7 @@ pub fn id_to_string_name(id: u8) -> (&'static str, &'static str) {
 		NbtChunk::ID => ("chunk", "chunks"),
 		NbtRegion::ID => ("region", "regions"),
 		NbtNull::ID => ("entry", "entries"),
-		_ => unsafe { panic_unchecked("Invalid id") },
+		_ => panic!("Invalid id"),
 	}
 }
 
@@ -1619,7 +1677,7 @@ impl NbtElement {
 			NbtChunk::ID => NbtPattern::Chunk(unsafe { self.as_chunk_unchecked() }),
 			NbtRegion::ID => NbtPattern::Region(unsafe { self.as_region_unchecked() }),
 			NbtNull::ID => NbtPattern::Null(unsafe { self.as_null_unchecked() }),
-			_ => unsafe { panic_unchecked("variant wasn't known") },
+			_ => panic!("variant wasn't known"),
 		}
 	}
 
@@ -1640,7 +1698,7 @@ impl NbtElement {
 			NbtChunk::ID => NbtPatternMut::Chunk(unsafe { self.as_chunk_unchecked_mut() }),
 			NbtRegion::ID => NbtPatternMut::Region(unsafe { self.as_region_unchecked_mut() }),
 			NbtNull::ID => NbtPatternMut::Null(unsafe { self.as_null_unchecked_mut() }),
-			_ => unsafe { panic_unchecked("variant wasn't known") },
+			_ => panic!("variant wasn't known"),
 		}
 	}
 }

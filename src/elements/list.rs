@@ -327,7 +327,7 @@ impl NbtList {
 			}
 
 			ctx.line_number();
-			Self::render_icon(ctx.pos(), BASE_Z, builder);
+			self.render_icon(ctx.pos(), BASE_Z, builder);
 			if !self.is_empty() {
 				ctx.draw_toggle(ctx.pos() - (16, 0), self.open, builder);
 			}
@@ -403,7 +403,7 @@ impl NbtList {
 			}
 
 			ctx.line_number();
-			Self::render_icon(ctx.pos(), BASE_Z, builder);
+			self.render_icon(ctx.pos(), BASE_Z, builder);
 			if !self.is_empty() {
 				ctx.draw_toggle(ctx.pos() - (16, 0), self.open, builder);
 			}
@@ -489,7 +489,8 @@ impl NbtList {
 	pub fn children_mut(&mut self) -> IterMut<'_, NbtElement> { self.elements.iter_mut() }
 
 	pub fn drop(&mut self, mut key: Option<CompactString>, mut element: NbtElement, y: &mut usize, depth: usize, target_depth: usize, mut line_number: usize, indices: &mut Vec<usize>) -> DropFn {
-		if *y < 16 && *y >= 8 && depth == target_depth {
+		let can_insert = self.can_insert(&element);
+		if *y < 16 && *y >= 8 && depth == target_depth && can_insert {
 			let before = (self.height(), self.true_height());
 			indices.push(0);
 			if let Err(element) = self.insert(0, element) { return DropFn::InvalidType(key, element) }
@@ -501,7 +502,7 @@ impl NbtList {
 				line_number + 1,
 				None,
 			);
-		} else if self.height() == 1 && *y < 24 && *y >= 16 && depth == target_depth {
+		} else if self.height() == 1 && *y < 24 && *y >= 16 && depth == target_depth && can_insert {
 			let before = self.true_height();
 			indices.push(self.len());
 			if let Err(element) = self.insert(self.len(), element) {
@@ -530,10 +531,10 @@ impl NbtList {
 			for (idx, value) in self.children_mut().enumerate() {
 				*ptr = idx;
 				let heights = (element.height(), element.true_height());
-				if *y < 8 && depth == target_depth {
+				if *y < 8 && depth == target_depth && can_insert {
 					if let Err(element) = self.insert(idx, element) { return DropFn::InvalidType(key, element) }
 					return DropFn::Dropped(heights.0, heights.1, None, line_number + 1, None);
-				} else if *y >= value.height() * 16 - 8 && *y < value.height() * 16 && depth == target_depth {
+				} else if *y >= value.height() * 16 - 8 && *y < value.height() * 16 && depth == target_depth && can_insert {
 					*ptr = idx + 1;
 					let true_height = value.true_height();
 					if let Err(element) = self.insert(idx + 1, element) { return DropFn::InvalidType(key, element) }
@@ -597,7 +598,7 @@ impl NbtList {
 	}
 
 	#[inline]
-	pub fn render_icon(pos: impl Into<(usize, usize)>, z: ZOffset, builder: &mut VertexBufferBuilder) { builder.draw_texture_z(pos, z, LIST_UV, (16, 16)); }
+	pub fn render_icon(&self, pos: impl Into<(usize, usize)>, z: ZOffset, builder: &mut VertexBufferBuilder) { builder.draw_texture_z(pos, z, LIST_UV, (16, 16)); }
 
 	#[inline]
 	pub fn recache(&mut self) {

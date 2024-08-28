@@ -3,7 +3,7 @@ use std::time::Duration;
 use enum_map::Enum;
 
 use crate::{since_epoch, smoothstep64, split_lines, StrExt};
-use crate::assets::{NOTIFICATION_TEXT_Z, NOTIFICATION_UV, NOTIFICATION_Z};
+use crate::assets::{NOTIFICATION_BAR_BACKDROP_UV, NOTIFICATION_BAR_UV, NOTIFICATION_TEXT_Z, NOTIFICATION_UV, NOTIFICATION_Z};
 use crate::color::TextColor;
 use crate::vertex_buffer_builder::{Vec2u, VertexBufferBuilder};
 
@@ -86,7 +86,7 @@ impl Notification {
             pos + (2, 2),
             NOTIFICATION_Z,
             NOTIFICATION_UV + (6, 2),
-            (self.width + 6, self.lines.len() * 16),
+            (self.width + 6, self.height() - 4),
             (12, 16),
         );
         builder.draw_texture_z(pos + (2, 2), NOTIFICATION_Z, NOTIFICATION_UV + (2, 2), (4, 16));
@@ -97,13 +97,13 @@ impl Notification {
             (2, 2),
         );
         builder.draw_texture_z(
-            pos + (6 + self.width + 2, self.lines.len() * 16 + 2),
+            pos + (6 + self.width + 2, self.height() - 2),
             NOTIFICATION_Z,
             NOTIFICATION_UV + (18, 18),
             (2, 2),
         );
         builder.draw_texture_z(
-            pos + (0, self.lines.len() * 16 + 2),
+            pos + (0, self.height() - 2),
             NOTIFICATION_Z,
             NOTIFICATION_UV + (0, 18),
             (2, 2),
@@ -124,7 +124,7 @@ impl Notification {
                     (16.min(remaining_width), 2),
                 );
                 builder.draw_texture_z(
-                    pos + (6 + self.width + 2 - remaining_width, 2 + self.lines.len() * 16),
+                    pos + (6 + self.width + 2 - remaining_width, self.height() - 2),
                     NOTIFICATION_Z,
                     NOTIFICATION_UV + (2, 18),
                     (16.min(remaining_width), 2),
@@ -133,20 +133,21 @@ impl Notification {
             }
         }
         {
-            // if we draw in 16 inc blocks...and the whole thing is a multiple of 16, we can cheat a lot
-            for i in 0..self.lines.len() {
+            let mut remaining_height = self.height() - 4;
+            while remaining_height > 0 {
                 builder.draw_texture_z(
-                    pos + (0, 2 + i * 16),
+                    pos + (0, self.height() - 4 - remaining_height + 2),
                     NOTIFICATION_Z,
                     NOTIFICATION_UV + (0, 2),
-                    (2, 16)
+                    (2, 16.min(remaining_height))
                 );
                 builder.draw_texture_z(
-                    pos + (6 + self.width + 2, 2 + i * 16),
+                    pos + (6 + self.width + 2, self.height() - 4 - remaining_height + 2),
                     NOTIFICATION_Z,
                     NOTIFICATION_UV + (18, 2),
-                    (2, 16)
+                    (2, 16.min(remaining_height))
                 );
+                remaining_height = remaining_height.saturating_sub(16);
             }
         }
         builder.color = self.text_color;
@@ -154,14 +155,37 @@ impl Notification {
             builder.settings(pos + (7, 2 + idx * 16), true, NOTIFICATION_TEXT_Z);
             let _ = write!(builder, "{line}");
         }
+        let bar_width = self.get_bar_width();
+        builder.draw_texture_region_z(
+            pos + (3, self.height() - 3),
+            NOTIFICATION_Z,
+            NOTIFICATION_BAR_UV,
+            (bar_width, 1),
+            (20, 1)
+        );
+        builder.draw_texture_region_z(
+            pos + (4, self.height() - 2),
+            NOTIFICATION_Z,
+            NOTIFICATION_BAR_BACKDROP_UV,
+            (bar_width, 1),
+            (20, 1)
+        );
     }
 
     #[allow(clippy::wrong_self_convention)]
     pub fn is_invisible(&mut self) -> bool {
         let now = since_epoch();
         let ms = now.saturating_sub(*self.timestamp.get_or_insert(now)).as_millis() as usize;
+        let display_time = self.message_len * 60 + 3000 + 500;
+        ms > display_time
+    }
+
+    fn get_bar_width(&mut self) -> usize {
+        let now = since_epoch();
+        let ms = (now.saturating_sub(*self.timestamp.get_or_insert(now)).as_millis() as usize).saturating_sub(250);
+        let width = self.width + 4;
         let display_time = self.message_len * 60 + 3000;
-        ms > 500 + display_time
+        ((1.0 - (ms as f64 / display_time as f64)).clamp(0.0, 1.0) * width as f64).round() as usize
     }
 
     fn get_inset(&mut self) -> usize {
@@ -179,6 +203,6 @@ impl Notification {
     }
     
     pub fn height(&self) -> usize {
-        4 + self.lines.len() * 16
+        6 + self.lines.len() * 16
     }
 }

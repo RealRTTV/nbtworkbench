@@ -1,4 +1,5 @@
 use std::alloc::{alloc, dealloc, Layout};
+use std::array;
 use std::fmt::{Display, Formatter};
 use std::mem::{ManuallyDrop, MaybeUninit};
 use std::ops::Deref;
@@ -96,7 +97,7 @@ impl NbtString {
 		use std::fmt::Write;
 
 		ctx.line_number();
-		Self::render_icon(ctx.pos(), BASE_Z, builder);
+		self.render_icon(ctx.pos(), BASE_Z, builder);
 
 		ctx.render_errors(ctx.pos(), builder);
 		if ctx.forbid(ctx.pos()) {
@@ -113,7 +114,7 @@ impl NbtString {
 	}
 
 	#[inline]
-	pub fn render_icon(pos: impl Into<(usize, usize)>, z: ZOffset, builder: &mut VertexBufferBuilder) { builder.draw_texture_z(pos, z, STRING_UV, (16, 16)); }
+	pub fn render_icon(&self, pos: impl Into<(usize, usize)>, z: ZOffset, builder: &mut VertexBufferBuilder) { builder.draw_texture_z(pos, z, STRING_UV, (16, 16)); }
 }
 
 #[repr(C)]
@@ -132,7 +133,7 @@ impl Clone for TwentyThree {
 					heap: ManuallyDrop::new(HeapTwentyThree {
 						ptr: NonNull::new_unchecked(ptr),
 						len: self.heap.len,
-						_pad: MaybeUninit::uninit_array(),
+						_pad: [const { MaybeUninit::<u8>::uninit() }; 22 - core::mem::size_of::<usize>() - core::mem::size_of::<NonNull<u8>>()],
 						variant: 254,
 					}),
 				}
@@ -154,7 +155,7 @@ impl TwentyThree {
 					heap: ManuallyDrop::new(HeapTwentyThree {
 						ptr: NonNull::new_unchecked(owned.as_mut_ptr()),
 						len,
-						_pad: MaybeUninit::uninit_array(),
+						_pad: [const { MaybeUninit::<u8>::uninit() }; 22 - core::mem::size_of::<usize>() - core::mem::size_of::<NonNull<u8>>()],
 						variant: 254,
 					}),
 				};
@@ -168,14 +169,9 @@ impl TwentyThree {
 							data: ptr.cast::<[u8; 23]>().read(),
 						}
 					} else {
-						let mut data = MaybeUninit::<u8>::uninit_array();
-						data.as_mut_ptr()
-							.cast::<u8>()
-							.copy_from_nonoverlapping(ptr, len);
-						data[22].write(192 + len as u8);
-						StackTwentyThree {
-							data: MaybeUninit::array_assume_init(data),
-						}
+						let mut data = array::from_fn::<u8, 23, _>(|idx| s.as_bytes().get(idx).copied().unwrap_or(0));
+						data[22] = 192 + len as u8;
+						StackTwentyThree { data }
 					}),
 				};
 				core::mem::forget(s);

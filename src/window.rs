@@ -21,7 +21,7 @@ use zune_inflate::DeflateOptions;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::JsValue;
 
-use crate::{assets, config, error, OptionExt, since_epoch, WINDOW_PROPERTIES, WindowProperties, WORKBENCH};
+use crate::{assets, config, error, since_epoch, WINDOW_PROPERTIES, WindowProperties, WORKBENCH};
 use crate::alert::Alert;
 use crate::assets::HEADER_SIZE;
 use crate::color::TextColor;
@@ -356,11 +356,11 @@ impl<'window> State<'window> {
 			usage: TextureUsages::TEXTURE_BINDING | TextureUsages::COPY_DST,
 			view_formats: &[],
 		});
-		queue.write_texture(unicode_texture.as_image_copy(), &unsafe {
+		queue.write_texture(unicode_texture.as_image_copy(), &{
 			zune_inflate::DeflateDecoder::new_with_options(
 				include_bytes!("assets/unicode.hex.zib"),
 				DeflateOptions::default().set_confirm_checksum(false),
-			).decode_zlib().ok().panic_unchecked("there is no way this fails, otherwise i deserve the ub that comes from this.")
+			).decode_zlib().ok().expect("there is no way this fails, otherwise i deserve the ub that comes from this.")
 		}, ImageDataLayout {
 			offset: 0,
 			bytes_per_row: Some(512),
@@ -491,7 +491,7 @@ impl<'window> State<'window> {
 			workbench.window_dimensions(new_size.width as usize, new_size.height as usize);
 			for tab in &mut workbench.tabs {
 				tab.scroll = tab.scroll();
-				tab.horizontal_scroll = tab.horizontal_scroll(workbench.held_entry.element());
+				tab.horizontal_scroll = tab.horizontal_scroll();
 			}
 		}
 	}

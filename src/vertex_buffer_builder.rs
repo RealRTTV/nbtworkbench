@@ -25,7 +25,7 @@ pub struct VertexBufferBuilder {
 	pub color: u32,
 	two_over_width: f32,
 	negative_two_over_height: f32,
-	owned_tooltip: Option<(Box<[String]>, Vec2u, bool, u32)>,
+	tooltips: Vec<(Box<[String]>, Vec2u, bool, u32)>,
 	scale: f32,
 }
 
@@ -72,16 +72,13 @@ impl VertexBufferBuilder {
 			color: TextColor::White.to_raw(),
 			two_over_width: 2.0 / size.width as f32,
 			negative_two_over_height: -2.0 / size.height as f32,
-			owned_tooltip: None,
+			tooltips: vec![],
 			scale
 		}
 	}
 
 	#[inline]
 	pub const fn scroll(&self) -> usize { self.scroll }
-
-	#[inline]
-	pub const fn drew_tooltip(&self) -> bool { self.owned_tooltip.is_some() }
 
 	#[inline]
 	pub fn settings(&mut self, pos: impl Into<(usize, usize)>, dropshadow: bool, z: ZOffset) {
@@ -122,7 +119,7 @@ impl VertexBufferBuilder {
 	#[inline]
 	pub fn draw_tooltip(&mut self, text: &[&str], pos: impl Into<(usize, usize)>, force_draw_right: bool) {
 		let color = self.color;
-		self.owned_tooltip.get_or_insert_with(move || (text.iter().map(|s| s.to_string()).collect::<Vec<_>>().into_boxed_slice(), Vec2u::from(pos.into()), force_draw_right, color));
+		self.tooltips.push((text.iter().map(|s| s.to_string()).collect::<Vec<_>>().into_boxed_slice(), Vec2u::from(pos.into()), force_draw_right, color));
 	}
 
 	pub fn clear_buffers(&mut self) {
@@ -135,80 +132,79 @@ impl VertexBufferBuilder {
 	}
 
 	#[inline]
-	pub fn draw_tooltip0(&mut self) -> bool {
+	pub fn draw_tooltips(&mut self) {
 		use core::fmt::Write;
 
-		let (text, pos, no_tooltip_repositioning, color) = if let Some(tooltip) = self.owned_tooltip.take() { tooltip } else { return false };
-		self.color = color;
+		for (text, pos, no_tooltip_repositioning, color) in core::mem::replace(&mut self.tooltips, vec![]) {
+			self.color = color;
 
-		let (mut x, y) = pos.into();
-		let mut y = y + 16;
-		let text_width = text.iter().map(|x| x.width()).max().unwrap_or(0);
-		if !no_tooltip_repositioning && x + text_width + 6 > self.window_width() {
-			x = usize::max(x.saturating_sub(text_width + 30), 4)
+			let (mut x, y) = pos.into();
+			let mut y = y + 16;
+			let text_width = text.iter().map(|x| x.width()).max().unwrap_or(0);
+			if !no_tooltip_repositioning && x + text_width + 6 > self.window_width() {
+				x = usize::max(x.saturating_sub(text_width + 30), 4)
+			}
+			if !no_tooltip_repositioning && y + text.len() * 16 + 9 > self.window_height() {
+				y = self.window_height().saturating_sub(text.len() * 16 + 9);
+			}
+			self.text_z = TOOLTIP_Z;
+			self.text_coords = (x + 3, y + 3);
+			self.draw_texture_z((x, y), TOOLTIP_Z, TOOLTIP_UV, (3, 3));
+			let mut max = x + 3;
+			for line in text.iter() {
+				let _ = write!(self, "{line}");
+				max = max.max(self.text_coords.0);
+				self.text_coords.0 = x + 3;
+				self.text_coords.1 += 16;
+			}
+			let width = max - 3 - x;
+			let height = self.text_coords.1 - 3 - y;
+			self.draw_texture_region_z(
+				(x + 3, y),
+				TOOLTIP_Z,
+				TOOLTIP_UV + (3, 0),
+				(width, 3),
+				(10, 3),
+			);
+			self.draw_texture_z((x + width + 3, y), TOOLTIP_Z, TOOLTIP_UV + (13, 0), (3, 3));
+
+			self.draw_texture_z((x, y + height + 3), TOOLTIP_Z, TOOLTIP_UV + (0, 13), (3, 3));
+			self.draw_texture_region_z(
+				(x + 3, y + height + 3),
+				TOOLTIP_Z,
+				TOOLTIP_UV + (3, 13),
+				(width, 3),
+				(10, 3),
+			);
+			self.draw_texture_z(
+				(x + width + 3, y + height + 3),
+				TOOLTIP_Z,
+				TOOLTIP_UV + (13, 13),
+				(3, 3),
+			);
+			self.draw_texture_region_z(
+				(x, y + 3),
+				TOOLTIP_Z,
+				TOOLTIP_UV + (0, 3),
+				(3, height),
+				(3, 10),
+			);
+			self.draw_texture_region_z(
+				(x + width + 3, y + 3),
+				TOOLTIP_Z,
+				TOOLTIP_UV + (13, 3),
+				(3, height),
+				(3, 10),
+			);
+
+			self.draw_texture_region_z(
+				(x + 3, y + 3),
+				TOOLTIP_Z,
+				TOOLTIP_UV + (3, 3),
+				(width, height),
+				(10, 10),
+			);
 		}
-		if !no_tooltip_repositioning && y + text.len() * 16 + 9 > self.window_height() {
-			y = self.window_height().saturating_sub(text.len() * 16 + 9);
-		}
-		self.text_z = TOOLTIP_Z;
-		self.text_coords = (x + 3, y + 3);
-		self.draw_texture_z((x, y), TOOLTIP_Z, TOOLTIP_UV, (3, 3));
-		let mut max = x + 3;
-		for line in text.iter() {
-			let _ = write!(self, "{line}");
-			max = max.max(self.text_coords.0);
-			self.text_coords.0 = x + 3;
-			self.text_coords.1 += 16;
-		}
-		let width = max - 3 - x;
-		let height = self.text_coords.1 - 3 - y;
-		self.draw_texture_region_z(
-			(x + 3, y),
-			TOOLTIP_Z,
-			TOOLTIP_UV + (3, 0),
-			(width, 3),
-			(10, 3),
-		);
-		self.draw_texture_z((x + width + 3, y), TOOLTIP_Z, TOOLTIP_UV + (13, 0), (3, 3));
-
-		self.draw_texture_z((x, y + height + 3), TOOLTIP_Z, TOOLTIP_UV + (0, 13), (3, 3));
-		self.draw_texture_region_z(
-			(x + 3, y + height + 3),
-			TOOLTIP_Z,
-			TOOLTIP_UV + (3, 13),
-			(width, 3),
-			(10, 3),
-		);
-		self.draw_texture_z(
-			(x + width + 3, y + height + 3),
-			TOOLTIP_Z,
-			TOOLTIP_UV + (13, 13),
-			(3, 3),
-		);
-		self.draw_texture_region_z(
-			(x, y + 3),
-			TOOLTIP_Z,
-			TOOLTIP_UV + (0, 3),
-			(3, height),
-			(3, 10),
-		);
-		self.draw_texture_region_z(
-			(x + width + 3, y + 3),
-			TOOLTIP_Z,
-			TOOLTIP_UV + (13, 3),
-			(3, height),
-			(3, 10),
-		);
-
-		self.draw_texture_region_z(
-			(x + 3, y + 3),
-			TOOLTIP_Z,
-			TOOLTIP_UV + (3, 3),
-			(width, height),
-			(10, 10),
-		);
-
-		true
 	}
 
 	#[inline]

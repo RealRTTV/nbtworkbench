@@ -7,7 +7,7 @@ use compact_str::CompactString;
 use notify::{EventKind, PollWatcher, RecursiveMode, Watcher};
 use uuid::Uuid;
 
-use crate::{FileUpdateSubscription, panic_unchecked, set_clipboard};
+use crate::{FileUpdateSubscription, set_clipboard};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::{assets::{OPEN_ARRAY_IN_HEX_UV, OPEN_IN_TXT}, FileUpdateSubscriptionType, since_epoch, StrExt};
 use crate::assets::{ACTION_WHEEL_Z, COPY_FORMATTED_UV, COPY_RAW_UV, SORT_COMPOUND_BY_NAME, SORT_COMPOUND_BY_TYPE};
@@ -230,7 +230,7 @@ impl ElementAction {
 											}
 											vec
 										},
-										_ => panic_unchecked("list was let through even thought it didn't have valid type"),
+										_ => panic!("list was let through even thought it didn't have valid type"),
 									}
 								} else {
 									break 'm;
@@ -311,7 +311,7 @@ impl ElementAction {
 					} else if let Some(chunk) = element.as_chunk_mut() {
 						chunk.entries.sort_by(Self::by_name, line_number, true_line_number, true_height, open, bookmark_slice)
 					} else {
-						unsafe { panic_unchecked("Unknown element kind for compound sorting") }
+						panic!("Unknown element kind for compound sorting")
 					};
 
 					return Some(WorkbenchAction::ReorderCompound { indices, reordering_indices });
@@ -325,7 +325,7 @@ impl ElementAction {
 					} else if let Some(chunk) = element.as_chunk_mut() {
 						chunk.entries.sort_by(Self::by_type, line_number, true_line_number, true_height, open, bookmark_slice)
 					} else {
-						unsafe { panic_unchecked("Unknown element kind for compound sorting") }
+						panic!("Unknown element kind for compound sorting")
 					};
 
 					return Some(WorkbenchAction::ReorderCompound { indices, reordering_indices });

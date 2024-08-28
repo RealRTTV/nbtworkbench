@@ -9,7 +9,7 @@ use std::thread::Scope;
 use compact_str::{CompactString, format_compact, ToCompactString};
 use hashbrown::raw::RawTable;
 
-use crate::{config, DropFn, OptionExt, RenderContext, StrExt, VertexBufferBuilder};
+use crate::{config, hash, DropFn, RenderContext, StrExt, VertexBufferBuilder};
 use crate::assets::{BASE_Z, COMPOUND_ROOT_UV, COMPOUND_UV, CONNECTION_UV, HEADER_SIZE, JUST_OVERLAPPING_BASE_TEXT_Z, LINE_NUMBER_CONNECTOR_Z, LINE_NUMBER_SEPARATOR_UV, ZOffset};
 use crate::be_decoder::BigEndianDecoder;
 use crate::color::TextColor;
@@ -18,7 +18,7 @@ use crate::elements::element::NbtElement;
 use crate::encoder::UncheckedBufWriter;
 use crate::formatter::PrettyFormatter;
 use crate::le_decoder::LittleEndianDecoder;
-use crate::marked_line::{MarkedLine, MarkedLineSlice};
+use crate::marked_line::MarkedLineSlice;
 
 #[allow(clippy::module_name_repetitions)]
 #[repr(C)]
@@ -162,16 +162,12 @@ impl NbtCompound {
 
 	#[inline]
 	pub fn insert(&mut self, idx: usize, mut str: CompactString, value: NbtElement) {
-		loop {
-			if self.entries.has(&str) {
-				str += " - Copy";
-			} else {
-				self.height += value.height() as u32;
-				self.true_height += value.true_height() as u32;
-				self.entries.insert_at(str, value, idx);
-				return;
-			}
+		while self.entries.has(&str) {
+			str += " - Copy";
 		}
+		self.height += value.height() as u32;
+		self.true_height += value.true_height() as u32;
+		self.entries.insert_at(str, value, idx);
 	}
 
 	#[inline] // has some unchecked stuff
@@ -464,7 +460,7 @@ impl NbtCompound {
 			}
 
 			ctx.line_number();
-			Self::render_icon(ctx.pos(), BASE_Z, builder);
+			self.render_icon(ctx.pos(), BASE_Z, builder);
 			if !self.is_empty() {
 				ctx.draw_toggle(ctx.pos() - (16, 0), self.open, builder);
 			}
@@ -585,7 +581,8 @@ impl NbtCompound {
 
 	#[inline]
 	pub fn drop(&mut self, mut key: Option<CompactString>, mut element: NbtElement, y: &mut usize, depth: usize, target_depth: usize, mut line_number: usize, indices: &mut Vec<usize>) -> DropFn {
-		if *y < 16 && *y >= 8 && depth == target_depth {
+		let can_insert = self.can_insert(&element);
+		if *y < 16 && *y >= 8 && depth == target_depth && can_insert {
 			let before = (self.height(), self.true_height());
 			self.open = true;
 			self.insert(0, key.unwrap_or(CompactString::const_new("_")), element);
@@ -593,20 +590,18 @@ impl NbtCompound {
 			return DropFn::Dropped(
 				self.height as usize - before.0,
 				self.true_height as usize - before.1,
-				unsafe {
-					Some(
-						self.get(0)
-							.panic_unchecked("We just added it")
-							.0
-							.to_compact_string(),
-					)
-				},
+				Some(
+					self.get(0)
+						.expect("We just added it")
+						.0
+						.to_compact_string(),
+				),
 				line_number + 1,
 				None,
 			);
 		}
 
-		if self.height() == 1 && *y < 24 && *y >= 16 && depth == target_depth {
+		if self.height() == 1 && *y < 24 && *y >= 16 && depth == target_depth && can_insert {
 			let before = self.true_height();
 			self.open = true;
 			indices.push(self.len());
@@ -618,14 +613,12 @@ impl NbtCompound {
 			return DropFn::Dropped(
 				self.height as usize - 1,
 				self.true_height as usize - before,
-				unsafe {
-					Some(
-						self.get(self.len() - 1)
-							.panic_unchecked("We just added it")
-							.0
-							.to_compact_string(),
-					)
-				},
+				Some(
+					self.get(self.len() - 1)
+						.expect("We just added it")
+						.0
+						.to_compact_string(),
+				),
 				line_number + before + 1,
 				None,
 			);
@@ -643,24 +636,22 @@ impl NbtCompound {
 			for (idx, (_, value)) in self.children_mut().enumerate() {
 				*ptr = idx;
 				let heights = (element.height(), element.true_height());
-				if *y < 8 && depth == target_depth {
+				if *y < 8 && depth == target_depth && can_insert {
 					*y = 0;
 					self.insert(idx, key.unwrap_or(CompactString::const_new("_")), element);
 					return DropFn::Dropped(
 						heights.0,
 						heights.1,
-						unsafe {
-							Some(
-								self.get(idx)
-									.panic_unchecked("We just added it")
-									.0
-									.to_compact_string(),
-							)
-						},
+						Some(
+							self.get(idx)
+								.expect("We just added it")
+								.0
+								.to_compact_string(),
+						),
 						line_number + 1,
 						None,
 					);
-				} else if *y >= value.height() * 16 - 8 && *y < value.height() * 16 && depth == target_depth {
+				} else if *y >= value.height() * 16 - 8 && *y < value.height() * 16 && depth == target_depth && can_insert {
 					*y = 0;
 					*ptr = idx + 1;
 					line_number += value.true_height();
@@ -672,14 +663,12 @@ impl NbtCompound {
 					return DropFn::Dropped(
 						heights.0,
 						heights.1,
-						unsafe {
-							Some(
-								self.get(idx + 1)
-									.panic_unchecked("We just added it")
-									.0
-									.to_compact_string(),
-							)
-						},
+						Some(
+							self.get(idx + 1)
+								.expect("We just added it")
+								.0
+								.to_compact_string(),
+						),
 						line_number + 1,
 						None,
 					);
@@ -742,7 +731,7 @@ impl NbtCompound {
 	}
 
 	#[inline]
-	pub fn render_icon(pos: impl Into<(usize, usize)>, z: ZOffset, builder: &mut VertexBufferBuilder) { builder.draw_texture_z(pos, z, COMPOUND_UV, (16, 16)); }
+	pub fn render_icon(&self, pos: impl Into<(usize, usize)>, z: ZOffset, builder: &mut VertexBufferBuilder) { builder.draw_texture_z(pos, z, COMPOUND_UV, (16, 16)); }
 }
 
 // Based on indexmap, but they didn't let me clone with unchecked mem stuff
@@ -988,22 +977,21 @@ impl CompoundMap {
 			let mut current_line_number = line_number + 1;
 			self.entries.iter().map(|entry| { let new_line_number = current_line_number; current_line_number += entry.value.height(); new_line_number }).collect::<Vec<_>>()
 		};
-		let mut new_bookmarks = Box::<[MarkedLine]>::new_uninit_slice(bookmarks[true_line_number..true_line_number + true_height].len());
-		let mut new_bookmarks_len = 0;
+		let mut new_bookmarks = Vec::with_capacity(bookmarks[true_line_number..true_line_number + true_height].len());
 		// yeah, it's hacky... but there's not much else I *can* do. plus: it works extremely well.
 		for (idx, entry) in self.entries.iter_mut().enumerate() {
 			entry.additional = idx;
 		}
 		self.entries.sort_by(|a, b| f((&a.key, &a.value), (&b.key, &b.value)));
 		let indices = self.entries.iter().map(|entry| entry.additional).collect::<Vec<_>>();
-		let mut inverted_indices = Box::<[usize]>::new_uninit_slice(self.len());
+		let mut inverted_indices = vec![0; indices.len()];
 		let mut current_true_line_number = true_line_number + 1;
 		let mut current_line_number = line_number + 1;
 		for (new_idx, &idx) in indices.iter().enumerate() {
 			// SAFETY: these indices are valid since the length did not change and since the values written were indexes
 			unsafe {
 				let entry = self.entries.get_unchecked_mut(new_idx);
-				*self.indices.find(hash!(entry.key), |&target_idx| target_idx == idx).panic_unchecked("index obviously exists").as_mut() = new_idx;
+				*self.indices.find(hash!(entry.key), |&target_idx| target_idx == idx).expect("index obviously exists").as_mut() = new_idx;
 
 				let true_line_number = *true_line_numbers.get_unchecked(idx);
 				let line_number = *line_numbers.get_unchecked(idx);
@@ -1012,17 +1000,16 @@ impl CompoundMap {
 				let true_offset = current_true_line_number as isize - true_line_number as isize;
 				let offset = if open { current_line_number as isize - line_number as isize } else { 0 };
 				for bookmark in bookmarks[true_line_number..true_line_number + true_height].iter() {
-					new_bookmarks[new_bookmarks_len].write(bookmark.offset(offset as usize, true_offset as usize));
-					new_bookmarks_len += 1;
+					new_bookmarks.push(bookmark.offset(offset as usize, true_offset as usize));
 				}
 				current_true_line_number += true_height;
 				current_line_number += height;
-				inverted_indices[idx].write(new_idx);
+				inverted_indices[idx] = new_idx;
 			}
 		}
 		let bookmark_slice = &mut bookmarks[true_line_number..true_line_number + true_height];
-		unsafe { core::ptr::copy_nonoverlapping(new_bookmarks.as_ptr().cast::<MarkedLine>(), bookmark_slice.as_mut_ptr(), bookmark_slice.len()); }
-		unsafe { inverted_indices.assume_init() }
+		bookmark_slice.copy_from_slice(&new_bookmarks);
+		inverted_indices.into_boxed_slice()
 	}
 
 	#[inline]

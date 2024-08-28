@@ -2,7 +2,7 @@ use std::iter::Peekable;
 
 use compact_str::{CompactString, ToCompactString};
 
-use crate::{OptionExt, panic_unchecked, Position};
+use crate::Position;
 use crate::elements::element::{NbtByteArray, NbtElement, NbtIntArray, NbtLongArray, NbtPatternMut};
 
 /// Navigates a tree from the given route of an indices list, will cause UB on invalid lists. Typically used for operations which are saved and not direct clicking interaction.
@@ -114,11 +114,9 @@ impl<'a, I: Iterator<Item = usize> + ExactSizeIterator> Navigate<'a, I> {
 			self.step();
 		}
 
-		unsafe {
-			self.node
-				.map(|(a, b, c)| (a, b, c, self.line_number))
-				.panic_unchecked("List cannot be empty")
-		}
+		self.node
+			.map(|(a, b, c)| (a, b, c, self.line_number))
+			.expect("List cannot be empty")
 	}
 }
 
@@ -126,20 +124,22 @@ impl<'a, I: Iterator<Item = usize> + ExactSizeIterator> Navigate<'a, I> {
 #[must_use]
 pub struct Traverse<'a> {
 	node: Option<(usize, Option<CompactString>, &'a mut NbtElement)>,
+	x: usize,
 	y: usize,
-	cut: bool,
-	head: bool,
+	killed: bool,
 	line_number: usize,
+	depth: usize,
 }
 
 impl<'a> Traverse<'a> {
-	pub fn new(y: usize, root: &'a mut NbtElement) -> Self {
+	pub fn new(x: usize, y: usize, root: &'a mut NbtElement) -> Self {
 		Self {
-			cut: y >= root.height() || y == 0,
+			killed: y >= root.height() || y == 0,
 			node: Some((0, None, root)),
+			x,
 			y,
-			head: true,
 			line_number: 1,
+			depth: 0,
 		}
 	}
 
@@ -150,16 +150,39 @@ impl<'a> Traverse<'a> {
 			match node.as_pattern_mut() {
 				NbtPatternMut::Region(region) => {
 					self.y -= 1;
-					for (idx, value) in region.children_mut().enumerate() {
-						let height = value.height();
-						if self.y >= height {
-							self.line_number += value.true_height();
-							self.y -= height;
-							continue;
-						} else {
-							self.cut = self.y == 0;
-							self.line_number += 1;
-							break 'm (idx, None, value);
+					if region.is_grid_layout() {
+						if self.x < 2 {
+							self.killed = true;
+							self.node = None;
+							return None;
+						}
+						self.x -= 2;
+						if self.x >= 32 {
+							self.killed = true;
+							self.node = None;
+							return None;
+						}
+						let idx = self.y * 32 + self.x;
+						for chunk in region.children().take(idx) {
+							self.line_number += chunk.true_height();
+						}
+						self.line_number += 1;
+						self.y = 0;
+						self.depth += self.x;
+						self.killed = true;
+						break 'm (idx, None, &mut region.chunks[idx]);
+					} else {
+						for (idx, value) in region.children_mut().enumerate() {
+							let height = value.height();
+							if self.y >= height {
+								self.line_number += value.true_height();
+								self.y -= height;
+								continue;
+							} else {
+								self.killed = self.y == 0;
+								self.line_number += 1;
+								break 'm (idx, None, value);
+							}
 						}
 					}
 				}
@@ -172,7 +195,7 @@ impl<'a> Traverse<'a> {
 							self.y -= height;
 							continue;
 						} else {
-							self.cut = self.y == 0;
+							self.killed = self.y == 0;
 							self.line_number += 1;
 							break 'm (idx, Some(key.to_compact_string()), value);
 						}
@@ -187,7 +210,7 @@ impl<'a> Traverse<'a> {
 							self.y -= height;
 							continue;
 						} else {
-							self.cut = self.y == 0;
+							self.killed = self.y == 0;
 							self.line_number += 1;
 							break 'm (idx, Some(key.to_compact_string()), value);
 						}
@@ -202,33 +225,36 @@ impl<'a> Traverse<'a> {
 							self.y -= height;
 							continue;
 						} else {
-							self.cut = self.y == 0;
+							self.killed = self.y == 0;
 							self.line_number += 1;
 							break 'm (idx, None, value);
 						}
 					}
 				}
 				NbtPatternMut::ByteArray(array) => {
-					self.cut = true;
+					self.killed = true;
 					let idx = core::mem::replace(&mut self.y, 0) - 1;
 					self.line_number += idx + 1;
 					break 'm (idx, None, array.get_mut(idx)?);
 				}
 				NbtPatternMut::IntArray(array) => {
-					self.cut = true;
+					self.killed = true;
 					let idx = core::mem::replace(&mut self.y, 0) - 1;
 					self.line_number += idx + 1;
 					break 'm (idx, None, array.get_mut(idx)?);
 				}
 				NbtPatternMut::LongArray(array) => {
-					self.cut = true;
+					self.killed = true;
 					let idx = core::mem::replace(&mut self.y, 0) - 1;
 					self.line_number += idx + 1;
 					break 'm (idx, None, array.get_mut(idx)?);
 				}
 				_ => return None,
 			}
-			unsafe { panic_unchecked("could not find value in any (skipped everything somehow)") }
+
+			self.killed = true;
+			self.node = None;
+			return None;
 		};
 
 		self.node = Some((idx, key, new));
@@ -237,47 +263,13 @@ impl<'a> Traverse<'a> {
 	}
 
 	#[must_use]
-	pub fn last(mut self) -> Option<(usize, Option<CompactString>, &'a mut NbtElement, usize)> {
-		if self.cut && !self.head { return None }
+	#[allow(clippy::type_complexity)] // literally can't otherwise the compiler crashes... yeah...
+	pub fn last(mut self) -> Option<(usize, (usize, Option<CompactString>, &'a mut NbtElement, usize),)> {
 		while self.y > 0 {
+			self.depth += 1;
 			self.step();
 		}
-		self.node.map(|(a, b, c)| (a, b, c, self.line_number))
-	}
-
-	pub const fn enumerate(self) -> EnumeratedTraverse<'a> {
-		EnumeratedTraverse {
-			inner: self,
-			depth: 0,
-		}
-	}
-}
-
-#[must_use]
-pub struct EnumeratedTraverse<'a> {
-	inner: Traverse<'a>,
-	depth: usize,
-}
-
-impl<'a> EnumeratedTraverse<'a> {
-	#[must_use]
-	#[allow(clippy::type_complexity)] // literally can't otherwise the compiler crashes... yeah...
-	pub fn last(
-		mut self,
-	) -> (
-		usize,
-		(usize, Option<CompactString>, &'a mut NbtElement, usize),
-	) {
-		while self.inner.y > 0 {
-			self.depth += 1;
-			self.inner.step();
-		}
-		unsafe {
-			self.inner
-				.node
-				.map(|(a, b, c)| (self.depth, (a, b, c, self.inner.line_number)))
-				.panic_unchecked("head is always initialized")
-		}
+		self.node.map(|(a, b, c)| (self.depth, (a, b, c, self.line_number)))
 	}
 }
 
@@ -286,17 +278,19 @@ impl<'a> EnumeratedTraverse<'a> {
 #[must_use]
 pub struct TraverseParents<'a> {
 	node: Option<&'a mut NbtElement>,
+	x: usize,
 	y: usize,
-	cut: bool,
+	killed: bool,
 	head: bool,
 	line_number: usize,
 }
 
 impl<'a> TraverseParents<'a> {
-	pub fn new(y: usize, root: &'a mut NbtElement) -> Self {
+	pub fn new(x: usize, y: usize, root: &'a mut NbtElement) -> Self {
 		Self {
-			cut: y >= root.height() || y == 0,
+			killed: y >= root.height() || y == 0,
 			node: Some(root),
+			x,
 			y,
 			head: true,
 			line_number: 1,
@@ -309,15 +303,19 @@ impl<'a> TraverseParents<'a> {
 			match node.as_pattern_mut() {
 				NbtPatternMut::Region(region) => {
 					self.y -= 1;
-					for value in region.children_mut() {
-						let height = value.height();
-						if self.y >= height {
-							self.y -= height;
-							self.line_number += value.true_height();
-							continue;
-						} else {
-							self.line_number += 1;
-							break 'm value;
+					if region.is_grid_layout() {
+						return None;
+					} else {
+						for value in region.children_mut() {
+							let height = value.height();
+							if self.y >= height {
+								self.y -= height;
+								self.line_number += value.true_height();
+								continue;
+							} else {
+								self.line_number += 1;
+								break 'm value;
+							}
 						}
 					}
 				}
@@ -377,26 +375,40 @@ impl<'a> TraverseParents<'a> {
 				}
 				_ => return None,
 			}
-			unsafe { panic_unchecked("Skipped everything in TraverseParents (somehow)") }
+			self.killed = true;
+			self.node = None;
+			return None
 		});
 
 		Some(())
 	}
 
-	fn extras(&self) -> (usize, Option<CompactString>, bool) {
-		let node = unsafe {
-			self.node
-				.as_ref()
-				.panic_unchecked("Expected a value for parent element")
-		};
+	fn extras(&mut self) -> (usize, Option<CompactString>, bool) {
+		let Some(node) = self.node.as_ref() else { self.killed = true; return (0, None, true) };
 		if let Some(region) = node.as_region() {
-			let mut remaining_y = self.y - 1;
-			for (idx, element) in region.children().enumerate() {
-				if remaining_y >= element.height() {
-					remaining_y -= element.height();
-					continue;
-				} else {
-					return (idx, None, remaining_y == 0);
+			if region.is_grid_layout() {
+				self.y -= 1;
+				if self.x < 2 {
+					self.killed = true;
+					return (0, None, true)
+				}
+				self.x -= 2;
+				if self.x >= 32 {
+					self.killed = true;
+					return (0, None, true)
+				}
+				let idx = self.y * 32 + self.x;
+				self.y = 0;
+				return (idx, None, true)
+			} else {
+				let mut remaining_y = self.y - 1;
+				for (idx, element) in region.children().enumerate() {
+					if remaining_y >= element.height() {
+						remaining_y -= element.height();
+						continue;
+					} else {
+						return (idx, None, remaining_y == 0);
+					}
 				}
 			}
 		} else if let Some(list) = node.as_list() {
@@ -432,7 +444,7 @@ impl<'a> TraverseParents<'a> {
 		} else if let NbtByteArray::ID | NbtIntArray::ID | NbtLongArray::ID = node.id() {
 			return (self.y - 1, None, true);
 		}
-		unsafe { panic_unchecked("Expected parent element to be complex") }
+		panic!("Expected parent element to be complex")
 	}
 
 	#[allow(clippy::should_implement_trait)] // no
@@ -445,7 +457,7 @@ impl<'a> TraverseParents<'a> {
 		&mut NbtElement,
 		usize,
 	)> {
-		if self.cut { return None }
+		if self.killed { return None }
 
 		let head = core::mem::replace(&mut self.head, false);
 
@@ -454,8 +466,9 @@ impl<'a> TraverseParents<'a> {
 		}
 
 		let (idx, key, is_last) = self.extras();
-		self.cut = is_last;
-		let position = match (head, self.cut) {
+		if self.killed { return None }
+		self.killed = is_last;
+		let position = match (head, self.killed) {
 			(true, false) => Position::First,
 			(false, false) => Position::Middle,
 			(false, true) => Position::Last,

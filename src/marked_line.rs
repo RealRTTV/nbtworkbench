@@ -153,6 +153,7 @@ impl MarkedLines {
 }
 
 #[repr(transparent)]
+#[derive(Debug)]
 pub struct MarkedLineSlice([MarkedLine]);
 
 impl MarkedLineSlice {

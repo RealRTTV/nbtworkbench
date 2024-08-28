@@ -1,6 +1,8 @@
+use std::cell::SyncUnsafeCell;
 use std::ffi::OsStr;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
@@ -9,7 +11,7 @@ use flate2::Compression;
 use uuid::Uuid;
 use zune_inflate::DeflateDecoder;
 
-use crate::{LinkedQueue, OptionExt, panic_unchecked, RenderContext, since_epoch, StrExt, TAB_CLOSE_DOUBLE_CLICK_INTERVAL, TEXT_DOUBLE_CLICK_INTERVAL, WindowProperties};
+use crate::{LinkedQueue, RenderContext, since_epoch, StrExt, TAB_CLOSE_DOUBLE_CLICK_INTERVAL, TEXT_DOUBLE_CLICK_INTERVAL, WindowProperties, OptionExt, HeldEntry};
 use crate::assets::{BASE_Z, BYTE_ARRAY_GHOST_UV, BYTE_ARRAY_UV, BYTE_GRAYSCALE_UV, BYTE_UV, CHUNK_GHOST_UV, CHUNK_UV, COMPOUND_GHOST_UV, COMPOUND_ROOT_UV, COMPOUND_UV, DIM_LIGHTBULB_UV, DISABLED_REFRESH_UV, DOUBLE_GRAYSCALE_UV, DOUBLE_UV, ENABLED_FREEHAND_MODE_UV, FLOAT_GRAYSCALE_UV, FLOAT_UV, FREEHAND_MODE_UV, GZIP_FILE_TYPE_UV, HEADER_SIZE, HELD_SCROLLBAR_UV, HOVERED_WIDGET_UV, INT_ARRAY_GHOST_UV, INT_ARRAY_UV, INT_GRAYSCALE_UV, INT_UV, JUST_OVERLAPPING_BASE_Z, LIGHTBULB_UV, LINE_NUMBER_SEPARATOR_UV, LIST_GHOST_UV, LIST_UV, LITTLE_ENDIAN_HEADER_NBT_FILE_TYPE_UV, LITTLE_ENDIAN_NBT_FILE_TYPE_UV, LONG_ARRAY_GHOST_UV, LONG_ARRAY_UV, LONG_GRAYSCALE_UV, LONG_UV, MCA_FILE_TYPE_UV, NBT_FILE_TYPE_UV, REFRESH_UV, REGION_UV, SCROLLBAR_Z, SHORT_GRAYSCALE_UV, SHORT_UV, SNBT_FILE_TYPE_UV, STEAL_ANIMATION_OVERLAY_UV, STRING_GHOST_UV, STRING_UV, UNHELD_SCROLLBAR_UV, UNKNOWN_NBT_GHOST_UV, UNKNOWN_NBT_UV, UNSELECTED_WIDGET_UV, ZLIB_FILE_TYPE_UV, ZOffset};
 use crate::color::TextColor;
 use crate::elements::chunk::NbtRegion;
@@ -42,7 +44,10 @@ pub struct Tab {
 	pub last_close_attempt: Duration,
 	pub last_selected_text_interaction: (usize, usize, Duration),
 	pub last_interaction: Duration,
-	pub last_double_click_expand: (Vec2u, Duration),
+	pub last_double_click_interaction: (usize, Duration),
+	pub held_entry: HeldEntry,
+	// this took me two days
+	pub from_indices_arc: Option<Arc<SyncUnsafeCell<Box<[usize]>>>>,
 }
 
 impl Tab {
@@ -79,7 +84,9 @@ impl Tab {
 			last_close_attempt: Duration::ZERO,
 			last_selected_text_interaction: (0, 0, Duration::ZERO),
 			last_interaction: since_epoch(),
-			last_double_click_expand: (Vec2u::new(0, 0), Duration::ZERO),
+			last_double_click_interaction: (0, Duration::ZERO),
+			held_entry: HeldEntry::Empty,
+			from_indices_arc: None,
 		})
 	}
 
@@ -119,13 +126,13 @@ impl Tab {
 	}
 
 	#[allow(clippy::too_many_lines)]
-	pub fn render(&self, builder: &mut VertexBufferBuilder, ctx: &mut RenderContext, held: bool, held_entry: Option<&NbtElement>, skip_tooltips: bool, steal_delta: f32) {
+	pub fn render(&self, builder: &mut VertexBufferBuilder, ctx: &mut RenderContext, held: bool, skip_tooltips: bool, steal_delta: f32) {
 		let mouse_x = ctx.mouse_x;
 		let mouse_y = ctx.mouse_y;
 
 		let horizontal_scroll_before = core::mem::replace(
 			&mut builder.horizontal_scroll,
-			self.horizontal_scroll(held_entry),
+			self.horizontal_scroll(),
 		);
 		if let Some(compound) = self.value.as_compound() {
 			compound.render_root(builder, &self.name, ctx);
@@ -135,7 +142,11 @@ impl Tab {
 			list.render_root(builder, &self.name, ctx);
 		}
 		builder.color = TextColor::White.to_raw();
-		ctx.render_line_numbers(builder, &self.bookmarks);
+		if self.value.as_region().is_some_and(|region| region.is_grid_layout()) {
+			ctx.render_grid_line_numbers(builder, &self.bookmarks);
+		} else {
+			ctx.render_line_numbers(builder, &self.bookmarks);
+		}
 		ctx.render_key_value_errors(builder);
 		builder.horizontal_scroll = horizontal_scroll_before;
 
@@ -177,7 +188,9 @@ impl Tab {
 			}
 		}
 
-		ctx.render_scrollbar_bookmarks(builder, &self.bookmarks, &self.value);
+		if self.value.as_region().is_none_or(|region| !region.is_grid_layout()) {
+			ctx.render_scrollbar_bookmarks(builder, &self.bookmarks, &self.value);
+		}
 
 		{
 			// shifted one left to center between clipboard and freehand
@@ -258,7 +271,7 @@ impl Tab {
 			.enumerate()
 			{
 				let uv = if mx == Some(idx * 16) && !skip_tooltips {
-					builder.draw_tooltip(&[name], (mouse_x, mouse_y), false);
+					builder.draw_tooltip(&[name], (idx * 16 + 16 + 16 + 4, 26 + 16), false);
 					selected
 				} else {
 					unselected
@@ -269,7 +282,7 @@ impl Tab {
 
 			{
 				let uv = if mx == Some(192) && self.value.id() == NbtRegion::ID && !skip_tooltips {
-					builder.draw_tooltip(&["Chunk (`)"], (mouse_x, mouse_y), false);
+					builder.draw_tooltip(&["Chunk (`)"], (192, 26 + 16), false);
 					CHUNK_UV
 				} else {
 					CHUNK_GHOST_UV
@@ -279,7 +292,7 @@ impl Tab {
 
 			{
 				let uv = if mx == Some(208) && !skip_tooltips {
-					builder.draw_tooltip(&["Clipboard (V)"], (mouse_x, mouse_y), false);
+					builder.draw_tooltip(&["Clipboard (V)"], (208, 26 + 16), false);
 					UNKNOWN_NBT_UV
 				} else {
 					UNKNOWN_NBT_GHOST_UV
@@ -306,20 +319,19 @@ impl Tab {
 		}
 	}
 
-	pub fn set_selected_text(&mut self, line_number: Option<usize>, selected_text: Option<SelectedText>) {
+	pub fn set_selected_text(&mut self, y: Option<usize>, selected_text: Option<SelectedText>) {
 		self.selected_text = selected_text;
 		let now = since_epoch();
-		if let Some(selected_text) = self.selected_text.as_mut() && let Some(line_number) = line_number {
-			let (old_y, times_clicked, timestamp) = core::mem::replace(&mut self.last_selected_text_interaction, (line_number, 0, now));
-			if now - timestamp < TEXT_DOUBLE_CLICK_INTERVAL && old_y == line_number && !selected_text.value.is_empty() {
-				self.last_selected_text_interaction = (line_number, times_clicked + 1, now);
+		if let Some(selected_text) = self.selected_text.as_mut() && let Some(y) = y {
+			let (old_y, times_clicked, timestamp) = core::mem::replace(&mut self.last_selected_text_interaction, (y, 0, now));
+			if now - timestamp < TEXT_DOUBLE_CLICK_INTERVAL && old_y == y && !selected_text.value.is_empty() {
+				self.last_selected_text_interaction = (y, times_clicked + 1, now);
 				// the previous click count was divisible by 1
 				let (left, right) = if times_clicked % 2 == 1 {
 					(0, selected_text.value.len())
 				} else {
 					(get_cursor_left_jump_idx(selected_text.cursor, selected_text.value.as_bytes()), get_cursor_right_jump_idx(selected_text.cursor, selected_text.value.as_bytes()))
 				};
-				// if they're == it's also false, just being careful here
 				if right > left {
 					selected_text.selection = Some(left);
 				}
@@ -333,7 +345,6 @@ impl Tab {
 	pub fn append_to_history(&mut self, action: WorkbenchAction) {
 		self.undos.push(action);
 		self.redos.clear();
-		self.unsaved_changes = true;
 	}
 
 	#[must_use]
@@ -345,8 +356,8 @@ impl Tab {
 	}
 
 	#[must_use]
-	pub fn horizontal_scroll(&self, held: Option<&NbtElement>) -> usize {
-		let left_margin = self.left_margin(held);
+	pub fn horizontal_scroll(&self) -> usize {
+		let left_margin = self.left_margin();
 		let selected_text_width = if let Some(selected_text) = &self.selected_text {
 			selected_text.indices.len() * 16 + 32 + 4 + selected_text.width()
 		} else {
@@ -364,7 +375,7 @@ impl Tab {
 	}
 
 	#[must_use]
-	pub fn left_margin(&self, held: Option<&NbtElement>) -> usize { ((self.value.true_height() + held.map_or(0, NbtElement::true_height)).ilog10() as usize + 1) * 8 + 4 + 8 }
+	pub fn left_margin(&self) -> usize { ((self.value.true_height() + self.held_entry.element().map_or(0, NbtElement::true_height)).ilog10() as usize + 1) * 8 + 4 + 8 }
 
 	#[inline]
 	pub fn set_scroll(&mut self, scroll: f32) {
@@ -384,7 +395,7 @@ impl Tab {
 	}
 
 	#[inline]
-	pub fn set_horizontal_scroll(&mut self, scroll: f32, held: Option<&NbtElement>) {
+	pub fn set_horizontal_scroll(&mut self, scroll: f32,) {
 		#[cfg(target_os = "macos")]
 		const SCROLL_MULTIPLIER: f32 = 4.0;
 		#[cfg(not(target_os = "macos"))]
@@ -397,106 +408,104 @@ impl Tab {
 		} else {
 			self.horizontal_scroll += (scroll * SCROLL_MULTIPLIER) as usize;
 		}
-		self.horizontal_scroll = self.horizontal_scroll(held);
+		self.horizontal_scroll = self.horizontal_scroll();
 	}
 
 	#[inline]
 	#[must_use]
 	#[allow(clippy::too_many_lines)]
 	pub fn close_selected_text(&mut self, on_invalid_format: bool, window_properties: &mut WindowProperties) -> bool {
-		unsafe {
-			if let Some(SelectedText(Text { value, editable: true, additional: SelectedTextAdditional { indices, prefix, suffix, .. }, .. })) = self.selected_text.clone() {
-				if let Some((&last, rem)) = indices.split_last() {
-					let value = CompactString::from(value);
-					let key = prefix.0.is_empty() && !suffix.0.is_empty();
-					let (key, value) = {
-						let element = Navigate::new(rem.iter().copied(), &mut self.value).last().2;
-						if key {
-							if let Some(compound) = element.as_compound_mut() {
-								let idx = compound.entries.idx_of(&value);
-								if let Some(idx) = idx {
-									return if idx == last {
-										self.selected_text = None;
-										true
-									} else {
-										on_invalid_format
-									};
-								}
-								(
-									Some(compound.entries.update_key(last, value.clone()).unwrap_or(value)),
-									None,
-								)
-							} else if let Some(chunk) = element.as_chunk_mut() {
-								let idx = chunk.entries.idx_of(&value);
-								if let Some(idx) = idx {
-									return if idx == last {
-										self.selected_text = None;
-										true
-									} else {
-										on_invalid_format
-									};
-								}
-								(
-									Some(chunk.entries.update_key(last, value.clone()).unwrap_or(value)),
-									None,
-								)
-							} else {
-								panic_unchecked("Expected key-value indices chain tail to be of type compound")
+		if let Some(SelectedText(Text { value, editable: true, additional: SelectedTextAdditional { indices, prefix, suffix, .. }, .. })) = self.selected_text.clone() {
+			if let Some((&last, rem)) = indices.split_last() {
+				let value = CompactString::from(value);
+				let key = prefix.0.is_empty() && !suffix.0.is_empty();
+				let (key, value) = {
+					let element = Navigate::new(rem.iter().copied(), &mut self.value).last().2;
+					if key {
+						if let Some(compound) = element.as_compound_mut() {
+							let idx = compound.entries.idx_of(&value);
+							if let Some(idx) = idx {
+								return if idx == last {
+									self.selected_text = None;
+									true
+								} else {
+									on_invalid_format
+								};
 							}
+							(
+								Some(compound.entries.update_key(last, value.clone()).unwrap_or(value)),
+								None,
+							)
+						} else if let Some(chunk) = element.as_chunk_mut() {
+							let idx = chunk.entries.idx_of(&value);
+							if let Some(idx) = idx {
+								return if idx == last {
+									self.selected_text = None;
+									true
+								} else {
+									on_invalid_format
+								};
+							}
+							(
+								Some(chunk.entries.update_key(last, value.clone()).unwrap_or(value)),
+								None,
+							)
 						} else {
-							// no drops dw, well except for the value, but that's a simple thing dw
-							let child = element
-								.get_mut(last)
-								.panic_unchecked("Last index was valid");
-							let (previous, success) = child
-								.set_value(value)
-								.panic_unchecked("Type of indices tail can accept value writes");
-							if !success { return on_invalid_format }
-							if previous == child.value().0 {
-								self.selected_text = None;
-								return true
-							}
-							(None, Some(previous))
+							panic!("Expected key-value indices chain tail to be of type compound")
 						}
-					};
-
-					self.append_to_history(WorkbenchAction::Rename {
-						indices,
-						key,
-						value,
-					});
-					self.selected_text = None;
-				} else {
-					if self.path.as_ref().map(|path| path.as_os_str().to_string_lossy()).as_deref().unwrap_or(&self.name) == value {
-						return true;
-					}
-					let buf = PathBuf::from(value);
-					return if let Some(name) = buf
-						.file_name()
-						.and_then(OsStr::to_str)
-						.map(ToOwned::to_owned)
-					{
-						window_properties.window_title(&format!("{name} - NBT Workbench"));
-						let old_name = core::mem::replace(&mut self.name, name.into_boxed_str());
-						let action = WorkbenchAction::Rename {
-							indices: Box::new([]),
-							key: None,
-							value: Some(
-								self.path
-									.replace(buf)
-									.as_deref()
-									.and_then(|path| path.to_str())
-									.map(|str| str.to_compact_string())
-									.unwrap_or_else(|| old_name.to_compact_string()),
-							),
-						};
-						self.append_to_history(action);
-						self.selected_text = None;
-						true
 					} else {
-						false
-					};
+						// no drops dw, well except for the value, but that's a simple thing dw
+						let child = element
+							.get_mut(last)
+							.expect("Last index was valid");
+						let (previous, success) = child
+							.set_value(value)
+							.expect("Type of indices tail can accept value writes");
+						if !success { return on_invalid_format }
+						if previous == child.value().0 {
+							self.selected_text = None;
+							return true
+						}
+						(None, Some(previous))
+					}
+				};
+
+				self.append_to_history(WorkbenchAction::Rename {
+					indices,
+					key,
+					value,
+				});
+				self.selected_text = None;
+			} else {
+				if self.path.as_ref().map(|path| path.as_os_str().to_string_lossy()).as_deref().unwrap_or(&self.name) == value {
+					return true;
 				}
+				let buf = PathBuf::from(value);
+				return if let Some(name) = buf
+					.file_name()
+					.and_then(OsStr::to_str)
+					.map(ToOwned::to_owned)
+				{
+					window_properties.window_title(&format!("{name} - NBT Workbench"));
+					let old_name = core::mem::replace(&mut self.name, name.into_boxed_str());
+					let action = WorkbenchAction::Rename {
+						indices: Box::new([]),
+						key: None,
+						value: Some(
+							self.path
+								.replace(buf)
+								.as_deref()
+								.and_then(|path| path.to_str())
+								.map(|str| str.to_compact_string())
+								.unwrap_or_else(|| old_name.to_compact_string()),
+						),
+					};
+					self.append_to_history(action);
+					self.selected_text = None;
+					true
+				} else {
+					false
+				};
 			}
 		}
 		true

@@ -23,7 +23,7 @@ impl NbtNull {
     #[inline]
     pub fn render(&self, builder: &mut VertexBufferBuilder, name: Option<&str>, ctx: &mut RenderContext) {
         ctx.line_number();
-        Self::render_icon(ctx.pos(), BASE_Z, builder);
+        self.render_icon(ctx.pos(), BASE_Z, builder);
         ctx.render_errors(ctx.pos(), builder);
         if ctx.forbid(ctx.pos()) {
             builder.settings(ctx.pos() + (20, 0), false, JUST_OVERLAPPING_BASE_TEXT_Z);
@@ -40,7 +40,7 @@ impl NbtNull {
     }
 
     #[inline]
-    pub fn render_icon(pos: impl Into<(usize, usize)>, z: ZOffset, builder: &mut VertexBufferBuilder) { builder.draw_texture_z(pos, z, (240, 240), (16, 16)); }
+    pub fn render_icon(&self, pos: impl Into<(usize, usize)>, z: ZOffset, builder: &mut VertexBufferBuilder) { builder.draw_texture_z(pos, z, (240, 240), (16, 16)); }
 }
 
 impl Display for NbtNull {

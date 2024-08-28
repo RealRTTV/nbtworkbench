@@ -115,6 +115,7 @@ pub const COMPOUND_UV: Vec2u = Vec2u::new(48, 32);
 pub const INT_ARRAY_UV: Vec2u = Vec2u::new(112, 0);
 pub const LONG_ARRAY_UV: Vec2u = Vec2u::new(0, 32);
 pub const REGION_UV: Vec2u = Vec2u::new(96, 32);
+pub const REGION_GRID_UV: Vec2u = Vec2u::new(96, 48);
 pub const CHUNK_UV: Vec2u = Vec2u::new(64, 32);
 
 pub const BYTE_GRAYSCALE_UV: Vec2u = Vec2u::new(0, 16);
@@ -132,6 +133,8 @@ pub const LONG_ARRAY_GHOST_UV: Vec2u = Vec2u::new(0, 48);
 pub const CHUNK_GHOST_UV: Vec2u = Vec2u::new(64, 48);
 pub const ALERT_UV: Vec2u = Vec2u::new(112, 144);
 pub const NOTIFICATION_UV: Vec2u = Vec2u::new(112, 184);
+pub const NOTIFICATION_BAR_UV: Vec2u = Vec2u::new(112, 204);
+pub const NOTIFICATION_BAR_BACKDROP_UV: Vec2u = Vec2u::new(112, 205);
 pub const BACKDROP_UV: Vec2u = Vec2u::new(16, 160);
 pub const ADD_SEARCH_BOOKMARKS_UV: Vec2u = Vec2u::new(48, 160);
 pub const REMOVE_SEARCH_BOOKMARKS_UV: Vec2u = Vec2u::new(64, 160);
@@ -141,7 +144,7 @@ pub const SEARCH_KEYS_AND_VALUES_UV: Vec2u = Vec2u::new(80, 192);
 pub const STRING_SEARCH_MODE_UV: Vec2u = Vec2u::new(96, 160);
 pub const REGEX_SEARCH_MODE_UV: Vec2u = Vec2u::new(96, 176);
 pub const SNBT_SEARCH_MODE_UV: Vec2u = Vec2u::new(96, 192);
-pub const NEW_FILE_UV: Vec2u = Vec2u::new(96, 48);
+pub const NEW_FILE_UV: Vec2u = Vec2u::new(16, 96);
 pub const REFRESH_UV: Vec2u = Vec2u::new(152, 144);
 pub const DISABLED_REFRESH_UV: Vec2u = Vec2u::new(168, 144);
 pub const LIGHTBULB_UV: Vec2u = Vec2u::new(32, 160);
@@ -162,12 +165,14 @@ pub enum ZOffset {
     LINE_NUMBER_Z = 130,
     LINE_NUMBER_CONNECTOR_Z = 131,
     BOOKMARK_Z = 140,
+	JUST_OVERLAPPING_BOOKMARK_Z = 141,
     SELECTED_TEXT_Z = 170,
 	SELECTED_TEXT_SELECTION_Z = 171,
     ACTION_WHEEL_Z = 190,
     SCROLLBAR_BOOKMARK_Z = 199,
     SCROLLBAR_Z = 200,
     HELD_ENTRY_Z = 210,
+    HELD_ENTRY_TEXT_Z = 211,
     NOTIFICATION_Z = 240,
     NOTIFICATION_TEXT_Z = 241,
     TOOLTIP_Z = 255,
@@ -197,7 +202,7 @@ pub fn icon() -> Vec<u8> {
 		7 => STAL_MUSIC_DISC_ICON,
 		_ => unsafe { core::hint::unreachable_unchecked() },
 	};
-	let mut scaled = Box::<[i32]>::new_uninit_slice(4096);
+	let mut scaled = vec![0; 4096];
 	for y in 0..16 {
 		for x in 0..16 {
 			unsafe {

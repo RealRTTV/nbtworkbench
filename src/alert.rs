@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use crate::{since_epoch, smoothstep64, split_lines, StrExt};
-use crate::assets::{ALERT_UV, NOTIFICATION_TEXT_Z, NOTIFICATION_Z};
+use crate::assets::{ALERT_UV, NOTIFICATION_BAR_BACKDROP_UV, NOTIFICATION_BAR_UV, NOTIFICATION_TEXT_Z, NOTIFICATION_Z};
 use crate::color::TextColor;
 use crate::vertex_buffer_builder::{Vec2u, VertexBufferBuilder};
 
@@ -39,7 +39,7 @@ impl Alert {
 			pos + (4, 4),
 			NOTIFICATION_Z,
 			ALERT_UV + (12, 4),
-			(self.width + 16, 16 + self.lines.len() * 16),
+			(self.width + 16, self.height() - 8),
 			(24, 32),
 		);
 		builder.draw_texture_z(pos + (4, 4), NOTIFICATION_Z, ALERT_UV + (4, 4), (8, 32));
@@ -56,13 +56,13 @@ impl Alert {
 			(4, 4),
 		);
 		builder.draw_texture_z(
-			pos + (0, 20 + self.lines.len() * 16),
+			pos + (0, self.height() - 4),
 			NOTIFICATION_Z,
 			ALERT_UV + (0, 36),
 			(4, 4),
 		);
 		builder.draw_texture_z(
-			pos + (self.width + 20, 20 + self.lines.len() * 16),
+			pos + (self.width + 20, self.height() - 4),
 			NOTIFICATION_Z,
 			ALERT_UV + (36, 36),
 			(4, 4),
@@ -77,7 +77,7 @@ impl Alert {
 					(32.min(remaining_width), 4),
 				);
 				builder.draw_texture_z(
-					pos + (self.width + 20 - remaining_width, 20 + self.lines.len() * 16),
+					pos + (self.width + 20 - remaining_width, self.height() - 4),
 					NOTIFICATION_Z,
 					ALERT_UV + (2, 36),
 					(32.min(remaining_width), 4),
@@ -86,16 +86,16 @@ impl Alert {
 			}
 		}
 		{
-			let mut remaining_height = 16 + self.lines.len() * 16;
+			let mut remaining_height = self.height() - 8;
 			while remaining_height > 0 {
 				builder.draw_texture_z(
-					pos + (0, 20 + self.lines.len() * 16 - remaining_height),
+					pos + (0, self.height() - 4 - remaining_height),
 					NOTIFICATION_Z,
 					ALERT_UV + (0, 4),
 					(4, 32.min(remaining_height)),
 				);
 				builder.draw_texture_z(
-					pos + (self.width + 20, 20 + self.lines.len() * 16 - remaining_height),
+					pos + (self.width + 20, self.height() - 4 - remaining_height),
 					NOTIFICATION_Z,
 					ALERT_UV + (36, 4),
 					(4, 32.min(remaining_height)),
@@ -111,6 +111,21 @@ impl Alert {
 			builder.settings(pos + (18, 20 + idx * 16), true, NOTIFICATION_TEXT_Z);
 			let _ = write!(builder, "{line}");
 		}
+		let bar_width = self.get_bar_width();
+		builder.draw_texture_region_z(
+			pos + (6, self.height() - 8),
+			NOTIFICATION_Z,
+			NOTIFICATION_BAR_UV,
+			(bar_width, 2),
+			(20, 1)
+		);
+		builder.draw_texture_region_z(
+			pos + (8, self.height() - 6),
+			NOTIFICATION_Z,
+			NOTIFICATION_BAR_BACKDROP_UV,
+			(bar_width, 2),
+			(20, 1)
+		);
 	}
 
 	#[allow(clippy::wrong_self_convention)]
@@ -118,6 +133,14 @@ impl Alert {
 		let ms = since_epoch().saturating_sub(*self.timestamp.get_or_insert(since_epoch())).as_millis() as usize;
 		let display_time = (self.message_len + self.title.len()) * 60 + 3000;
 		ms > 500 + display_time
+	}
+
+	fn get_bar_width(&mut self) -> usize {
+		let now = since_epoch();
+		let ms = (now.saturating_sub(*self.timestamp.get_or_insert(now)).as_millis() as usize).saturating_sub(250);
+		let width = self.width + 4;
+		let display_time = (self.message_len + self.title.len()) * 60 + 3000;
+		((1.0 - (ms as f64 / display_time as f64)).clamp(0.0, 1.0) * width as f64).round() as usize
 	}
 
 	fn get_inset(&mut self) -> usize {
@@ -134,6 +157,6 @@ impl Alert {
 	}
 
 	pub fn height(&mut self) -> usize {
-		24 + self.lines.len() * 16
+		30 + self.lines.len() * 16
 	}
 }
