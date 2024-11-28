@@ -221,6 +221,7 @@ macro_rules! array {
 			#[inline]
 			pub fn remove(&mut self, idx: usize) -> NbtElement {
 				let removed = self.values.remove(idx);
+				self.decrement(removed.height(), removed.true_height());
 				self.values.shrink_to_fit();
 				removed
 			}
@@ -228,8 +229,10 @@ macro_rules! array {
 			#[inline]
 			pub fn replace(&mut self, idx: usize, value: NbtElement) -> Option<NbtElement> {
 				if !self.can_insert(&value) || idx >= self.len() { return None; }
-
-				Some(core::mem::replace(&mut self.values[idx], value))
+				self.increment(value.height(), value.true_height());
+				let old = core::mem::replace(&mut self.values[idx], value);
+				self.decrement(old.height(), old.true_height());
+				Some(old)
 			}
 
 			#[inline]
@@ -344,20 +347,20 @@ macro_rules! array {
 			pub fn drop(&mut self, key: Option<CompactString>, element: NbtElement, y: &mut usize, depth: usize, target_depth: usize, line_number: usize, indices: &mut Vec<usize>) -> DropFn {
 				if 8 <= *y && *y < 16 && depth == target_depth {
 					indices.push(0);
-					if let Err(element) = self.insert(0, element) { return DropFn::InvalidType(key, element) }
+					if let Err(element) = self.insert(0, element) { return DropFn::InvalidType((key, element)) }
 					self.open = true;
 					return DropFn::Dropped(1, 1, None, line_number + 1, None);
 				}
 
 				if self.height() * 16 <= *y && *y < self.height() * 16 + 8 && depth == target_depth {
 					indices.push(self.len());
-					if let Err(element) = self.insert(self.len(), element) { return DropFn::InvalidType(key, element) }
+					if let Err(element) = self.insert(self.len(), element) { return DropFn::InvalidType((key, element)) }
 					self.open = true;
 					return DropFn::Dropped(1, 1, None, line_number + self.len(), None);
 				}
 
 				if *y < 16 {
-					return DropFn::Missed(key, element);
+					return DropFn::Missed((key, element));
 				} else {
 					*y -= 16;
 				}
@@ -369,11 +372,11 @@ macro_rules! array {
 						for idx in 0..self.values.len() {
 							*ptr = idx;
 							if *y < 8 && depth == target_depth {
-								if let Err(element) = self.insert(idx, element) { return DropFn::InvalidType(key, element) }
+								if let Err(element) = self.insert(idx, element) { return DropFn::InvalidType((key, element)) }
 								return DropFn::Dropped(1, 1, None, line_number + idx + 1, None);
 							} else if *y < 16 && depth == target_depth {
 								*ptr = idx + 1;
-								if let Err(element) = self.insert(idx + 1, element) { return DropFn::InvalidType(key, element) }
+								if let Err(element) = self.insert(idx + 1, element) { return DropFn::InvalidType((key, element)) }
 								return DropFn::Dropped(1, 1, None, line_number + idx + 1 + 1, None);
 							}
 
@@ -384,7 +387,7 @@ macro_rules! array {
 						*y = y.saturating_sub((self.len() + 1) * 16);
 					}
 				}
-				DropFn::Missed(key, element)
+				DropFn::Missed((key, element))
 			}
 
 			#[inline]

@@ -246,6 +246,7 @@ impl NbtList {
 	#[must_use]
 	pub fn remove(&mut self, idx: usize) -> NbtElement {
 		let removed = self.elements.remove(idx);
+		self.decrement(removed.height(), removed.true_height());
 		self.elements.shrink_to_fit();
 		removed
 	}
@@ -253,8 +254,10 @@ impl NbtList {
 	#[inline]
 	pub fn replace(&mut self, idx: usize, value: NbtElement) -> Option<NbtElement> {
 		if !self.can_insert(&value) || idx >= self.len() { return None; }
-
-		Some(core::mem::replace(&mut self.elements[idx], value))
+		self.increment(value.height(), value.true_height());
+		let old = core::mem::replace(&mut self.elements[idx], value);
+		self.decrement(old.height(), old.true_height());
+		Some(old)
 	}
 
 	#[inline]
@@ -493,7 +496,7 @@ impl NbtList {
 		if *y < 16 && *y >= 8 && depth == target_depth && can_insert {
 			let before = (self.height(), self.true_height());
 			indices.push(0);
-			if let Err(element) = self.insert(0, element) { return DropFn::InvalidType(key, element) }
+			if let Err(element) = self.insert(0, element) { return DropFn::InvalidType((key, element)) }
 			self.open = true;
 			return DropFn::Dropped(
 				self.height as usize - before.0,
@@ -507,7 +510,7 @@ impl NbtList {
 			indices.push(self.len());
 			if let Err(element) = self.insert(self.len(), element) {
 				// indices are never used
-				return DropFn::InvalidType(key, element);
+				return DropFn::InvalidType((key, element));
 			}
 			self.open = true;
 			return DropFn::Dropped(
@@ -520,7 +523,7 @@ impl NbtList {
 		}
 
 		if *y < 16 {
-			return DropFn::Missed(key, element);
+			return DropFn::Missed((key, element));
 		} else {
 			*y -= 16;
 		}
@@ -532,12 +535,12 @@ impl NbtList {
 				*ptr = idx;
 				let heights = (element.height(), element.true_height());
 				if *y < 8 && depth == target_depth && can_insert {
-					if let Err(element) = self.insert(idx, element) { return DropFn::InvalidType(key, element) }
+					if let Err(element) = self.insert(idx, element) { return DropFn::InvalidType((key, element)) }
 					return DropFn::Dropped(heights.0, heights.1, None, line_number + 1, None);
 				} else if *y >= value.height() * 16 - 8 && *y < value.height() * 16 && depth == target_depth && can_insert {
 					*ptr = idx + 1;
 					let true_height = value.true_height();
-					if let Err(element) = self.insert(idx + 1, element) { return DropFn::InvalidType(key, element) }
+					if let Err(element) = self.insert(idx + 1, element) { return DropFn::InvalidType((key, element)) }
 					return DropFn::Dropped(heights.0, heights.1, None, line_number + true_height + 1, None);
 				}
 
@@ -550,8 +553,8 @@ impl NbtList {
 					line_number + 1,
 					indices,
 				) {
-					x @ DropFn::InvalidType(_, _) => return x,
-					DropFn::Missed(k, e) => {
+					x @ DropFn::InvalidType(_) => return x,
+					DropFn::Missed((k, e)) => {
 						key = k;
 						element = e;
 					}
@@ -565,7 +568,7 @@ impl NbtList {
 			}
 			indices.pop();
 		}
-		DropFn::Missed(key, element)
+		DropFn::Missed((key, element))
 	}
 
 	#[inline]
@@ -602,6 +605,14 @@ impl NbtList {
 
 	#[inline]
 	pub fn recache(&mut self) {
+		let mut height = 1;
+		let mut true_height = 1;
+		for child in self.children() {
+			height += child.height() as u32;
+			true_height += child.true_height() as u32;
+		}
+		self.true_height = true_height;
+		self.height = height;
 		let mut max_depth = 0;
 		if self.open() {
 			for child in self.children() {

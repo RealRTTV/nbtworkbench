@@ -302,9 +302,11 @@ impl NbtRegion {
 		self.flags ^= 0b10;
 		if self.is_grid_layout() {
 			self.height = 32 + 1;
-			let mut true_line_number = 1_usize;
+			// one for the region + one for the chunk head
+			let mut true_line_number = 2_usize;
 			for (idx, chunk) in self.children_mut().enumerate() {
 				chunk.shut();
+				// skip the head because that shouldn't be hidden
 				bookmarks[true_line_number + 1..=true_line_number + chunk.true_height()].iter_mut().for_each(|bookmark| *bookmark = bookmark.hidden(idx + 1));
 				true_line_number += chunk.true_height();
 			}
@@ -323,22 +325,25 @@ impl NbtRegion {
 
 	#[inline]
 	pub fn insert(&mut self, idx: usize, value: NbtElement) -> Result<Option<NbtElement>, NbtElement> {
-		let Some(chunk) = value.as_chunk() else { return Err(value) };
-		self.increment(chunk.height(), chunk.true_height());
 		self.replace(idx, value)
 	}
 
 	#[inline]
 	pub fn replace(&mut self, idx: usize, mut value: NbtElement) -> Result<Option<NbtElement>, NbtElement> {
+		let (height, true_height) = (value.height(), value.true_height());
 		let Some(chunk) = value.as_chunk_mut() else { return Err(value) };
 		if let Some(old) = self.chunks.get(idx).and_then(NbtElement::as_chunk) {
 			self.decrement(old.height(), old.true_height());
 		}
 		chunk.set_pos(idx);
-		match self.chunks.get_mut(idx) {
-			Some(slot) => Ok(Some(core::mem::replace(slot, value))),
-			None => Err(value)
-		}
+		let result = match self.chunks.get_mut(idx) {
+			Some(slot) => {
+				core::mem::replace(slot, value)
+			},
+			None => return Err(value)
+		};
+		self.increment(height, true_height);
+		Ok(Some(result))
 	}
 
 	/// # Errors
@@ -356,12 +361,15 @@ impl NbtRegion {
 	#[inline]
 	#[must_use]
 	pub fn replace_with_empty(&mut self, pos: usize) -> NbtElement {
-		unsafe {
+		let removed = unsafe {
 			core::ptr::replace(
 				core::ptr::addr_of_mut!(self.chunks[pos]),
 				NbtElement::Chunk(NbtChunk::unloaded_from_pos(pos)),
 			)
-		}
+		};
+		self.increment(1, 1);
+		self.decrement(removed.height(), removed.true_height());
+		removed
 	}
 
 	#[inline]
@@ -411,6 +419,13 @@ impl NbtRegion {
 	pub fn render_root(&self, builder: &mut VertexBufferBuilder, str: &str, ctx: &mut RenderContext) {
 		use std::fmt::Write;
 
+		builder.draw_texture_z(
+			ctx.pos() - (20, 2),
+			LINE_NUMBER_CONNECTOR_Z,
+			LINE_NUMBER_SEPARATOR_UV,
+			(2, 2),
+		);
+
 		let mut remaining_scroll = builder.scroll() / 16;
 		'head: {
 			if remaining_scroll > 0 {
@@ -426,12 +441,6 @@ impl NbtRegion {
 				ctx.skip_line_numbers(1);
 			}
 			// fun hack for connection
-			builder.draw_texture_z(
-				ctx.pos() - (20, 2),
-				LINE_NUMBER_CONNECTOR_Z,
-				LINE_NUMBER_SEPARATOR_UV,
-				(2, 2),
-			);
 			self.render_icon(ctx.pos(), BASE_Z, builder);
 			builder.draw_texture(ctx.pos() - (16, 0), CONNECTION_UV, (16, 9));
 			if !self.is_empty() {
@@ -560,65 +569,104 @@ impl NbtRegion {
 	}
 
 	#[inline]
-	pub fn drop(&mut self, mut key: Option<CompactString>, mut element: NbtElement, y: &mut usize, depth: usize, target_depth: usize, mut line_number: usize, indices: &mut Vec<usize>) -> DropFn {
-		if target_depth > depth && *y >= self.true_height() && element.as_chunk().is_some() {
-			return DropFn::InvalidType(key, element);
-		}
-
-		if *y < 16 {
-			return DropFn::Missed(key, element);
-		} else {
-			*y -= 16;
-		}
-
-		if self.is_open() && !self.is_empty() {
-			indices.push(0);
-			let ptr = unsafe { &mut *indices.as_mut_ptr().add(indices.len() - 1) };
-			for (idx, value) in self.children_mut().enumerate() {
-				*ptr = idx;
-				let heights = (element.height(), element.true_height());
-				if *y >= value.height() * 16 - 16
-					&& *y < value.height() * 16
-					&& depth == target_depth
-					&& element.as_chunk().is_some()
-				{
-					return match self.insert(idx, element) {
-						Ok(old) => DropFn::Dropped(
-							heights.0,
-							heights.1,
-							None,
-							line_number + heights.1 + 1,
-							if old.as_ref().and_then(NbtElement::as_chunk).is_some_and(|chunk| chunk.is_loaded()) { Some((None, old.expect("we know this will be Some since it's a region"))) } else { None },
-						),
-						Err(element) => DropFn::InvalidType(key, element),
-					}
-				}
-
-				match value.drop(
-					key,
-					element,
-					y,
-					depth + 1,
-					target_depth,
-					line_number,
-					indices,
-				) {
-					x @ DropFn::InvalidType(_, _) => return x,
-					DropFn::Missed(k, e) => {
-						key = k;
-						element = e;
-					}
-					DropFn::Dropped(increment, true_increment, key, line_number, value) => {
-						self.increment(increment, true_increment);
-						return DropFn::Dropped(increment, true_increment, key, line_number, value);
-					}
-				}
-
-				line_number += value.true_height();
+	pub fn drop(&mut self, mut key: Option<CompactString>, mut element: NbtElement, y: &mut usize, depth: usize, mut target_depth: usize, mut line_number: usize, indices: &mut Vec<usize>) -> DropFn {
+		if self.is_grid_layout() {
+			if *y < 16 {
+				return DropFn::Missed((key, element))
+			} else {
+				*y -= 16;
 			}
-			indices.pop();
+
+			if *y >= 32 * 16 {
+				return DropFn::Missed((key, element))
+			}
+
+			if target_depth < 2 {
+				return DropFn::Missed((key, element))
+			} else {
+				target_depth -= 2;
+			}
+
+			if target_depth >= 32 {
+				return DropFn::Missed((key, element))
+			}
+
+			let heights = (element.height(), element.true_height());
+			let idx = (*y & !15) * 2 + target_depth;
+			indices.push(idx);
+			for chunk in self.children().take(idx) {
+				line_number += chunk.true_height();
+			}
+			match self.insert(idx, element) {
+				Ok(old) => DropFn::Dropped(
+					heights.0,
+					heights.1,
+					None,
+					line_number + 1,
+					if old.as_ref().and_then(NbtElement::as_chunk).is_some_and(|chunk| chunk.is_loaded()) { Some((None, old.expect("we know this will be Some since it's a region"))) } else { None },
+				),
+				Err(element) => DropFn::InvalidType((key, element))
+			}
+		} else {
+			if target_depth > depth && *y >= self.true_height() && element.as_chunk().is_some() {
+				return DropFn::InvalidType((key, element));
+			}
+
+			if *y < 16 {
+				return DropFn::Missed((key, element));
+			} else {
+				*y -= 16;
+			}
+
+			if self.is_open() && !self.is_empty() {
+				indices.push(0);
+				let ptr = unsafe { &mut *indices.as_mut_ptr().add(indices.len() - 1) };
+				for (idx, value) in self.children_mut().enumerate() {
+					*ptr = idx;
+					let heights = (element.height(), element.true_height());
+					if *y >= value.height() * 16 - 16
+						&& *y < value.height() * 16
+						&& depth == target_depth
+						&& element.as_chunk().is_some()
+					{
+						return match self.insert(idx, element) {
+							Ok(old) => DropFn::Dropped(
+								heights.0,
+								heights.1,
+								None,
+								line_number + 1,
+								if old.as_ref().and_then(NbtElement::as_chunk).is_some_and(|chunk| chunk.is_loaded()) { Some((None, old.expect("we know this will be Some since it's a region"))) } else { None },
+							),
+							Err(element) => DropFn::InvalidType((key, element)),
+						};
+					}
+
+					match value.drop(
+						key,
+						element,
+						y,
+						depth + 1,
+						target_depth,
+						line_number,
+						indices,
+					) {
+						x @ DropFn::InvalidType(_) => return x,
+						DropFn::Missed((k, e)) => {
+							key = k;
+							element = e;
+						}
+						DropFn::Dropped(increment, true_increment, key, line_number, value) => {
+							self.increment(increment, true_increment);
+							return DropFn::Dropped(increment, true_increment, key, line_number, value);
+						}
+					}
+
+					line_number += value.true_height();
+				}
+				indices.pop();
+			}
+			DropFn::Missed((key, element))
 		}
-		DropFn::Missed(key, element)
 	}
 
 	#[inline]
@@ -670,18 +718,25 @@ impl NbtRegion {
 
 	#[inline]
 	pub fn recache(&mut self) {
+		let mut true_height = 1;
+		let mut height = 1;
 		let mut loaded_chunks = 0_usize;
 		for child in self.children() {
 			if child.as_chunk().is_some_and(|chunk| chunk.is_loaded()) {
 				loaded_chunks += 1;
 			}
+			true_height += child.true_height() as u32;
+			height += child.height() as u32;
 		}
+		self.true_height = true_height;
+		self.height = height;
 		self.loaded_chunks = loaded_chunks as u16;
 
 		let mut max_depth = 0;
 		if self.is_open() {
 			if self.is_grid_layout() {
 				max_depth = 16 + 32 * 16;
+				self.height = 33;
 			} else {
 				for child in self.children() {
 					max_depth = usize::max(max_depth, 16 + 4 + child.value().0.width());

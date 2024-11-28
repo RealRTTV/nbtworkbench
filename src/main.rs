@@ -16,9 +16,10 @@
 	panic_update_hook,
     stmt_expr_attributes,
 	float_next_up_down,
-	variant_count
+	variant_count,
+	sync_unsafe_cell,
+	duration_millis_float
 )]
-#![feature(sync_unsafe_cell)]
 #![windows_subsystem = "windows"]
 
 extern crate core;
@@ -48,6 +49,7 @@ use crate::marked_line::{MarkedLine, MarkedLineSlice, MarkedLines};
 use crate::tree_travel::Navigate;
 use crate::vertex_buffer_builder::Vec2u;
 use crate::workbench::Workbench;
+use crate::workbench_action::WorkbenchAction;
 
 mod alert;
 mod assets;
@@ -262,12 +264,11 @@ pub fn main() -> ! {
 		println!("{}", env!("CARGO_PKG_VERSION"));
 		std::process::exit(0);
 	} else if let Some("-?" | "/?" | "--help" | "-h") = first_arg.as_deref() {
-		println!(
-			r#"
+		println!(r#"
 Usage:
   nbtworkbench --version|-v
   nbtworkbench -?|-h|--help|/?
-  nbtworkbench find <path> [(--mode|-m)=normal|regex|snbt] [(--search|-s)=key|value|all] <query>
+  nbtworkbench find <path> [(--mode|-m)=(normal|regex|snbt)] [(--search|-s)=(key|value|all)] <query>
   nbtworkbench reformat (--format|-f)=<format> [(--out-dir|-d)=<out-dir>] [(--out-ext|-e)=<out-ext>] <path>
 
 Options:
@@ -275,20 +276,21 @@ Options:
   -?, -h, --help, /?  Displays this dialog.
   --mode, -m          Changes the `find` mode to take the <query> field as either, a containing substring, a regex (match whole), or snbt. [default: normal]
   --search, -s        Searches for results matching the <query> in either, the key, the value, or both (note that substrings and regex search the same pattern in both key and value, while the regex uses it's key field to match equal strings). [default: all]
-  --format, -f        Specifies the format to be reformatted to; either `nbt`, `snbt`, `dat/dat_old/gzip` or `zlib`.
+  --format, -f        Specifies the format to be reformatted to; either `nbt`, `snbt`, `dat/dat_old/gzip`, `zlib`, 'lnbt' (little endian nbt), or 'lhnbt' (little endian nbt with header).
   --out-dir, -d       Specifies the output directory. [default: ./]
-  --out-ext, -e       Specifies the output file extension (if not specified, it will infer from --format)"#
-		);
+  --out-ext, -e       Specifies the output file extension (if not specified, it will infer from --format)"#);
 		std::process::exit(0);
 	} else {
 		pollster::block_on(window::run())
 	}
 }
 
+pub type NbtElementAndKey = (Option<CompactString>, NbtElement);
+
 pub enum DropFn {
-	Dropped(usize, usize, Option<CompactString>, usize, Option<(Option<CompactString>, NbtElement)>),
-	Missed(Option<CompactString>, NbtElement),
-	InvalidType(Option<CompactString>, NbtElement),
+	Dropped(usize, usize, Option<CompactString>, usize, Option<NbtElementAndKey>),
+	Missed(NbtElementAndKey),
+	InvalidType(NbtElementAndKey),
 }
 
 /// Yoinked from `itertools`.
@@ -303,8 +305,8 @@ pub enum Position {
 #[derive(Debug)]
 pub enum HeldEntry {
 	Empty,
-	FromAether((Option<CompactString>, NbtElement)),
-	FromKnown((Option<CompactString>, NbtElement), Box<[usize]>, bool),
+	FromAether(NbtElementAndKey),
+	FromKnown(NbtElementAndKey, Box<[usize]>, bool),
 }
 
 impl HeldEntry {
@@ -534,13 +536,6 @@ pub fn encompasses_or_equal<T: Ord>(outer: &[T], inner: &[T]) -> bool {
 #[must_use]
 pub fn encompasses<T: Ord>(outer: &[T], inner: &[T]) -> bool {
 	outer.len() < inner.len() && outer == &inner[..outer.len()]
-}
-
-#[inline]
-#[must_use]
-pub fn either_encompass<T: Ord>(a: &[T], b: &[T]) -> bool {
-	let min = usize::min(a.len(), b.len());
-	a[..min] == b[..min]
 }
 
 #[inline]
@@ -925,7 +920,12 @@ impl<'a> RenderContext<'a> {
 
 		let last_line_number = (self.line_numbers.len() > 1) as usize * 32 + 1;
 		for line_number in 1..=last_line_number {
-			if 16 * line_number - 16 >= scroll {
+			let uv = if line_number == last_line_number {
+				END_LINE_NUMBER_SEPARATOR_UV
+			} else {
+				LINE_NUMBER_SEPARATOR_UV
+			};
+			if 16 * line_number >= scroll + 16 {
 				let color = if line_number % 2 == 1 {
 					0x777777
 				} else {
@@ -942,13 +942,8 @@ impl<'a> RenderContext<'a> {
 				);
 				let _ = write!(builder, "{line_number}");
 				builder.color = color;
+				builder.draw_texture_z((builder.text_coords.0 + 4, HEADER_SIZE + 16 * line_number - 16 - scroll), LINE_NUMBER_Z, uv, (2, 16));
 			}
-			let uv = if line_number == last_line_number {
-				END_LINE_NUMBER_SEPARATOR_UV
-			} else {
-				LINE_NUMBER_SEPARATOR_UV
-			};
-			builder.draw_texture_z((builder.text_coords.0 + 4, HEADER_SIZE + 16 * line_number - 16 - scroll), LINE_NUMBER_Z, uv, (2, 16));
 		}
 
 		if let Some((first, rest)) = bookmarks.split_first() && first.true_line_number() == 1 {
@@ -1204,82 +1199,158 @@ pub fn smoothstep64(x: f64) -> f64 {
 #[must_use]
 pub const fn valid_unescaped_char(byte: u8) -> bool { matches!(byte, b'0'..=b'9' | b'A'..=b'Z' | b'a'..=b'z' | b'_' | b'-' | b'.' | b'+') }
 
-pub fn add_element(root: &mut NbtElement, key: Option<CompactString>, value: NbtElement, indices: &[usize], bookmarks: &mut MarkedLines, subscription: &mut Option<FileUpdateSubscription>) -> anyhow::Result<()> {
+#[derive(Clone)]
+pub struct RemoveElementResult {
+	indices: Box<[usize]>,
+	kv: NbtElementAndKey,
+	replaces: bool,
+}
+
+impl RemoveElementResult {
+	pub fn into_raw(self) -> (Box<[usize]>, NbtElementAndKey, bool) {
+		(self.indices, self.kv, self.replaces)
+	}
+
+	pub fn into_action(self) -> WorkbenchAction {
+		if self.replaces {
+			WorkbenchAction::Replace {
+				indices: self.indices,
+				value: self.kv,
+			}
+		} else {
+			WorkbenchAction::Remove {
+				element: self.kv,
+				indices: self.indices,
+			}
+		}
+	}
+}
+
+#[derive(Clone)]
+pub struct SwapElementResult {
+	parent: Box<[usize]>,
+	a: usize,
+	b: usize,
+}
+
+impl SwapElementResult {
+	pub fn into_raw(self) -> (Box<[usize]>, usize, usize) {
+		(self.parent, self.a, self.b)
+	}
+
+	pub fn into_action(self) -> WorkbenchAction {
+		WorkbenchAction::Swap {
+			parent: self.parent,
+			a: self.a,
+			b: self.b,
+		}
+	}
+}
+
+/// Properly adds an element under the specified indices, updating the following relevant data
+/// - Subscription Indices
+/// - Bookmarked Lines
+/// - Heights and True Heights
+/// - Workbench Actions
+/// - Horizontal Scroll
+///
+/// # Examples
+/// ```rust
+/// let workbench = ...;
+/// let tab = tab_mut!(workbench);
+/// let action = add_element(
+///     &mut tab.value,
+///     None,
+///     NbtElement::from_str(
+///         r#"{"registry":"minecraft:item","value":"minecraft:stone"}"#
+///     ).unwrap().1,
+///     Box::new([0]),
+///     &mut tab.bookmarks,
+///     &mut self.subscription
+/// )?;
+/// tab.append_to_history(action);
+/// ```
+pub fn add_element(root: &mut NbtElement, key: Option<CompactString>, value: NbtElement, indices: Box<[usize]>, bookmarks: &mut MarkedLines, subscription: &mut Option<FileUpdateSubscription>) -> anyhow::Result<WorkbenchAction> {
 	let (&last, rem) = indices.split_last().expect("You can't remove the head!");
-	let (height, true_height) = (value.height(), value.true_height());
 
 	let (_, _, parent, mut line_number) = Navigate::new(rem.iter().copied(), root).last();
-	let old_heights = if let Some(compound) = parent.as_compound_mut() {
-		compound.insert(last, key.unwrap_or(CompactString::const_new("_")), value);
-		None
-	} else if let Some(chunk) = parent.as_chunk_mut() {
-		chunk.insert(last, key.unwrap_or(CompactString::const_new("_")), value);
-		None
-	} else {
-		match parent.insert(last, value) {
-			Ok(Some(old)) => Some((old.height(), old.true_height())),
-			Ok(None) => None,
-			Err(_) => return Err(anyhow!("Invalid type to insert into parent")),
-		}
+	let (old_parent_height, old_parent_true_height) = (parent.height(), parent.true_height());
+	// SAFETY: we have updated all the relevant data
+	let old_value = match unsafe { parent.insert(last, (key, value)) } {
+		Ok(Some(old)) => Some(old),
+		Ok(None) => None,
+		Err(_) => return Err(anyhow!("Invalid type to insert into parent")),
 	};
-	let (diff, true_diff) = Vec2u::from((height, true_height)).wrapping_sub(old_heights.unwrap_or((0, 0)).into()).into();
+	let (parent_height, parent_true_height) = (parent.height(), parent.true_height());
+	let (diff, true_diff) = (parent_height.wrapping_sub(old_parent_height), parent_true_height.wrapping_sub(old_parent_true_height));
+	let (_old_height, old_true_height) = (old_value.as_ref().map(NbtElement::height), old_value.as_ref().map(NbtElement::true_height));
+	let been_replaced = old_true_height.is_some();
 
 	for n in 0..last {
-		line_number += parent.get(n).expect("What the fuck???").true_height();
+		line_number += parent[n].true_height();
 	}
 	line_number += 1;
-	if let Some((_, old_true_height)) = old_heights {
-		bookmarks.remove(line_number..line_number + old_true_height);
-		line_number += old_true_height;
-	}
-
+	bookmarks.remove(line_number..line_number + old_true_height.unwrap_or(0));
 	bookmarks[line_number..].increment(diff, true_diff);
 
-	let mut iter = Navigate::new(rem.iter().copied(), root);
-	while let Some((position, _, _, element, _)) = iter.next() {
-		if let Position::Middle | Position::First = position {
-			element.increment(height, true_height);
-		}
-	}
-
 	if let Some(subscription) = subscription && encompasses_or_equal(rem, &subscription.indices) {
-		if subscription.indices[rem.len()] <= last && old_heights.is_none() {
+		if subscription.indices[rem.len()] <= last && !been_replaced {
 			subscription.indices[rem.len()] += 1;
 		}
 	}
 
 	recache_along_indices(rem, root);
 
-	Ok(())
+	let action = if let Some(old_value) = old_value {
+		WorkbenchAction::Replace { indices, value: (None, old_value) }
+	} else {
+		WorkbenchAction::Add { indices }
+	};
+
+	Ok(action)
 }
 
-pub fn remove_element(root: &mut NbtElement, indices: &[usize], bookmarks: &mut MarkedLines, subscription: &mut Option<FileUpdateSubscription>) -> anyhow::Result<(Option<CompactString>, NbtElement)> {
+/// Properly removes an element under the specified indices, updating the following relevant data
+/// - Subscription Indices
+/// - Bookmarked Lines
+/// - Heights and True Heights
+/// - Workbench Actions
+/// - Horizontal Scroll
+///
+/// # Examples
+/// ```rust
+/// let workbench = ...;
+/// let tab = tab_mut!(workbench);
+/// let result = remove_element(
+///     &mut tab.value,
+///     Box::new([0]),
+///     &mut tab.bookmarks,
+///     &mut self.subscription
+/// )?;
+/// tab.append_to_history(result.into_action());
+/// ```
+pub fn remove_element(root: &mut NbtElement, indices: Box<[usize]>, bookmarks: &mut MarkedLines, subscription: &mut Option<FileUpdateSubscription>) -> anyhow::Result<RemoveElementResult> {
 	let (&last, rem) = indices.split_last().context("Cannot remove the root")?;
 	let (_, _, parent, mut line_number) = Navigate::new(rem.iter().copied(), root).last();
 	for n in 0..last {
-		line_number += parent.get(n).expect("What the fuck").true_height();
+		line_number += parent[n].true_height();
 	}
 	line_number += 1;
-	let old_len = parent.len();
-	let (key, value) = parent.remove(last).context("Could not remove element")?;
+	let (old_parent_height, old_parent_true_height) = (parent.height(), parent.true_height());
+	// SAFETY: we have updated all the relevant data
+	let (key, value) = unsafe { parent.remove(last) }.context("Could not remove element")?;
 	let (height, true_height) = (value.height(), value.true_height());
-	let replacement_heights = if let Some(replacement) = parent.get(last) && parent.len() == old_len { Some((replacement.height(), replacement.true_height())) } else { None };
-	let (diff, true_diff) = if let Some((replacement_height, replacement_true_height)) = replacement_heights { (height.saturating_sub(replacement_height), true_height.saturating_sub(replacement_true_height)) } else { (height, true_height) };
-	let mut iter = Navigate::new(rem.iter().copied(), root);
-	while let Some((_, _, _, element, _)) = iter.next() {
-		element.decrement(diff, true_diff);
-	}
-	if let Some((_, replacement_true_height)) = replacement_heights {
-		bookmarks.remove(line_number..line_number + replacement_true_height);
-		line_number += replacement_true_height;
-	}
+	let (parent_height, parent_true_height) = (parent.height(), parent.true_height());
+	let (diff, true_diff) = (parent_height.wrapping_sub(old_parent_height), parent_true_height.wrapping_sub(old_parent_true_height));
+	let been_replaced = !(height == diff && true_height == true_diff);
+	bookmarks.remove(line_number..line_number);
 	bookmarks[line_number..].decrement(diff, true_diff);
 
 	if let Some(inner_subscription) = subscription {
-		if *rem == *inner_subscription.indices {
+		if encompasses_or_equal(&indices, &inner_subscription.indices) {
 			*subscription = None;
 		} else if encompasses(rem, &inner_subscription.indices) {
-			if inner_subscription.indices[rem.len()] >= last && replacement_heights.is_none() {
+			if inner_subscription.indices[rem.len()] >= last && !been_replaced {
 				inner_subscription.indices[rem.len()] -= 1;
 			}
 		}
@@ -1287,7 +1358,144 @@ pub fn remove_element(root: &mut NbtElement, indices: &[usize], bookmarks: &mut 
 
 	recache_along_indices(rem, root);
 
-	Ok((key, value))
+	Ok(RemoveElementResult {
+		indices,
+		kv: (key, value),
+		replaces: been_replaced,
+	})
+}
+
+/// Properly replaces an element under the specified indices, updating the following relevant data
+/// - Subscription Indices
+/// - Bookmarked Lines
+/// - Heights and True Heights
+/// - Workbench Actions
+/// - Horizontal Scroll
+///
+/// # Examples
+/// ```rust
+/// let workbench = ...;
+/// let tab = tab_mut!(workbench);
+/// let result = replace_element(
+///     &mut tab.value,
+///     NbtElement::from_str(
+///         r#"{"registry":"minecraft:item","value":"minecraft:stone"}"#
+///     ).unwrap(),
+///     Box::new([0]),
+///     &mut tab.bookmarks,
+///     &mut self.subscription
+/// )?;
+/// tab.append_to_history(result.into_action());
+/// ```
+pub fn replace_element(root: &mut NbtElement, value: NbtElementAndKey, indices: Box<[usize]>, bookmarks: &mut MarkedLines, subscription: &mut Option<FileUpdateSubscription>) -> anyhow::Result<RemoveElementResult> {
+	let Some((&last, rem)) = indices.split_last() else {
+		return if root.id() == value.1.id() {
+			bookmarks.remove(..);
+
+			Ok(RemoveElementResult {
+				indices: Box::new([]),
+				kv: (None, core::mem::replace(root, value.1)),
+				replaces: true,
+			})
+		} else {
+			Err(anyhow!("Root element type cannot be changed"))
+		}
+	};
+
+	let (_, _, parent, mut line_number) = Navigate::new(rem.iter().copied(), root).last();
+	for n in 0..last {
+		line_number += parent[n].true_height();
+	}
+	line_number += 1;
+
+	let (old_parent_height, old_parent_true_height) = (parent.height(), parent.true_height());
+	// SAFETY: we have updated all the relevant data
+	let (old_key, old_value) = unsafe { parent.replace_key_value(last, value) }.context("Failed to replace element")?;
+	let (_old_height, old_true_height) = (old_value.height(), old_value.true_height());
+	let (parent_height, parent_true_height) = (parent.height(), parent.true_height());
+	let (diff, true_diff) = (parent_height.wrapping_sub(old_parent_height), parent_true_height.wrapping_sub(old_parent_true_height));
+	bookmarks.remove(line_number..line_number + old_true_height);
+	bookmarks[line_number..].increment(diff, true_diff);
+
+	if let Some(inner_subscription) = subscription {
+		if encompasses_or_equal(&indices, &inner_subscription.indices) {
+			*subscription = None;
+		}
+	}
+
+	recache_along_indices(rem, root);
+
+	Ok(RemoveElementResult {
+		indices,
+		kv: (old_key, old_value),
+		replaces: true,
+	})
+}
+
+/// Properly swaps two elements under their specified indices (requires them to be at the same depth), updating the following relevant data
+/// - Subscription Indices
+/// - Bookmarked Lines
+/// - Heights and True Heights
+/// - Workbench Actions
+/// - Horizontal Scroll
+pub fn swap_elements(root: &mut NbtElement, parent_indices: Box<[usize]>, a: usize, b: usize, bookmarks: &mut MarkedLines, subscription: &mut Option<FileUpdateSubscription>) -> anyhow::Result<SwapElementResult> {
+	let (a, b) = if a <= b { (a, b) } else { (b, a) };
+	let parent_y = sum_indices(parent_indices.iter().copied(), root);
+	let (_, _, parent, parent_line_number) = Navigate::new(parent_indices.iter().copied(), root).last();
+
+	let mut a_line_number = parent_line_number;
+	let mut a_y = parent_y;
+	let (a_height, a_true_height) = (parent[a].height(), parent[a].true_height());
+	for n in 0..a {
+		let sibling = &parent[n];
+		a_line_number += sibling.true_height();
+		a_y += sibling.height();
+	}
+	a_line_number += 1;
+	a_y += 1;
+
+	let mut b_line_number = parent_line_number;
+	let mut b_y = parent_y;
+	let (b_height, b_true_height) = (parent[b].height(), parent[b].true_height());
+	for n in 0..b {
+		let sibling = &parent[n];
+		b_line_number += sibling.true_height();
+		b_y += sibling.height();
+	}
+	b_line_number += 1;
+	b_y += 1;
+
+	let mut a_bookmarks = bookmarks.remove(a_line_number..a_line_number + a_true_height);
+	let mut b_bookmarks = bookmarks.remove(b_line_number..b_line_number + b_true_height);
+	MarkedLineSlice::from_marked_lines_mut(&mut a_bookmarks).decrement(a_y, a_line_number);
+	MarkedLineSlice::from_marked_lines_mut(&mut b_bookmarks).decrement(b_y, b_line_number);
+
+	bookmarks[b_line_number..].decrement(b_height, b_true_height);
+	bookmarks[a_line_number..].decrement(a_height, a_true_height);
+
+	MarkedLineSlice::from_marked_lines_mut(&mut a_bookmarks).increment(b_y, b_line_number);
+	MarkedLineSlice::from_marked_lines_mut(&mut b_bookmarks).increment(a_y, a_line_number);
+	bookmarks.add_bookmarks(a_bookmarks);
+	bookmarks.add_bookmarks(b_bookmarks);
+
+	if let Some(subscription_inner) = subscription && encompasses(&parent_indices, &subscription_inner.indices) {
+		let sibling = &mut subscription_inner.indices[parent_indices.len()];
+		if *sibling == a {
+			*sibling = b;
+		} else if *sibling == b {
+			*sibling = a;
+		}
+	}
+
+	parent.swap(a, b);
+
+	recache_along_indices(&parent_indices, root);
+
+	Ok(SwapElementResult {
+		parent: parent_indices,
+		a,
+		b,
+	})
 }
 
 #[must_use]

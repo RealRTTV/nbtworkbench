@@ -58,7 +58,7 @@ fn get_predicate(args: &mut Vec<String>) -> SearchPredicate {
         std::process::exit(0)
     };
 
-    let search_flags = match get_argument("--search", args).or_else(|| get_argument("-s", args)).as_deref() {
+    let search_flags = match get_argument_any(&["--search", "-s"], args).as_deref() {
         Some("key") => SearchFlags::Keys,
         Some("value") => SearchFlags::Values,
         Some("all") | None => SearchFlags::KeysValues,
@@ -68,7 +68,7 @@ fn get_predicate(args: &mut Vec<String>) -> SearchPredicate {
         }
     };
 
-    match get_argument("--mode", args).or_else(|| get_argument("-m", args)).as_deref() {
+    match get_argument_any(&["--mode", "-m"], args).as_deref() {
         Some("normal") | None => SearchPredicate {
             search_flags,
             inner: SearchPredicateInner::String(query),
@@ -111,6 +111,10 @@ fn increment_progress_bar(completed: &AtomicU64, size: u64, total: u64, action: 
 
 fn get_argument(key: &str, args: &mut Vec<String>) -> Option<String> {
     Some(args.remove(args.iter().position(|x| x.strip_prefix(key).is_some_and(|x| x.starts_with("=")))?).split_off(key.len() + 1))
+}
+
+fn get_argument_any(keys: &[&str], args: &mut Vec<String>) -> Option<String> {
+    keys.iter().filter_map(|key| get_argument(key, args)).next()
 }
 
 #[inline]
@@ -189,12 +193,13 @@ pub fn reformat() -> ! {
     let mut args = std::env::args().collect::<Vec<_>>();
     args.drain(..2);
 
-    let format_arg = get_argument("--format", &mut args).or_else(|| get_argument("-f", &mut args));
+    let format_arg = get_argument_any(&["--format", "-f"], &mut args);
     let (extension, format) = match format_arg.as_deref() {
         Some(x @ "nbt") => (x, FileFormat::Nbt),
         Some(x @ ("dat" | "dat_old" | "gzip")) => (if x == "gzip" { "dat" } else { x }, FileFormat::Gzip),
         Some(x @ "zlib") => (x, FileFormat::Zlib),
         Some(x @ "snbt") => (x, FileFormat::Snbt),
+        Some(x @ ("lnbt" | "lhnbt")) => ("nbt", if x == "lnbt" { FileFormat::LittleEndianNbt } else { FileFormat::LittleEndianHeaderNbt }),
         None => {
             error!("`--format` not specified.");
             std::process::exit(1);
@@ -205,13 +210,13 @@ pub fn reformat() -> ! {
         }
     };
 
-    let extension = if let Some(extension) = get_argument("--out-ext", &mut args).or_else(|| get_argument("-e", &mut args)) {
+    let extension = if let Some(extension) = get_argument_any(&["--out-ext", "-e"], &mut args) {
         extension
     } else {
         extension.to_owned()
     };
 
-    let out_dir = if let Some(out_dir) = get_argument("--out-dir", &mut args).or_else(|| get_argument("-d", &mut args)) {
+    let out_dir = if let Some(out_dir) = get_argument_any(&["--out-dir", "-d"], &mut args) {
         Some(PathBuf::from(out_dir))
     } else {
         None

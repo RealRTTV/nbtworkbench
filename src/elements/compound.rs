@@ -9,7 +9,7 @@ use std::thread::Scope;
 use compact_str::{CompactString, format_compact, ToCompactString};
 use hashbrown::raw::RawTable;
 
-use crate::{config, hash, DropFn, RenderContext, StrExt, VertexBufferBuilder};
+use crate::{config, hash, DropFn, NbtElementAndKey, RenderContext, StrExt, VertexBufferBuilder};
 use crate::assets::{BASE_Z, COMPOUND_ROOT_UV, COMPOUND_UV, CONNECTION_UV, HEADER_SIZE, JUST_OVERLAPPING_BASE_TEXT_Z, LINE_NUMBER_CONNECTOR_Z, LINE_NUMBER_SEPARATOR_UV, ZOffset};
 use crate::be_decoder::BigEndianDecoder;
 use crate::color::TextColor;
@@ -181,15 +181,19 @@ impl NbtCompound {
 	}
 
 	#[inline]
-	pub fn remove_idx(&mut self, idx: usize) -> Option<(CompactString, NbtElement)> { self.entries.shift_remove_idx(idx) }
+	pub fn remove(&mut self, idx: usize) -> Option<(CompactString, NbtElement)> {
+		let kv = self.entries.shift_remove_idx(idx)?;
+		self.decrement(kv.1.height(), kv.1.true_height());
+		Some(kv)
+	}
 
 	#[inline]
-	pub fn replace(&mut self, idx: usize, str: CompactString, value: NbtElement) -> Option<NbtElement> {
+	pub fn replace(&mut self, idx: usize, str: CompactString, value: NbtElement) -> Option<NbtElementAndKey> {
 		if !self.can_insert(&value) || idx >= self.len() { return None; }
 
-		let (_, removed) = self.remove_idx(idx)?;
+		let kv = self.remove(idx).map(|(a, b)| (Some(a), b))?;
 		self.insert(idx, str, value);
-		Some(removed)
+		Some(kv)
 	}
 
 	#[inline]
@@ -373,6 +377,14 @@ impl NbtCompound {
 
 	#[inline]
 	pub fn recache(&mut self) {
+		let mut height = 1;
+		let mut true_height = 1;
+		for (_, child) in self.children() {
+			height += child.height() as u32;
+			true_height += child.true_height() as u32;
+		}
+		self.height = height;
+		self.true_height = true_height;
 		let mut max_depth = 0;
 		if self.open() {
 			for (key, child) in self.children() {
@@ -625,7 +637,7 @@ impl NbtCompound {
 		}
 
 		if *y < 16 {
-			return DropFn::Missed(key, element);
+			return DropFn::Missed((key, element));
 		} else {
 			*y -= 16;
 		}
@@ -683,8 +695,8 @@ impl NbtCompound {
 					line_number + 1,
 					indices,
 				) {
-					x @ DropFn::InvalidType(_, _) => return x,
-					DropFn::Missed(k, e) => {
+					x @ DropFn::InvalidType(_) => return x,
+					DropFn::Missed((k, e)) => {
 						key = k;
 						element = e;
 					}
@@ -698,7 +710,7 @@ impl NbtCompound {
 			}
 			indices.pop();
 		}
-		DropFn::Missed(key, element)
+		DropFn::Missed((key, element))
 	}
 
 	#[inline]

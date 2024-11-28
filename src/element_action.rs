@@ -353,7 +353,7 @@ impl ElementAction {
 					};
 					let mut indices = indices.into_vec();
 					indices.push(0);
-					if let Err(e) = add_element(element, key, value, &[0], bookmarks, subscription) {
+					if let Err(e) = add_element(element, key, value, Box::new([0]), bookmarks, subscription) {
 						alerts.push(Alert::new("Error!", TextColor::Red, e.to_string()));
 						return None;
 					}

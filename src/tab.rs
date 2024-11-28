@@ -134,6 +134,7 @@ impl Tab {
 			&mut builder.horizontal_scroll,
 			self.horizontal_scroll(),
 		);
+		// let start = std::time::Instant::now();
 		if let Some(compound) = self.value.as_compound() {
 			compound.render_root(builder, &self.name, ctx);
 		} else if let Some(region) = self.value.as_region() {
@@ -141,6 +142,7 @@ impl Tab {
 		} else if let Some(list) = self.value.as_list() {
 			list.render_root(builder, &self.name, ctx);
 		}
+		// println!("Tree Only: {}ms", start.elapsed().as_millis_f64());
 		builder.color = TextColor::White.to_raw();
 		if self.value.as_region().is_some_and(|region| region.is_grid_layout()) {
 			ctx.render_grid_line_numbers(builder, &self.bookmarks);

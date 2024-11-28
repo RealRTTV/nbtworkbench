@@ -176,6 +176,7 @@ pub enum ZOffset {
     HELD_ENTRY_TEXT_Z = 211,
     NOTIFICATION_Z = 240,
     NOTIFICATION_TEXT_Z = 241,
+	DEBUG_TEXT_Z = 251,
     TOOLTIP_Z = 255,
 }
 

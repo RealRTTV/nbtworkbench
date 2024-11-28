@@ -4,6 +4,7 @@ use std::convert::identity;
 use std::ops::{Deref, DerefMut, Index, IndexMut, RangeBounds};
 
 use crate::assets::{BOOKMARK_UV, HIDDEN_BOOKMARK_UV};
+use crate::combined_two_sorted;
 use crate::vertex_buffer_builder::Vec2u;
 
 macro_rules! slice {
@@ -118,6 +119,13 @@ impl MarkedLines {
     }
 
     #[inline]
+    pub fn add_bookmarks(&mut self, other: impl Into<Vec<MarkedLine>>) {
+        let this = core::mem::replace(self, Self::new()).into_raw();
+        let that = other.into().into_boxed_slice();
+        self.inner = combined_two_sorted(this, that);
+    }
+
+    #[inline]
     pub fn clear(&mut self) {
         self.inner.clear();
     }
@@ -152,11 +160,27 @@ impl MarkedLines {
     }
 }
 
+impl Into<Vec<MarkedLine>> for MarkedLines {
+    fn into(self) -> Vec<MarkedLine> {
+        self.inner
+    }
+}
+
 #[repr(transparent)]
 #[derive(Debug)]
 pub struct MarkedLineSlice([MarkedLine]);
 
 impl MarkedLineSlice {
+    #[inline]
+    pub fn from_marked_lines(marked_lines: &[MarkedLine]) -> &Self {
+        unsafe { core::mem::transmute(marked_lines) }
+    }
+
+    #[inline]
+    pub fn from_marked_lines_mut(marked_lines: &mut [MarkedLine]) -> &mut Self {
+        unsafe { core::mem::transmute(marked_lines) }
+    }
+
     #[inline]
     pub fn increment(&mut self, value: usize, true_value: usize) {
         for marked_line in &mut self.0 {

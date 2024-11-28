@@ -642,7 +642,9 @@ impl<'window> State<'window> {
 				timestamp_writes: None,
 				occlusion_query_set: None,
 			});
+			// let start = std::time::Instant::now();
 			workbench.render(&mut builder);
+			// println!("Full Frame: {}ms", start.elapsed().as_millis_f64());
 
 			let show_cursor = true;
 			if show_cursor != workbench.cursor_visible {

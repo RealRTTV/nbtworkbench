@@ -53,6 +53,7 @@ impl core::fmt::Write for VertexBufferBuilder {
 
 impl VertexBufferBuilder {
 	pub const CHAR_WIDTH: &'static [u8] = include_bytes!("assets/char_widths.hex");
+	pub const CHAR_HEIGHT: usize = 16;
 
 	pub fn new(size: PhysicalSize<u32>, scroll: usize, scale: f32) -> Self {
 		Self {
@@ -139,7 +140,7 @@ impl VertexBufferBuilder {
 			self.color = color;
 
 			let (mut x, y) = pos.into();
-			let mut y = y + 16;
+			let mut y = y + Self::CHAR_HEIGHT;
 			let text_width = text.iter().map(|x| x.width()).max().unwrap_or(0);
 			if !no_tooltip_repositioning && x + text_width + 6 > self.window_width() {
 				x = usize::max(x.saturating_sub(text_width + 30), 4)
@@ -155,7 +156,7 @@ impl VertexBufferBuilder {
 				let _ = write!(self, "{line}");
 				max = max.max(self.text_coords.0);
 				self.text_coords.0 = x + 3;
-				self.text_coords.1 += 16;
+				self.text_coords.1 += Self::CHAR_HEIGHT;
 			}
 			let width = max - 3 - x;
 			let height = self.text_coords.1 - 3 - y;
@@ -219,9 +220,9 @@ impl VertexBufferBuilder {
 			let char = f32::from_bits(char as u32);
 
 			let x0 = x.mul_add(self.two_over_width, -1.0);
-			let x1 = self.two_over_width.mul_add(16.0 * self.scale, x0);
+			let x1 = self.two_over_width.mul_add(Self::CHAR_HEIGHT as f32 * self.scale, x0);
 			let y1 = y.mul_add(self.negative_two_over_height, 1.0);
-			let y0 = self.negative_two_over_height.mul_add(16.0 * self.scale, y1);
+			let y0 = self.negative_two_over_height.mul_add(Self::CHAR_HEIGHT as f32 * self.scale, y1);
 
 			let len = self.text_vertices_len;
 			let vec = &mut self.text_vertices;

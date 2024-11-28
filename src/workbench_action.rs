@@ -1,11 +1,12 @@
 use std::cell::SyncUnsafeCell;
+use std::ffi::OsStr;
 use std::mem::MaybeUninit;
 use std::path::PathBuf;
 use std::sync::Arc;
 use compact_str::{CompactString, ToCompactString};
 
-use crate::{encompasses, encompasses_or_equal, FileUpdateSubscription, hash, HeldEntry, add_element, remove_element};
-use crate::{Position, sum_indices};
+use crate::{FileUpdateSubscription, hash, HeldEntry, add_element, remove_element, NbtElementAndKey, replace_element, recache_along_indices, swap_elements};
+use crate::sum_indices;
 use crate::Navigate;
 use crate::elements::compound::{CompoundMap, Entry};
 use crate::elements::element::NbtElement;
@@ -14,7 +15,7 @@ use crate::marked_line::MarkedLines;
 #[derive(Debug)]
 pub enum WorkbenchAction {
 	Remove {
-		element: (Option<CompactString>, NbtElement),
+		element: NbtElementAndKey,
 		indices: Box<[usize]>,
 	},
 	Add {
@@ -25,14 +26,14 @@ pub enum WorkbenchAction {
 		key: Option<CompactString>,
 		value: Option<CompactString>,
 	},
-	Move {
-		from: Box<[usize]>,
-		to: Box<[usize]>,
-		original_key: Option<CompactString>,
+	Swap {
+		parent: Box<[usize]>,
+		a: usize,
+		b: usize,
 	},
 	Replace {
 		indices: Box<[usize]>,
-		value: (Option<CompactString>, NbtElement),
+		value: NbtElementAndKey,
 	},
 	ReorderCompound {
 		indices: Box<[usize]>,
@@ -60,7 +61,7 @@ pub enum WorkbenchAction {
 		held_entry: HeldEntry,
 	},
 	Bulk {
-		actions: Box<[WorkbenchAction]>,
+		actions: Box<[Self]>,
 	}
 }
 
@@ -82,25 +83,10 @@ impl WorkbenchAction {
 	)]
 	unsafe fn undo0(self, root: &mut NbtElement, bookmarks: &mut MarkedLines, subscription: &mut Option<FileUpdateSubscription>, path: &mut Option<PathBuf>, name: &mut Box<str>, held_entry: &mut HeldEntry) -> Option<Self> {
 		Some(match self {
-			Self::Remove {
-				element: (key, value),
-				indices,
-			} => {
-				add_element(root, key, value, indices.as_ref(), bookmarks, subscription).expect("Could add element");
-				Self::Add { indices }
-			}
-			Self::Add { indices } => {
-				let (key, value) = remove_element(root, &indices, bookmarks, subscription).expect("Could remove element");
-				Self::Remove {
-					element: (key, value),
-					indices,
-				}
-			}
-			Self::Rename {
-				indices,
-				key,
-				value,
-			} => {
+			Self::Remove { element: (key, value), indices, } => add_element(root, key, value, indices, bookmarks, subscription).expect("Couldn't add element"),
+			Self::Add { indices } => remove_element(root, indices, bookmarks, subscription).expect("Could remove element").into_action(),
+			Self::Replace { indices, value, } => replace_element(root, value, indices, bookmarks, subscription).expect("Could not replace element").into_action(),
+			Self::Rename { indices, key, value } => {
 				if let Some((&last, rem)) = indices.split_last() {
 					let key = if let Some(key) = key {
 						let parent = Navigate::new(rem.iter().copied(), root).last().2;
@@ -122,7 +108,7 @@ impl WorkbenchAction {
 							.map(|x| x.0)
 					});
 					if key.is_some() || value.is_some() {
-						crate::recache_along_indices(rem, root);
+						recache_along_indices(rem, root);
 					}
 					Self::Rename {
 						indices,
@@ -130,168 +116,21 @@ impl WorkbenchAction {
 						value,
 					}
 				} else {
-					let old = PathBuf::from(value?.into_string());
-					let old_name = old
+					let new = PathBuf::from(value?.into_string());
+					let new_name = new
 						.file_name()
-						.and_then(|str| str.to_str())?
+						.and_then(OsStr::to_str)?
 						.to_owned()
 						.into_boxed_str();
-					let value = if let Some(new) = path.replace(old) {
-						new.to_str()?.to_compact_string()
-					} else {
-						name.to_compact_string()
-					};
-					*name = old_name;
-					Self::Rename {
-						indices,
-						key,
-						value: Some(value),
-					}
+					let old = path
+						.replace(new)
+						.and_then(|new| new.to_str().map(|s| s.to_compact_string()))
+						.unwrap_or_else(|| name.to_compact_string());
+					*name = new_name;
+					Self::Rename { indices, key, value: Some(old) }
 				}
 			}
-			Self::Move {
-				mut from,
-				to,
-				original_key,
-			} => {
-				let mut changed_subscription_indices = false;
-
-				let (key, mov) = {
-					let (&last, rem) = to.split_last()?;
-					let (_, _, parent, mut line_number) = Navigate::new(rem.iter().copied(), root).last();
-					for n in 0..last {
-						line_number += parent.get(n)?.true_height();
-					}
-					line_number += 1;
-					let (key, element) = parent.remove(last)?;
-					let (height, true_height) = (element.height(), element.true_height());
-					let mut iter = Navigate::new(rem.iter().copied(), root);
-					while let Some((_, _, _, element, _)) = iter.next() {
-						element.decrement(height, true_height);
-					}
-					let _ = bookmarks.remove(line_number..line_number + true_height);
-					bookmarks[line_number..].decrement(height, true_height);
-					if let Some(subscription) = subscription {
-						if to == subscription.indices {
-							subscription.indices = from.clone();
-							changed_subscription_indices = true;
-						} else if encompasses(rem, &subscription.indices) {
-							if subscription.indices[rem.len()] >= last {
-								subscription.indices[rem.len()] -= 1;
-							}
-						}
-					}
-					crate::recache_along_indices(rem, root);
-					(key, element)
-				};
-
-				{
-					let line_number = {
-						let last = from.last().copied()?;
-						if last == 0 {
-							Navigate::new(from.iter().copied().take(from.len() - 1), root)
-								.last()
-								.3 + 1
-						} else {
-							*from.last_mut()? -= 1;
-							let x = Navigate::new(from.iter().copied(), root).last().3 + 1;
-							*from.last_mut()? += 1;
-							x
-						}
-					};
-					let (&last, rem) = from.split_last()?;
-					let (height, true_height) = (mov.height(), mov.true_height());
-					let mut iter = Navigate::new(rem.iter().copied(), root);
-					while let Some((position, _, _, element, _)) = iter.next() {
-						match position {
-							Position::First | Position::Middle => {
-								element.increment(height, true_height);
-							}
-							Position::Last | Position::Only => {
-								if let Some(compound) = element.as_compound_mut() {
-									compound.insert(last, original_key?, mov);
-								} else if let Some(chunk) = element.as_chunk_mut() {
-									chunk.insert(last, original_key?, mov);
-								} else {
-									if element.insert(last, mov).is_err() { return None }
-								}
-								break;
-							}
-						}
-					}
-					bookmarks[line_number..].increment(height, true_height);
-					if let Some(subscription) = subscription
-						&& !changed_subscription_indices
-						&& encompasses_or_equal(rem, &subscription.indices)
-					{
-						if subscription.indices[rem.len()] <= last {
-							subscription.indices[rem.len()] += 1;
-						}
-					}
-					crate::recache_along_indices(rem, root);
-				}
-
-				Self::Move {
-					from: to,
-					to: from,
-					original_key: key,
-				}
-			}
-			Self::Replace {
-				indices,
-				value: (key, value),
-			} => {
-				let element = Navigate::new(indices.iter().copied(), root).last().2;
-				let (diff, true_diff) = (
-					value.height().wrapping_sub(element.height()),
-					value.true_height().wrapping_sub(element.true_height()),
-				);
-				if let Some((&last, rest)) = indices.split_last() {
-					let mut iter = Navigate::new(rest.iter().copied(), root);
-					while let Some((position, _, _, element, line_number)) = iter.next() {
-						if let Position::Last | Position::Only = position {
-							let (old_key, old_value) = element
-								.remove(last)
-								.expect("index is always valid");
-							let old_true_height = old_value.true_height();
-							element.decrement(old_value.height(), old_value.true_height());
-							if let Some(compound) = element.as_compound_mut() {
-								compound.insert(last, key?, value);
-							} else if let Some(chunk) = element.as_chunk_mut() {
-								chunk.insert(last, key?, value);
-							} else {
-								if element.insert(last, value).is_err() {
-									panic!("oh crap");
-								}
-							}
-							let _ = bookmarks.remove(line_number..line_number + old_true_height);
-							bookmarks[line_number..].increment(true_diff, diff);
-
-							crate::recache_along_indices(rest, root);
-							if let Some(inner_subscription) = subscription
-								&& encompasses(&indices, &inner_subscription.indices)
-							{
-								*subscription = None;
-							}
-
-							return Some(Self::Replace {
-								indices,
-								value: (old_key, old_value),
-							});
-						} else {
-							element.increment(diff, true_diff);
-						}
-					}
-					panic!("always will have a value")
-				} else {
-					let old_root = core::mem::replace(root, value);
-					bookmarks.clear();
-					return Some(Self::Replace {
-						indices,
-						value: (None, old_root),
-					});
-				}
-			}
+			Self::Swap { parent, a, b, } => swap_elements(root, parent, a, b, bookmarks, subscription).expect("Couldn't swap element").into_action(),
 			Self::ReorderCompound { indices: traversal_indices, reordering_indices } => {
 				let line_number = sum_indices(traversal_indices.iter().copied(), root);
 				let (_, _, element, true_line_number) = Navigate::new(traversal_indices.iter().copied(), root).last();
@@ -351,12 +190,12 @@ impl WorkbenchAction {
 					HeldEntry::FromAether(value) => (value, None),
 					HeldEntry::FromKnown(value, indices, is_swap) => (value, Some((indices, is_swap))),
 				};
-				let Self::Replace { value, indices } = Self::Replace { indices, value: (original_key, value) }.undo0(root, bookmarks, subscription, path, name, held_entry)? else { return None };
-				*held_entry = if let Some((held_entry_indices, is_swap)) = known_data { HeldEntry::FromKnown(value, held_entry_indices, is_swap) } else { HeldEntry::FromAether(value) };
+				let (indices, kv, _) = replace_element(root, (original_key, value), indices, bookmarks, subscription).expect("Could replace element").into_raw();
+				*held_entry = if let Some((held_entry_indices, is_swap)) = known_data { HeldEntry::FromKnown(kv, held_entry_indices, is_swap) } else { HeldEntry::FromAether(kv) };
 				Self::HeldEntrySwap { indices, original_key: new_key }
 			},
 			Self::HeldEntryDrop { from_indices, indices, original_key } => {
-				let (new_key, value) = remove_element(root, &indices, bookmarks, subscription).expect("Able to remove element");
+				let (indices, (new_key, value), _) = remove_element(root, indices, bookmarks, subscription).expect("Able to remove element").into_raw();
 				*held_entry = if let Some(from_indices) = &from_indices { HeldEntry::FromKnown((original_key, value), Box::clone(&*from_indices.get()), false) } else { HeldEntry::FromAether((original_key, value)) };
 				if matches!(held_entry, HeldEntry::FromAether(_)) {
 					Self::HeldEntryStealFromAether { indices, original_key: new_key }
@@ -366,13 +205,13 @@ impl WorkbenchAction {
 			}
 			Self::HeldEntrySteal { from_indices, original_key } => {
 				let HeldEntry::FromKnown((new_key, value), indices, _) = held_entry.take() else { return None };
-				add_element(root, original_key, value, &indices, bookmarks, subscription).expect("Able to add element");
+				let Self::Add { indices } = add_element(root, original_key, value, indices, bookmarks, subscription).expect("Expected ability to add element") else { return None };
 				Self::HeldEntryDrop { from_indices, indices, original_key: new_key }
 
 			},
 			Self::HeldEntryStealFromAether { indices, original_key } => {
 				let HeldEntry::FromAether((new_key, value)) = held_entry.take() else { return None };
-				add_element(root, original_key, value, &indices, bookmarks, subscription).expect("Able to add element");
+				let Self::Add { indices } = add_element(root, original_key, value, indices, bookmarks, subscription).expect("Expected ability to add element") else { return None };
 				Self::HeldEntryDrop {
 					from_indices: None,
 					indices,

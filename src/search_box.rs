@@ -8,7 +8,7 @@ use winit::event::MouseButton;
 use winit::keyboard::KeyCode;
 use winit::window::Theme;
 
-use crate::{combined_two_sorted, config, create_regex, flags, since_epoch, SortAlgorithm, StrExt};
+use crate::{config, create_regex, flags, since_epoch, SortAlgorithm, StrExt};
 use crate::assets::{ADD_SEARCH_BOOKMARKS_UV, BASE_Z, BOOKMARK_UV, DARK_STRIPE_UV, HIDDEN_BOOKMARK_UV, HOVERED_WIDGET_UV, REGEX_SEARCH_MODE_UV, REMOVE_SEARCH_BOOKMARKS_UV, SEARCH_BOX_SELECTION_Z, SEARCH_BOX_Z, SEARCH_KEYS_AND_VALUES_UV, SEARCH_KEYS_UV, SEARCH_VALUES_UV, SNBT_SEARCH_MODE_UV, STRING_SEARCH_MODE_UV, UNSELECTED_WIDGET_UV};
 use crate::color::TextColor;
 use crate::elements::element::NbtElement;
@@ -351,8 +351,7 @@ impl SearchBox {
         let new_bookmarks = Self::search0(root, &predicate);
         self.hits = Some((new_bookmarks.len(), since_epoch() - start));
         if !count_only {
-            let old_bookmarks = core::mem::replace(bookmarks, MarkedLines::new());
-            *bookmarks = unsafe { MarkedLines::from_raw(combined_two_sorted(new_bookmarks.into_raw(), old_bookmarks.into_raw())) };
+            bookmarks.add_bookmarks(new_bookmarks);
         }
     }
 

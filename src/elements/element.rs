@@ -12,7 +12,7 @@ use compact_str::{CompactString, format_compact, ToCompactString};
 use hashbrown::raw::RawTable;
 use polonius_the_crab::{polonius, polonius_return};
 
-use crate::{array, assets::JUST_OVERLAPPING_BASE_TEXT_Z, DropFn, primitive, RenderContext, since_epoch, StrExt, TextColor, VertexBufferBuilder};
+use crate::{array, assets::JUST_OVERLAPPING_BASE_TEXT_Z, DropFn, primitive, RenderContext, since_epoch, StrExt, TextColor, VertexBufferBuilder, NbtElementAndKey};
 use crate::assets::{BASE_Z, BYTE_ARRAY_UV, BYTE_UV, CONNECTION_UV, DOUBLE_UV, FLOAT_UV, INT_ARRAY_UV, INT_UV, LONG_ARRAY_UV, LONG_UV, SHORT_UV, ZOffset};
 use crate::be_decoder::BigEndianDecoder;
 use crate::element_action::ElementAction;
@@ -148,7 +148,7 @@ impl NbtElement {
 	pub fn set_id(&mut self, id: u8) {
 		unsafe { core::ptr::write(core::ptr::addr_of_mut!(self.id.id), id); }
 	}
-	
+
 	#[must_use]
 	#[inline]
 	pub fn Byte(this: NbtByte) -> Self {
@@ -482,7 +482,7 @@ impl NbtElement {
 
 		NbtString::from_str0(s).map(|(s, x)| (s, Self::String(x)))
 	}
-	
+
 	#[inline(never)]
 	pub fn from_be_bytes(element: u8, decoder: &mut BigEndianDecoder) -> Option<Self> {
 		Some(match element {
@@ -572,10 +572,6 @@ impl NbtElement {
 	#[inline]
 	#[must_use]
 	pub const fn id(&self) -> u8 { unsafe { self.id.id } }
-
-	#[inline]
-	#[must_use]
-	pub const fn is_null(&self) -> bool { self.id() == 0 }
 
 	#[inline]
 	#[must_use]
@@ -711,7 +707,10 @@ impl NbtElement {
 		unsafe {
 			Some(match self.id() {
 				NbtCompound::ID => self.compound.len(),
-				NbtByteArray::ID | NbtIntArray::ID | NbtLongArray::ID | NbtList::ID => self.list.len(),
+				NbtByteArray::ID => self.byte_array.len(),
+				NbtIntArray::ID => self.int_array.len(),
+				NbtLongArray::ID => self.long_array.len(),
+				NbtList::ID => self.list.len(),
 				NbtRegion::ID => self.region.len(),
 				NbtChunk::ID => self.chunk.len(),
 				_ => return None,
@@ -785,25 +784,14 @@ impl NbtElement {
 	pub fn height(&self) -> usize {
 		unsafe {
 			match self.id() {
-				NbtByteArray::ID | NbtIntArray::ID | NbtLongArray::ID => self.byte_array.height(),
+				NbtByteArray::ID => self.byte_array.height(),
+				NbtIntArray::ID => self.int_array.height(),
+				NbtLongArray::ID => self.long_array.height(),
 				NbtList::ID => self.list.height(),
 				NbtCompound::ID => self.compound.height(),
 				NbtChunk::ID => self.chunk.height(),
 				NbtRegion::ID => self.region.height(),
 				_ => 1,
-			}
-		}
-	}
-
-	#[inline]
-	pub fn swap(&mut self, a: usize, b: usize) {
-		unsafe {
-			match self.id() {
-				NbtByteArray::ID | NbtIntArray::ID | NbtLongArray::ID | NbtList::ID => self.list.elements.swap(a, b),
-				NbtCompound::ID => self.compound.entries.swap(a, b),
-				NbtChunk::ID => self.chunk.entries.swap(a, b),
-				NbtRegion::ID => self.region.swap(a, b),
-				_ => {}
 			}
 		}
 	}
@@ -823,7 +811,10 @@ impl NbtElement {
 	pub fn children(&self) -> Option<Result<Iter<'_, NbtElement>, CompoundMapIter<'_>>> {
 		unsafe {
 			Some(match self.id() {
-				NbtByteArray::ID | NbtIntArray::ID | NbtLongArray::ID | NbtList::ID => Ok(self.list.children()),
+				NbtByteArray::ID => Ok(self.byte_array.children()),
+				NbtIntArray::ID => Ok(self.int_array.children()),
+				NbtLongArray::ID => Ok(self.long_array.children()),
+				NbtList::ID => Ok(self.list.children()),
 				NbtCompound::ID => Err(self.compound.children()),
 				NbtChunk::ID => Err(self.chunk.children()),
 				NbtRegion::ID => Ok(self.region.children()),
@@ -883,7 +874,9 @@ impl NbtElement {
 	pub fn true_height(&self) -> usize {
 		unsafe {
 			match self.id() {
-				NbtByteArray::ID | NbtIntArray::ID | NbtLongArray::ID => self.byte_array.true_height(),
+				NbtByteArray::ID => self.byte_array.true_height(),
+				NbtIntArray::ID => self.int_array.true_height(),
+				NbtLongArray::ID => self.long_array.true_height(),
 				NbtList::ID => self.list.true_height(),
 				NbtCompound::ID => self.compound.true_height(),
 				NbtRegion::ID => self.region.true_height(),
@@ -898,7 +891,9 @@ impl NbtElement {
 	pub fn toggle(&mut self) -> Option<()> {
 		unsafe {
 			match self.id() {
-				NbtByteArray::ID | NbtIntArray::ID | NbtLongArray::ID => self.byte_array.toggle(),
+				NbtByteArray::ID => self.byte_array.toggle(),
+				NbtIntArray::ID => self.int_array.toggle(),
+				NbtLongArray::ID => self.long_array.toggle(),
 				NbtList::ID => self.list.toggle(),
 				NbtCompound::ID => self.compound.toggle(),
 				NbtRegion::ID => self.region.toggle(),
@@ -913,7 +908,9 @@ impl NbtElement {
 	pub fn open(&self) -> bool {
 		unsafe {
 			match self.id() {
-				NbtByteArray::ID | NbtIntArray::ID | NbtLongArray::ID => self.byte_array.open(),
+				NbtByteArray::ID => self.byte_array.open(),
+				NbtIntArray::ID => self.int_array.open(),
+				NbtLongArray::ID => self.long_array.open(),
 				NbtList::ID => self.list.open(),
 				NbtCompound::ID => self.compound.open(),
 				NbtRegion::ID => self.region.is_open(),
@@ -927,7 +924,9 @@ impl NbtElement {
 	pub fn increment(&mut self, amount: usize, true_amount: usize) {
 		unsafe {
 			match self.id() {
-				NbtByteArray::ID | NbtIntArray::ID | NbtLongArray::ID => self.byte_array.increment(amount, true_amount),
+				NbtByteArray::ID => self.byte_array.increment(amount, true_amount),
+				NbtIntArray::ID => self.int_array.increment(amount, true_amount),
+				NbtLongArray::ID => self.long_array.increment(amount, true_amount),
 				NbtList::ID => self.list.increment(amount, true_amount),
 				NbtCompound::ID => self.compound.increment(amount, true_amount),
 				NbtRegion::ID => self.region.increment(amount, true_amount),
@@ -941,7 +940,9 @@ impl NbtElement {
 	pub fn decrement(&mut self, amount: usize, true_amount: usize) {
 		unsafe {
 			match self.id() {
-				NbtByteArray::ID | NbtIntArray::ID | NbtLongArray::ID => self.byte_array.decrement(amount, true_amount),
+				NbtByteArray::ID => self.byte_array.decrement(amount, true_amount),
+				NbtIntArray::ID => self.int_array.decrement(amount, true_amount),
+				NbtLongArray::ID => self.long_array.decrement(amount, true_amount),
 				NbtList::ID => self.list.decrement(amount, true_amount),
 				NbtCompound::ID => self.compound.decrement(amount, true_amount),
 				NbtRegion::ID => self.region.decrement(amount, true_amount),
@@ -1012,6 +1013,17 @@ impl NbtElement {
 
 	#[inline]
 	#[must_use]
+	pub fn is_grid_layout(&self) -> bool {
+		unsafe {
+			match self.id() {
+				NbtRegion::ID => self.region.is_grid_layout(),
+				_ => false,
+			}
+		}
+	}
+
+	#[inline]
+	#[must_use]
 	pub fn should_render_description(&self) -> bool {
 		unsafe {
 			match self.id() {
@@ -1028,7 +1040,7 @@ impl NbtElement {
 			match self.id() {
 				_ if *y >= height + 8 => {
 					*y -= height;
-					DropFn::Missed(key, element)
+					DropFn::Missed((key, element))
 				}
 				NbtByteArray::ID => self
 					.byte_array
@@ -1060,7 +1072,7 @@ impl NbtElement {
 					.drop(key, element, y, depth, target_depth, line_number, indices),
 				_ => {
 					*y = y.saturating_sub(16);
-					DropFn::Missed(key, element)
+					DropFn::Missed((key, element))
 				}
 			}
 		}
@@ -1070,7 +1082,9 @@ impl NbtElement {
 	pub fn shut(&mut self) {
 		unsafe {
 			match self.id() {
-				NbtByteArray::ID | NbtIntArray::ID | NbtLongArray::ID => self.byte_array.shut(),
+				NbtByteArray::ID => self.byte_array.shut(),
+				NbtIntArray::ID => self.int_array.shut(),
+				NbtLongArray::ID => self.long_array.shut(),
 				NbtList::ID => self.list.shut(),
 				NbtCompound::ID => self.compound.shut(),
 				NbtChunk::ID => self.chunk.shut(),
@@ -1085,7 +1099,9 @@ impl NbtElement {
 	pub fn expand<'a, 'b>(&'b mut self, scope: &'a Scope<'a, 'b>) {
 		unsafe {
 			match self.id() {
-				NbtByteArray::ID | NbtIntArray::ID | NbtLongArray::ID => self.byte_array.expand(),
+				NbtByteArray::ID => self.byte_array.expand(),
+				NbtIntArray::ID => self.int_array.expand(),
+				NbtLongArray::ID => self.long_array.expand(),
 				NbtList::ID => self.list.expand(scope),
 				NbtCompound::ID => self.compound.expand(scope),
 				NbtChunk::ID => self.chunk.expand(scope),
@@ -1100,7 +1116,9 @@ impl NbtElement {
 	pub fn expand(&mut self) {
 		unsafe {
 			match self.id() {
-				NbtByteArray::ID | NbtIntArray::ID | NbtLongArray::ID => self.byte_array.expand(),
+				NbtByteArray::ID => self.byte_array.expand(),
+				NbtIntArray::ID => self.int_array.expand(),
+				NbtLongArray::ID => self.long_array.expand(),
 				NbtList::ID => self.list.expand(),
 				NbtCompound::ID => self.compound.expand(),
 				NbtChunk::ID => self.chunk.expand(),
@@ -1116,52 +1134,72 @@ impl NbtElement {
 	///
 	/// If any changes are made to this error list, then the duplicate may have to be updated as it relies on this never occurring
 	#[inline]
-	pub fn insert(&mut self, idx: usize, value: Self) -> Result<Option<Self>, Self> {
+	pub unsafe fn insert(&mut self, idx: usize, value: NbtElementAndKey) -> Result<Option<Self>, Self> {
 		unsafe {
 			match self.id() {
-				NbtByteArray::ID => self.byte_array.insert(idx, value),
-				NbtList::ID => self.list.insert(idx, value),
+				NbtByteArray::ID => self.byte_array.insert(idx, value.1),
+				NbtList::ID => self.list.insert(idx, value.1),
 				NbtCompound::ID => {
-					self.compound.insert(idx, CompactString::const_new("_"), value);
+					self.compound.insert(idx, value.0.unwrap_or(CompactString::const_new("_")), value.1);
 					Ok(None)
 				}
-				NbtIntArray::ID => self.int_array.insert(idx, value),
-				NbtLongArray::ID => self.long_array.insert(idx, value),
-				NbtRegion::ID => self.region.insert(idx, value),
+				NbtIntArray::ID => self.int_array.insert(idx, value.1),
+				NbtLongArray::ID => self.long_array.insert(idx, value.1),
+				NbtRegion::ID => self.region.insert(idx, value.1),
 				NbtChunk::ID => {
-					self.chunk.insert(idx, CompactString::const_new("_"), value);
+					self.chunk.insert(idx, value.0.unwrap_or(CompactString::const_new("_")), value.1);
 					Ok(None)
 				}
-				_ => Err(value),
+				_ => Err(value.1),
 			}
 		}
 	}
 
 	#[inline]
-	pub fn replace(&mut self, idx: usize, value: NbtElement) -> Option<NbtElement> {
+	pub unsafe fn replace_key_value(&mut self, idx: usize, kv: NbtElementAndKey) -> Option<NbtElementAndKey> {
 		unsafe {
 			match self.id() {
-				NbtByteArray::ID | NbtIntArray::ID | NbtLongArray::ID => self.byte_array.replace(idx, value),
-				NbtList::ID => self.list.replace(idx, value),
-				NbtCompound::ID => self.compound.replace(idx, CompactString::const_new("_"), value),
-				NbtChunk::ID => self.chunk.replace(idx, CompactString::const_new("_"), value),
-				NbtRegion::ID => self.region.replace(idx, value).ok().flatten(),
+				NbtByteArray::ID => Some((None, self.byte_array.replace(idx, kv.1)?)),
+				NbtIntArray::ID => Some((None, self.int_array.replace(idx, kv.1)?)),
+				NbtLongArray::ID => Some((None, self.long_array.replace(idx, kv.1)?)),
+				NbtList::ID => Some((None, self.list.replace(idx, kv.1)?)),
+				NbtCompound::ID => self.compound.replace(idx, kv.0?, kv.1),
+				NbtChunk::ID => self.chunk.replace(idx, kv.0?, kv.1),
+				NbtRegion::ID => Some((None, self.region.replace(idx, kv.1).ok()??)),
 				_ => None,
 			}
 		}
 	}
 
 	#[inline]
-	pub fn remove(&mut self, idx: usize) -> Option<(Option<CompactString>, Self)> {
+	pub unsafe fn remove(&mut self, idx: usize) -> Option<(Option<CompactString>, Self)> {
 		unsafe {
 			Some(match self.id() {
-				NbtByteArray::ID | NbtIntArray::ID | NbtLongArray::ID => (None, self.byte_array.remove(idx)),
+				NbtByteArray::ID => (None, self.byte_array.remove(idx)),
+				NbtIntArray::ID => (None, self.int_array.remove(idx)),
+				NbtLongArray::ID => (None, self.long_array.remove(idx)),
 				NbtList::ID => (None, self.list.remove(idx)),
-				NbtCompound::ID => return self.compound.remove_idx(idx).map(|(a, b)| (Some(a), b)),
+				NbtCompound::ID => return self.compound.remove(idx).map(|(a, b)| (Some(a), b)),
 				NbtRegion::ID => (None, self.region.replace_with_empty(idx)),
-				NbtChunk::ID => return self.chunk.remove_idx(idx).map(|(a, b)| (Some(a), b)),
+				NbtChunk::ID => return self.chunk.remove(idx).map(|(a, b)| (Some(a), b)),
 				_ => return None,
 			})
+		}
+	}
+
+	#[inline]
+	pub fn swap(&mut self, a: usize, b: usize) {
+		unsafe {
+			match self.id() {
+				NbtByteArray::ID => self.byte_array.values.swap(a, b),
+				NbtIntArray::ID => self.int_array.values.swap(a, b),
+				NbtLongArray::ID  => self.long_array.values.swap(a, b),
+				NbtList::ID => self.list.elements.swap(a, b),
+				NbtCompound::ID => self.compound.entries.swap(a, b),
+				NbtChunk::ID => self.chunk.entries.swap(a, b),
+				NbtRegion::ID => self.region.swap(a, b),
+				_ => {}
+			}
 		}
 	}
 
@@ -1170,7 +1208,9 @@ impl NbtElement {
 	pub fn get(&self, idx: usize) -> Option<&Self> {
 		unsafe {
 			match self.id() {
-				NbtByteArray::ID | NbtIntArray::ID | NbtLongArray::ID => self.byte_array.get(idx),
+				NbtByteArray::ID => self.byte_array.get(idx),
+				NbtIntArray::ID => self.int_array.get(idx),
+				NbtLongArray::ID => self.long_array.get(idx),
 				NbtList::ID => self.list.get(idx),
 				NbtCompound::ID => self.compound.get(idx).map(|(_, x)| x),
 				NbtRegion::ID => self.region.get(idx),
@@ -1185,7 +1225,9 @@ impl NbtElement {
 	pub fn get_mut(&mut self, idx: usize) -> Option<&mut Self> {
 		unsafe {
 			match self.id() {
-				NbtByteArray::ID | NbtIntArray::ID | NbtLongArray::ID => self.byte_array.get_mut(idx),
+				NbtByteArray::ID => self.byte_array.get_mut(idx),
+				NbtIntArray::ID => self.int_array.get_mut(idx),
+				NbtLongArray::ID => self.long_array.get_mut(idx),
 				NbtList::ID => self.list.get_mut(idx),
 				NbtCompound::ID => self.compound.get_mut(idx).map(|(_, x)| x),
 				NbtRegion::ID => self.region.get_mut(idx),
@@ -1200,7 +1242,9 @@ impl NbtElement {
 	pub fn max_depth(&self) -> usize {
 		unsafe {
 			match self.id() {
-				NbtByteArray::ID | NbtIntArray::ID | NbtLongArray::ID => self.byte_array.max_depth(),
+				NbtByteArray::ID => self.byte_array.max_depth(),
+				NbtIntArray::ID => self.int_array.max_depth(),
+				NbtLongArray::ID => self.long_array.max_depth(),
 				NbtList::ID => self.list.max_depth(),
 				NbtCompound::ID => self.compound.max_depth(),
 				NbtRegion::ID => self.region.max_depth(),
@@ -1336,7 +1380,7 @@ impl NbtElement {
 			}
 		}
 	}
-	
+
 	#[must_use]
 	pub fn can_insert(&self, value: &NbtElement) -> bool {
 		unsafe {
@@ -1575,7 +1619,7 @@ impl<'a> IndexMut<&'a str> for NbtElement {
 				None
 			}
 		}
-		
+
 		let mut this = self;
 		polonius!(|this| -> &'polonius mut NbtElement {
 			if let Some(x) = try_index(this, index) {
@@ -1710,1024 +1754,87 @@ impl NbtElement {
 	}
 }
 
-#[allow(dead_code)]
-impl NbtElement {
-	/// # Safety
-	///
-	/// * `self` must be of variant `NbtElement::Byte`
-	#[inline]
-	#[must_use]
-	pub unsafe fn into_byte_unchecked(self) -> NbtByte {
-		let result = core::ptr::read(core::ptr::addr_of!(*self.byte));
-		core::mem::forget(self);
-		result
-	}
-
-	/// # Safety
-	///
-	/// * `self` must be of variant `NbtElement::Byte`
-	#[inline]
-	#[must_use]
-	pub unsafe fn as_byte_unchecked(&self) -> &NbtByte { &self.byte }
-
-	/// # Safety
-	///
-	/// * `self` must be of variant `NbtElement::Byte`
-	#[inline]
-	#[must_use]
-	pub unsafe fn as_byte_unchecked_mut(&mut self) -> &mut NbtByte { &mut self.byte }
-
-	#[inline]
-	#[must_use]
-	pub fn into_byte(self) -> Option<NbtByte> {
-		unsafe {
-			if self.id() == NbtByte::ID {
-				Some({
-					let result = core::ptr::read(core::ptr::addr_of!(*self.byte));
-					core::mem::forget(self);
-					result
-				})
-			} else {
-				None
+macro_rules! type_conversions {
+    ($t:ty, $field:ident, $is:ident, $into_unchecked:ident, $as_unchecked:ident, $as_unchecked_mut:ident, $into:ident, $r#as:ident, $as_mut:ident) => {
+		#[allow(dead_code)]
+		impl NbtElement {
+			#[inline]
+			#[must_use]
+			pub unsafe fn $into_unchecked(self) -> $t {
+				let result = core::ptr::read(core::ptr::addr_of!(*self.$field));
+				core::mem::forget(self);
+				result
 			}
-		}
-	}
 
-	#[inline]
-	#[must_use]
-	pub fn as_byte(&self) -> Option<&NbtByte> {
-		unsafe {
-			if self.id() == NbtByte::ID {
-				Some(&self.byte)
-			} else {
-				None
+			#[inline]
+			#[must_use]
+			pub unsafe fn $as_unchecked(&self) -> &$t {
+				&self.$field
 			}
-		}
-	}
 
-	#[inline]
-	#[must_use]
-	pub fn as_byte_mut(&mut self) -> Option<&mut NbtByte> {
-		unsafe {
-			if self.id() == NbtByte::ID {
-				Some(&mut self.byte)
-			} else {
-				None
+			#[inline]
+			#[must_use]
+			pub unsafe fn $as_unchecked_mut(&mut self) -> &mut $t {
+				&mut self.$field
 			}
-		}
-	}
-}
 
-#[allow(dead_code)]
-impl NbtElement {
-	/// # Safety
-	///
-	/// * `self` must be of variant `NbtElement::Short`
-	#[inline]
-	#[must_use]
-	pub unsafe fn into_short_unchecked(self) -> NbtShort {
-		let result = core::ptr::read(core::ptr::addr_of!(*self.short));
-		core::mem::forget(self);
-		result
-	}
-
-	/// # Safety
-	///
-	/// * `self` must be of variant `NbtElement::Short`
-	#[inline]
-	#[must_use]
-	pub unsafe fn as_short_unchecked(&self) -> &NbtShort { &self.short }
-
-	/// # Safety
-	///
-	/// * `self` must be of variant `NbtElement::Short`
-	#[inline]
-	#[must_use]
-	pub unsafe fn as_short_unchecked_mut(&mut self) -> &mut NbtShort { &mut self.short }
-
-	#[inline]
-	#[must_use]
-	pub fn into_short(self) -> Option<NbtShort> {
-		unsafe {
-			if self.id() == NbtShort::ID {
-				Some({
-					let result = core::ptr::read(core::ptr::addr_of!(*self.short));
-					core::mem::forget(self);
-					result
-				})
-			} else {
-				None
+			#[inline]
+			#[must_use]
+			pub fn $into(self) -> Option<$t> {
+				unsafe {
+					if self.$is() {
+						Some(self.$into_unchecked())
+					} else {
+						None
+					}
+				}
 			}
-		}
-	}
 
-	#[inline]
-	#[must_use]
-	pub fn as_short(&self) -> Option<&NbtShort> {
-		unsafe {
-			if self.id() == NbtShort::ID {
-				Some(&self.short)
-			} else {
-				None
+			#[inline]
+			#[must_use]
+			pub fn $r#as(&self) -> Option<&$t> {
+				unsafe {
+					if self.$is() {
+						Some(self.$as_unchecked())
+					} else {
+						None
+					}
+				}
 			}
-		}
-	}
 
-	#[inline]
-	#[must_use]
-	pub fn as_short_mut(&mut self) -> Option<&mut NbtShort> {
-		unsafe {
-			if self.id() == NbtShort::ID {
-				Some(&mut self.short)
-			} else {
-				None
+			#[inline]
+			#[must_use]
+			pub fn $as_mut(&mut self) -> Option<&mut $t> {
+				unsafe {
+					if self.$is() {
+						Some(self.$as_unchecked_mut())
+					} else {
+						None
+					}
+				}
+			}
+
+			#[inline]
+			#[must_use]
+			pub fn $is(&self) -> bool {
+				self.id() == <$t>::ID
 			}
 		}
 	}
 }
 
-#[allow(dead_code)]
-impl NbtElement {
-	/// # Safety
-	///
-	/// * `self` must be of variant `NbtElement::Int`
-	#[inline]
-	#[must_use]
-	pub unsafe fn into_int_unchecked(self) -> NbtInt {
-		let result = core::ptr::read(core::ptr::addr_of!(*self.int));
-		core::mem::forget(self);
-		result
-	}
-
-	/// # Safety
-	///
-	/// * `self` must be of variant `NbtElement::Int`
-	#[inline]
-	#[must_use]
-	pub unsafe fn as_int_unchecked(&self) -> &NbtInt { &self.int }
-
-	/// # Safety
-	///
-	/// * `self` must be of variant `NbtElement::Int`
-	#[inline]
-	#[must_use]
-	pub unsafe fn as_int_unchecked_mut(&mut self) -> &mut NbtInt { &mut self.int }
-
-	#[inline]
-	#[must_use]
-	pub fn into_int(self) -> Option<NbtInt> {
-		unsafe {
-			if self.id() == NbtInt::ID {
-				Some({
-					let result = core::ptr::read(core::ptr::addr_of!(*self.int));
-					core::mem::forget(self);
-					result
-				})
-			} else {
-				None
-			}
-		}
-	}
-
-	#[inline]
-	#[must_use]
-	pub fn as_int(&self) -> Option<&NbtInt> {
-		unsafe {
-			if self.id() == NbtInt::ID {
-				Some(&self.int)
-			} else {
-				None
-			}
-		}
-	}
-
-	#[inline]
-	#[must_use]
-	pub fn as_int_mut(&mut self) -> Option<&mut NbtInt> {
-		unsafe {
-			if self.id() == NbtInt::ID {
-				Some(&mut self.int)
-			} else {
-				None
-			}
-		}
-	}
-}
-
-#[allow(dead_code)]
-impl NbtElement {
-	/// # Safety
-	///
-	/// * `self` must be of variant `NbtElement::Long`
-	#[inline]
-	#[must_use]
-	pub unsafe fn into_long_unchecked(self) -> NbtLong {
-		let result = core::ptr::read(core::ptr::addr_of!(*self.long));
-		core::mem::forget(self);
-		result
-	}
-
-	/// # Safety
-	///
-	/// * `self` must be of variant `NbtElement::Long`
-	#[inline]
-	#[must_use]
-	pub unsafe fn as_long_unchecked(&self) -> &NbtLong { &self.long }
-
-	/// # Safety
-	///
-	/// * `self` must be of variant `NbtElement::Long`
-	#[inline]
-	#[must_use]
-	pub unsafe fn as_long_unchecked_mut(&mut self) -> &mut NbtLong { &mut self.long }
-
-	#[inline]
-	#[must_use]
-	pub fn into_long(self) -> Option<NbtLong> {
-		unsafe {
-			if self.id() == NbtLong::ID {
-				Some({
-					let result = core::ptr::read(core::ptr::addr_of!(*self.long));
-					core::mem::forget(self);
-					result
-				})
-			} else {
-				None
-			}
-		}
-	}
-
-	#[inline]
-	#[must_use]
-	pub fn as_long(&self) -> Option<&NbtLong> {
-		unsafe {
-			if self.id() == NbtLong::ID {
-				Some(&self.long)
-			} else {
-				None
-			}
-		}
-	}
-
-	#[inline]
-	#[must_use]
-	pub fn as_long_mut(&mut self) -> Option<&mut NbtLong> {
-		unsafe {
-			if self.id() == NbtLong::ID {
-				Some(&mut self.long)
-			} else {
-				None
-			}
-		}
-	}
-}
-
-#[allow(dead_code)]
-impl NbtElement {
-	/// # Safety
-	///
-	/// * `self` must be of variant `NbtElement::Float`
-	#[inline]
-	#[must_use]
-	pub unsafe fn into_float_unchecked(self) -> NbtFloat {
-		let result = core::ptr::read(core::ptr::addr_of!(*self.float));
-		core::mem::forget(self);
-		result
-	}
-
-	/// # Safety
-	///
-	/// * `self` must be of variant `NbtElement::Float`
-	#[inline]
-	#[must_use]
-	pub unsafe fn as_float_unchecked(&self) -> &NbtFloat { &self.float }
-
-	/// # Safety
-	///
-	/// * `self` must be of variant `NbtElement::Float`
-	#[inline]
-	#[must_use]
-	pub unsafe fn as_float_unchecked_mut(&mut self) -> &mut NbtFloat { &mut self.float }
-
-	#[inline]
-	#[must_use]
-	pub fn into_float(self) -> Option<NbtFloat> {
-		unsafe {
-			if self.id() == NbtFloat::ID {
-				Some({
-					let result = core::ptr::read(core::ptr::addr_of!(*self.float));
-					core::mem::forget(self);
-					result
-				})
-			} else {
-				None
-			}
-		}
-	}
-
-	#[inline]
-	#[must_use]
-	pub fn as_float(&self) -> Option<&NbtFloat> {
-		unsafe {
-			if self.id() == NbtFloat::ID {
-				Some(&self.float)
-			} else {
-				None
-			}
-		}
-	}
-
-	#[inline]
-	#[must_use]
-	pub fn as_float_mut(&mut self) -> Option<&mut NbtFloat> {
-		unsafe {
-			if self.id() == NbtFloat::ID {
-				Some(&mut self.float)
-			} else {
-				None
-			}
-		}
-	}
-}
-
-#[allow(dead_code)]
-impl NbtElement {
-	/// # Safety
-	///
-	/// * `self` must be of variant `NbtElement::Double`
-	#[inline]
-	#[must_use]
-	pub unsafe fn into_double_unchecked(self) -> NbtDouble {
-		let result = core::ptr::read(core::ptr::addr_of!(*self.double));
-		core::mem::forget(self);
-		result
-	}
-
-	/// # Safety
-	///
-	/// * `self` must be of variant `NbtElement::Double`
-	#[inline]
-	#[must_use]
-	pub unsafe fn as_double_unchecked(&self) -> &NbtDouble { &self.double }
-
-	/// # Safety
-	///
-	/// * `self` must be of variant `NbtElement::Double`
-	#[inline]
-	#[must_use]
-	pub unsafe fn as_double_unchecked_mut(&mut self) -> &mut NbtDouble { &mut self.double }
-
-	#[inline]
-	#[must_use]
-	pub fn into_double(self) -> Option<NbtDouble> {
-		unsafe {
-			if self.id() == NbtDouble::ID {
-				Some({
-					let result = core::ptr::read(core::ptr::addr_of!(*self.double));
-					core::mem::forget(self);
-					result
-				})
-			} else {
-				None
-			}
-		}
-	}
-
-	#[inline]
-	#[must_use]
-	pub fn as_double(&self) -> Option<&NbtDouble> {
-		unsafe {
-			if self.id() == NbtDouble::ID {
-				Some(&self.double)
-			} else {
-				None
-			}
-		}
-	}
-
-	#[inline]
-	#[must_use]
-	pub fn as_double_mut(&mut self) -> Option<&mut NbtDouble> {
-		unsafe {
-			if self.id() == NbtDouble::ID {
-				Some(&mut self.double)
-			} else {
-				None
-			}
-		}
-	}
-}
-
-#[allow(dead_code)]
-impl NbtElement {
-	/// # Safety
-	///
-	/// * `self` must be of variant `NbtElement::ByteArray`
-	#[inline]
-	#[must_use]
-	pub unsafe fn into_byte_array_unchecked(self) -> NbtByteArray {
-		let result = core::ptr::read(core::ptr::addr_of!(*self.byte_array));
-		core::mem::forget(self);
-		result
-	}
-
-	/// # Safety
-	///
-	/// * `self` must be of variant `NbtElement::ByteArray`
-	#[inline]
-	#[must_use]
-	pub unsafe fn as_byte_array_unchecked(&self) -> &NbtByteArray { &self.byte_array }
-
-	/// # Safety
-	///
-	/// * `self` must be of variant `NbtElement::ByteArray`
-	#[inline]
-	#[must_use]
-	pub unsafe fn as_byte_array_unchecked_mut(&mut self) -> &mut NbtByteArray { &mut self.byte_array }
-
-	#[inline]
-	#[must_use]
-	pub fn into_byte_array(self) -> Option<NbtByteArray> {
-		unsafe {
-			if self.id() == NbtByteArray::ID {
-				Some({
-					let result = core::ptr::read(core::ptr::addr_of!(*self.byte_array));
-					core::mem::forget(self);
-					result
-				})
-			} else {
-				None
-			}
-		}
-	}
-
-	#[inline]
-	#[must_use]
-	pub fn as_byte_array(&self) -> Option<&NbtByteArray> {
-		unsafe {
-			if self.id() == NbtByteArray::ID {
-				Some(&self.byte_array)
-			} else {
-				None
-			}
-		}
-	}
-
-	#[inline]
-	#[must_use]
-	pub fn as_byte_array_mut(&mut self) -> Option<&mut NbtByteArray> {
-		unsafe {
-			if self.id() == NbtByteArray::ID {
-				Some(&mut self.byte_array)
-			} else {
-				None
-			}
-		}
-	}
-}
-
-#[allow(dead_code)]
-impl NbtElement {
-	/// # Safety
-	///
-	/// * `self` must be of variant `NbtElement::String`
-	#[inline]
-	#[must_use]
-	pub unsafe fn into_string_unchecked(self) -> NbtString {
-		let result = core::ptr::read(core::ptr::addr_of!(*self.string));
-		core::mem::forget(self);
-		result
-	}
-
-	/// # Safety
-	///
-	/// * `self` must be of variant `NbtElement::String`
-	#[inline]
-	#[must_use]
-	pub unsafe fn as_string_unchecked(&self) -> &NbtString { &self.string }
-
-	/// # Safety
-	///
-	/// * `self` must be of variant `NbtElement::String`
-	#[inline]
-	#[must_use]
-	pub unsafe fn as_string_unchecked_mut(&mut self) -> &mut NbtString { &mut self.string }
-
-	#[inline]
-	#[must_use]
-	pub fn into_string(self) -> Option<NbtString> {
-		unsafe {
-			if self.id() == NbtString::ID {
-				Some({
-					let result = core::ptr::read(core::ptr::addr_of!(*self.string));
-					core::mem::forget(self);
-					result
-				})
-			} else {
-				None
-			}
-		}
-	}
-
-	#[inline]
-	#[must_use]
-	pub fn as_string(&self) -> Option<&NbtString> {
-		unsafe {
-			if self.id() == NbtString::ID {
-				Some(&self.string)
-			} else {
-				None
-			}
-		}
-	}
-
-	#[inline]
-	#[must_use]
-	pub fn as_string_mut(&mut self) -> Option<&mut NbtString> {
-		unsafe {
-			if self.id() == NbtString::ID {
-				Some(&mut self.string)
-			} else {
-				None
-			}
-		}
-	}
-}
-
-#[allow(dead_code)]
-impl NbtElement {
-	/// # Safety
-	///
-	/// * `self` must be of variant `NbtElement::List`
-	#[inline]
-	#[must_use]
-	pub unsafe fn into_list_unchecked(self) -> NbtList {
-		let result = core::ptr::read(core::ptr::addr_of!(*self.list));
-		core::mem::forget(self);
-		result
-	}
-
-	/// # Safety
-	///
-	/// * `self` must be of variant `NbtElement::List`
-	#[inline]
-	#[must_use]
-	pub unsafe fn as_list_unchecked(&self) -> &NbtList { &self.list }
-
-	/// # Safety
-	///
-	/// * `self` must be of variant `NbtElement::List`
-	#[inline]
-	#[must_use]
-	pub unsafe fn as_list_unchecked_mut(&mut self) -> &mut NbtList { &mut self.list }
-
-	#[inline]
-	#[must_use]
-	pub fn into_list(self) -> Option<NbtList> {
-		unsafe {
-			if self.id() == NbtList::ID {
-				Some({
-					let result = core::ptr::read(core::ptr::addr_of!(*self.list));
-					core::mem::forget(self);
-					result
-				})
-			} else {
-				None
-			}
-		}
-	}
-
-	#[inline]
-	#[must_use]
-	pub fn as_list(&self) -> Option<&NbtList> {
-		unsafe {
-			if self.id() == NbtList::ID {
-				Some(&self.list)
-			} else {
-				None
-			}
-		}
-	}
-
-	#[inline]
-	#[must_use]
-	pub fn as_list_mut(&mut self) -> Option<&mut NbtList> {
-		unsafe {
-			if self.id() == NbtList::ID {
-				Some(&mut self.list)
-			} else {
-				None
-			}
-		}
-	}
-}
-
-#[allow(dead_code)]
-impl NbtElement {
-	/// # Safety
-	///
-	/// * `self` must be of variant `NbtElement::Compound`
-	#[inline]
-	#[must_use]
-	pub unsafe fn into_compound_unchecked(self) -> NbtCompound {
-		let result = core::ptr::read(core::ptr::addr_of!(*self.compound));
-		core::mem::forget(self);
-		result
-	}
-
-	/// # Safety
-	///
-	/// * `self` must be of variant `NbtElement::Compound`
-	#[inline]
-	#[must_use]
-	pub unsafe fn as_compound_unchecked(&self) -> &NbtCompound { &self.compound }
-
-	/// # Safety
-	///
-	/// * `self` must be of variant `NbtElement::Compound`
-	#[inline]
-	#[must_use]
-	pub unsafe fn as_compound_unchecked_mut(&mut self) -> &mut NbtCompound { &mut self.compound }
-
-	#[inline]
-	#[must_use]
-	pub fn into_compound(self) -> Option<NbtCompound> {
-		unsafe {
-			if self.id() == NbtCompound::ID {
-				Some({
-					let result = core::ptr::read(core::ptr::addr_of!(*self.compound));
-					core::mem::forget(self);
-					result
-				})
-			} else {
-				drop(self);
-				None
-			}
-		}
-	}
-
-	#[inline]
-	#[must_use]
-	pub fn as_compound(&self) -> Option<&NbtCompound> {
-		unsafe {
-			if self.id() == NbtCompound::ID {
-				Some(&self.compound)
-			} else {
-				None
-			}
-		}
-	}
-
-	#[inline]
-	#[must_use]
-	pub fn as_compound_mut(&mut self) -> Option<&mut NbtCompound> {
-		unsafe {
-			if self.id() == NbtCompound::ID {
-				Some(&mut self.compound)
-			} else {
-				None
-			}
-		}
-	}
-}
-
-#[allow(dead_code)]
-impl NbtElement {
-	/// # Safety
-	///
-	/// * `self` must be of variant `NbtElement::IntArray`
-	#[inline]
-	#[must_use]
-	pub unsafe fn into_int_array_unchecked(self) -> NbtIntArray {
-		let result = core::ptr::read(core::ptr::addr_of!(*self.int_array));
-		core::mem::forget(self);
-		result
-	}
-
-	/// # Safety
-	///
-	/// * `self` must be of variant `NbtElement::IntArray`
-	#[inline]
-	#[must_use]
-	pub unsafe fn as_int_array_unchecked(&self) -> &NbtIntArray { &self.int_array }
-
-	/// # Safety
-	///
-	/// * `self` must be of variant `NbtElement::IntArray`
-	#[inline]
-	#[must_use]
-	pub unsafe fn as_int_array_unchecked_mut(&mut self) -> &mut NbtIntArray { &mut self.int_array }
-
-	#[inline]
-	#[must_use]
-	pub fn into_int_array(self) -> Option<NbtIntArray> {
-		unsafe {
-			if self.id() == NbtIntArray::ID {
-				Some({
-					let result = core::ptr::read(core::ptr::addr_of!(*self.int_array));
-					core::mem::forget(self);
-					result
-				})
-			} else {
-				drop(self);
-				None
-			}
-		}
-	}
-
-	#[inline]
-	#[must_use]
-	pub fn as_int_array(&self) -> Option<&NbtIntArray> {
-		unsafe {
-			if self.id() == NbtIntArray::ID {
-				Some(&self.int_array)
-			} else {
-				None
-			}
-		}
-	}
-
-	#[inline]
-	#[must_use]
-	pub fn as_int_array_mut(&mut self) -> Option<&mut NbtIntArray> {
-		unsafe {
-			if self.id() == NbtIntArray::ID {
-				Some(&mut self.int_array)
-			} else {
-				None
-			}
-		}
-	}
-}
-
-#[allow(dead_code)]
-impl NbtElement {
-	/// # Safety
-	///
-	/// * `self` must be of variant `NbtElement::LongArray`
-	#[inline]
-	#[must_use]
-	pub unsafe fn into_long_array_unchecked(self) -> NbtLongArray {
-		let result = core::ptr::read(core::ptr::addr_of!(*self.long_array));
-		core::mem::forget(self);
-		result
-	}
-
-	/// # Safety
-	///
-	/// * `self` must be of variant `NbtElement::LongArray`
-	#[inline]
-	#[must_use]
-	pub unsafe fn as_long_array_unchecked(&self) -> &NbtLongArray { &self.long_array }
-
-	/// # Safety
-	///
-	/// * `self` must be of variant `NbtElement::LongArray`
-	#[inline]
-	#[must_use]
-	pub unsafe fn as_long_array_unchecked_mut(&mut self) -> &mut NbtLongArray { &mut self.long_array }
-
-	#[inline]
-	#[must_use]
-	pub fn into_long_array(self) -> Option<NbtLongArray> {
-		unsafe {
-			if self.id() == NbtLongArray::ID {
-				Some({
-					let result = core::ptr::read(core::ptr::addr_of!(*self.long_array));
-					core::mem::forget(self);
-					result
-				})
-			} else {
-				None
-			}
-		}
-	}
-
-	#[inline]
-	#[must_use]
-	pub fn as_long_array(&self) -> Option<&NbtLongArray> {
-		unsafe {
-			if self.id() == NbtLongArray::ID {
-				Some(&self.long_array)
-			} else {
-				None
-			}
-		}
-	}
-
-	#[inline]
-	#[must_use]
-	pub fn as_long_array_mut(&mut self) -> Option<&mut NbtLongArray> {
-		unsafe {
-			if self.id() == NbtLongArray::ID {
-				Some(&mut self.long_array)
-			} else {
-				None
-			}
-		}
-	}
-}
-
-#[allow(dead_code)]
-impl NbtElement {
-	/// # Safety
-	///
-	/// * `self` must be of variant `NbtElement::Chunk`
-	#[inline]
-	#[must_use]
-	pub unsafe fn into_chunk_unchecked(self) -> NbtChunk {
-		let result = core::ptr::read(core::ptr::addr_of!(*self.chunk));
-		core::mem::forget(self);
-		result
-	}
-
-	/// # Safety
-	///
-	/// * `self` must be of variant `NbtElement::Chunk`
-	#[inline]
-	#[must_use]
-	pub unsafe fn as_chunk_unchecked(&self) -> &NbtChunk { &self.chunk }
-
-	/// # Safety
-	///
-	/// * `self` must be of variant `NbtElement::Chunk`
-	#[inline]
-	#[must_use]
-	pub unsafe fn as_chunk_unchecked_mut(&mut self) -> &mut NbtChunk { &mut self.chunk }
-
-	#[inline]
-	#[must_use]
-	pub fn into_chunk(self) -> Option<NbtChunk> {
-		unsafe {
-			if self.id() == NbtChunk::ID {
-				Some({
-					let result = core::ptr::read(core::ptr::addr_of!(*self.chunk));
-					core::mem::forget(self);
-					result
-				})
-			} else {
-				None
-			}
-		}
-	}
-
-	#[inline]
-	#[must_use]
-	pub fn as_chunk(&self) -> Option<&NbtChunk> {
-		unsafe {
-			if self.id() == NbtChunk::ID {
-				Some(&self.chunk)
-			} else {
-				None
-			}
-		}
-	}
-
-	#[inline]
-	#[must_use]
-	pub fn as_chunk_mut(&mut self) -> Option<&mut NbtChunk> {
-		unsafe {
-			if self.id() == NbtChunk::ID {
-				Some(&mut self.chunk)
-			} else {
-				None
-			}
-		}
-	}
-}
-
-#[allow(dead_code)]
-impl NbtElement {
-	/// # Safety
-	///
-	/// * `self` must be of variant `NbtElement::Region`
-	#[inline]
-	#[must_use]
-	pub unsafe fn into_region_unchecked(self) -> NbtRegion {
-		let result = core::ptr::read(core::ptr::addr_of!(*self.region));
-		core::mem::forget(self);
-		result
-	}
-
-	/// # Safety
-	///
-	/// * `self` must be of variant `NbtElement::Region`
-	#[inline]
-	#[must_use]
-	pub unsafe fn as_region_unchecked(&self) -> &NbtRegion { &self.region }
-
-	/// # Safety
-	///
-	/// * `self` must be of variant `NbtElement::Region`
-	#[inline]
-	#[must_use]
-	pub unsafe fn as_region_unchecked_mut(&mut self) -> &mut NbtRegion { &mut self.region }
-
-	#[inline]
-	#[must_use]
-	pub fn into_region(self) -> Option<NbtRegion> {
-		unsafe {
-			if self.id() == NbtRegion::ID {
-				Some({
-					let result = core::ptr::read(core::ptr::addr_of!(*self.region));
-					core::mem::forget(self);
-					result
-				})
-			} else {
-				None
-			}
-		}
-	}
-
-	#[inline]
-	#[must_use]
-	pub fn as_region(&self) -> Option<&NbtRegion> {
-		unsafe {
-			if self.id() == NbtRegion::ID {
-				Some(&self.region)
-			} else {
-				None
-			}
-		}
-	}
-
-	#[inline]
-	#[must_use]
-	pub fn as_region_mut(&mut self) -> Option<&mut NbtRegion> {
-		unsafe {
-			if self.id() == NbtRegion::ID {
-				Some(&mut self.region)
-			} else {
-				None
-			}
-		}
-	}
-}
-
-#[allow(dead_code)]
-impl NbtElement {
-	/// # Safety
-	///
-	/// * `self` must be of variant `NbtElement::Null`
-	#[inline]
-	#[must_use]
-	pub unsafe fn into_null_unchecked(self) -> NbtNull {
-		let result = core::ptr::read(core::ptr::addr_of!(*self.null));
-		core::mem::forget(self);
-		result
-	}
-
-	/// # Safety
-	///
-	/// * `self` must be of variant `NbtElement::Null`
-	#[inline]
-	#[must_use]
-	pub unsafe fn as_null_unchecked(&self) -> &NbtNull { &self.null }
-
-	/// # Safety
-	///
-	/// * `self` must be of variant `NbtElement::Null`
-	#[inline]
-	#[must_use]
-	pub unsafe fn as_null_unchecked_mut(&mut self) -> &mut NbtNull { &mut self.null }
-
-	#[inline]
-	#[must_use]
-	pub fn into_null(self) -> Option<NbtNull> {
-		unsafe {
-			if self.id() == NbtNull::ID {
-				Some({
-					let result = core::ptr::read(core::ptr::addr_of!(*self.null));
-					core::mem::forget(self);
-					result
-				})
-			} else {
-				None
-			}
-		}
-	}
-
-	#[inline]
-	#[must_use]
-	pub fn as_null(&self) -> Option<&NbtNull> {
-		unsafe {
-			if self.id() == NbtNull::ID {
-				Some(&self.null)
-			} else {
-				None
-			}
-		}
-	}
-
-	#[inline]
-	#[must_use]
-	pub fn as_null_mut(&mut self) -> Option<&mut NbtNull> {
-		unsafe {
-			if self.id() == NbtNull::ID {
-				Some(&mut self.null)
-			} else {
-				None
-			}
-		}
-	}
-}
+type_conversions! { NbtByte, byte, is_byte, into_byte_unchecked, as_byte_unchecked, as_byte_unchecked_mut, into_byte, as_byte, as_byte_mut }
+type_conversions! { NbtShort, short, is_short, into_short_unchecked, as_short_unchecked, as_short_unchecked_mut, into_short, as_short, as_short_mut }
+type_conversions! { NbtInt, int, is_int, into_int_unchecked, as_int_unchecked, as_int_unchecked_mut, into_int, as_int, as_int_mut }
+type_conversions! { NbtLong, long, is_long, into_long_unchecked, as_long_unchecked, as_long_unchecked_mut, into_long, as_long, as_long_mut }
+type_conversions! { NbtFloat, float, is_float, into_float_unchecked, as_float_unchecked, as_float_unchecked_mut, into_float, as_float, as_float_mut }
+type_conversions! { NbtDouble, double, is_double, into_double_unchecked, as_double_unchecked, as_double_unchecked_mut, into_double, as_double, as_double_mut }
+type_conversions! { NbtByteArray, byte_array, is_byte_array, into_byte_array_unchecked, as_byte_array_unchecked, as_byte_array_unchecked_mut, into_byte_array, as_byte_array, as_byte_array_mut }
+type_conversions! { NbtString, string, is_string, into_string_unchecked, as_string_unchecked, as_string_unchecked_mut, into_string, as_string, as_string_mut }
+type_conversions! { NbtList, list, is_list, into_list_unchecked, as_list_unchecked, as_list_unchecked_mut, into_list, as_list, as_list_mut }
+type_conversions! { NbtCompound, compound, is_compound, into_compound_unchecked, as_compound_unchecked, as_compound_unchecked_mut, into_compound, as_compound, as_compound_mut }
+type_conversions! { NbtIntArray, int_array, is_int_array, into_int_array_unchecked, as_int_array_unchecked, as_int_array_unchecked_mut, into_int_array, as_int_array, as_int_array_mut }
+type_conversions! { NbtLongArray, long_array, is_long_array, into_long_array_unchecked, as_long_array_unchecked, as_long_array_unchecked_mut, into_long_array, as_long_array, as_long_array_mut }
+type_conversions! { NbtChunk, chunk, is_chunk, into_chunk_unchecked, as_chunk_unchecked, as_chunk_unchecked_mut, into_chunk, as_chunk, as_chunk_mut }
+type_conversions! { NbtRegion, region, is_region, into_region_unchecked, as_region_unchecked, as_region_unchecked_mut, into_region, as_region, as_region_mut }
+type_conversions! { NbtNull, null, is_null, into_null_unchecked, as_null_unchecked, as_null_unchecked_mut, into_null, as_null, as_null_mut }

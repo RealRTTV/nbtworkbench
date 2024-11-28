@@ -129,6 +129,7 @@ pub struct Traverse<'a> {
 	killed: bool,
 	line_number: usize,
 	depth: usize,
+	indices: Vec<usize>,
 }
 
 impl<'a> Traverse<'a> {
@@ -140,6 +141,7 @@ impl<'a> Traverse<'a> {
 			y,
 			line_number: 1,
 			depth: 0,
+			indices: Vec::new(),
 		}
 	}
 
@@ -168,7 +170,6 @@ impl<'a> Traverse<'a> {
 						}
 						self.line_number += 1;
 						self.y = 0;
-						self.depth += self.x;
 						self.killed = true;
 						break 'm (idx, None, &mut region.chunks[idx]);
 					} else {
@@ -257,6 +258,8 @@ impl<'a> Traverse<'a> {
 			return None;
 		};
 
+		self.indices.push(idx);
+
 		self.node = Some((idx, key, new));
 
 		Some(())
@@ -264,12 +267,12 @@ impl<'a> Traverse<'a> {
 
 	#[must_use]
 	#[allow(clippy::type_complexity)] // literally can't otherwise the compiler crashes... yeah...
-	pub fn last(mut self) -> Option<(usize, (usize, Option<CompactString>, &'a mut NbtElement, usize),)> {
-		while self.y > 0 {
+	pub fn last(mut self) -> Option<(usize, (usize, Option<CompactString>, &'a mut NbtElement, usize, Box<[usize]>))> {
+		while self.y > 0 && !self.killed {
 			self.depth += 1;
 			self.step();
 		}
-		self.node.map(|(a, b, c)| (self.depth, (a, b, c, self.line_number)))
+		self.node.map(|(a, b, c)| (self.depth, (a, b, c, self.line_number, self.indices.into_boxed_slice())))
 	}
 }
 
