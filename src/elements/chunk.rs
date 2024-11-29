@@ -450,9 +450,7 @@ impl NbtRegion {
 			if ctx.forbid(ctx.pos()) {
 				builder.settings(ctx.pos() + (20, 0), false, JUST_OVERLAPPING_BASE_TEXT_Z);
 				builder.color = TextColor::TreeKey.to_raw();
-				let _ = write!(builder, "{str} ");
-				builder.color = TextColor::TreeKey.to_raw();
-				let _ = write!(builder, "[{}]", self.value());
+				let _ = write!(builder, "{str}: [{}]", self.value());
 			}
 
 			ctx.y_offset += 16;

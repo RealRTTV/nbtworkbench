@@ -694,12 +694,13 @@ impl Workbench {
 			.as_ref()
 			.and_then(|x| x.to_str())
 			.map_or_else(|| tab.name.clone(), Into::into);
+		let suffix = format!("[{}]", tab.value.value().0).into_boxed_str();
 		tab.set_selected_text(Some(0), SelectedText::new(
 			36 + left_margin,
 			offset + path_minus_name_width,
 			HEADER_SIZE,
 			Some((name, TextColor::TreeKey, true)),
-			None,
+			Some((suffix, TextColor::TreeKey, false)),
 			vec![],
 		));
 		tab.selected_text.is_some()
@@ -1676,14 +1677,13 @@ impl Workbench {
 							self.search_box.deselect();
 							return true;
 						}
-						SearchBoxKeyResult::ClearAllBookmarks => {
-							tab.bookmarks.clear();
-							self.search_box.hits = None;
-							self.search_box.post_input((self.window_width, self.window_height));
-							return true;
-						}
-						result @ (SearchBoxKeyResult::Finish | SearchBoxKeyResult::FinishCountOnly) => {
-							self.search_box.search(&mut tab.bookmarks, &mut tab.value, result == SearchBoxKeyResult::FinishCountOnly);
+						result @ (SearchBoxKeyResult::ClearAndSearch | SearchBoxKeyResult::Search | SearchBoxKeyResult::SearchCountOnly) => {
+							if result == SearchBoxKeyResult::ClearAndSearch {
+								tab.bookmarks.clear();
+								self.search_box.hits = None;
+								self.search_box.post_input((self.window_width, self.window_height));
+							}
+							self.search_box.search(&mut tab.bookmarks, &mut tab.value, result == SearchBoxKeyResult::SearchCountOnly);
 							self.search_box.post_input((self.window_width, self.window_height));
 							return true;
 						}
@@ -1772,7 +1772,6 @@ impl Workbench {
 				if self.action_wheel.is_some() && key == KeyCode::Escape && flags == flags!() {
 					self.action_wheel = None;
 					return true;
-
 				}
 				if !tab.held_entry.is_empty() && key == KeyCode::Escape && flags == flags!() {
 					let action = WorkbenchAction::DeleteHeldEntry { held_entry: tab.held_entry.take() };
@@ -2041,7 +2040,6 @@ impl Workbench {
 
 	#[inline]
 	pub fn set_scale(&mut self, scale: f32) {
-		println!("set_scale called! (scale = {scale}), backtrace:\n{}", std::backtrace::Backtrace::capture());
 		let scale = (scale * 10.0).round() / 10.0;
 		let max_scale = usize::min(self.raw_window_width / MIN_WINDOW_WIDTH, self.raw_window_height / MIN_WINDOW_HEIGHT) as f32;
 		let scale = scale.clamp(1.0, max_scale);

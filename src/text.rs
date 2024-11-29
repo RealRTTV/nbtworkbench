@@ -33,9 +33,9 @@ pub enum SearchBoxKeyResult {
     Failed,
     NothingSpecial,
     Escape,
-    Finish,
-    FinishCountOnly,
-    ClearAllBookmarks,
+    Search,
+    SearchCountOnly,
+    ClearAndSearch,
 }
 
 #[repr(u8)]
@@ -64,7 +64,7 @@ impl From<KeyResult> for SearchBoxKeyResult {
             Failed => Self::Failed,
             NothingSpecial => Self::NothingSpecial,
             Escape => Self::Escape,
-            Finish => Self::Finish,
+            Finish => Self::Search,
         }
     }
 }

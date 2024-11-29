@@ -483,7 +483,6 @@ impl<'window> State<'window> {
 	}
 
 	fn resize(&mut self, workbench: &mut Workbench, new_size: PhysicalSize<u32>, monitor_dims: Option<PhysicalSize<u32>>) {
-		dbg!(new_size);
 		if new_size.width > 0 && new_size.height > 0 {
 			let monitor_dims = monitor_dims.unwrap_or(PhysicalSize::new(1280, 720));
 			self.size = new_size;

@@ -9,7 +9,7 @@ use winit::keyboard::KeyCode;
 use winit::window::Theme;
 
 use crate::{config, create_regex, flags, since_epoch, SortAlgorithm, StrExt};
-use crate::assets::{ADD_SEARCH_BOOKMARKS_UV, BASE_Z, BOOKMARK_UV, DARK_STRIPE_UV, HIDDEN_BOOKMARK_UV, HOVERED_WIDGET_UV, REGEX_SEARCH_MODE_UV, REMOVE_SEARCH_BOOKMARKS_UV, SEARCH_BOX_SELECTION_Z, SEARCH_BOX_Z, SEARCH_KEYS_AND_VALUES_UV, SEARCH_KEYS_UV, SEARCH_VALUES_UV, SNBT_SEARCH_MODE_UV, STRING_SEARCH_MODE_UV, UNSELECTED_WIDGET_UV};
+use crate::assets::{SEARCH_BOOKMARKS_UV, BASE_Z, BOOKMARK_UV, DARK_STRIPE_UV, HIDDEN_BOOKMARK_UV, HOVERED_WIDGET_UV, REGEX_SEARCH_MODE_UV, SEARCH_APPEND_BOOKMARKS_UV, SEARCH_BOX_SELECTION_Z, SEARCH_BOX_Z, SEARCH_KEYS_AND_VALUES_UV, SEARCH_KEYS_UV, SEARCH_VALUES_UV, SNBT_SEARCH_MODE_UV, STRING_SEARCH_MODE_UV, UNSELECTED_WIDGET_UV};
 use crate::color::TextColor;
 use crate::elements::element::NbtElement;
 use crate::marked_line::{MarkedLine, MarkedLines};
@@ -258,9 +258,9 @@ impl SearchBox {
         builder.horizontal_scroll = 0;
 
         {
-            let bookmark_uv = if shift { REMOVE_SEARCH_BOOKMARKS_UV } else { ADD_SEARCH_BOOKMARKS_UV };
+            let bookmark_uv = if shift { SEARCH_APPEND_BOOKMARKS_UV } else { SEARCH_BOOKMARKS_UV };
             let widget_uv = if (builder.window_width() - SEARCH_BOX_END_X - 17 - 16 - 16..builder.window_width() - SEARCH_BOX_END_X - 1 - 16 - 16).contains(&mouse_x) && (26..42).contains(&mouse_y) {
-                builder.draw_tooltip(&[if shift { "Remove all bookmarks (Shift + Enter)" } else { "Add search bookmarks (Enter)" }], mouse, false);
+                builder.draw_tooltip(&[if shift { "Append to search (Shift + Enter)"} else { "Search (Enter)" }], mouse, false);
                 HOVERED_WIDGET_UV
             } else {
                 UNSELECTED_WIDGET_UV
@@ -323,11 +323,11 @@ impl SearchBox {
 
     #[inline]
     pub fn on_bookmark_widget(&mut self, shift: bool, bookmarks: &mut MarkedLines, root: &mut NbtElement) {
-        if shift {
+        if !shift {
             bookmarks.clear();
-        } else {
-            self.search(bookmarks, root, false);
         }
+
+        self.search(bookmarks, root, false);
     }
 
     #[inline]
@@ -405,12 +405,16 @@ impl SearchBox {
     pub fn on_key_press(&mut self, key: KeyCode, char: Option<char>, flags: u8) -> SearchBoxKeyResult {
         let before = self.value.clone();
         let result = 'a: {
+            if let KeyCode::Enter | KeyCode::NumpadEnter = key && flags == flags!() {
+                break 'a SearchBoxKeyResult::ClearAndSearch
+            }
+
             if let KeyCode::Enter | KeyCode::NumpadEnter = key && flags == flags!(Shift) {
-                break 'a SearchBoxKeyResult::ClearAllBookmarks
+                break 'a SearchBoxKeyResult::Search
             }
 
             if let KeyCode::Enter | KeyCode::NumpadEnter = key && flags == flags!(Alt) {
-                break 'a SearchBoxKeyResult::FinishCountOnly
+                break 'a SearchBoxKeyResult::SearchCountOnly
             }
 
             self.0.on_key_press(key, char, flags).into()
