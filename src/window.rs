@@ -63,7 +63,7 @@ pub async fn run() -> ! {
 						}
 					}
 					WindowEvent::CloseRequested => if self.workbench.close() == 0 { std::process::exit(0) },
-					WindowEvent::Resized(new_size) => self.state.resize(self.workbench, new_size),
+					WindowEvent::Resized(new_size) => self.state.resize(self.workbench, new_size, self.window.current_monitor().map(|monitor| monitor.size())),
 					_ => {}
 				}
 			}
@@ -86,7 +86,7 @@ pub async fn run() -> ! {
 	let event_loop = EventLoop::builder().build().expect("Event loop was unconstructable");
 	let mut builder = WindowAttributes::default()
 		.with_title("NBT Workbench")
-		.with_inner_size(PhysicalSize::new(WINDOW_WIDTH as u32, WINDOW_HEIGHT as u32))
+		.with_inner_size(PhysicalSize::new(7680, 4320))
 		.with_min_inner_size(PhysicalSize::new(
 			MIN_WINDOW_WIDTH as u32,
 			MIN_WINDOW_HEIGHT as u32,
@@ -122,20 +122,20 @@ pub async fn run() -> ! {
 		}).expect("Couldn't append canvas to document body")
 	};
 	#[cfg(not(target_arch = "wasm32"))]
-	let window_size = if let Some(monitor) = window.current_monitor() {
-		let monitor_dims = monitor.size();
-		let width = (WINDOW_WIDTH as u32).max(monitor_dims.width * 9 / 32);
-		let height = (WINDOW_HEIGHT as u32).max(monitor_dims.height * 7 / 24);
+	let window_size = {
+		let (window_width_pct, window_height_pct) = config::get_window_dims_pct();
+		let monitor_dims = window.current_monitor().map(|monitor| monitor.size()).unwrap_or(PhysicalSize::new(1280, 720));
+		let width = (f64::round(window_width_pct * monitor_dims.width as f64) as u32).max(MIN_WINDOW_WIDTH as u32);
+		let height = (f64::round(window_height_pct * monitor_dims.height as f64) as u32).max(MIN_WINDOW_HEIGHT as u32);
+		config::set_window_dims_pct((width as f64 / monitor_dims.width as f64, height as f64 / monitor_dims.height as f64));
 		PhysicalSize::new(width, height)
-	} else {
-		PhysicalSize::new(WINDOW_WIDTH as u32, WINDOW_HEIGHT as u32)
 	};
+	let _ = window.request_inner_size(window_size);
 	let state = State::new(&window, window_size).await;
 	unsafe { std::ptr::write(std::ptr::addr_of_mut!(WINDOW_PROPERTIES), UnsafeCell::new(WindowProperties::new(Rc::clone(&window)))); }
 	let window_properties = unsafe { WINDOW_PROPERTIES.get_mut() };
 	unsafe { std::ptr::write(std::ptr::addr_of_mut!(WORKBENCH), UnsafeCell::new(Workbench::new(window_properties))); }
 	let workbench = unsafe { WORKBENCH.get_mut() };
-	workbench.set_scale(100.0);
 	let mut handler = Handler { state, window_properties, workbench, window: Rc::clone(&window) };
 	event_loop.run_app(&mut handler).expect("Event loop failed");
 	loop {}
@@ -482,16 +482,18 @@ impl<'window> State<'window> {
 		}
 	}
 
-	fn resize(&mut self, workbench: &mut Workbench, new_size: PhysicalSize<u32>) {
+	fn resize(&mut self, workbench: &mut Workbench, new_size: PhysicalSize<u32>, monitor_dims: Option<PhysicalSize<u32>>) {
+		dbg!(new_size);
 		if new_size.width > 0 && new_size.height > 0 {
+			let monitor_dims = monitor_dims.unwrap_or(PhysicalSize::new(1280, 720));
 			self.size = new_size;
 			self.config.width = new_size.width;
 			self.config.height = new_size.height;
 			self.surface.configure(&self.device, &self.config);
+			config::set_window_dims_pct((new_size.width as f64 / monitor_dims.width as f64, new_size.height as f64 / monitor_dims.height as f64));
 			workbench.window_dimensions(new_size.width as usize, new_size.height as usize);
 			for tab in &mut workbench.tabs {
-				tab.scroll = tab.scroll();
-				tab.horizontal_scroll = tab.horizontal_scroll();
+				tab.refresh_scrolls();
 			}
 		}
 	}

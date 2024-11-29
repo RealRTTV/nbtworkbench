@@ -34,6 +34,7 @@ use anyhow::{anyhow, Context};
 use compact_str::{CompactString, ToCompactString};
 use regex::{Regex, RegexBuilder};
 use static_assertions::const_assert_eq;
+use winit::dpi::PhysicalSize;
 use winit::window::Window;
 
 use elements::element::NbtElement;
@@ -558,7 +559,7 @@ impl WindowProperties {
 	}
 
 	pub fn window_title(&mut self, title: &str) -> &mut Self {
-		if let WindowProperties::Real(window) = self {
+		if let Self::Real(window) = self {
 			window.set_title(title);
 			#[cfg(target_arch = "wasm32")]
 			if let Some(document) = web_sys::window().and_then(|window| window.document()) {
@@ -566,6 +567,13 @@ impl WindowProperties {
 			}
 		}
 		self
+	}
+
+	pub fn get_window_size(&self) -> Option<PhysicalSize<u32>> {
+		match self {
+			Self::Real(window) => Some(window.inner_size()),
+			Self::Fake => None,
+		}
 	}
 }
 

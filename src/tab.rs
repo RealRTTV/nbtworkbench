@@ -376,6 +376,12 @@ impl Tab {
 		scroll.min(max)
 	}
 
+	#[inline]
+	pub fn refresh_scrolls(&mut self) {
+		self.scroll = self.scroll();
+		self.horizontal_scroll = self.horizontal_scroll();
+	}
+
 	#[must_use]
 	pub fn left_margin(&self) -> usize { ((self.value.true_height() + self.held_entry.element().map_or(0, NbtElement::true_height)).ilog10() as usize + 1) * 8 + 4 + 8 }
 

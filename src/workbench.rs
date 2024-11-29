@@ -144,6 +144,18 @@ impl Workbench {
 			ignore_event_end: Duration::ZERO,
 			debug_menu: false,
 		};
+		if let Some(window_dims) = window_properties.get_window_size() {
+			workbench.raw_window_width = window_dims.width as usize;
+			workbench.raw_window_height = window_dims.height as usize;
+
+			let scale = config::get_scale();
+			if let Some(scale) = scale {
+				workbench.set_scale(scale);
+			} else {
+				workbench.set_scale(1000.0);
+				workbench.set_scale(workbench.scale.floor());
+			}
+		}
 		'create_tab: {
 			if let Some(path) = &std::env::args()
 				.nth(1)
@@ -510,16 +522,14 @@ impl Workbench {
 			};
 			let action = replace_element(&mut tab.value, kv, subscription.indices.clone(), &mut tab.bookmarks, &mut None)?.into_action();
 			tab.append_to_history(action);
-			tab.horizontal_scroll = tab.horizontal_scroll();
-			tab.scroll = tab.scroll();
+			tab.refresh_scrolls();
 			Ok(())
 		}
 
 		fn write_array(subscription: &FileUpdateSubscription, tab: &mut Tab, new_value: NbtElement) -> Result<()> {
 			let action = replace_element(&mut tab.value, (None, new_value), subscription.indices.clone(), &mut tab.bookmarks, &mut None)?.into_action();
 			tab.append_to_history(action);
-			tab.horizontal_scroll = tab.horizontal_scroll();
-			tab.scroll = tab.scroll();
+			tab.refresh_scrolls();
 			Ok(())
 		}
 
@@ -709,8 +719,7 @@ impl Workbench {
 				}
 			};
 			tab.append_to_history(action);
-			tab.scroll = tab.scroll();
-			tab.horizontal_scroll = tab.horizontal_scroll();
+			tab.refresh_scrolls();
 			true
 		} else {
 			false
@@ -1093,8 +1102,7 @@ impl Workbench {
 		}
 		tab.value.on_root_style_change(&mut tab.bookmarks);
 		recache_along_indices(&[], &mut tab.value);
-		tab.scroll = tab.scroll();
-		tab.horizontal_scroll = tab.horizontal_scroll();
+		tab.refresh_scrolls();
 		true
 	}
 
@@ -1124,9 +1132,9 @@ impl Workbench {
 				element.increment(increment, 0);
 			}
 
-			tab.scroll = tab.scroll();
 			// toggle has no effect on true height
 			recache_along_indices(&indices, &mut tab.value);
+			tab.refresh_scrolls();
 			let InteractionInformation::Content { is_in_left_margin: false, value, .. } = Self::get_interaction_information_raw(left_margin, horizontal_scroll, tab.scroll(), self.mouse_x, self.mouse_y, &mut tab.value) else { panic!("wut") };
 			if expand {
 				tab.bookmarks[true_line_number + 1..true_line_number + true_height].iter_mut().for_each(|bookmark| *bookmark = bookmark.open(y + bookmark.true_line_number() - true_line_number));
@@ -1306,8 +1314,7 @@ impl Workbench {
 			let mut selected_text_indices = result.parent.to_vec();
 			selected_text_indices.push(*last - 1);
 			*indices = selected_text_indices.into_boxed_slice();
-			tab.scroll = tab.scroll();
-			tab.horizontal_scroll = tab.horizontal_scroll();
+			tab.refresh_scrolls();
 			tab.append_to_history(result.into_action());
 			*last -= 1;
 		}
@@ -1336,8 +1343,7 @@ impl Workbench {
 			let mut selected_text_indices = result.parent.to_vec();
 			selected_text_indices.push(*last + 1);
 			*indices = selected_text_indices.into_boxed_slice();
-			tab.scroll = tab.scroll();
-			tab.horizontal_scroll = tab.horizontal_scroll();
+			tab.refresh_scrolls();
 			tab.append_to_history(result.into_action());
 			*last += 1;
 
@@ -2035,11 +2041,13 @@ impl Workbench {
 
 	#[inline]
 	pub fn set_scale(&mut self, scale: f32) {
+		println!("set_scale called! (scale = {scale}), backtrace:\n{}", std::backtrace::Backtrace::capture());
 		let scale = (scale * 10.0).round() / 10.0;
 		let max_scale = usize::min(self.raw_window_width / MIN_WINDOW_WIDTH, self.raw_window_height / MIN_WINDOW_HEIGHT) as f32;
-		let scale = scale.min(max_scale).max(1.0);
+		let scale = scale.clamp(1.0, max_scale);
 
 		self.scale = scale;
+		config::set_scale(Some(scale));
 		self.mouse_x = (self.raw_mouse_x / self.scale as f64) as usize;
 		self.mouse_y = (self.raw_mouse_y / self.scale as f64) as usize;
 		self.window_width = (self.raw_window_width as f32 / self.scale).round() as usize;
