@@ -3,7 +3,6 @@ use std::fs::{File, read};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use compact_str::CompactString;
 use glob::glob;
 
 use crate::{create_regex, error, log, WindowProperties};
@@ -68,12 +67,14 @@ fn get_predicate(args: &mut Vec<String>) -> SearchPredicate {
         }
     };
 
+    let case_sensitive = get_argument_any(&["-cs", "--case-sensitive"], args).is_some();
+
     match get_argument_any(&["--mode", "-m"], args).as_deref() {
         Some("normal") | None => SearchPredicate {
             search_flags,
-            inner: SearchPredicateInner::String(query),
+            inner: SearchPredicateInner::String(query, case_sensitive),
         },
-        Some("regex") => if let Some(regex) = create_regex(query) {
+        Some("regex") => if let Some(regex) = create_regex(query, case_sensitive) {
             SearchPredicate {
                 search_flags,
                 inner: SearchPredicateInner::Regex(regex),
@@ -85,7 +86,7 @@ fn get_predicate(args: &mut Vec<String>) -> SearchPredicate {
         Some("snbt") => match NbtElement::from_str(&query) {
             Ok((key, snbt)) => SearchPredicate {
                 search_flags,
-                inner: SearchPredicateInner::Snbt(key.map(CompactString::into_string), snbt),
+                inner: SearchPredicateInner::Snbt((key, snbt)),
             },
             Err(idx) => {
                 error!(r#"Invalid snbt at index {idx}, valid snbt look like: `key:"minecraft:air"` or `{{id:"minecraft:looting",lvl:3s}}` (note that some terminals use "" to contain one parameter and that inner ones will have to be escaped)"#);

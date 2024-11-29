@@ -298,19 +298,24 @@ impl Workbench {
 				if let MouseButton::Left | MouseButton::Right = button {
 					let shift = (self.shift()) ^ (button == MouseButton::Right);
 
-					if (self.window_width - SEARCH_BOX_END_X - 17 - 16 - 16..self.window_width - SEARCH_BOX_END_X - 1 - 16 - 16).contains(&self.mouse_x) & &(26..42).contains(&self.mouse_y) {
+					if (self.window_width - SEARCH_BOX_END_X - 17 - 16 - 16 - 16..self.window_width - SEARCH_BOX_END_X - 1 - 16 - 16 - 16).contains(&self.mouse_x) & &(26..42).contains(&self.mouse_y) {
 						let tab = tab_mut!( self );
 						self.search_box.on_bookmark_widget(shift, &mut tab.bookmarks, &mut tab.value);
 						return true;
 					}
 
-					if (self.window_width - SEARCH_BOX_END_X - 17 - 16..self.window_width - SEARCH_BOX_END_X - 1 - 16).contains(&self.mouse_x) & &(26..42).contains(&self.mouse_y) {
+					if (self.window_width - SEARCH_BOX_END_X - 17 - 16 - 16..self.window_width - SEARCH_BOX_END_X - 1 - 16 - 16).contains(&self.mouse_x) & &(26..42).contains(&self.mouse_y) {
 						self.search_box.on_search_widget(shift);
 						return true;
 					}
 
-					if (self.window_width - SEARCH_BOX_END_X - 17..self.window_width - SEARCH_BOX_END_X - 1).contains(&self.mouse_x) & &(26..42).contains(&self.mouse_y) {
+					if (self.window_width - SEARCH_BOX_END_X - 17 - 16..self.window_width - SEARCH_BOX_END_X - 1 - 16).contains(&self.mouse_x) & &(26..42).contains(&self.mouse_y) {
 						self.search_box.on_mode_widget(shift);
+						return true;
+					}
+
+					if (self.window_width - SEARCH_BOX_END_X - 17..self.window_width - SEARCH_BOX_END_X - 1).contains(&self.mouse_x) & &(26..42).contains(&self.mouse_y) {
+						self.search_box.on_case_sensitive_widget(shift);
 						return true;
 					}
 				}
@@ -2040,6 +2045,7 @@ impl Workbench {
 
 	#[inline]
 	pub fn set_scale(&mut self, scale: f32) {
+		let old_scale = self.scale;
 		let scale = (scale * 10.0).round() / 10.0;
 		let max_scale = usize::min(self.raw_window_width / MIN_WINDOW_WIDTH, self.raw_window_height / MIN_WINDOW_HEIGHT) as f32;
 		let scale = scale.clamp(1.0, max_scale);
@@ -2055,7 +2061,9 @@ impl Workbench {
 			tab.window_height = self.window_height;
 		}
 
-		self.notify(NotificationKind::Scale, format!("Scale: {scale:.1}x (Max {max_scale}.0)"), TextColor::White)
+		if old_scale != scale {
+			self.notify(NotificationKind::Scale, format!("Scale: {scale:.1}x (Max {max_scale}.0)"), TextColor::White)
+		}
 	}
 
 	#[inline]

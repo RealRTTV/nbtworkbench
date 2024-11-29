@@ -2,14 +2,13 @@ use std::fmt::Display;
 use std::ops::{Deref, DerefMut};
 use std::time::Duration;
 
-use compact_str::CompactString;
 use regex::Regex;
 use winit::event::MouseButton;
 use winit::keyboard::KeyCode;
 use winit::window::Theme;
 
-use crate::{config, create_regex, flags, since_epoch, SortAlgorithm, StrExt};
-use crate::assets::{SEARCH_BOOKMARKS_UV, BASE_Z, BOOKMARK_UV, DARK_STRIPE_UV, HIDDEN_BOOKMARK_UV, HOVERED_WIDGET_UV, REGEX_SEARCH_MODE_UV, SEARCH_APPEND_BOOKMARKS_UV, SEARCH_BOX_SELECTION_Z, SEARCH_BOX_Z, SEARCH_KEYS_AND_VALUES_UV, SEARCH_KEYS_UV, SEARCH_VALUES_UV, SNBT_SEARCH_MODE_UV, STRING_SEARCH_MODE_UV, UNSELECTED_WIDGET_UV};
+use crate::{config, create_regex, flags, since_epoch, NbtElementAndKey, SortAlgorithm, StrExt};
+use crate::assets::{SEARCH_BOOKMARKS_UV, BASE_Z, BOOKMARK_UV, DARK_STRIPE_UV, HIDDEN_BOOKMARK_UV, HOVERED_WIDGET_UV, REGEX_SEARCH_MODE_UV, SEARCH_APPEND_BOOKMARKS_UV, SEARCH_BOX_SELECTION_Z, SEARCH_BOX_Z, SEARCH_KEYS_AND_VALUES_UV, SEARCH_KEYS_UV, SEARCH_VALUES_UV, SNBT_SEARCH_MODE_UV, STRING_SEARCH_MODE_UV, UNSELECTED_WIDGET_UV, SELECTED_WIDGET_UV, CASE_SENSITIVE_ON_UV, CASE_SENSITIVE_OFF_UV};
 use crate::color::TextColor;
 use crate::elements::element::NbtElement;
 use crate::marked_line::{MarkedLine, MarkedLines};
@@ -26,9 +25,9 @@ pub struct SearchPredicate {
 }
 
 pub enum SearchPredicateInner {
-    String(String),
+    String(String, bool),
     Regex(Regex),
-    Snbt(Option<String>, NbtElement),
+    Snbt(NbtElementAndKey),
 }
 
 #[repr(u8)]
@@ -117,18 +116,22 @@ impl SearchMode {
         }
     }
 
-    pub fn into_predicate(self, value: String) -> Option<SearchPredicate> {
+    pub fn into_predicate(self, value: String, case_sensitive: bool) -> Option<SearchPredicate> {
         let search_flags = config::get_search_flags();
         Some(match self {
-            Self::String => SearchPredicate { inner: SearchPredicateInner::String(value), search_flags },
-            Self::Regex => if let Some(regex) = create_regex(value) { SearchPredicate { inner: SearchPredicateInner::Regex(regex), search_flags } } else { return None },
+            Self::String => SearchPredicate { inner: SearchPredicateInner::String(value, case_sensitive), search_flags },
+            Self::Regex => if let Some(regex) = create_regex(value, case_sensitive) { SearchPredicate { inner: SearchPredicateInner::Regex(regex), search_flags } } else { return None },
             Self::Snbt => if let Ok((key, value)) = {
                 let sort = config::set_sort_algorithm(SortAlgorithm::None);
                 let result = NbtElement::from_str(&value);
                 config::set_sort_algorithm(sort);
                 result
-            } { SearchPredicate { inner: SearchPredicateInner::Snbt(key.map(CompactString::into_string), value), search_flags } } else { return None },
+            } { SearchPredicate { inner: SearchPredicateInner::Snbt((key, value)), search_flags } } else { return None },
         })
+    }
+
+    pub fn has_case_sensitivity(&self) -> bool {
+        matches!(self, Self::String | Self::Regex)
     }
 }
 
@@ -136,16 +139,21 @@ impl SearchPredicate {
     fn matches(&self, key: Option<&str>, value: &NbtElement) -> bool {
         let flags = self.search_flags as u8 + 1;
         match &self.inner {
-            SearchPredicateInner::String(str) => {
+            SearchPredicateInner::String(str, case_sensitive) => {
                 let (value, color) = value.value();
-                ((flags & 0b01) > 0 && color != TextColor::TreeKey && value.contains(str)) || ((flags & 0b10) > 0 && key.is_some_and(|k| k.contains(str)))
+                let (key, value, matcher) = if *case_sensitive {
+                    (key.map(|s| s.to_owned()), value, str.to_owned())
+                } else {
+                    (key.map(|s| s.to_ascii_lowercase()), value.to_ascii_lowercase(), str.to_ascii_lowercase())
+                };
+                ((flags & 0b01) > 0 && color != TextColor::TreeKey && value.contains(&matcher)) || ((flags & 0b10) > 0 && key.is_some_and(|k| k.contains(&matcher)))
             }
             SearchPredicateInner::Regex(regex) => {
                 let (value, color) = value.value();
                 ((flags & 0b01) > 0 && color != TextColor::TreeKey && regex.is_match(&value)) || ((flags & 0b10) > 0 && key.is_some_and(|k| regex.is_match(k)))
             }
-            SearchPredicateInner::Snbt(k, element) => {
-                (!((flags & 0b01) > 0 && !element.matches(value))) && (!((flags & 0b10) > 0 && k.as_deref() != key))
+            SearchPredicateInner::Snbt((k, element)) => {
+                (!((flags & 0b01) > 0 && !element.matches(value))) && (!((flags & 0b10) > 0 && k.as_ref().map(|k| k.as_str()) != key))
             },
         }
     }
@@ -259,41 +267,63 @@ impl SearchBox {
 
         {
             let bookmark_uv = if shift { SEARCH_APPEND_BOOKMARKS_UV } else { SEARCH_BOOKMARKS_UV };
-            let widget_uv = if (builder.window_width() - SEARCH_BOX_END_X - 17 - 16 - 16..builder.window_width() - SEARCH_BOX_END_X - 1 - 16 - 16).contains(&mouse_x) && (26..42).contains(&mouse_y) {
+            let widget_uv = if (builder.window_width() - SEARCH_BOX_END_X - 17 - 16 - 16 - 16..builder.window_width() - SEARCH_BOX_END_X - 1 - 16 - 16 - 16).contains(&mouse_x) && (26..42).contains(&mouse_y) {
                 builder.draw_tooltip(&[if shift { "Append to search (Shift + Enter)"} else { "Search (Enter)" }], mouse, false);
                 HOVERED_WIDGET_UV
             } else {
-                UNSELECTED_WIDGET_UV
+                SELECTED_WIDGET_UV
             };
 
-            builder.draw_texture_z((builder.window_width() - SEARCH_BOX_END_X - 17 - 16 - 16, 26), BASE_Z, widget_uv, (16, 16));
-            builder.draw_texture_z((builder.window_width() - SEARCH_BOX_END_X - 17 - 16 - 16, 26), BASE_Z, bookmark_uv, (16, 16));
+            builder.draw_texture_z((builder.window_width() - SEARCH_BOX_END_X - 17 - 16 - 16 - 16, 26), BASE_Z, widget_uv, (16, 16));
+            builder.draw_texture_z((builder.window_width() - SEARCH_BOX_END_X - 17 - 16 - 16 - 16, 26), BASE_Z, bookmark_uv, (16, 16));
         }
 
         {
             let search_uv = config::get_search_flags().uv();
-            let widget_uv = if (builder.window_width() - SEARCH_BOX_END_X - 17 - 16..builder.window_width() - SEARCH_BOX_END_X - 1 - 16).contains(&mouse_x) && (26..42).contains(&mouse_y) {
+            let widget_uv = if (builder.window_width() - SEARCH_BOX_END_X - 17 - 16 - 16..builder.window_width() - SEARCH_BOX_END_X - 1 - 16 - 16).contains(&mouse_x) && (26..42).contains(&mouse_y) {
                 builder.draw_tooltip(&[&config::get_search_flags().to_string()], mouse, false);
                 HOVERED_WIDGET_UV
             } else {
-                UNSELECTED_WIDGET_UV
+                SELECTED_WIDGET_UV
             };
 
-            builder.draw_texture_z((builder.window_width() - SEARCH_BOX_END_X - 17 - 16, 26), BASE_Z, widget_uv, (16, 16));
-            builder.draw_texture_z((builder.window_width() - SEARCH_BOX_END_X - 17 - 16, 26), BASE_Z, search_uv, (16, 16));
+            builder.draw_texture_z((builder.window_width() - SEARCH_BOX_END_X - 17 - 16 - 16, 26), BASE_Z, widget_uv, (16, 16));
+            builder.draw_texture_z((builder.window_width() - SEARCH_BOX_END_X - 17 - 16 - 16, 26), BASE_Z, search_uv, (16, 16));
         }
 
         {
             let mode_uv = config::get_search_mode().uv();
-            let widget_uv = if (builder.window_width() - SEARCH_BOX_END_X - 17..builder.window_width() - SEARCH_BOX_END_X - 1).contains(&mouse_x) && (26..42).contains(&mouse_y) {
+            let widget_uv = if (builder.window_width() - SEARCH_BOX_END_X - 17 - 16..builder.window_width() - SEARCH_BOX_END_X - 1 - 16).contains(&mouse_x) && (26..42).contains(&mouse_y) {
                 builder.draw_tooltip(&[&format!("{mode} Mode", mode = config::get_search_mode())], mouse, false);
                 HOVERED_WIDGET_UV
+            } else {
+                SELECTED_WIDGET_UV
+            };
+
+            builder.draw_texture_z((builder.window_width() - SEARCH_BOX_END_X - 17 - 16, 26), BASE_Z, widget_uv, (16, 16));
+            builder.draw_texture_z((builder.window_width() - SEARCH_BOX_END_X - 17 - 16, 26), BASE_Z, mode_uv, (16, 16));
+        }
+
+        {
+            let has_case_sensitivity = config::get_search_mode().has_case_sensitivity();
+            let within_widget_bounds = (builder.window_width() - SEARCH_BOX_END_X - 17..builder.window_width() - SEARCH_BOX_END_X - 1).contains(&mouse_x) && (26..42).contains(&mouse_y);
+            let case_sensitive = config::get_case_sensitive();
+            let case_sensitive_uv = if case_sensitive || !has_case_sensitivity { CASE_SENSITIVE_ON_UV } else { CASE_SENSITIVE_OFF_UV };
+            if within_widget_bounds {
+                builder.draw_tooltip(&[if case_sensitive || !has_case_sensitivity { "Case Sensitive" } else { "Case Insensitive" }], mouse, false);
+            }
+            let widget_uv = if has_case_sensitivity {
+                if within_widget_bounds {
+                    HOVERED_WIDGET_UV
+                } else {
+                    SELECTED_WIDGET_UV
+                }
             } else {
                 UNSELECTED_WIDGET_UV
             };
 
             builder.draw_texture_z((builder.window_width() - SEARCH_BOX_END_X - 17, 26), BASE_Z, widget_uv, (16, 16));
-            builder.draw_texture_z((builder.window_width() - SEARCH_BOX_END_X - 17, 26), BASE_Z, mode_uv, (16, 16));
+            builder.draw_texture_z((builder.window_width() - SEARCH_BOX_END_X - 17, 26), BASE_Z, case_sensitive_uv, (16, 16));
         }
     }
 
@@ -341,16 +371,27 @@ impl SearchBox {
     }
 
     #[inline]
+    pub fn on_case_sensitive_widget(&mut self, _shift: bool) {
+        if config::get_search_mode().has_case_sensitivity() {
+            config::set_case_sensitive(!config::get_case_sensitive());
+        }
+    }
+
+    #[inline]
     pub fn search(&mut self, bookmarks: &mut MarkedLines, root: &NbtElement, count_only: bool) {
         if self.value.is_empty() {
             return;
         }
 
-        let Some(predicate) = config::get_search_mode().into_predicate(self.value.clone()) else { return };
         let start = since_epoch();
-        let new_bookmarks = Self::search0(root, &predicate);
+        let new_bookmarks = if self.value.is_empty() {
+            MarkedLines::new()
+        } else {
+            let Some(predicate) = config::get_search_mode().into_predicate(self.value.clone(), config::get_case_sensitive()) else { return };
+            Self::search0(root, &predicate)
+        };
         self.hits = Some((new_bookmarks.len(), since_epoch() - start));
-        if !count_only {
+        if !count_only && !new_bookmarks.is_empty() {
             bookmarks.add_bookmarks(new_bookmarks);
         }
     }

@@ -1,27 +1,27 @@
 use fxhash::FxHashMap;
+use parking_lot::RwLock;
 use winit::window::Theme;
 use crate::search_box::{SearchFlags, SearchMode};
 
 use crate::SortAlgorithm;
-use crate::window::{WINDOW_HEIGHT, WINDOW_WIDTH};
 
 struct Config {
     theme: Theme,
     sort_algorithm: SortAlgorithm,
     search_mode: SearchMode,
     search_flags: SearchFlags,
-    window_dims_pct: (f64, f64),
+    case_sensitive: bool,
     scale: Option<f32>,
 }
 
-static mut CONFIG: Config = Config {
+static CONFIG: RwLock<Config> = RwLock::new(Config {
     theme: Theme::Dark,
     sort_algorithm: SortAlgorithm::Type,
     search_mode: SearchMode::String,
     search_flags: SearchFlags::Values,
-    window_dims_pct: (WINDOW_WIDTH as f64 / 1280.0, WINDOW_HEIGHT as f64 / 720.0),
+    case_sensitive: true,
     scale: None,
-};
+});
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn read() -> bool {
@@ -57,8 +57,8 @@ fn read0(map: &FxHashMap<String, String>) {
     if let Some(search_flags) = map.get("search_flags").and_then(|s| match s.as_str() { "key" => Some(SearchFlags::Keys), "value" => Some(SearchFlags::Values), "all" => Some(SearchFlags::KeysValues), _ => None }) {
         set_search_flags(search_flags);
     }
-    if let Some(window_dims_pct) = map.get("window_dims_pct").and_then(|s| s.split_once("x")).and_then(|(width, height)| width.parse::<f64>().ok().and_then(|width| height.parse::<f64>().ok().map(|height| (width, height)))) {
-        set_window_dims_pct(window_dims_pct);
+    if let Some(case_sensitive) = map.get("case_sensitive").and_then(|s| s.parse::<bool>().ok()) {
+        set_case_sensitive(case_sensitive);
     }
     if let Some(scale) = map.get("scale").and_then(|s| s.strip_prefix("Some(")).and_then(|s| s.strip_suffix(")")).and_then(|s| s.parse::<f32>().ok()) {
         set_scale(Some(scale));
@@ -91,7 +91,7 @@ fn write0() -> String {
     writeln!(&mut builder, "sort_algorithm={}", match get_sort_algorithm() { SortAlgorithm::None => "none", SortAlgorithm::Name => "name", SortAlgorithm::Type => "type" }).unwrap_or(());
     writeln!(&mut builder, "search_mode={}", match get_search_mode() { SearchMode::String => "string", SearchMode::Regex => "regex", SearchMode::Snbt => "snbt" }).unwrap_or(());
     writeln!(&mut builder, "search_flags={}", match get_search_flags() { SearchFlags::Keys => "key", SearchFlags::Values => "value", SearchFlags::KeysValues => "all" }).unwrap_or(());
-    writeln!(&mut builder, "window_dims_pct={}x{}", get_window_dims_pct().0, get_window_dims_pct().1).unwrap_or(());
+    writeln!(&mut builder, "case_sensitive={}", get_case_sensitive()).unwrap_or(());
     writeln!(&mut builder, "scale={:?}", get_scale()).unwrap_or(());
     builder
 }
@@ -99,12 +99,12 @@ fn write0() -> String {
 #[inline]
 #[must_use]
 pub fn get_theme() -> Theme {
-    unsafe { CONFIG.theme }
+    CONFIG.read().theme
 }
 
 #[inline]
 pub fn set_theme(theme: Theme) -> Theme {
-    let old_theme = unsafe { core::mem::replace(&mut CONFIG.theme, theme) };
+    let old_theme = core::mem::replace(&mut CONFIG.write().theme, theme);
     write();
     old_theme
 }
@@ -113,12 +113,12 @@ pub fn set_theme(theme: Theme) -> Theme {
 #[inline]
 #[must_use]
 pub fn get_sort_algorithm() -> SortAlgorithm {
-    unsafe { CONFIG.sort_algorithm }
+    CONFIG.read().sort_algorithm
 }
 
 #[inline]
 pub fn set_sort_algorithm(sort_algorithm: SortAlgorithm) -> SortAlgorithm {
-    let old_sort_algorithm = unsafe { core::mem::replace(&mut CONFIG.sort_algorithm, sort_algorithm) };
+    let old_sort_algorithm = core::mem::replace(&mut CONFIG.write().sort_algorithm, sort_algorithm);
     write();
     old_sort_algorithm
 }
@@ -126,12 +126,12 @@ pub fn set_sort_algorithm(sort_algorithm: SortAlgorithm) -> SortAlgorithm {
 #[inline]
 #[must_use]
 pub fn get_search_mode() -> SearchMode {
-    unsafe { CONFIG.search_mode }
+    CONFIG.read().search_mode
 }
 
 #[inline]
 pub fn set_search_mode(search_mode: SearchMode) -> SearchMode {
-    let old_search_mode = unsafe { core::mem::replace(&mut CONFIG.search_mode, search_mode) };
+    let old_search_mode = core::mem::replace(&mut CONFIG.write().search_mode, search_mode);
     write();
     old_search_mode
 }
@@ -139,40 +139,38 @@ pub fn set_search_mode(search_mode: SearchMode) -> SearchMode {
 #[inline]
 #[must_use]
 pub fn get_search_flags() -> SearchFlags {
-    unsafe { CONFIG.search_flags }
+    CONFIG.read().search_flags
 }
 
 #[inline]
 pub fn set_search_flags(search_flags: SearchFlags) -> SearchFlags {
-    let old_search_flags = unsafe { core::mem::replace(&mut CONFIG.search_flags, search_flags) };
+    let old_search_flags = core::mem::replace(&mut CONFIG.write().search_flags, search_flags);
     write();
     old_search_flags
 }
 
 #[inline]
 #[must_use]
-pub fn get_window_dims_pct() -> (f64, f64) {
-    unsafe { CONFIG.window_dims_pct }
+pub fn get_case_sensitive() -> bool {
+    CONFIG.read().case_sensitive
 }
 
 #[inline]
-pub fn set_window_dims_pct(window_dims_pct: (f64, f64)) -> (f64, f64) {
-    let width = f64::clamp(window_dims_pct.0, 0.0, 1.0);
-    let height = f64::clamp(window_dims_pct.1, 0.0, 1.0);
-    let old_window_dims_pct = unsafe { core::mem::replace(&mut CONFIG.window_dims_pct, (width, height)) };
+pub fn set_case_sensitive(case_sensitive: bool) -> bool {
+    let old_case_sensitive = core::mem::replace(&mut CONFIG.write().case_sensitive, case_sensitive);
     write();
-    old_window_dims_pct
+    old_case_sensitive
 }
 
 #[inline]
 #[must_use]
 pub fn get_scale() -> Option<f32> {
-    unsafe { CONFIG.scale }
+    CONFIG.read().scale
 }
 
 #[inline]
 pub fn set_scale(scale: Option<f32>) -> Option<f32> {
-    let old_scale = unsafe { core::mem::replace(&mut CONFIG.scale, scale) };
+    let old_scale = core::mem::replace(&mut CONFIG.write().scale, scale);
     write();
     old_scale
 }

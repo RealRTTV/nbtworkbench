@@ -42,7 +42,7 @@ use vertex_buffer_builder::VertexBufferBuilder;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::prelude::wasm_bindgen;
 
-use crate::assets::{BASE_TEXT_Z, BASE_Z, BOOKMARK_UV, BOOKMARK_Z, END_LINE_NUMBER_SEPARATOR_UV, HEADER_SIZE, HIDDEN_BOOKMARK_UV, HOVERED_WIDGET_UV, INSERTION_CHUNK_UV, INSERTION_UV, INVALID_STRIPE_UV, LINE_NUMBER_SEPARATOR_UV, LINE_NUMBER_Z, SCROLLBAR_BOOKMARK_Z, SELECTED_TOGGLE_OFF_UV, SELECTED_TOGGLE_ON_UV, SORT_COMPOUND_BY_NAME_UV, SORT_COMPOUND_BY_NOTHING_UV, SORT_COMPOUND_BY_TYPE_UV, TEXT_UNDERLINE_UV, TOGGLE_Z, UNSELECTED_TOGGLE_OFF_UV, UNSELECTED_TOGGLE_ON_UV, UNSELECTED_WIDGET_UV};
+use crate::assets::{BASE_TEXT_Z, BASE_Z, BOOKMARK_UV, BOOKMARK_Z, END_LINE_NUMBER_SEPARATOR_UV, HEADER_SIZE, HIDDEN_BOOKMARK_UV, HOVERED_WIDGET_UV, INSERTION_CHUNK_UV, INSERTION_UV, INVALID_STRIPE_UV, LINE_NUMBER_SEPARATOR_UV, LINE_NUMBER_Z, SCROLLBAR_BOOKMARK_Z, SELECTED_TOGGLE_OFF_UV, SELECTED_TOGGLE_ON_UV, SELECTED_WIDGET_UV, SORT_COMPOUND_BY_NAME_UV, SORT_COMPOUND_BY_NOTHING_UV, SORT_COMPOUND_BY_TYPE_UV, TEXT_UNDERLINE_UV, TOGGLE_Z, UNSELECTED_TOGGLE_OFF_UV, UNSELECTED_TOGGLE_ON_UV};
 use crate::color::TextColor;
 use crate::elements::compound::CompoundMap;
 use crate::elements::element::{NbtByteArray, NbtIntArray, NbtLongArray};
@@ -347,7 +347,7 @@ pub fn set_clipboard(value: String) -> bool {
 }
 
 #[must_use]
-pub fn create_regex(mut str: String) -> Option<Regex> {
+pub fn create_regex(mut str: String, case_sensitive: bool) -> Option<Regex> {
 	let flags = 'a: {
 		if !str.starts_with("/") {
 			break 'a 0;
@@ -372,7 +372,7 @@ pub fn create_regex(mut str: String) -> Option<Regex> {
 	};
 
 	RegexBuilder::new(&str)
-		.case_insensitive(flags & 0b1 > 0)
+		.case_insensitive((flags & 0b1 > 0) || !case_sensitive)
 		.multi_line(flags & 0b100 > 0)
 		.dot_matches_new_line(flags & 0b1000 > 0)
 		.unicode(flags & 0b10000 > 0)
@@ -616,12 +616,10 @@ impl SortAlgorithm {
 			builder.draw_tooltip(&[&format!("Compound Sorting Algorithm ({self})")], (ctx.mouse_x, ctx.mouse_y), false);
 			HOVERED_WIDGET_UV
 		} else {
-			UNSELECTED_WIDGET_UV
+			SELECTED_WIDGET_UV
 		};
 		builder.draw_texture((280, 26), widget_uv, (16, 16));
 		builder.draw_texture((283, 29), uv, (10, 10));
-
-
 	}
 
 	pub fn cycle(self) -> Self {

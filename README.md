@@ -104,6 +104,7 @@ however, it would not come to be without the lovely projects below inspiring it.
 ### Technologies
 * [WGPU](https://github.com/gfx-rs/wgpu)
 * [Rust](https://rust-lang.org)
+* [Aesprite Font (occasional use)](https://github.com/aseprite/aseprite/blob/main/data/fonts/aseprite_font.png)
 
 ### Icons
 * Remastered/Inspired by [jaquado](https://github.com/jaquadro)'s [NBTExplorer](https://github.com/jaquadro/NBTExplorer) icons.

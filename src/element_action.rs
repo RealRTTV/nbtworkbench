@@ -138,14 +138,14 @@ impl ElementAction {
 				Self::CopyRaw => {
 					use core::fmt::Write;
 
-					let mut buffer = key.map_or(String::new(), |x| x.into_string() + ":");
+					let mut buffer = key.map_or(String::new(), |x| if x.needs_escape() { format!("{x:?}") } else { x.into_string() } + ":");
 					if write!(&mut buffer, "{element}").is_err() { break 'm }
 					set_clipboard(buffer);
 				}
 				Self::CopyFormatted => {
 					use core::fmt::Write;
 
-					let mut buffer = key.map_or(String::new(), |x| x.into_string() + ": ");
+					let mut buffer = key.map_or(String::new(), |x| if x.needs_escape() { format!("{x:?}") } else { x.into_string() } + ":");
 					if write!(&mut buffer, "{element:#?}").is_err() { break 'm }
 					set_clipboard(buffer);
 				}

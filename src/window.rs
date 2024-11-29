@@ -63,7 +63,7 @@ pub async fn run() -> ! {
 						}
 					}
 					WindowEvent::CloseRequested => if self.workbench.close() == 0 { std::process::exit(0) },
-					WindowEvent::Resized(new_size) => self.state.resize(self.workbench, new_size, self.window.current_monitor().map(|monitor| monitor.size())),
+					WindowEvent::Resized(new_size) => self.state.resize(self.workbench, new_size),
 					_ => {}
 				}
 			}
@@ -123,11 +123,10 @@ pub async fn run() -> ! {
 	};
 	#[cfg(not(target_arch = "wasm32"))]
 	let window_size = {
-		let (window_width_pct, window_height_pct) = config::get_window_dims_pct();
-		let monitor_dims = window.current_monitor().map(|monitor| monitor.size()).unwrap_or(PhysicalSize::new(1280, 720));
+		let (window_width_pct, window_height_pct) = (WINDOW_WIDTH as f64 / 1920.0, WINDOW_HEIGHT as f64 / 1080.0);
+		let monitor_dims = window.current_monitor().map(|monitor| monitor.size()).unwrap_or(PhysicalSize::new(1920, 1080));
 		let width = (f64::round(window_width_pct * monitor_dims.width as f64) as u32).max(MIN_WINDOW_WIDTH as u32);
 		let height = (f64::round(window_height_pct * monitor_dims.height as f64) as u32).max(MIN_WINDOW_HEIGHT as u32);
-		config::set_window_dims_pct((width as f64 / monitor_dims.width as f64, height as f64 / monitor_dims.height as f64));
 		PhysicalSize::new(width, height)
 	};
 	let _ = window.request_inner_size(window_size);
@@ -482,14 +481,12 @@ impl<'window> State<'window> {
 		}
 	}
 
-	fn resize(&mut self, workbench: &mut Workbench, new_size: PhysicalSize<u32>, monitor_dims: Option<PhysicalSize<u32>>) {
+	fn resize(&mut self, workbench: &mut Workbench, new_size: PhysicalSize<u32>) {
 		if new_size.width > 0 && new_size.height > 0 {
-			let monitor_dims = monitor_dims.unwrap_or(PhysicalSize::new(1280, 720));
 			self.size = new_size;
 			self.config.width = new_size.width;
 			self.config.height = new_size.height;
 			self.surface.configure(&self.device, &self.config);
-			config::set_window_dims_pct((new_size.width as f64 / monitor_dims.width as f64, new_size.height as f64 / monitor_dims.height as f64));
 			workbench.window_dimensions(new_size.width as usize, new_size.height as usize);
 			for tab in &mut workbench.tabs {
 				tab.refresh_scrolls();
