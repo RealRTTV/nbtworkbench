@@ -713,7 +713,7 @@ impl NbtRegion {
 	#[inline]
 	#[cfg(target_arch = "wasm32")]
 	pub fn expand(&mut self) {
-		self.open = !self.is_empty();
+		self.set_open(!self.is_empty());
 		if !self.is_grid_layout() {
 			self.height = self.true_height;
 			for element in self.children_mut() {
