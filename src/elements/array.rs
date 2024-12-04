@@ -24,6 +24,12 @@ macro_rules! array {
 			}
 		}
 
+		impl PartialEq for $name {
+			fn eq(&self, other: &Self) -> bool {
+				self.values.eq(&other.values)
+			}
+		}
+
 		impl Clone for $name {
 			#[allow(clippy::cast_ptr_alignment)]
 			#[inline]

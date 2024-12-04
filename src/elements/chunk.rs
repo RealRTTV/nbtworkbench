@@ -43,6 +43,12 @@ impl NbtRegion {
 	}
 }
 
+impl PartialEq for NbtRegion {
+	fn eq(&self, other: &Self) -> bool {
+		self.chunks.eq(&other.chunks)
+	}
+}
+
 impl Clone for NbtRegion {
 	#[allow(clippy::cast_ptr_alignment)]
 	#[inline]
@@ -670,7 +676,9 @@ impl NbtRegion {
 	#[inline]
 	pub fn shut(&mut self) {
 		for element in self.children_mut() {
-			element.shut();
+			if element.open() {
+				element.shut();
+			}
 		}
 		self.set_open(false);
 		self.height = if self.is_grid_layout() { 33 } else { 1025 };
@@ -737,7 +745,7 @@ impl NbtRegion {
 				self.height = 33;
 			} else {
 				for child in self.children() {
-					max_depth = usize::max(max_depth, 16 + 4 + child.value().0.width());
+					max_depth = usize::max(max_depth, 16 + 4 + child.value_width());
 					max_depth = usize::max(max_depth, 16 + child.max_depth());
 				}
 			}
@@ -794,6 +802,12 @@ pub struct NbtChunk {
 impl NbtChunk {
 	pub fn matches(&self, other: &Self) -> bool {
 		self.inner.matches(&other.inner)
+	}
+}
+
+impl PartialEq for NbtChunk {
+	fn eq(&self, other: &Self) -> bool {
+		(&*self.inner).eq(&*other.inner)
 	}
 }
 

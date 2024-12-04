@@ -12,7 +12,7 @@ use compact_str::{CompactString, format_compact, ToCompactString};
 use hashbrown::raw::RawTable;
 use polonius_the_crab::{polonius, polonius_return};
 
-use crate::{array, assets::JUST_OVERLAPPING_BASE_TEXT_Z, DropFn, primitive, RenderContext, since_epoch, StrExt, TextColor, VertexBufferBuilder, NbtElementAndKey};
+use crate::{array, assets::JUST_OVERLAPPING_BASE_TEXT_Z, DropFn, primitive, RenderContext, since_epoch, StrExt, TextColor, VertexBufferBuilder, NbtElementAndKey, width_ascii};
 use crate::assets::{BASE_Z, BYTE_ARRAY_UV, BYTE_UV, CONNECTION_UV, DOUBLE_UV, FLOAT_UV, INT_ARRAY_UV, INT_UV, LONG_ARRAY_UV, LONG_UV, SHORT_UV, ZOffset};
 use crate::be_decoder::BigEndianDecoder;
 use crate::element_action::ElementAction;
@@ -85,6 +85,34 @@ impl NbtElement {
 				NbtIntArray::ID => self.int_array.matches(&other.int_array),
 				NbtLongArray::ID => self.long_array.matches(&other.long_array),
 				NbtNull::ID => self.null.matches(&other.null),
+				_ => core::hint::unreachable_unchecked(),
+			}
+		}
+	}
+}
+
+impl PartialEq for NbtElement {
+	#[inline(never)]
+	fn eq(&self, other: &Self) -> bool {
+		if self.id() != other.id() { return false }
+
+		unsafe {
+			match self.id() {
+				NbtChunk::ID => self.chunk.eq(&other.chunk),
+				NbtRegion::ID => self.region.eq(&other.region),
+				NbtByte::ID => self.byte.eq(&other.byte),
+				NbtShort::ID => self.short.eq(&other.short),
+				NbtInt::ID => self.int.eq(&other.int),
+				NbtLong::ID => self.long.eq(&other.long),
+				NbtFloat::ID => self.float.eq(&other.float),
+				NbtDouble::ID => self.double.eq(&other.double),
+				NbtByteArray::ID => self.byte_array.eq(&other.byte_array),
+				NbtString::ID => self.string.eq(&other.string),
+				NbtList::ID => self.list.eq(&other.list),
+				NbtCompound::ID => self.compound.eq(&other.compound),
+				NbtIntArray::ID => self.int_array.eq(&other.int_array),
+				NbtLongArray::ID => self.long_array.eq(&other.long_array),
+				NbtNull::ID => self.null.eq(&other.null),
 				_ => core::hint::unreachable_unchecked(),
 			}
 		}
@@ -979,6 +1007,69 @@ impl NbtElement {
 
 	#[inline]
 	#[must_use]
+	pub fn value_width(&self) -> usize {
+		unsafe {
+			match self.id() {
+				NbtByte::ID => {
+					(const { width_ascii("1") }) * self.byte.value.abs().checked_ilog10().map_or(1, |x| x as usize + 1)
+						+ (self.byte.value < 0) as usize * const { width_ascii("-") }
+				},
+				NbtShort::ID => {
+					(const { width_ascii("1") }) * self.short.value.abs().checked_ilog10().map_or(1, |x| x as usize + 1)
+						+ (self.short.value < 0) as usize * const { width_ascii("-") }
+				},
+				NbtInt::ID => {
+					(const { width_ascii("1") }) * self.int.value.abs().checked_ilog10().map_or(1, |x| x as usize + 1)
+						+ (self.int.value < 0) as usize * const { width_ascii("-") }
+				},
+				NbtLong::ID => {
+					(const { width_ascii("1") }) * self.long.value.abs().checked_ilog10().map_or(1, |x| x as usize + 1)
+						+ (self.long.value < 0) as usize * const { width_ascii("-") }
+				},
+				NbtFloat::ID => self.float.value().width(), // todo, barely optimize this by making a lot of code myself
+				NbtDouble::ID => self.double.value().width(), // todo, barely optimize this by making a lot of code myself
+				NbtByteArray::ID => {
+					(const { width_ascii("1") }) * self.byte_array.len().checked_ilog10().map_or(1, |x| x as usize + 1)
+						+ const { width_ascii(" ") }
+						+ if self.byte_array.len() == 1 { const { id_to_string_name_width(NbtByte::ID) }.0 } else { const { id_to_string_name_width(NbtByte::ID) }.1 }
+				},
+				NbtString::ID => self.string.str.width(),
+				NbtList::ID => {
+					(const { width_ascii("1") }) * self.list.len().checked_ilog10().map_or(1, |x| x as usize + 1)
+						+ const { width_ascii(" ") }
+						+ if self.list.len() == 1 { id_to_string_name_width(self.list.id()).0 } else { id_to_string_name_width(self.list.id()).1 }
+				},
+				NbtCompound::ID => {
+					(const { width_ascii("1") }) * self.compound.len().checked_ilog10().map_or(1, |x| x as usize + 1)
+						+ const { width_ascii(" ") }
+						+ if self.compound.len() == 1 { const { id_to_string_name_width(NbtNull::ID) }.0 } else { const { id_to_string_name_width(NbtNull::ID) }.1 }
+				},
+				NbtIntArray::ID => {
+					(const { width_ascii("1") }) * self.int_array.len().checked_ilog10().map_or(1, |x| x as usize + 1)
+						+ const { width_ascii(" ") }
+						+ if self.int_array.len() == 1 { const { id_to_string_name_width(NbtInt::ID) }.0 } else { const { id_to_string_name_width(NbtInt::ID) }.1 }
+				},
+				NbtLongArray::ID => {
+					(const { width_ascii("1") }) * self.long_array.len().checked_ilog10().map_or(1, |x| x as usize + 1)
+						+ const { width_ascii(" ") }
+						+ if self.long_array.len() == 1 { const { id_to_string_name_width(NbtLong::ID) }.0 } else { const { id_to_string_name_width(NbtLong::ID) }.1 }
+				},
+				NbtChunk::ID => {
+					(const { width_ascii("1") }) * (self.chunk.x.checked_ilog10().map_or(1, |x| x as usize + 1) + self.chunk.z.checked_ilog10().map_or(1, |x| x as usize + 1))
+						+ const { width_ascii(", ") }
+				},
+				NbtRegion::ID => {
+					(const { width_ascii("1") }) * self.region.loaded_chunks().checked_ilog10().map_or(1, |x| x as usize + 1)
+						+ const { width_ascii(" chunk") }
+						+ (self.region.loaded_chunks() == 1) as usize * const { width_ascii("s") }
+				},
+				_ => 0,
+			}
+		}
+	}
+
+	#[inline]
+	#[must_use]
 	pub fn is_primitive(&self) -> bool {
 		match self.id() {
 			NbtByte::ID | NbtShort::ID | NbtInt::ID | NbtLong::ID | NbtFloat::ID | NbtDouble::ID | NbtString::ID => true,
@@ -1670,6 +1761,29 @@ pub fn id_to_string_name(id: u8) -> (&'static str, &'static str) {
 		NbtRegion::ID => ("region", "regions"),
 		NbtNull::ID => ("entry", "entries"),
 		_ => panic!("Invalid id"),
+	}
+}
+
+#[inline]
+#[must_use]
+pub const fn id_to_string_name_width(id: u8) -> (usize, usize) {
+	match id {
+		NbtByte::ID => (width_ascii("byte"), width_ascii("bytes")),
+		NbtShort::ID => (width_ascii("short"), width_ascii("shorts")),
+		NbtInt::ID => (width_ascii("int"), width_ascii("ints")),
+		NbtLong::ID => (width_ascii("long"), width_ascii("longs")),
+		NbtFloat::ID => (width_ascii("float"), width_ascii("floats")),
+		NbtDouble::ID => (width_ascii("double"), width_ascii("doubles")),
+		NbtByteArray::ID => (width_ascii("byte array"), width_ascii("byte arrays")),
+		NbtString::ID => (width_ascii("string"), width_ascii("strings")),
+		NbtList::ID => (width_ascii("list"), width_ascii("lists")),
+		NbtCompound::ID => (width_ascii("compound"), width_ascii("compounds")),
+		NbtIntArray::ID => (width_ascii("int array"), width_ascii("int arrays")),
+		NbtLongArray::ID => (width_ascii("long array"), width_ascii("long arrays")),
+		NbtChunk::ID => (width_ascii("chunk"), width_ascii("chunks")),
+		NbtRegion::ID => (width_ascii("region"), width_ascii("regions")),
+		NbtNull::ID => (width_ascii("entry"), width_ascii("entries")),
+		_ => (0, 0),
 	}
 }
 

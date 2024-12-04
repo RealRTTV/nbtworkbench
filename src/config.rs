@@ -10,7 +10,7 @@ struct Config {
     sort_algorithm: SortAlgorithm,
     search_mode: SearchMode,
     search_flags: SearchFlags,
-    case_sensitive: bool,
+    search_exact_match: bool,
     scale: Option<f32>,
 }
 
@@ -19,7 +19,7 @@ static CONFIG: RwLock<Config> = RwLock::new(Config {
     sort_algorithm: SortAlgorithm::Type,
     search_mode: SearchMode::String,
     search_flags: SearchFlags::Values,
-    case_sensitive: true,
+    search_exact_match: true,
     scale: None,
 });
 
@@ -57,8 +57,8 @@ fn read0(map: &FxHashMap<String, String>) {
     if let Some(search_flags) = map.get("search_flags").and_then(|s| match s.as_str() { "key" => Some(SearchFlags::Keys), "value" => Some(SearchFlags::Values), "all" => Some(SearchFlags::KeysValues), _ => None }) {
         set_search_flags(search_flags);
     }
-    if let Some(case_sensitive) = map.get("case_sensitive").and_then(|s| s.parse::<bool>().ok()) {
-        set_case_sensitive(case_sensitive);
+    if let Some(search_exact_match) = map.get("search_exact_match").and_then(|s| s.parse::<bool>().ok()) {
+        set_search_exact_match(search_exact_match);
     }
     if let Some(scale) = map.get("scale").and_then(|s| s.strip_prefix("Some(")).and_then(|s| s.strip_suffix(")")).and_then(|s| s.parse::<f32>().ok()) {
         set_scale(Some(scale));
@@ -91,7 +91,7 @@ fn write0() -> String {
     writeln!(&mut builder, "sort_algorithm={}", match get_sort_algorithm() { SortAlgorithm::None => "none", SortAlgorithm::Name => "name", SortAlgorithm::Type => "type" }).unwrap_or(());
     writeln!(&mut builder, "search_mode={}", match get_search_mode() { SearchMode::String => "string", SearchMode::Regex => "regex", SearchMode::Snbt => "snbt" }).unwrap_or(());
     writeln!(&mut builder, "search_flags={}", match get_search_flags() { SearchFlags::Keys => "key", SearchFlags::Values => "value", SearchFlags::KeysValues => "all" }).unwrap_or(());
-    writeln!(&mut builder, "case_sensitive={}", get_case_sensitive()).unwrap_or(());
+    writeln!(&mut builder, "search_exact_match={}", get_search_exact_match()).unwrap_or(());
     writeln!(&mut builder, "scale={:?}", get_scale()).unwrap_or(());
     builder
 }
@@ -151,15 +151,15 @@ pub fn set_search_flags(search_flags: SearchFlags) -> SearchFlags {
 
 #[inline]
 #[must_use]
-pub fn get_case_sensitive() -> bool {
-    CONFIG.read().case_sensitive
+pub fn get_search_exact_match() -> bool {
+    CONFIG.read().search_exact_match
 }
 
 #[inline]
-pub fn set_case_sensitive(case_sensitive: bool) -> bool {
-    let old_case_sensitive = core::mem::replace(&mut CONFIG.write().case_sensitive, case_sensitive);
+pub fn set_search_exact_match(search_exact_match: bool) -> bool {
+    let old_search_exact_match = core::mem::replace(&mut CONFIG.write().search_exact_match, search_exact_match);
     write();
-    old_case_sensitive
+    old_search_exact_match
 }
 
 #[inline]

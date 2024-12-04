@@ -8,7 +8,7 @@ use winit::keyboard::KeyCode;
 use winit::window::Theme;
 
 use crate::{config, create_regex, flags, since_epoch, NbtElementAndKey, SortAlgorithm, StrExt};
-use crate::assets::{SEARCH_BOOKMARKS_UV, BASE_Z, BOOKMARK_UV, DARK_STRIPE_UV, HIDDEN_BOOKMARK_UV, HOVERED_WIDGET_UV, REGEX_SEARCH_MODE_UV, SEARCH_APPEND_BOOKMARKS_UV, SEARCH_BOX_SELECTION_Z, SEARCH_BOX_Z, SEARCH_KEYS_AND_VALUES_UV, SEARCH_KEYS_UV, SEARCH_VALUES_UV, SNBT_SEARCH_MODE_UV, STRING_SEARCH_MODE_UV, UNSELECTED_WIDGET_UV, SELECTED_WIDGET_UV, CASE_SENSITIVE_ON_UV, CASE_SENSITIVE_OFF_UV};
+use crate::assets::{SEARCH_BOOKMARKS_UV, BASE_Z, BOOKMARK_UV, DARK_STRIPE_UV, HIDDEN_BOOKMARK_UV, HOVERED_WIDGET_UV, REGEX_SEARCH_MODE_UV, SEARCH_APPEND_BOOKMARKS_UV, SEARCH_BOX_SELECTION_Z, SEARCH_BOX_Z, SEARCH_KEYS_AND_VALUES_UV, SEARCH_KEYS_UV, SEARCH_VALUES_UV, SNBT_SEARCH_MODE_UV, STRING_SEARCH_MODE_UV, UNSELECTED_WIDGET_UV, SELECTED_WIDGET_UV, EXACT_MATCH_ON_UV, EXACT_MATCH_OFF_UV};
 use crate::color::TextColor;
 use crate::elements::element::NbtElement;
 use crate::marked_line::{MarkedLine, MarkedLines};
@@ -25,9 +25,11 @@ pub struct SearchPredicate {
 }
 
 pub enum SearchPredicateInner {
-    String(String, bool),
+    String(String),
+    StringCaseInsensitive(String),
     Regex(Regex),
     Snbt(NbtElementAndKey),
+    SnbtExactMatch(NbtElementAndKey),
 }
 
 #[repr(u8)]
@@ -92,6 +94,7 @@ impl Display for SearchMode {
 }
 
 impl SearchMode {
+    #[inline]
     pub fn cycle(self) -> Self {
         match self {
             Self::String => Self::Regex,
@@ -100,6 +103,7 @@ impl SearchMode {
         }
     }
 
+    #[inline]
     pub fn rev_cycle(self) -> Self {
         match self {
             Self::String => Self::Snbt,
@@ -108,6 +112,7 @@ impl SearchMode {
         }
     }
 
+    #[inline]
     pub fn uv(self) -> Vec2u {
         match self {
             Self::String => STRING_SEARCH_MODE_UV,
@@ -116,22 +121,39 @@ impl SearchMode {
         }
     }
 
-    pub fn into_predicate(self, value: String, case_sensitive: bool) -> Option<SearchPredicate> {
+    pub fn into_predicate(self, value: String, exact_match: bool) -> Option<SearchPredicate> {
         let search_flags = config::get_search_flags();
         Some(match self {
-            Self::String => SearchPredicate { inner: SearchPredicateInner::String(value, case_sensitive), search_flags },
-            Self::Regex => if let Some(regex) = create_regex(value, case_sensitive) { SearchPredicate { inner: SearchPredicateInner::Regex(regex), search_flags } } else { return None },
+            Self::String => SearchPredicate { inner: if exact_match { SearchPredicateInner::String(value) } else { SearchPredicateInner::StringCaseInsensitive(value.to_lowercase()) }, search_flags },
+            Self::Regex => if let Some(regex) = create_regex(value, exact_match) { SearchPredicate { inner: SearchPredicateInner::Regex(regex), search_flags } } else { return None },
             Self::Snbt => if let Ok((key, value)) = {
                 let sort = config::set_sort_algorithm(SortAlgorithm::None);
                 let result = NbtElement::from_str(&value);
                 config::set_sort_algorithm(sort);
                 result
-            } { SearchPredicate { inner: SearchPredicateInner::Snbt((key, value)), search_flags } } else { return None },
+            } { SearchPredicate { inner: if exact_match { SearchPredicateInner::SnbtExactMatch((key, value)) } else { SearchPredicateInner::Snbt((key, value)) }, search_flags } } else { return None },
         })
     }
 
-    pub fn has_case_sensitivity(&self) -> bool {
-        matches!(self, Self::String | Self::Regex)
+    #[inline]
+    pub fn has_exact_match_mode(&self) -> bool {
+        matches!(self, Self::String | Self::Regex | Self::Snbt)
+    }
+
+    #[inline]
+    pub fn get_exact_search_on_name(&self) -> &str {
+        match self {
+            Self::String | Self::Regex => "Case Sensitive Mode",
+            Self::Snbt => "Exact Match Mode",
+        }
+    }
+
+    #[inline]
+    pub fn get_exact_search_off_name(&self) -> &str {
+        match self {
+            Self::String | Self::Regex => "Case Insensitive Mode",
+            Self::Snbt => "Contains Mode",
+        }
     }
 }
 
@@ -139,14 +161,14 @@ impl SearchPredicate {
     fn matches(&self, key: Option<&str>, value: &NbtElement) -> bool {
         let flags = self.search_flags as u8 + 1;
         match &self.inner {
-            SearchPredicateInner::String(str, case_sensitive) => {
+            SearchPredicateInner::String(matcher) => {
                 let (value, color) = value.value();
-                let (key, value, matcher) = if *case_sensitive {
-                    (key.map(|s| s.to_owned()), value, str.to_owned())
-                } else {
-                    (key.map(|s| s.to_ascii_lowercase()), value.to_ascii_lowercase(), str.to_ascii_lowercase())
-                };
-                ((flags & 0b01) > 0 && color != TextColor::TreeKey && value.contains(&matcher)) || ((flags & 0b10) > 0 && key.is_some_and(|k| k.contains(&matcher)))
+                ((flags & 0b01) > 0 && color != TextColor::TreeKey && value.contains(matcher)) || ((flags & 0b10) > 0 && key.is_some_and(|k| k.contains(matcher)))
+            }
+            SearchPredicateInner::StringCaseInsensitive(matcher) => {
+                let (value, color) = value.value();
+                let (key, value) = (key.map(|s| s.to_lowercase()), value.to_lowercase());
+                ((flags & 0b01) > 0 && color != TextColor::TreeKey && value.contains(matcher)) || ((flags & 0b10) > 0 && key.is_some_and(|k| k.contains(matcher)))
             }
             SearchPredicateInner::Regex(regex) => {
                 let (value, color) = value.value();
@@ -154,7 +176,10 @@ impl SearchPredicate {
             }
             SearchPredicateInner::Snbt((k, element)) => {
                 (!((flags & 0b01) > 0 && !element.matches(value))) && (!((flags & 0b10) > 0 && k.as_ref().map(|k| k.as_str()) != key))
-            },
+            }
+            SearchPredicateInner::SnbtExactMatch((k, element)) => {
+                (!((flags & 0b01) > 0 && !element.eq(value))) && (!((flags & 0b10) > 0 && k.as_ref().map(|k| k.as_str()) != key))
+            }
         }
     }
 }
@@ -226,6 +251,7 @@ impl SearchBox {
     pub fn render(&self, builder: &mut VertexBufferBuilder, shift: bool, mouse: (usize, usize)) {
         use std::fmt::Write;
 
+        let search_mode = config::get_search_mode();
         let pos = Vec2u::new(SEARCH_BOX_START_X, 23);
         let (mouse_x, mouse_y) = mouse;
 
@@ -244,7 +270,7 @@ impl SearchBox {
         if self.value.is_empty() {
             builder.settings(pos + (0, 3), false, SEARCH_BOX_Z);
             builder.color = TextColor::Gray.to_raw();
-            let _ = write!(builder, "{}", match config::get_search_mode() {
+            let _ = write!(builder, "{}", match search_mode {
                 SearchMode::String => r#"Search..."#,
                 SearchMode::Regex => r#"/[Ss]earch\.*/g"#,
                 SearchMode::Snbt => r#"{dialog: "search", ...}"#,
@@ -292,9 +318,9 @@ impl SearchBox {
         }
 
         {
-            let mode_uv = config::get_search_mode().uv();
+            let mode_uv = search_mode.uv();
             let widget_uv = if (builder.window_width() - SEARCH_BOX_END_X - 17 - 16..builder.window_width() - SEARCH_BOX_END_X - 1 - 16).contains(&mouse_x) && (26..42).contains(&mouse_y) {
-                builder.draw_tooltip(&[&format!("{mode} Mode", mode = config::get_search_mode())], mouse, false);
+                builder.draw_tooltip(&[&format!("{search_mode} Mode")], mouse, false);
                 HOVERED_WIDGET_UV
             } else {
                 SELECTED_WIDGET_UV
@@ -305,14 +331,14 @@ impl SearchBox {
         }
 
         {
-            let has_case_sensitivity = config::get_search_mode().has_case_sensitivity();
+            let has_exact_search = search_mode.has_exact_match_mode();
             let within_widget_bounds = (builder.window_width() - SEARCH_BOX_END_X - 17..builder.window_width() - SEARCH_BOX_END_X - 1).contains(&mouse_x) && (26..42).contains(&mouse_y);
-            let case_sensitive = config::get_case_sensitive();
-            let case_sensitive_uv = if case_sensitive || !has_case_sensitivity { CASE_SENSITIVE_ON_UV } else { CASE_SENSITIVE_OFF_UV };
+            let exact_match = config::get_search_exact_match();
+            let exact_match_uv = if exact_match || !has_exact_search { EXACT_MATCH_ON_UV } else { EXACT_MATCH_OFF_UV };
             if within_widget_bounds {
-                builder.draw_tooltip(&[if case_sensitive || !has_case_sensitivity { "Case Sensitive" } else { "Case Insensitive" }], mouse, false);
+                builder.draw_tooltip(&[if exact_match || !has_exact_search { search_mode.get_exact_search_on_name() } else { search_mode.get_exact_search_off_name() }], mouse, false);
             }
-            let widget_uv = if has_case_sensitivity {
+            let widget_uv = if has_exact_search {
                 if within_widget_bounds {
                     HOVERED_WIDGET_UV
                 } else {
@@ -323,7 +349,7 @@ impl SearchBox {
             };
 
             builder.draw_texture_z((builder.window_width() - SEARCH_BOX_END_X - 17, 26), BASE_Z, widget_uv, (16, 16));
-            builder.draw_texture_z((builder.window_width() - SEARCH_BOX_END_X - 17, 26), BASE_Z, case_sensitive_uv, (16, 16));
+            builder.draw_texture_z((builder.window_width() - SEARCH_BOX_END_X - 17, 26), BASE_Z, exact_match_uv, (16, 16));
         }
     }
 
@@ -371,9 +397,9 @@ impl SearchBox {
     }
 
     #[inline]
-    pub fn on_case_sensitive_widget(&mut self, _shift: bool) {
-        if config::get_search_mode().has_case_sensitivity() {
-            config::set_case_sensitive(!config::get_case_sensitive());
+    pub fn on_exact_match_widget(&mut self, _shift: bool) {
+        if config::get_search_mode().has_exact_match_mode() {
+            config::set_search_exact_match(!config::get_search_exact_match());
         }
     }
 
@@ -387,7 +413,7 @@ impl SearchBox {
         let new_bookmarks = if self.value.is_empty() {
             MarkedLines::new()
         } else {
-            let Some(predicate) = config::get_search_mode().into_predicate(self.value.clone(), config::get_case_sensitive()) else { return };
+            let Some(predicate) = config::get_search_mode().into_predicate(self.value.clone(), config::get_search_exact_match()) else { return };
             Self::search0(root, &predicate)
         };
         self.hits = Some((new_bookmarks.len(), since_epoch() - start));

@@ -9,7 +9,7 @@ use std::thread::Scope;
 use compact_str::{CompactString, format_compact, ToCompactString};
 use hashbrown::raw::RawTable;
 
-use crate::{config, hash, DropFn, NbtElementAndKey, RenderContext, StrExt, VertexBufferBuilder};
+use crate::{config, hash, width_ascii, DropFn, NbtElementAndKey, RenderContext, StrExt, VertexBufferBuilder};
 use crate::assets::{BASE_Z, COMPOUND_ROOT_UV, COMPOUND_UV, CONNECTION_UV, HEADER_SIZE, JUST_OVERLAPPING_BASE_TEXT_Z, LINE_NUMBER_CONNECTOR_Z, LINE_NUMBER_SEPARATOR_UV, ZOffset};
 use crate::be_decoder::BigEndianDecoder;
 use crate::color::TextColor;
@@ -33,6 +33,12 @@ pub struct NbtCompound {
 impl NbtCompound {
 	pub fn matches(&self, other: &Self) -> bool {
 		self.entries.matches(&other.entries)
+	}
+}
+
+impl PartialEq for NbtCompound {
+	fn eq(&self, other: &Self) -> bool {
+		self.entries.eq(&other.entries)
 	}
 }
 
@@ -386,11 +392,8 @@ impl NbtCompound {
 		let mut max_depth = 0;
 		if self.open() {
 			for (key, child) in self.children() {
-				max_depth = usize::max(
-					max_depth,
-					16 + 4 + key.width() + ": ".width() + child.value().0.width(),
-				);
-				max_depth = usize::max(max_depth, 16 + child.max_depth());
+				max_depth = max_depth.max(16 + 4 + key.width() + const { width_ascii(": ") } + child.value_width());
+				max_depth = max_depth.max(16 + child.max_depth());
 			}
 		}
 		self.max_depth = max_depth as u32;
@@ -714,7 +717,9 @@ impl NbtCompound {
 	#[inline]
 	pub fn shut(&mut self) {
 		for (_, element) in self.children_mut() {
-			element.shut();
+			if element.open() {
+				element.shut();
+			}
 		}
 		self.open = false;
 		self.height = self.len() as u32 + 1;
@@ -763,6 +768,12 @@ impl CompoundMap {
 	}
 }
 
+impl PartialEq for CompoundMap {
+	fn eq(&self, other: &Self) -> bool {
+		self.entries.as_slice().eq(other.entries.as_slice())
+	}
+}
+
 impl Clone for CompoundMap {
 	#[allow(clippy::cast_ptr_alignment)]
 	fn clone(&self) -> Self {
@@ -802,6 +813,12 @@ impl Default for CompoundMap {
 			indices: RawTable::new(),
 			entries: Vec::new(),
 		}
+	}
+}
+
+impl PartialEq for Entry {
+	fn eq(&self, other: &Self) -> bool {
+		self.key == other.key && self.value == other.value
 	}
 }
 

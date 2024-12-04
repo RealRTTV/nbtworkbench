@@ -67,14 +67,14 @@ fn get_predicate(args: &mut Vec<String>) -> SearchPredicate {
         }
     };
 
-    let case_sensitive = get_argument_any(&["-cs", "--case-sensitive"], args).is_some();
+    let exact_match = get_argument_any(&["-em", "--exact-match"], args).is_some();
 
     match get_argument_any(&["--mode", "-m"], args).as_deref() {
         Some("normal") | None => SearchPredicate {
             search_flags,
-            inner: SearchPredicateInner::String(query, case_sensitive),
+            inner: if exact_match { SearchPredicateInner::String(query) } else { SearchPredicateInner::StringCaseInsensitive(query.to_lowercase()) },
         },
-        Some("regex") => if let Some(regex) = create_regex(query, case_sensitive) {
+        Some("regex") => if let Some(regex) = create_regex(query, exact_match) {
             SearchPredicate {
                 search_flags,
                 inner: SearchPredicateInner::Regex(regex),
@@ -86,7 +86,7 @@ fn get_predicate(args: &mut Vec<String>) -> SearchPredicate {
         Some("snbt") => match NbtElement::from_str(&query) {
             Ok((key, snbt)) => SearchPredicate {
                 search_flags,
-                inner: SearchPredicateInner::Snbt((key, snbt)),
+                inner: if exact_match { SearchPredicateInner::SnbtExactMatch((key, snbt)) } else { SearchPredicateInner::Snbt((key, snbt)) },
             },
             Err(idx) => {
                 error!(r#"Invalid snbt at index {idx}, valid snbt look like: `key:"minecraft:air"` or `{{id:"minecraft:looting",lvl:3s}}` (note that some terminals use "" to contain one parameter and that inner ones will have to be escaped)"#);
@@ -118,7 +118,6 @@ fn get_argument_any(keys: &[&str], args: &mut Vec<String>) -> Option<String> {
     keys.iter().filter_map(|key| get_argument(key, args)).next()
 }
 
-#[inline]
 pub fn find() -> ! {
     let mut args = std::env::args().collect::<Vec<_>>();
     // one for the exe, one for the `find`
@@ -189,7 +188,6 @@ pub fn find() -> ! {
     std::process::exit(0);
 }
 
-#[inline]
 pub fn reformat() -> ! {
     let mut args = std::env::args().collect::<Vec<_>>();
     args.drain(..2);

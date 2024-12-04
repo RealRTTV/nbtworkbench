@@ -182,8 +182,7 @@ impl ElementAction {
 					};
 					let subscription_type;
 					if let Ok(mut file) = OpenOptions::new().write(true).create(true).open(&path) {
-						if file
-							.write_all(&unsafe {
+						if file.write_all(&unsafe {
 								if let Some(array) = element.as_byte_array() {
 									subscription_type = FileUpdateSubscriptionType::ByteArray;
 									let mut vec = Vec::with_capacity(array.len());

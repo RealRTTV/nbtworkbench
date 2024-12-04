@@ -150,8 +150,8 @@ pub const REFRESH_UV: Vec2u = Vec2u::new(152, 144);
 pub const DISABLED_REFRESH_UV: Vec2u = Vec2u::new(168, 144);
 pub const LIGHTBULB_UV: Vec2u = Vec2u::new(32, 144);
 pub const DIM_LIGHTBULB_UV: Vec2u = Vec2u::new(48, 144);
-pub const CASE_SENSITIVE_ON_UV: Vec2u = Vec2u::new(64, 176);
-pub const CASE_SENSITIVE_OFF_UV: Vec2u = Vec2u::new(64, 192);
+pub const EXACT_MATCH_ON_UV: Vec2u = Vec2u::new(64, 176);
+pub const EXACT_MATCH_OFF_UV: Vec2u = Vec2u::new(64, 192);
 
 #[repr(u8)]
 #[allow(non_camel_case_types)]

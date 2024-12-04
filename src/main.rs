@@ -269,7 +269,7 @@ pub fn main() -> ! {
 Usage:
   nbtworkbench --version|-v
   nbtworkbench -?|-h|--help|/?
-  nbtworkbench find <path> [(--mode|-m)=(normal|regex|snbt)] [(--search|-s)=(key|value|all)] <query>
+  nbtworkbench find <path> [(--mode|-m)=(normal|regex|snbt)] [(--search|-s)=(key|value|all)] [--exact-match|-em] <query>
   nbtworkbench reformat (--format|-f)=<format> [(--out-dir|-d)=<out-dir>] [(--out-ext|-e)=<out-ext>] <path>
 
 Options:
@@ -280,7 +280,7 @@ Options:
   --format, -f        Specifies the format to be reformatted to; either `nbt`, `snbt`, `dat/dat_old/gzip`, `zlib`, 'lnbt' (little endian nbt), or 'lhnbt' (little endian nbt with header).
   --out-dir, -d       Specifies the output directory. [default: ./]
   --out-ext, -e       Specifies the output file extension (if not specified, it will infer from --format)"#);
-		std::process::exit(0);
+		std::process::exit(0)
 	} else {
 		pollster::block_on(window::run())
 	}
@@ -1768,6 +1768,18 @@ impl CharExt for char {
 			VertexBufferBuilder::CHAR_WIDTH[56829] as usize
 		}
 	}
+}
+
+pub const fn width_ascii(s: &str) -> usize {
+	let mut width = 0;
+	let mut i = 0;
+	while i < s.len() {
+		if s.as_bytes()[i].is_ascii() {
+			width += VertexBufferBuilder::CHAR_WIDTH[s.as_bytes()[i] as usize] as usize;
+			i += 1;
+		}
+	}
+	width
 }
 
 pub trait OptionExt<T> {

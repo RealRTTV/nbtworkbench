@@ -7,7 +7,7 @@ use std::thread::Scope;
 
 use compact_str::{CompactString, format_compact};
 
-use crate::{DropFn, RenderContext, StrExt, VertexBufferBuilder};
+use crate::{DropFn, RenderContext, VertexBufferBuilder};
 use crate::assets::{BASE_Z, CONNECTION_UV, JUST_OVERLAPPING_BASE_TEXT_Z, LIST_UV, ZOffset};
 use crate::be_decoder::BigEndianDecoder;
 use crate::color::TextColor;
@@ -35,6 +35,12 @@ impl NbtList {
 		} else {
 			self.elements.iter().all(|a| other.elements.iter().any(|b| a.matches(b)))
 		}
+	}
+}
+
+impl PartialEq for NbtList {
+	fn eq(&self, other: &Self) -> bool {
+		self.elements.as_slice().eq(other.elements.as_slice())
 	}
 }
 
@@ -574,7 +580,9 @@ impl NbtList {
 	#[inline]
 	pub fn shut(&mut self) {
 		for element in self.children_mut() {
-			element.shut();
+			if element.open() {
+				element.shut();
+			}
 		}
 		self.open = false;
 		self.height = self.len() as u32 + 1;
@@ -616,7 +624,7 @@ impl NbtList {
 		let mut max_depth = 0;
 		if self.open() {
 			for child in self.children() {
-				max_depth = usize::max(max_depth, 16 + 4 + child.value().0.width());
+				max_depth = usize::max(max_depth, 16 + 4 + child.value_width());
 				max_depth = usize::max(max_depth, 16 + child.max_depth());
 			}
 		}

@@ -17,7 +17,7 @@ use crate::le_decoder::LittleEndianDecoder;
 
 #[repr(transparent)]
 #[allow(clippy::module_name_repetitions)]
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct NbtString {
 	pub str: TwentyThree,
 }
@@ -141,6 +141,12 @@ impl Clone for TwentyThree {
 				Self { stack: self.stack }
 			}
 		}
+	}
+}
+
+impl PartialEq for TwentyThree {
+	fn eq(&self, other: &Self) -> bool {
+		self.as_str().eq(other.as_str())
 	}
 }
 

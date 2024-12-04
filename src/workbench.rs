@@ -315,7 +315,7 @@ impl Workbench {
 					}
 
 					if (self.window_width - SEARCH_BOX_END_X - 17..self.window_width - SEARCH_BOX_END_X - 1).contains(&self.mouse_x) & &(26..42).contains(&self.mouse_y) {
-						self.search_box.on_case_sensitive_widget(shift);
+						self.search_box.on_exact_match_widget(shift);
 						return true;
 					}
 				}
@@ -475,7 +475,9 @@ impl Workbench {
 					let mut depth = 0;
 					if (cy & !15) + scroll == HEADER_SIZE {
 						if let Some(action) = tab.value.actions().get(highlight_idx) {
-							if let Some(action) = action.apply(None, indices.into_boxed_slice(), tab.uuid, 1, 0, &mut tab.value, &mut tab.bookmarks, &mut self.subscription, &mut self.alerts) {
+							let indices = indices.into_boxed_slice();
+							if let Some(action) = action.apply(None, indices.clone(), tab.uuid, 1, 0, &mut tab.value, &mut tab.bookmarks, &mut self.subscription, &mut self.alerts) {
+								recache_along_indices(&indices, &mut tab.value);
 								tab.append_to_history(action);
 							}
 						}
@@ -499,7 +501,9 @@ impl Workbench {
 							if !(min_x..max_x).contains(&cx) {
 								break 'a;
 							};
-							if let Some(action) = action.apply(key, indices.into_boxed_slice(), tab.uuid, true_line_number, y, element, &mut tab.bookmarks, &mut self.subscription, &mut self.alerts) {
+							let indices = indices.into_boxed_slice();
+							if let Some(action) = action.apply(key, indices.clone(), tab.uuid, true_line_number, y, element, &mut tab.bookmarks, &mut self.subscription, &mut self.alerts) {
+								recache_along_indices(&indices, &mut tab.value);
 								tab.append_to_history(action);
 							}
 							return true;
@@ -532,7 +536,8 @@ impl Workbench {
 		}
 
 		fn write_array(subscription: &FileUpdateSubscription, tab: &mut Tab, new_value: NbtElement) -> Result<()> {
-			let action = replace_element(&mut tab.value, (None, new_value), subscription.indices.clone(), &mut tab.bookmarks, &mut None)?.into_action();
+			let key = Navigate::new(subscription.indices.iter().copied(), &mut tab.value).last().1;
+			let action = replace_element(&mut tab.value, (key, new_value), subscription.indices.clone(), &mut tab.bookmarks, &mut None)?.into_action();
 			tab.append_to_history(action);
 			tab.refresh_scrolls();
 			Ok(())
@@ -1116,7 +1121,7 @@ impl Workbench {
 	fn toggle(&mut self, expand: bool, ignore_depth: bool) -> bool {
 		let left_margin = self.left_margin();
 		let horizontal_scroll = self.horizontal_scroll();
-		if let InteractionInformation::Content { is_in_left_margin: false, x, y, depth, value, true_line_number, .. } = get_interaction_information!(self) && (x <= depth || ignore_depth) && !value.is_primitive() && value.true_height() > 1 {
+		if let InteractionInformation::Content { is_in_left_margin: false, x, y, depth, value, true_line_number, indices, .. } = get_interaction_information!(self) && (x <= depth || ignore_depth) && !value.is_primitive() && value.true_height() > 1 {
 			let (height, true_height) = (value.height(), value.true_height());
 
 			if expand {
@@ -1125,21 +1130,18 @@ impl Workbench {
 				#[cfg(target_arch = "wasm32")]
 				value.expand();
 			} else {
+				// let start = std::time::Instant::now();
 				let _ = value.toggle();
+				// println!("Toggle: {}ns", start.elapsed().as_nanos());
 			}
 			let increment = value.height().wrapping_sub(height);
 			let open = value.open();
 			let tab = tab_mut!(self);
 
-			let mut iter = TraverseParents::new(x, y, &mut tab.value);
-			let mut indices = Vec::with_capacity(depth);
-			while let Some((_, idx, _, element, _)) = iter.next() {
-				indices.push(idx);
-				element.increment(increment, 0);
-			}
-
 			// toggle has no effect on true height
+			// let start = std::time::Instant::now();
 			recache_along_indices(&indices, &mut tab.value);
+			// println!("Recache along indices: {}ns", start.elapsed().as_nanos());
 			tab.refresh_scrolls();
 			let InteractionInformation::Content { is_in_left_margin: false, value, .. } = Self::get_interaction_information_raw(left_margin, horizontal_scroll, tab.scroll(), self.mouse_x, self.mouse_y, &mut tab.value) else { panic!("wut") };
 			if expand {
@@ -2448,7 +2450,7 @@ impl Workbench {
 			let scroll = tab.scroll();
 			let InteractionInformation::Content { is_in_left_margin: false, depth, key, value, .. } = Self::get_interaction_information_raw(left_margin, 0, scroll, cx, cy, &mut tab.value) else { return };
 			let min_x = depth * 16 + left_margin;
-			let max_x = min_x + 32 + value.value().0.width() + key.map(|key| key.width() + ": ".width()).unwrap_or(0);
+			let max_x = min_x + 32 + value.value_width() + key.map(|key| key.width() + ": ".width()).unwrap_or(0);
 			if !(min_x..max_x).contains(&cx) { return };
 			builder.draw_texture_z((cx - 31, cy - 31), ACTION_WHEEL_Z, TRAY_UV, (64, 64));
 			for (n, &action) in value.actions().iter().enumerate().take(8) {

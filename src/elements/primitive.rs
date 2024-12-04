@@ -4,7 +4,7 @@ macro_rules! primitive {
 		primitive!($uv, $s, $name, $t, $id, |x: $t| x.to_compact_string());
 	};
 	($uv:ident, $s:expr, $name:ident, $t:ty, $id:literal, $compact_format:expr) => {
-		#[derive(Copy, Clone, Default)]
+		#[derive(Copy, Clone, Default, PartialEq)]
 		#[repr(transparent)]
 		pub struct $name {
 			pub value: $t,

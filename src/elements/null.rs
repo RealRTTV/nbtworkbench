@@ -7,7 +7,7 @@ use crate::formatter::PrettyFormatter;
 use crate::RenderContext;
 use crate::vertex_buffer_builder::VertexBufferBuilder;
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct NbtNull;
 
 impl NbtNull {
