@@ -9,7 +9,7 @@ use std::slice::{Iter, IterMut};
 use std::thread::Scope;
 
 use compact_str::{CompactString, format_compact, ToCompactString};
-use hashbrown::raw::RawTable;
+use hashbrown::HashTable;
 use polonius_the_crab::{polonius, polonius_return};
 
 use crate::{array, assets::JUST_OVERLAPPING_BASE_TEXT_Z, DropFn, primitive, RenderContext, since_epoch, StrExt, TextColor, VertexBufferBuilder, NbtElementAndKey, width_ascii};
@@ -1592,7 +1592,7 @@ impl Drop for NbtElement {
 				NbtCompound::ID => {
 					let map = &mut *self.compound.entries;
 					let CompoundMap { indices, entries } = map;
-					(indices as *mut RawTable<usize>).drop_in_place();
+					(indices as *mut HashTable<usize>).drop_in_place();
 					for Entry { value, key, .. } in &mut *entries {
 						(value as *mut Self).drop_in_place();
 						if key.is_heap_allocated() {
@@ -1616,7 +1616,7 @@ impl Drop for NbtElement {
 				NbtChunk::ID => {
 					let map = &mut *self.chunk.entries;
 					let CompoundMap { indices, entries } = map;
-					(indices as *mut RawTable<usize>).drop_in_place();
+					(indices as *mut HashTable<usize>).drop_in_place();
 					for Entry { value, key, .. } in &mut *entries {
 						(value as *mut Self).drop_in_place();
 						if key.is_heap_allocated() {
@@ -1644,7 +1644,7 @@ impl Drop for NbtElement {
 						let ptr = &mut **chunk.as_chunk_unchecked_mut();
 						let map = &mut *ptr.entries;
 						let CompoundMap { indices, entries } = map;
-						(indices as *mut RawTable<usize>).drop_in_place();
+						(indices as *mut HashTable<usize>).drop_in_place();
 						for Entry { value, key, .. } in &mut *entries {
 							(value as *mut Self).drop_in_place();
 							if key.is_heap_allocated() {

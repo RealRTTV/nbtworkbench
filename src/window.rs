@@ -299,7 +299,7 @@ impl<'window> State<'window> {
 			layout: Some(&render_pipeline_layout),
 			vertex: VertexState {
 				module: &shader,
-				entry_point: "vertex",
+				entry_point: Some("vertex"),
 				compilation_options: Default::default(),
 				buffers: &[VertexBufferLayout {
 					array_stride: 20,
@@ -309,7 +309,7 @@ impl<'window> State<'window> {
 			},
 			fragment: Some(FragmentState {
 				module: &shader,
-				entry_point: "fragment",
+				entry_point: Some("fragment"),
 				compilation_options: Default::default(),
 				targets: &[Some(ColorTargetState {
 					format: config.format,
@@ -405,7 +405,7 @@ impl<'window> State<'window> {
 			layout: Some(&text_render_pipeline_layout),
 			vertex: VertexState {
 				module: &text_shader,
-				entry_point: "vertex",
+				entry_point: Some("vertex"),
 				compilation_options: Default::default(),
 				buffers: &[VertexBufferLayout {
 					array_stride: 16,
@@ -415,7 +415,7 @@ impl<'window> State<'window> {
 			},
 			fragment: Some(FragmentState {
 				module: &text_shader,
-				entry_point: "fragment",
+				entry_point: Some("fragment"),
 				compilation_options: Default::default(),
 				targets: &[Some(ColorTargetState {
 					format: config.format,

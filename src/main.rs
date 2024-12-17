@@ -6,19 +6,17 @@
 #![feature(
     array_chunks,
     box_patterns,
-    const_collections_with_hasher,
     core_intrinsics,
     iter_array_chunks,
     iter_next_chunk,
-    lazy_cell,
-    let_chains,
     optimize_attribute,
 	panic_update_hook,
     stmt_expr_attributes,
 	float_next_up_down,
 	variant_count,
 	sync_unsafe_cell,
-	duration_millis_float
+	duration_millis_float,
+	let_chains
 )]
 #![windows_subsystem = "windows"]
 
@@ -656,7 +654,7 @@ impl SortAlgorithm {
 			// SAFETY: these indices are valid since the length did not change and since the values written were indexes
 			unsafe {
 				let entry = map.entries.get_unchecked_mut(new_idx);
-				*map.indices.find(hash!(entry.key), |&target_idx| target_idx == idx).expect("index obviously exists").as_mut() = new_idx;
+				*map.indices.find_mut(hash!(entry.key), |&target_idx| target_idx == idx).expect("index obviously exists") = new_idx;
 			}
 		}
 	}

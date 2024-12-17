@@ -7,7 +7,8 @@ use std::ops::Deref;
 use std::thread::Scope;
 
 use compact_str::{CompactString, format_compact, ToCompactString};
-use hashbrown::raw::RawTable;
+use hashbrown::hash_table::Entry::*;
+use hashbrown::hash_table::HashTable;
 
 use crate::{config, hash, width_ascii, DropFn, NbtElementAndKey, RenderContext, StrExt, VertexBufferBuilder};
 use crate::assets::{BASE_Z, COMPOUND_ROOT_UV, COMPOUND_UV, CONNECTION_UV, HEADER_SIZE, JUST_OVERLAPPING_BASE_TEXT_Z, LINE_NUMBER_CONNECTOR_Z, LINE_NUMBER_SEPARATOR_UV, ZOffset};
@@ -752,7 +753,7 @@ impl NbtCompound {
 // Based on indexmap, but they didn't let me clone with unchecked mem stuff
 #[allow(clippy::module_name_repetitions)]
 pub struct CompoundMap {
-	pub indices: RawTable<usize>,
+	pub indices: HashTable<usize>,
 	pub entries: Vec<Entry>,
 }
 
@@ -787,13 +788,8 @@ impl Clone for CompoundMap {
 		}
 
 		unsafe {
-			let mut table = RawTable::try_with_capacity(self.indices.len()).unwrap_unchecked();
-			for (idx, bucket) in self.indices.iter().enumerate() {
-				let hash = hash!(self.entries.get_unchecked(idx).key);
-				let _ = table.insert_in_slot(hash, core::mem::transmute(idx), *bucket.as_ref());
-			}
 			Self {
-				indices: table,
+				indices: HashTable::clone(&self.indices),
 				entries: clone_entries(&self.entries),
 			}
 		}
@@ -810,7 +806,7 @@ pub struct Entry {
 impl Default for CompoundMap {
 	fn default() -> Self {
 		Self {
-			indices: RawTable::new(),
+			indices: HashTable::new(),
 			entries: Vec::new(),
 		}
 	}
@@ -826,7 +822,7 @@ impl CompoundMap {
 	#[must_use]
 	pub fn idx_of(&self, key: &str) -> Option<usize> {
 		self.indices
-			.get(hash!(key), |&idx| unsafe { self.entries.get_unchecked(idx).key.as_str() == key })
+			.find(hash!(key), |&idx| unsafe { self.entries.get_unchecked(idx).key.as_str() == key })
 			.copied()
 	}
 
@@ -844,9 +840,9 @@ impl CompoundMap {
 	pub fn insert_full(&mut self, key: CompactString, element: NbtElement) -> (usize, Option<NbtElement>) {
 		unsafe {
 			let hash = hash!(key);
-			match self.indices.find_or_find_insert_slot(hash, |&idx| self.entries.get_unchecked(idx).key == key, |&idx| hash!(self.entries.get_unchecked(idx).key), ) {
-				Ok(bucket) => {
-					let idx = *bucket.as_ref();
+			match self.indices.entry(hash, |&idx| self.entries.get_unchecked(idx).key == key, |&idx| hash!(self.entries.get_unchecked(idx).key)) {
+				Occupied(entry) => {
+					let idx = *entry.get();
 					(
 						idx,
 						Some(core::mem::replace(
@@ -855,7 +851,7 @@ impl CompoundMap {
 						)),
 					)
 				}
-				Err(slot) => {
+				Vacant(slot) => {
 					let len = self.entries.len();
 					self.entries.try_reserve(1).unwrap_unchecked();
 					self.entries.as_mut_ptr().add(len).write(Entry {
@@ -864,7 +860,7 @@ impl CompoundMap {
 						additional: 0,
 					});
 					self.entries.set_len(len + 1);
-					self.indices.insert_in_slot(hash, slot, len);
+					slot.insert(len);
 					(len, None)
 				}
 			}
@@ -874,9 +870,9 @@ impl CompoundMap {
 	pub fn insert_at(&mut self, key: CompactString, element: NbtElement, idx: usize) -> Option<(CompactString, NbtElement)> {
 		unsafe {
 			let hash = hash!(key);
-			let (prev, end, bucket) = match self.indices.find_or_find_insert_slot(hash, |&idx| self.entries.get_unchecked(idx).key == key, |&idx| hash!(self.entries.get_unchecked(idx).key)) {
-				Ok(bucket) => {
-					let before = core::mem::replace(bucket.as_mut(), idx);
+			let (prev, end, ptr) = match self.indices.entry(hash, |&idx| self.entries.get_unchecked(idx).key == key, |&idx| hash!(self.entries.get_unchecked(idx).key)) {
+				Occupied(mut entry) => {
+					let before = core::mem::replace(entry.get_mut(), idx);
 					let Entry {
 						key: k, value: v, ..
 					} = self.entries.remove(before);
@@ -888,9 +884,9 @@ impl CompoundMap {
 							additional: 0,
 						},
 					);
-					(Some((k, v)), before, bucket)
+					(Some((k, v)), before, entry.get_mut() as *mut usize)
 				}
-				Err(slot) => {
+				Vacant(slot) => {
 					let len = self.entries.len();
 					self.entries.try_reserve_exact(1).unwrap_unchecked();
 					let ptr = self.entries.as_mut_ptr().add(idx);
@@ -901,32 +897,32 @@ impl CompoundMap {
 						additional: 0,
 					});
 					self.entries.set_len(len + 1);
-					let bucket = self.indices.insert_in_slot(hash, slot, idx);
-					(None, len, bucket)
+					let mut entry = slot.insert(len);
+					(None, len, entry.get_mut() as *mut usize)
 				}
 			};
 
 			match idx.cmp(&end) {
 				Ordering::Less => {
-					for index in self.indices.iter() {
-						let value = *index.as_ref();
+					for index in self.indices.iter_mut() {
+						let value = *index;
 						if value >= idx && value <= end {
-							*index.as_mut() += 1;
+							*index += 1;
 						}
 					}
 				}
 				Ordering::Equal => {}
 				Ordering::Greater => {
-					for index in self.indices.iter() {
-						let value = *index.as_ref();
+					for index in self.indices.iter_mut() {
+						let value = *index;
 						if value <= idx && value >= end {
-							*index.as_mut() -= 1;
+							*index -= 1;
 						}
 					}
 				}
 			}
 
-			*bucket.as_mut() = idx;
+			*ptr = idx;
 
 			prev
 		}
@@ -940,34 +936,33 @@ impl CompoundMap {
 	pub unsafe fn update_key_idx_unchecked(&mut self, idx: usize, key: CompactString) -> CompactString {
 		let new_hash = hash!(key);
 		let old_key = core::mem::replace(&mut self.entries.get_unchecked_mut(idx).key, key);
-		self.indices.remove_entry(hash!(old_key), |&target_idx| target_idx == idx).unwrap_unchecked();
-		self.indices.insert(new_hash, idx, |&idx| hash!(self.entries.get_unchecked(idx).key));
+		if let Ok(entry) = self.indices.find_entry(hash!(old_key), |&target_idx| target_idx == idx) {
+			entry.remove();
+		} else {
+			// should **never** happen
+			core::hint::unreachable_unchecked();
+		}
+		self.indices.insert_unique(new_hash, idx, |&idx| hash!(self.entries.get_unchecked(idx).key));
 		old_key
 	}
 
 	pub fn shift_remove_idx(&mut self, idx: usize) -> Option<(CompactString, NbtElement)> {
 		if idx > self.entries.len() { return None }
 		unsafe {
-			self.indices.remove_entry(hash!(self.entries.get_unchecked(idx).key), |&found_idx| found_idx == idx);
-			for bucket in self.indices.iter() {
-				if *bucket.as_ref() > idx {
-					*bucket.as_mut() -= 1;
+			if let Ok(entry) = self.indices.find_entry(hash!(self.entries.get_unchecked(idx).key), |&found_idx| found_idx == idx) {
+				entry.remove();
+			} else {
+				// should **never** happen
+				core::hint::unreachable_unchecked();
+			}
+			for entry in self.indices.iter_mut() {
+				if *entry > idx {
+					*entry -= 1;
 				}
 			}
 		}
 		let Entry { key, value, .. } = self.entries.remove(idx);
 		self.entries.shrink_to_fit();
-		Some((key, value))
-	}
-
-	pub fn swap_remove_idx(&mut self, idx: usize) -> Option<(CompactString, NbtElement)> {
-		if idx > self.entries.len() { return None }
-		let Entry { key, value, .. } = self.entries.swap_remove(idx);
-		let hash = hash!(key);
-		unsafe {
-			let tail = self.indices.remove_entry(hash, |&idx| idx + 1 == self.entries.len()).unwrap_unchecked();
-			*self.indices.get_mut(hash, |&idx| self.entries.get_unchecked(idx).key == key).unwrap_unchecked() = tail;
-		}
 		Some((key, value))
 	}
 
@@ -977,8 +972,8 @@ impl CompoundMap {
 			let a_hash = hash!(self.entries.get_unchecked(a).key);
 			let b_hash = hash!(self.entries.get_unchecked(b).key);
 			self.entries.swap(a, b);
-			let a = self.indices.get_mut(a_hash, |&idx| idx == a).unwrap_unchecked() as *mut usize;
-			let b = self.indices.get_mut(b_hash, |&idx| idx == b).unwrap_unchecked() as *mut usize;
+			let a = self.indices.find_mut(a_hash, |&idx| idx == a).unwrap_unchecked() as *mut usize;
+			let b = self.indices.find_mut(b_hash, |&idx| idx == b).unwrap_unchecked() as *mut usize;
 			core::ptr::swap(a, b);
 		}
 	}
@@ -1018,7 +1013,7 @@ impl CompoundMap {
 			// SAFETY: these indices are valid since the length did not change and since the values written were indexes
 			unsafe {
 				let entry = self.entries.get_unchecked_mut(new_idx);
-				*self.indices.find(hash!(entry.key), |&target_idx| target_idx == idx).expect("index obviously exists").as_mut() = new_idx;
+				*self.indices.find_mut(hash!(entry.key), |&target_idx| target_idx == idx).expect("index obviously exists") = new_idx;
 
 				let true_line_number = *true_line_numbers.get_unchecked(idx);
 				let line_number = *line_numbers.get_unchecked(idx);

@@ -159,7 +159,7 @@ impl WorkbenchAction {
 				let mut current_true_line_number = true_line_number + 1;
 				for (idx, &new_idx) in reordering_indices.iter().enumerate() {
 					let entry = core::mem::replace(previous_entries.get_unchecked_mut(new_idx), MaybeUninit::uninit()).assume_init();
-					*indices.find(hash!(entry.key), |&x| x == new_idx).expect("index obviously exists").as_mut() = idx;
+					*indices.find_mut(hash!(entry.key), |&x| x == new_idx).expect("index obviously exists") = idx;
 					let line_number = *line_numbers.get_unchecked(new_idx);
 					let true_line_number = *true_line_numbers.get_unchecked(new_idx);
 					let height = entry.value.height();
