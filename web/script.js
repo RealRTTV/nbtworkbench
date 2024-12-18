@@ -21,9 +21,11 @@ export function save(name, bytes) {
 
 export function onPanic(error) {
     let stack = new Error().stack;
-    document.getElementById("crashReportRaw").innerText = error + "\n\nStack:\n\n" + stack + "\n";
+    error = error + "\n\nStack:\n\n" + stack + "\n";
+    document.getElementById("crashReportRaw").crashData = error;
     let panic = document.getElementById("panic");
     panic.style.opacity = "0.8";
     panic.style.display = "grid";
     panic.style.zIndex = "1";
+    console.error(error)
 }

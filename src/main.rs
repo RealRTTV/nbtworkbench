@@ -227,10 +227,10 @@ pub fn close() -> usize {
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen(start))]
 #[cfg(target_arch = "wasm32")]
 pub fn wasm_main() {
-	config::read();
 	std::panic::set_hook(Box::new(|info| {
 		on_panic(info.to_string());
 	}));
+	config::read();
 	wasm_bindgen_futures::spawn_local(async move {
 		window::run().await;
 	});
@@ -341,7 +341,19 @@ pub fn set_clipboard(value: String) -> bool {
 
 #[cfg(target_arch = "wasm32")]
 pub fn set_clipboard(value: String) -> bool {
-	web_sys::window().map(|window| window.navigator()).and_then(|navigator| navigator.clipboard()).map(|clipboard| clipboard.write_text(&value)).is_some()
+	web_sys::window().map(|window| window.navigator()).map(|navigator| navigator.clipboard()).map(|clipboard| clipboard.write_text(&value)).is_some()
+}
+
+#[must_use]
+#[cfg(not(target_arch = "wasm32"))]
+pub fn since_epoch() -> Duration {
+	std::time::SystemTime::UNIX_EPOCH.elapsed().unwrap_or_else(|e| e.duration())
+}
+
+#[must_use]
+#[cfg(target_arch = "wasm32")]
+pub fn since_epoch() -> Duration {
+	Duration::from_millis(web_sys::js_sys::Date::now() as u64)
 }
 
 #[must_use]
@@ -377,18 +389,6 @@ pub fn create_regex(mut str: String, case_sensitive: bool) -> Option<Regex> {
 		.swap_greed(flags & 0b10000 > 0)
 		.build()
 		.ok()
-}
-
-#[must_use]
-#[cfg(not(target_arch = "wasm32"))]
-pub fn since_epoch() -> Duration {
-	std::time::SystemTime::UNIX_EPOCH.elapsed().unwrap_or_else(|e| e.duration())
-}
-
-#[must_use]
-#[cfg(target_arch = "wasm32")]
-pub fn since_epoch() -> Duration {
-	Duration::from_millis(web_sys::js_sys::Date::now() as u64)
 }
 
 pub fn split_lines<const MAX_WIDTH: usize>(s: String) -> Vec<String> {
@@ -1329,7 +1329,7 @@ pub fn add_element(root: &mut NbtElement, key: Option<CompactString>, value: Nbt
 ///     &mut tab.value,
 ///     Box::new([0]),
 ///     &mut tab.bookmarks,
-///     &mut self.subscription
+///     &mut workbench.subscription
 /// )?;
 /// tab.append_to_history(result.into_action());
 /// ```
@@ -1387,7 +1387,7 @@ pub fn remove_element(root: &mut NbtElement, indices: Box<[usize]>, bookmarks: &
 ///     ).unwrap(),
 ///     Box::new([0]),
 ///     &mut tab.bookmarks,
-///     &mut self.subscription
+///     &mut workbench.subscription
 /// )?;
 /// tab.append_to_history(result.into_action());
 /// ```

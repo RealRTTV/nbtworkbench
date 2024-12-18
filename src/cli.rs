@@ -137,7 +137,7 @@ pub fn find() -> ! {
             let mut path = root.clone();
             path.push(p);
             results.push(s.spawn(|| 'a: {
-                let mut workbench = Workbench::new(&mut WindowProperties::Fake);
+                let mut workbench = Workbench::new(&mut WindowProperties::Fake, None);
                 workbench.tabs.clear();
 
                 let bytes = match read(&path) {
@@ -235,7 +235,7 @@ pub fn reformat() -> ! {
             s.spawn(|| 'a: {
                 let p = p;
                 let path = pa;
-                let mut workbench = Workbench::new(&mut WindowProperties::Fake);
+                let mut workbench = Workbench::new(&mut WindowProperties::Fake, None);
                 workbench.tabs.clear();
 
                 let bytes = match read(&path) {

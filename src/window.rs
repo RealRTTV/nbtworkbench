@@ -121,19 +121,21 @@ pub async fn run() -> ! {
 			Some(size)
 		}).expect("Couldn't append canvas to document body")
 	};
+	crate::log!("window_dims = {window_size:?}");
 	#[cfg(not(target_arch = "wasm32"))]
 	let window_size = {
 		let (window_width_pct, window_height_pct) = (WINDOW_WIDTH as f64 / 1920.0, WINDOW_HEIGHT as f64 / 1080.0);
 		let monitor_dims = window.current_monitor().map(|monitor| monitor.size()).unwrap_or(PhysicalSize::new(1920, 1080));
 		let width = (f64::round(window_width_pct * monitor_dims.width as f64) as u32).max(MIN_WINDOW_WIDTH as u32);
 		let height = (f64::round(window_height_pct * monitor_dims.height as f64) as u32).max(MIN_WINDOW_HEIGHT as u32);
-		PhysicalSize::new(width, height)
+		let size = PhysicalSize::new(width, height);
+		let _ = window.request_inner_size(size);
+		size
 	};
-	let _ = window.request_inner_size(window_size);
 	let state = State::new(&window, window_size).await;
 	unsafe { std::ptr::write(std::ptr::addr_of_mut!(WINDOW_PROPERTIES), UnsafeCell::new(WindowProperties::new(Rc::clone(&window)))); }
 	let window_properties = unsafe { WINDOW_PROPERTIES.get_mut() };
-	unsafe { std::ptr::write(std::ptr::addr_of_mut!(WORKBENCH), UnsafeCell::new(Workbench::new(window_properties))); }
+	unsafe { std::ptr::write(std::ptr::addr_of_mut!(WORKBENCH), UnsafeCell::new(Workbench::new(window_properties, Some(window_size)))); }
 	let workbench = unsafe { WORKBENCH.get_mut() };
 	let mut handler = Handler { state, window_properties, workbench, window: Rc::clone(&window) };
 	event_loop.run_app(&mut handler).expect("Event loop failed");
