@@ -121,7 +121,6 @@ pub async fn run() -> ! {
 			Some(size)
 		}).expect("Couldn't append canvas to document body")
 	};
-	crate::log!("window_dims = {window_size:?}");
 	#[cfg(not(target_arch = "wasm32"))]
 	let window_size = {
 		let (window_width_pct, window_height_pct) = (WINDOW_WIDTH as f64 / 1920.0, WINDOW_HEIGHT as f64 / 1080.0);

@@ -147,7 +147,6 @@ impl Workbench {
 		if let Some(window_dims) = window_dims {
 			workbench.raw_window_width = window_dims.width as usize;
 			workbench.raw_window_height = window_dims.height as usize;
-			crate::log!("width={}, height={} (workbench.rs #150)", workbench.raw_window_width, workbench.raw_window_height);
 
 			let scale = config::get_scale();
 			if let Some(scale) = scale {
@@ -2041,7 +2040,6 @@ impl Workbench {
 		let height_scaling = window_height as f64 / self.raw_window_height as f64;
 		self.raw_window_width = window_width;
 		self.raw_window_height = window_height;
-		crate::log!("width={}, height={} (workbench.rs #2044)", self.raw_window_width, self.raw_window_height);
 		self.raw_mouse_x = self.raw_mouse_x * width_scaling;
 		self.raw_mouse_y = self.raw_mouse_y * height_scaling;
 		self.set_scale(self.scale);
@@ -2051,7 +2049,6 @@ impl Workbench {
 	pub fn set_scale(&mut self, scale: f32) {
 		let old_scale = self.scale;
 		let scale = (scale * 10.0).round() / 10.0;
-		crate::log!("width={}, height={} (workbench.rs #2054)", self.raw_window_width, self.raw_window_height);
 		let max_scale = usize::min(self.raw_window_width / MIN_WINDOW_WIDTH, self.raw_window_height / MIN_WINDOW_HEIGHT) as f32;
 		let scale = scale.clamp(1.0, max_scale);
 
