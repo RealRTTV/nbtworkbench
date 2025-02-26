@@ -239,7 +239,7 @@ impl<Additional: Clone, Cache: Cachelike<Additional>> Text<Additional, Cache> {
             return NothingSpecial;
         }
 
-        if key == KeyCode::KeyA && flags == flags!(Ctrl) && self.editable {
+        if key == KeyCode::KeyA && flags == flags!(Ctrl) && self.editable && !self.value.is_empty() {
             self.cursor = 0;
             self.selection = Some(self.value.len());
             return NothingSpecial;

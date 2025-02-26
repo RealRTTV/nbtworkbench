@@ -37,7 +37,6 @@ pub use render::assets;
 pub use render::widget;
 
 use static_assertions::const_assert_eq;
-use render::run;
 
 #[macro_export]
 macro_rules! flags {
@@ -132,6 +131,7 @@ pub static mut WINDOW_PROPERTIES: render::WindowProperties = render::WindowPrope
 /// * [`last_modified`](elements::chunk::NbtChunk) field actually gets the ability to be set
 /// # Major Features
 /// * macros
+#[cfg(not(target_arch = "wasm32"))]
 pub fn main() -> ! {
 	config::read();
 	#[cfg(target_os = "windows")] unsafe {
@@ -147,24 +147,9 @@ pub fn main() -> ! {
 		println!("{}", env!("CARGO_PKG_VERSION"));
 		std::process::exit(0);
 	} else if let Some("-?" | "/?" | "--help" | "-h") = first_arg.as_deref() {
-		println!(r#"
-Usage:
-  nbtworkbench --version|-v
-  nbtworkbench -?|-h|--help|/?
-  nbtworkbench find <path> [(--mode|-m)=(normal|regex|snbt)] [(--search|-s)=(key|value|any)] [--exact-match|-em] <query>
-  nbtworkbench reformat (--format|-f)=<format> [(--out-dir|-d)=<out-dir>] [(--out-ext|-e)=<out-ext>] <path>
-
-Options:
-  --version, -v       Displays the version of nbtworkbench you're running.
-  -?, -h, --help, /?  Displays this dialog.
-  --mode, -m          Changes the `find` mode to take the <query> field as either, a containing substring, a regex (match whole), or snbt. [default: normal]
-  --search, -s        Searches for results matching the <query> in either, the key, the value, or both (note that substrings and regex search the same pattern in both key and value, while the regex uses it's key field to match equal strings). [default: any]
-  --format, -f        Specifies the format to be reformatted to; either `nbt`, `snbt`, `dat/dat_old/gzip`, `zlib`, 'lnbt' (little endian nbt), or 'lhnbt' (little endian nbt with header).
-  --out-dir, -d       Specifies the output directory. [default: ./]
-  --out-ext, -e       Specifies the output file extension (if not specified, it will infer from --format)"#);
-		std::process::exit(0)
+		cli::help();
 	} else {
-		pollster::block_on(run())
+		pollster::block_on(render::run())
 	}
 }
 

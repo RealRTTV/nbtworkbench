@@ -8,7 +8,7 @@ use std::thread::Scope;
 use compact_str::{format_compact, CompactString};
 
 use crate::assets::{ZOffset, BASE_Z, CONNECTION_UV, JUST_OVERLAPPING_BASE_TEXT_Z, LIST_UV};
-use crate::elements::{id_to_string_name, NbtChunk, NbtElement};
+use crate::elements::{id_to_string_name, NbtChunk, NbtCompound, NbtElement};
 use crate::render::{RenderContext, TextColor, VertexBufferBuilder};
 use crate::serialization::{Decoder, PrettyFormatter, UncheckedBufWriter};
 use crate::workbench::DropFn;
@@ -20,7 +20,7 @@ pub struct NbtList {
 	height: u32,
 	true_height: u32,
 	max_depth: u32,
-	pub element: u8,
+	elements_bitset: u16,
 	open: bool,
 }
 
@@ -57,7 +57,7 @@ impl Clone for NbtList {
 				height: self.height,
 				true_height: self.true_height,
 				max_depth: self.max_depth,
-				element: self.element,
+				elements_bitset: self.elements_bitset,
 				open: self.open,
 			}
 		}
@@ -68,19 +68,21 @@ impl NbtList {
 	pub const ID: u8 = 9;
 	pub(in crate::elements) fn from_str0(mut s: &str) -> Result<(&str, Self), usize> {
 		s = s.strip_prefix('[').ok_or(s.len())?.trim_start();
-		let mut list = Self::new(vec![], 0);
+		let mut list = Self::new(vec![]);
 		while !s.starts_with(']') {
-			let (s2, element) = NbtElement::from_str0(s)?;
+			let (s2, mut element) = NbtElement::from_str0(s, NbtElement::parse_int)?;
+			element = element.try_into_inner().unwrap_or_else(|element| element);
 			list.insert(list.len(), element).map_err(|_| s.len())?;
 			s = s2.trim_start();
 			if let Some(s2) = s.strip_prefix(',') {
 				s = s2.trim_start();
-			} else {
+			} else if s.starts_with(']') {
 				break;
 			}
 		}
 		let s = s.strip_prefix(']').ok_or(s.len())?;
 		list.elements.shrink_to_fit();
+		list.recache_elements_bitset();
 		Ok((s, list))
 	}
 	#[allow(clippy::cast_ptr_alignment)]
@@ -92,54 +94,82 @@ impl NbtList {
 			let len = decoder.u32() as usize;
 			let ptr = alloc(Layout::array::<NbtElement>(len).unwrap_unchecked()).cast::<NbtElement>();
 			let mut true_height = 1;
+			let mut extracted_inner_element = false;
 			for n in 0..len {
-				let element = NbtElement::from_bytes(element, decoder)?;
+				let mut element = NbtElement::from_bytes(element, decoder)?;
+				element = match element.try_into_inner() {
+					Ok(inner) => {
+						extracted_inner_element = true;
+						inner
+					},
+					Err(element) => element
+				};
 				true_height += element.true_height() as u32;
 				ptr.add(n).write(element);
 			}
 			let box_ptr = alloc(Layout::new::<Vec<NbtElement>>()).cast::<Vec<NbtElement>>();
 			box_ptr.write(Vec::from_raw_parts(ptr, len, len));
-			Some(Self {
+			let mut list = Self {
 				elements: Box::from_raw(box_ptr),
 				height: 1 + len as u32,
 				true_height,
 				max_depth: 0,
-				element,
+				elements_bitset: 1 << element,
 				open: false,
-			})
+			};
+			if extracted_inner_element {
+				list.recache_elements_bitset();
+			}
+			Some(list)
 		}
 	}
 
 	#[inline]
 	pub fn to_be_bytes(&self, writer: &mut UncheckedBufWriter) {
-		writer.write(&[self.element]);
+		let heterogeneous = self.is_heterogeneous();
+		writer.write(&[self.serialize_id()]);
 		writer.write(&(self.len() as u32).to_be_bytes());
 		for element in self.elements.iter() {
-			element.to_be_bytes(writer);
+			if heterogeneous && element.id() != NbtCompound::ID {
+				writer.write(&[element.id()]);
+				element.to_be_bytes(writer);
+				writer.write(&[0x00]);
+			} else {
+				element.to_be_bytes(writer);
+			}
 		}
 	}
 
 	#[inline]
 	pub fn to_le_bytes(&self, writer: &mut UncheckedBufWriter) {
-		writer.write(&[self.element]);
+		let heterogeneous = self.is_heterogeneous();
+		writer.write(&[self.serialize_id()]);
 		writer.write(&(self.len() as u32).to_le_bytes());
 		for element in self.elements.iter() {
-			element.to_le_bytes(writer);
+			if heterogeneous && element.id() != NbtCompound::ID {
+				writer.write(&[element.id()]);
+				element.to_le_bytes(writer);
+				writer.write(&[0x00]);
+			} else {
+				element.to_be_bytes(writer);
+			}
 		}
 	}
 }
 
 impl NbtList {
 	#[inline]
-	pub fn new(elements: Vec<NbtElement>, element: u8) -> Self {
-		Self {
+	pub fn new(elements: Vec<NbtElement>) -> Self {
+		let mut this = Self {
 			height: elements.iter().map(NbtElement::height).sum::<usize>() as u32 + 1,
 			true_height: elements.iter().map(NbtElement::true_height).sum::<usize>() as u32 + 1,
 			elements: Box::new(elements),
-			element,
 			open: false,
+			elements_bitset: 0,
 			max_depth: 0,
-		}
+		};
+		this.recache_elements_bitset();
+		this
 	}
 
 	#[inline]
@@ -167,10 +197,30 @@ impl NbtList {
 	#[inline]
 	#[must_use]
 	pub const fn true_height(&self) -> usize { self.true_height as usize }
+	
+	#[inline]
+	#[must_use]
+	pub const fn is_heterogeneous(&self) -> bool { !self.elements_bitset.is_power_of_two() }
 
 	#[inline]
 	#[must_use]
-	pub const fn id(&self) -> u8 { self.element }
+	pub const fn id(&self) -> u8 {
+		if self.is_heterogeneous() {
+			0
+		} else {
+			self.elements_bitset.trailing_zeros() as u8
+		}
+	}
+	
+	#[inline]
+	#[must_use]
+	pub const fn serialize_id(&self) -> u8 {
+		if self.is_heterogeneous() {
+			NbtCompound::ID
+		} else {
+			self.elements_bitset.trailing_zeros() as u8
+		}
+	}
 
 	#[inline]
 	pub fn toggle(&mut self) -> Option<()> {
@@ -196,16 +246,12 @@ impl NbtList {
 	#[inline]
 	#[must_use]
 	pub fn can_insert(&self, value: &NbtElement) -> bool {
-		value.id() != NbtChunk::ID && (self.element == value.id() || self.is_empty())
+		value.id() != NbtChunk::ID
 	}
 
-	/// # Errors
-	///
-	/// * `NbtElement::id` of `value` != `self.id()`
 	#[inline]
 	pub fn insert(&mut self, idx: usize, value: NbtElement) -> Result<Option<NbtElement>, NbtElement> {
 		if self.can_insert(&value) {
-			self.element = value.id();
 			self.increment(value.height(), value.true_height());
 			unsafe {
 				self.elements.try_reserve_exact(1).unwrap_unchecked();
@@ -246,7 +292,7 @@ impl NbtList {
 	#[inline]
 	#[must_use]
 	pub fn value(&self) -> CompactString {
-		let (single, multiple) = id_to_string_name(self.element);
+		let (single, multiple) = id_to_string_name(self.id());
 		format_compact!(
 			"{} {}",
 			self.len(),
@@ -257,9 +303,14 @@ impl NbtList {
 
 impl Display for NbtList {
 	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+		let heterogeneous = self.is_heterogeneous();
 		write!(f, "[")?;
 		for (idx, element) in self.children().enumerate() {
-			write!(f, "{element}")?;
+			if heterogeneous && element.id() != NbtCompound::ID {
+				write!(f, "{{'':{element}}}")?;
+			} else {
+				write!(f, "{element}")?;
+			}
 			if likely(idx < self.len() - 1) {
 				write!(f, ",")?;
 			}
@@ -274,11 +325,18 @@ impl NbtList {
 			f.write_str("[]")
 		} else {
 			let len = self.len();
+			let heterogeneous = self.is_heterogeneous();
 			f.write_str("[\n");
 			f.increase();
 			for (idx, element) in self.children().enumerate() {
 				f.indent();
-				element.pretty_fmt(f);
+				if heterogeneous && element.id() != NbtCompound::ID {
+					f.write_str("{ '': ");
+					element.pretty_fmt(f);
+					f.write_str(" }");
+				} else {
+					element.pretty_fmt(f);
+				}
 				if idx + 1 < len {
 					f.write_str(",\n");
 				} else {
@@ -360,7 +418,7 @@ impl NbtList {
 				);
 
 				let pos = ctx.pos();
-				ctx.draw_held_entry_bar(ctx.pos(), builder, |x, y| pos == (x, y + 8), |x| self.can_insert(x));
+				ctx.draw_held_entry_bar(pos, builder, |x, y| pos == (x, y + 8), |x| self.can_insert(x));
 			}
 
 			ctx.offset_pos(-16, 0);
@@ -599,6 +657,16 @@ impl NbtList {
 			}
 		}
 		self.max_depth = max_depth as u32;
+		self.recache_elements_bitset();
+	}
+	
+	#[inline]
+	pub fn recache_elements_bitset(&mut self) {
+		let mut elements_bitset = 0_u16;
+		for element in self.children() {
+			elements_bitset |= 1 << element.id();
+		}
+		self.elements_bitset = elements_bitset;
 	}
 
 	#[inline]

@@ -12,12 +12,10 @@ use crate::elements::{NbtByte, NbtByteArray, NbtChunk, NbtCompound, NbtDouble, N
 use crate::render::{TextColor, VertexBufferBuilder};
 use crate::widget::Alert;
 use crate::workbench::{MarkedLines, WorkbenchAction, FileUpdateSubscription, add_element, FileUpdateSubscriptionType};
-use crate::util::{get_clipboard, now, set_clipboard};
+use crate::util::{get_clipboard, now, set_clipboard, StrExt};
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::assets::{OPEN_ARRAY_IN_HEX_UV, OPEN_IN_TXT_UV};
-#[cfg(not(target_arch = "wasm32"))]
-use crate::util::StrExt;
 
 #[derive(Copy, Clone)]
 pub enum ElementAction {
@@ -202,7 +200,7 @@ impl ElementAction {
 									}
 									vec
 								} else if let Some(list) = element.as_list() {
-									match list.element {
+									match list.id() {
 										NbtByte::ID => {
 											subscription_type = FileUpdateSubscriptionType::ByteList;
 											let mut vec = Vec::with_capacity(list.len());

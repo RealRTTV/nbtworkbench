@@ -1045,7 +1045,7 @@ impl Workbench {
     #[inline]
     #[cfg(target_arch = "wasm32")]
     fn open_file(&mut self, _: &mut WindowProperties) {
-        crate::try_open_dialog();
+        crate::wasm::try_open_dialog();
     }
 
     #[inline]

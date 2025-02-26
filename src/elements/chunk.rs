@@ -435,7 +435,7 @@ impl NbtRegion {
 				ctx.skip_line_numbers(1);
 				break 'head;
 			}
-			
+
 			let pos = ctx.pos();
 
 			// not used on the grid layout
@@ -917,7 +917,7 @@ impl NbtChunk {
 				ctx.skip_line_numbers(1);
 				break 'head;
 			}
-			
+
 			let pos = ctx.pos();
 
 			ctx.line_number();

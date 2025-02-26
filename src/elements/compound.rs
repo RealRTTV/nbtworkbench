@@ -66,12 +66,12 @@ impl NbtCompound {
 		while !s.starts_with('}') {
 			let (key, s2) = s.snbt_string_read()?;
 			s = s2.trim_start().strip_prefix(':').ok_or(s2.len())?.trim_start();
-			let (s2, value) = NbtElement::from_str0(s)?;
+			let (s2, value) = NbtElement::from_str0(s, NbtElement::parse_int)?;
 			compound.insert_replacing(key, value);
 			s = s2.trim_start();
 			if let Some(s2) = s.strip_prefix(',') {
 				s = s2.trim_start();
-			} else {
+			} else if s.starts_with('}') {
 				break;
 			}
 		}
@@ -350,6 +350,7 @@ impl NbtCompound {
 					ctx,
 				);
 				
+				let pos = ctx.pos();
 				ctx.draw_held_entry_bar(pos, builder, |x, y| pos == (x, y + 8), |x| self.can_insert(x));
 			}
 		}

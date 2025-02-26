@@ -321,13 +321,13 @@ impl NbtElement {
 				prefix
 			})
 		});
-		let (s, element) = Self::from_str0(s).map(|(s, x)| (s.trim_start(), x)).map_err(|x| total_len - x)?;
+		let (s, element) = Self::from_str0(s, Self::parse_int).map(|(s, x)| (s.trim_start(), x)).map_err(|x| total_len - x)?;
 		if !s.is_empty() { return Err(total_len - s.len()) }
 		Ok((prefix, element))
 	}
 
 	#[allow(clippy::too_many_lines)]
-	pub(in crate::elements) fn from_str0(mut s: &str) -> Result<(&str, Self), usize> {
+	pub(in crate::elements) fn from_str0<F: FnOnce(&str, bool, bool, u32, &str) -> Result<Self, usize>>(mut s: &str, parse_ambiguous_integer: F) -> Result<(&str, Self), usize> {
 		if let Some(s2) = s.strip_prefix("false") { return Ok((s2, Self::Byte(NbtByte { value: 0 }))) }
 		if let Some(s2) = s.strip_prefix("true") { return Ok((s2, Self::Byte(NbtByte { value: 1 }))) }
 		if s.starts_with("[B;") { return NbtByteArray::from_str0(s).map(|(s, x)| (s, Self::ByteArray(x))) }
@@ -394,78 +394,127 @@ impl NbtElement {
 			};
 		}
 
-		let digit_end_idx = 'a: {
-			let mut s = s;
-			let mut digit_end_idx = 0;
+		let (num_end_idx, suffix_len, unsigned, base, positive) = 'a: {
+			let mut d = s;
+			let mut num_end_idx = 0;
+			let mut suffix_len = 0;
+			let mut positive = true;
 
-			if s.starts_with('+') || s.starts_with('-') {
-				s = &s[1..];
-				digit_end_idx += 1;
+			if let Some(d2) = d.strip_prefix('+').or(d.strip_prefix('-')) {
+				if d.starts_with('-') {
+					positive = false;
+				}
+				s = d2;
+				d = s;
 			}
 
-			let int_part = s.bytes().take_while(u8::is_ascii_digit).count();
-			s = &s[int_part..];
-			digit_end_idx += int_part;
-			if int_part == 0 && !s.starts_with('.') {
-				break 'a 0;
+			if let Some(d2) = d.strip_prefix("0x") {
+				s = d2;
+				d = s;
+				let hex_part = d.bytes().take_while(|&b| b.is_ascii_hexdigit() || b == b'_').count();
+				num_end_idx += hex_part;
+				let unsigned = !d.starts_with('s');
+				if d.starts_with('u') || d.starts_with('s') {
+					suffix_len += 1;
+				}
+				(num_end_idx, suffix_len, unsigned, 16, positive)
+			} else if let Some(d2) = d.strip_prefix("0b") {
+				s = d2;
+				d = s;
+				let binary_part = d.bytes().take_while(|&b| b == b'0' || b == b'1' || b == b'_').count();
+				num_end_idx += binary_part;
+				let unsigned = !d.starts_with('s');
+				if d.starts_with('u') || d.starts_with('s') {
+					suffix_len += 1;
+				}
+				(num_end_idx, suffix_len, unsigned, 2, positive)
+			} else {
+				let int_part = d.bytes().take_while(|&b| b.is_ascii_digit() || b == b'_').count();
+				d = &d[int_part..];
+				num_end_idx += int_part;
+				if int_part == 0 && !d.starts_with('.') {
+					break 'a (num_end_idx, suffix_len, false, 10, true);
+				}
+				if let Some(d2) = d.strip_prefix('.') {
+					// floats
+					num_end_idx += 1;
+					d = d2;
+					let frac_part = d.bytes().take_while(|&b| b.is_ascii_digit() || b == b'_').count();
+					num_end_idx += frac_part;
+					if let Some(s2) = d.strip_prefix('e').or(d.strip_prefix('E')) {
+						num_end_idx += 1;
+						d = s2;
+						if let Some(s2) = d.strip_prefix('+').or(d.strip_prefix('-')) {
+							num_end_idx += 1;
+							d = s2;
+						}
+						let exponent_part = d.bytes().take_while(|&b| b.is_ascii_digit() || b == b'_').count();
+						num_end_idx += exponent_part;
+					}
+					(num_end_idx, suffix_len, false, 10, positive)
+				} else {
+					// ints
+					let unsigned = d.starts_with('u');
+					if d.starts_with('u') || d.starts_with('s') {
+						suffix_len += 1;
+					}
+					(num_end_idx, suffix_len, unsigned, 10, positive)
+				}
 			}
-			if let Some(s2) = s.strip_prefix('.') {
-				digit_end_idx += 1;
-				s = s2;
-				let frac_part = s.bytes().take_while(u8::is_ascii_digit).count();
-				digit_end_idx += frac_part;
-			}
-
-			digit_end_idx
 		};
-		if digit_end_idx > 0 {
-			let suffix = s[digit_end_idx..]
+		if num_end_idx > 0 {
+			let suffix = s[num_end_idx + suffix_len..]
 				.trim_start()
 				.as_bytes()
 				.first()
 				.map(u8::to_ascii_lowercase);
+			let num_str = s[..num_end_idx].replace('_', "");
 			return match suffix {
 				Some(b'b') => Ok((
-					&s[(digit_end_idx + 1)..],
-					Self::Byte(NbtByte {
-						value: s[..digit_end_idx].parse().map_err(|_| s.len())?,
-					}),
+					&s[num_end_idx + suffix_len + 1..],
+					Self::parse_byte(&num_str, unsigned, positive, base, s)?,
 				)),
 				Some(b's') => Ok((
-					&s[(digit_end_idx + 1)..],
-					Self::Short(NbtShort {
-						value: s[..digit_end_idx].parse().map_err(|_| s.len())?,
-					}),
+					&s[num_end_idx + suffix_len + 1..],
+					Self::parse_short(&num_str, unsigned, positive, base, s)?,
+				)),
+				Some(b'i') => Ok((
+					&s[num_end_idx + suffix_len + 1..],
+					Self::parse_int(&num_str, unsigned, positive, base, s)?,
 				)),
 				Some(b'l') => Ok((
-					&s[(digit_end_idx + 1)..],
-					Self::Long(NbtLong {
-						value: s[..digit_end_idx].parse().map_err(|_| s.len())?,
-					}),
+					&s[num_end_idx + suffix_len + 1..],
+					Self::parse_long(&num_str, unsigned, positive, base, s)?,
 				)),
 				Some(b'f') => Ok((
-					&s[(digit_end_idx + 1)..],
+					&s[num_end_idx + suffix_len + 1..],
 					Self::Float(NbtFloat {
-						value: s[..digit_end_idx].parse().map_err(|_| s.len())?,
+						value: {
+							let value = num_str.parse().map_err(|_| s.len())?;
+							if positive { value } else { -value }
+						}
 					}),
 				)),
 				Some(b'd') => Ok((
-					&s[(digit_end_idx + 1)..],
+					&s[num_end_idx + suffix_len + 1..],
 					Self::Double(NbtDouble {
-						value: s[..digit_end_idx].parse().map_err(|_| s.len())?,
+						value: {
+							let value = num_str.parse().map_err(|_| s.len())?;
+							if positive { value } else { -value }
+						}
 					}),
 				)),
 				Some(b'|') => Ok({
 					let mut s = s;
-					let Ok(x @ 0..=31) = s[..digit_end_idx].parse::<u8>() else {
+					let Ok(x @ 0..=31) = num_str.parse::<u8>() else {
 						return Err(s.len());
 					};
-					s = s[digit_end_idx..].trim_start().split_at(1).1.trim_start();
-					let digit_end_idx = s.bytes().position(|x| !x.is_ascii_digit()).ok_or(s.len())?;
-					let Ok(z @ 0..=31) = s[..digit_end_idx].parse::<u8>() else {
+					s = s[num_end_idx..].trim_start().split_at(1).1.trim_start();
+					let num_end_idx = s.bytes().position(|x| !x.is_ascii_digit()).ok_or(s.len())?;
+					let Ok(z @ 0..=31) = s[..num_end_idx].replace('_', "").parse::<u8>() else {
 						return Err(s.len());
 					};
-					s = s[digit_end_idx..].trim_start();
+					s = s[num_end_idx..].trim_start();
 					let (s, inner) = NbtCompound::from_str0(s)?;
 					(
 						s,
@@ -478,15 +527,75 @@ impl NbtElement {
 					)
 				}),
 				_ => Ok((
-					&s[digit_end_idx..],
-					Self::Int(NbtInt {
-						value: s[..digit_end_idx].parse().map_err(|_| s.len())?,
-					}),
+					&s[num_end_idx + suffix_len..],
+					parse_ambiguous_integer(&num_str, unsigned, positive, base, s)?,
 				)),
 			};
 		}
 
 		NbtString::from_str0(s).map(|(s, x)| (s, Self::String(x)))
+	}
+
+	pub(in crate::elements) fn parse_byte(num_str: &str, unsigned: bool, positive: bool, base: u32, s: &str) -> Result<Self, usize> {
+		let value = if unsigned {
+			u8::from_str_radix(&num_str, base).map_err(|_| s.len())? as i8
+		} else {
+			i8::from_str_radix(&num_str, base).map_err(|_| s.len())?
+		};
+		Ok(Self::Byte(NbtByte { value: if positive { value } else { -value }, }))
+	}
+
+	pub(in crate::elements) fn parse_short(num_str: &str, unsigned: bool, positive: bool, base: u32, s: &str) -> Result<Self, usize> {
+		let value = if unsigned {
+			u16::from_str_radix(&num_str, base).map_err(|_| s.len())? as i16
+		} else {
+			i16::from_str_radix(&num_str, base).map_err(|_| s.len())?
+		};
+		Ok(Self::Short(NbtShort { value: if positive { value } else { -value }, }))
+	}
+
+	pub(in crate::elements) fn parse_int(num_str: &str, unsigned: bool, positive: bool, base: u32, s: &str) -> Result<Self, usize> {
+		let value = if unsigned {
+			u32::from_str_radix(&num_str, base).map_err(|_| s.len())? as i32
+		} else {
+			i32::from_str_radix(&num_str, base).map_err(|_| s.len())?
+		};
+		Ok(Self::Int(NbtInt { value: if positive { value } else { -value }, }))
+	}
+
+	pub(in crate::elements) fn parse_long(num_str: &str, unsigned: bool, positive: bool, base: u32, s: &str) -> Result<Self, usize> {
+		let value = if unsigned {
+			u64::from_str_radix(&num_str, base).map_err(|_| s.len())? as i64
+		} else {
+			i64::from_str_radix(&num_str, base).map_err(|_| s.len())?
+		};
+		Ok(Self::Long(NbtLong { value: if positive { value } else { -value }, }))
+	}
+
+	pub(in crate::elements) fn array_try_into_byte(self) -> Option<Self> {
+		match self.id() {
+			NbtByte::ID => Some(self),
+			_ => None,
+		}
+	}
+
+	pub(in crate::elements) fn array_try_into_int(self) -> Option<Self> {
+		match self.id() {
+			NbtByte::ID => Some(Self::Int(NbtInt { value: unsafe { self.byte.value } as i32 })),
+			NbtShort::ID => Some(Self::Int(NbtInt { value: unsafe { self.short.value } as i32 })),
+			NbtInt::ID => Some(self),
+			_ => None,
+		}
+	}
+
+	pub(in crate::elements) fn array_try_into_long(self) -> Option<Self> {
+		match self.id() {
+			NbtByte::ID => Some(Self::Long(NbtLong { value: unsafe { self.byte.value } as i64 })),
+			NbtShort::ID => Some(Self::Long(NbtLong { value: unsafe { self.short.value } as i64 })),
+			NbtInt::ID => Some(Self::Long(NbtLong { value: unsafe { self.int.value } as i64 })),
+			NbtLong::ID => Some(self),
+			_ => None,
+		}
 	}
 
 	pub fn from_bytes<'a, D: Decoder<'a>>(element: u8, decoder: &mut D) -> Option<Self> {
@@ -569,7 +678,7 @@ impl NbtElement {
 			NbtDouble::ID => Self::Double(NbtDouble::default()),
 			NbtByteArray::ID => Self::ByteArray(NbtByteArray::new()),
 			NbtString::ID => Self::String(NbtString::new(CompactString::const_new(""))),
-			NbtList::ID => Self::List(NbtList::new(vec![], 0x00)),
+			NbtList::ID => Self::List(NbtList::new(vec![])),
 			NbtCompound::ID => Self::Compound(NbtCompound::new()),
 			NbtIntArray::ID => Self::IntArray(NbtIntArray::new()),
 			NbtLongArray::ID => Self::LongArray(NbtLongArray::new()),
@@ -1081,6 +1190,15 @@ impl NbtElement {
 	}
 
 	#[inline]
+	pub fn try_into_inner(mut self) -> Result<Self, Self> {
+		if let Some(compound) = self.as_compound_mut() && compound.len() == 1 && compound.get(0).is_some_and(|(key, _)| key.is_empty()) && let Some((_, inner)) = compound.remove(0) {
+			Ok(inner)
+		} else {
+			Err(self)
+		}
+	}
+
+	#[inline]
 	pub fn drop(&mut self, key: Option<CompactString>, element: Self, y: &mut usize, depth: usize, target_depth: usize, line_number: usize, indices: &mut Vec<usize>) -> DropFn {
 		unsafe {
 			let height = self.height() * 16;
@@ -1367,7 +1485,7 @@ impl NbtElement {
 						ElementAction::InsertFromClipboard,
 						ElementAction::OpenArrayInHex,
 					];
-					let id = self.as_list_unchecked().element;
+					let id = self.as_list_unchecked().id();
 					if matches!(id, NbtByte::ID | NbtShort::ID | NbtInt::ID | NbtLong::ID) {
 						&FULL
 					} else {
@@ -1530,10 +1648,9 @@ impl Drop for NbtElement {
 					core::ptr::addr_of_mut!(self.string.str).drop_in_place();
 				}
 				NbtList::ID => {
-					let element = self.list.element;
 					let list = &mut *self.list.elements;
-					if element > NbtDouble::ID {
-						for entry in &mut *list {
+					for entry in &mut *list {
+						if entry.id() > NbtDouble::ID {
 							(entry as *mut Self).drop_in_place();
 						}
 					}

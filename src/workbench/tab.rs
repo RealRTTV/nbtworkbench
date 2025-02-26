@@ -113,9 +113,10 @@ impl Tab {
 	}
 
 	#[cfg(target_arch = "wasm32")]
-	pub fn save(&mut self, _: bool) -> Result<()> {
+	pub fn save(&mut self, _: bool, window_properties: &mut WindowProperties) -> Result<()> {
+		let _ = self.write_selected_text(true, window_properties, false);
 		let bytes = self.format.encode(&self.value);
-		crate::save(self.name.as_ref(), bytes);
+		crate::wasm::save(self.name.as_ref(), bytes);
 		self.unsaved_changes = false;
 		Ok(())
 	}

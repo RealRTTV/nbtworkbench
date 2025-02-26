@@ -1,5 +1,5 @@
 macro_rules! array {
-	($element_field:ident, $name:ident, $t:ty, $my_id:literal, $id:literal, $char:literal, $uv:ident, $element_uv:ident) => {
+	($element_field:ident, $name:ident, $t:ty, $my_id:literal, $id:literal, $char:literal, $uv:ident, $element_uv:ident, $default_snbt_integer:ident, $try_into_element:ident) => {
 		#[repr(C)]
 		pub struct $name {
 			pub(in crate::elements) values: Box<Vec<NbtElement>>,
@@ -71,12 +71,13 @@ macro_rules! array {
 					.trim_start();
 				let mut array = Self::new();
 				while !s.starts_with(']') {
-					let (s2, element) = NbtElement::from_str0(s)?;
+					let (s2, element) = NbtElement::from_str0(s, NbtElement::$default_snbt_integer)?;
+					let element = element.$try_into_element().ok_or(s.len())?;
 					array.insert(array.len(), element).map_err(|_| s.len())?;
 					s = s2.trim_start();
 					if let Some(s2) = s.strip_prefix(',') {
 						s = s2.trim_start();
-					} else {
+					} else if s.starts_with(']') {
 						break;
 					}
 				}
@@ -447,6 +448,6 @@ use crate::elements::{id_to_string_name, NbtElement};
 use crate::workbench::{DropFn};
 use crate::util::{StrExt};
 
-array!(byte, NbtByteArray, i8, 7, 1, 'B', BYTE_ARRAY_UV, BYTE_UV);
-array!(int, NbtIntArray, i32, 11, 3, 'I', INT_ARRAY_UV, INT_UV);
-array!(long, NbtLongArray, i64, 12, 4, 'L', LONG_ARRAY_UV, LONG_UV);
+array!(byte, NbtByteArray, i8, 7, 1, 'B', BYTE_ARRAY_UV, BYTE_UV, parse_byte, array_try_into_byte);
+array!(int, NbtIntArray, i32, 11, 3, 'I', INT_ARRAY_UV, INT_UV, parse_int, array_try_into_int);
+array!(long, NbtLongArray, i64, 12, 4, 'L', LONG_ARRAY_UV, LONG_UV, parse_long, array_try_into_long);

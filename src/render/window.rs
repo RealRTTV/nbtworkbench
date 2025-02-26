@@ -52,7 +52,7 @@ pub async fn run() -> ! {
 			}
 
 			#[cfg(target_arch = "wasm32")]
-			crate::on_input();
+			crate::wasm::on_input();
 			if self.workbench.should_ignore_event() || !State::input(&event, self.workbench, self.window_properties) {
 				match event {
 					WindowEvent::RedrawRequested => {

@@ -12,6 +12,8 @@ NBT Workbench is written completely from scratch in [Rust](https://www.rust-lang
 
 * ☆ [Web Version](https://rttv.ca/main)
 * Java NBT files (`level.dat` / `hotbar.nbt`)
+  * ☆ Supports the new 2025 SNBT format
+  * ☆ Supports heterogeneous lists
 * Java region files (`.mca` / `.mcr`)
   * ☆ Supports the new 1.21 LZ4 compression format
   * ☆ Supports the 1.20.2 NBT packet format

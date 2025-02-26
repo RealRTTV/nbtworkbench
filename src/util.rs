@@ -80,14 +80,14 @@ pub fn split_lines<const MAX_WIDTH: usize>(s: String) -> Vec<String> {
 	if !trimmed.is_empty() {
 		lines.push(trimmed.to_string());
 	}
-	
+
 	lines
 }
 
 #[must_use]
 pub fn nth(n: usize) -> String {
     use std::fmt::Write as _;
-    
+
 	let mut buf = String::with_capacity(n.checked_ilog10().map_or(1, |x| x + 1) as usize + 2);
 	let _ = write!(&mut buf, "{n}");
 	if n / 10 % 10 == 1 {
@@ -137,6 +137,10 @@ pub fn smoothstep64(x: f64) -> f64 {
 #[inline]
 #[must_use]
 pub const fn valid_unescaped_char(byte: u8) -> bool { matches!(byte, b'0'..=b'9' | b'A'..=b'Z' | b'a'..=b'z' | b'_' | b'-' | b'.' | b'+') }
+
+#[inline]
+#[must_use]
+pub const fn valid_starting_char(byte: u8) -> bool { matches!(byte, b'A'..=b'Z' | b'a'..=b'z' | b'_') }
 
 #[must_use]
 pub fn combined_two_sorted<T: Ord>(a: Box<[T]>, b: Box<[T]>) -> Vec<T> {
@@ -244,7 +248,7 @@ impl<T> LinkedQueue<T> {
 
 	#[must_use]
 	pub const fn is_empty(&self) -> bool { self.len == 0 }
-	
+
 	#[must_use]
 	pub const fn len(&self) -> usize { self.len }
 
@@ -427,6 +431,26 @@ impl StrExt for str {
 						backslash = false;
 						byte = b'\0';
 					}
+				} else if byte == b'b' {
+					if backslash {
+						backslash = false;
+						byte = b'\x08';
+					}
+				} else if byte == b's' {
+					if backslash {
+						backslash = false;
+						byte = b'\x20';
+					}
+				} else if byte == b't' {
+					if backslash {
+						backslash = false;
+						byte = b'\x09';
+					}
+				} else if byte == b'f' {
+					if backslash {
+						backslash = false;
+						byte = b'\x0C';
+					}
 				} else if byte == b'x' {
 					if backslash {
 						backslash = false;
@@ -461,6 +485,28 @@ impl StrExt for str {
 							return Err(self.len());
 						}
 					}
+				} else if byte == b'U' {
+					if backslash {
+						backslash = false;
+						if let Ok([a, b, c, d, e, f, g, h]) = iter.next_chunk::<8>()
+							&& let Some(a) = MAPPING[a as usize]
+							&& let Some(b) = MAPPING[b as usize]
+							&& let Some(c) = MAPPING[c as usize]
+							&& let Some(d) = MAPPING[d as usize]
+							&& let Some(e) = MAPPING[e as usize]
+							&& let Some(f) = MAPPING[f as usize]
+							&& let Some(g) = MAPPING[g as usize]
+							&& let Some(h) = MAPPING[h as usize]
+							&& let Some(char) = char::from_u32(((a as u32) << 28) | ((b as u32) << 24) | ((c as u32) << 20) | ((d as u32) << 16) | ((e as u32) << 12) | ((f as u32) << 8) | ((g as u32) << 4) | (h as u32))
+						{
+							let len = char.len_utf8();
+							char.encode_utf8(unsafe { core::slice::from_raw_parts_mut(ptr.add(buf_len), len) });
+							buf_len += len;
+							continue;
+						} else {
+							return Err(self.len());
+						}
+					}
 				} else if backslash {
 					return Err(self.len());
 				}
@@ -476,7 +522,7 @@ impl StrExt for str {
 		}
 	}
 
-	fn needs_escape(&self) -> bool { self.as_bytes().first().is_some_and(u8::is_ascii_digit) || !self.bytes().all(valid_unescaped_char) }
+	fn needs_escape(&self) -> bool { self.as_bytes().first().copied().is_some_and(valid_starting_char) || !self.bytes().all(valid_unescaped_char) }
 
 	fn width(&self) -> usize {
 		self.chars().map(CharExt::width).sum()

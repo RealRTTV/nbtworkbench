@@ -38,13 +38,13 @@ extern "C" {
     pub fn get_clipboard() -> Option<String>;
 
     #[wasm_bindgen(js_name = "onInput")]
-    fn on_input();
+    pub fn on_input();
 
     #[wasm_bindgen(js_name = "tryOpenDialog")]
-    fn try_open_dialog();
+    pub fn try_open_dialog();
 
     #[wasm_bindgen(js_name = "save")]
-    fn save(name: &str, bytes: Vec<u8>);
+    pub fn save(name: &str, bytes: Vec<u8>);
 
     #[wasm_bindgen(js_name = "onPanic")]
     fn on_panic(msg: String);

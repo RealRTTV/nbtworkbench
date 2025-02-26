@@ -291,3 +291,23 @@ pub fn reformat() -> ! {
 
     std::process::exit(0);
 }
+
+pub fn help() -> ! {
+    println!(r#"
+Usage:
+  nbtworkbench --version|-v
+  nbtworkbench -?|-h|--help|/?
+  nbtworkbench find <path> [(--mode|-m)=(normal|regex|snbt)] [(--search|-s)=(key|value|any)] [--exact-match|-em] <query>
+  nbtworkbench reformat (--format|-f)=<format> [(--out-dir|-d)=<out-dir>] [(--out-ext|-e)=<out-ext>] <path>
+
+Options:
+  --version, -v       Displays the version of nbtworkbench you're running.
+  -?, -h, --help, /?  Displays this dialog.
+  --mode, -m          Changes the `find` mode to take the <query> field as either, a containing substring, a regex (match whole), or snbt. [default: normal]
+  --search, -s        Searches for results matching the <query> in either, the key, the value, or both (note that substrings and regex search the same pattern in both key and value, while the regex uses it's key field to match equal strings). [default: any]
+  --format, -f        Specifies the format to be reformatted to; either `nbt`, `snbt`, `dat/dat_old/gzip`, `zlib`, 'lnbt' (little endian nbt), or 'lhnbt' (little endian nbt with header).
+  --out-dir, -d       Specifies the output directory. [default: ./]
+  --out-ext, -e       Specifies the output file extension (if not specified, it will infer from --format)"#);
+    
+    std::process::exit(0);
+}
