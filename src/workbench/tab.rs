@@ -1,5 +1,6 @@
 use std::cell::SyncUnsafeCell;
 use std::ffi::OsStr;
+use std::fmt::Display;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -11,19 +12,12 @@ use flate2::Compression;
 use uuid::Uuid;
 use zune_inflate::DeflateDecoder;
 
-use crate::{LinkedQueue, RenderContext, since_epoch, StrExt, TAB_CLOSE_DOUBLE_CLICK_INTERVAL, TEXT_DOUBLE_CLICK_INTERVAL, WindowProperties, OptionExt, HeldEntry};
-use crate::assets::{BASE_Z, BYTE_ARRAY_GHOST_UV, BYTE_ARRAY_UV, BYTE_GRAYSCALE_UV, BYTE_UV, CHUNK_GHOST_UV, CHUNK_UV, COMPOUND_GHOST_UV, COMPOUND_ROOT_UV, COMPOUND_UV, DIM_LIGHTBULB_UV, DISABLED_REFRESH_UV, DOUBLE_GRAYSCALE_UV, DOUBLE_UV, ENABLED_FREEHAND_MODE_UV, FLOAT_GRAYSCALE_UV, FLOAT_UV, FREEHAND_MODE_UV, GZIP_FILE_TYPE_UV, HEADER_SIZE, HELD_SCROLLBAR_UV, HOVERED_WIDGET_UV, INT_ARRAY_GHOST_UV, INT_ARRAY_UV, INT_GRAYSCALE_UV, INT_UV, JUST_OVERLAPPING_BASE_Z, LIGHTBULB_UV, LINE_NUMBER_SEPARATOR_UV, LIST_GHOST_UV, LIST_UV, LITTLE_ENDIAN_HEADER_NBT_FILE_TYPE_UV, LITTLE_ENDIAN_NBT_FILE_TYPE_UV, LONG_ARRAY_GHOST_UV, LONG_ARRAY_UV, LONG_GRAYSCALE_UV, LONG_UV, MCA_FILE_TYPE_UV, NBT_FILE_TYPE_UV, REFRESH_UV, REGION_UV, SCROLLBAR_Z, SHORT_GRAYSCALE_UV, SHORT_UV, SNBT_FILE_TYPE_UV, STEAL_ANIMATION_OVERLAY_UV, STRING_GHOST_UV, STRING_UV, UNHELD_SCROLLBAR_UV, UNKNOWN_NBT_GHOST_UV, UNKNOWN_NBT_UV, UNSELECTED_WIDGET_UV, ZLIB_FILE_TYPE_UV, ZOffset, SELECTED_WIDGET_UV};
-use crate::color::TextColor;
-use crate::elements::chunk::NbtRegion;
-use crate::elements::compound::NbtCompound;
-use crate::elements::element::NbtElement;
-use crate::elements::list::NbtList;
-use crate::marked_line::MarkedLines;
-use crate::selected_text::{SelectedText, SelectedTextAdditional};
-use crate::text::{get_cursor_left_jump_idx, get_cursor_right_jump_idx, Text};
-use crate::tree_travel::Navigate;
-use crate::vertex_buffer_builder::{Vec2u, VertexBufferBuilder};
-use crate::workbench_action::WorkbenchAction;
+use crate::assets::{ZOffset, BASE_Z, BYTE_ARRAY_GHOST_UV, BYTE_ARRAY_UV, BYTE_GRAYSCALE_UV, BYTE_UV, CHUNK_GHOST_UV, CHUNK_UV, COMPOUND_GHOST_UV, COMPOUND_ROOT_UV, COMPOUND_UV, DIM_LIGHTBULB_UV, DISABLED_REFRESH_UV, DOUBLE_GRAYSCALE_UV, DOUBLE_UV, ENABLED_FREEHAND_MODE_UV, FLOAT_GRAYSCALE_UV, FLOAT_UV, FREEHAND_MODE_UV, GZIP_FILE_TYPE_UV, HEADER_SIZE, HELD_SCROLLBAR_UV, HOVERED_WIDGET_UV, INT_ARRAY_GHOST_UV, INT_ARRAY_UV, INT_GRAYSCALE_UV, INT_UV, JUST_OVERLAPPING_BASE_Z, LIGHTBULB_UV, LINE_NUMBER_SEPARATOR_UV, LIST_GHOST_UV, LIST_UV, LITTLE_ENDIAN_HEADER_NBT_FILE_TYPE_UV, LITTLE_ENDIAN_NBT_FILE_TYPE_UV, LONG_ARRAY_GHOST_UV, LONG_ARRAY_UV, LONG_GRAYSCALE_UV, LONG_UV, MCA_FILE_TYPE_UV, NBT_FILE_TYPE_UV, REFRESH_UV, REGION_UV, SCROLLBAR_Z, SELECTED_WIDGET_UV, SHORT_GRAYSCALE_UV, SHORT_UV, SNBT_FILE_TYPE_UV, STEAL_ANIMATION_OVERLAY_UV, STRING_GHOST_UV, STRING_UV, UNHELD_SCROLLBAR_UV, UNKNOWN_NBT_GHOST_UV, UNKNOWN_NBT_UV, UNSELECTED_WIDGET_UV, ZLIB_FILE_TYPE_UV};
+use crate::elements::{NbtCompound, NbtElement, NbtList, NbtRegion};
+use crate::render::{RenderContext, TextColor, Vec2u, VertexBufferBuilder, WindowProperties};
+use crate::widget::{get_cursor_left_jump_idx, get_cursor_right_jump_idx, SelectedText, SelectedTextAdditional, Text, TEXT_DOUBLE_CLICK_INTERVAL};
+use crate::util::{LinkedQueue, StrExt, now};
+use super::{HeldEntry, MarkedLines, Navigate, WorkbenchAction};
 
 pub struct Tab {
 	pub value: Box<NbtElement>,
@@ -83,7 +77,7 @@ impl Tab {
 			selected_text: None,
 			last_close_attempt: Duration::ZERO,
 			last_selected_text_interaction: (0, 0, Duration::ZERO),
-			last_interaction: since_epoch(),
+			last_interaction: now(),
 			last_double_click_interaction: (0, Duration::ZERO),
 			held_entry: HeldEntry::Empty,
 			from_indices_arc: None,
@@ -91,7 +85,8 @@ impl Tab {
 	}
 
 	#[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
-	pub fn save(&mut self, force_dialog: bool) -> Result<()> {
+	pub fn save(&mut self, force_dialog: bool, window_properties: &mut WindowProperties) -> Result<()> {
+		let _ = self.write_selected_text(true, window_properties, false);
 		if let Some(path) = self.path.as_deref() && path.is_absolute() && !force_dialog {
 			std::fs::write(path, self.format.encode(&self.value))?;
 			self.unsaved_changes = false;
@@ -127,8 +122,7 @@ impl Tab {
 
 	#[allow(clippy::too_many_lines)]
 	pub fn render(&self, builder: &mut VertexBufferBuilder, ctx: &mut RenderContext, held: bool, skip_tooltips: bool, steal_delta: f32) {
-		let mouse_x = ctx.mouse_x;
-		let mouse_y = ctx.mouse_y;
+		let (mouse_x, mouse_y) = ctx.mouse_pos().into();
 
 		let horizontal_scroll_before = core::mem::replace(
 			&mut builder.horizontal_scroll,
@@ -209,14 +203,10 @@ impl Tab {
 					builder.draw_tooltip(&["Freehand Mode (Ctrl + Shift + F)"], (mouse_x, mouse_y), false);
 				}
 
-				if self.freehand_mode {
+				if self.freehand_mode || hovering {
 					ENABLED_FREEHAND_MODE_UV
 				} else {
-					if hovering {
-						ENABLED_FREEHAND_MODE_UV
-					} else {
-						FREEHAND_MODE_UV
-					}
+					FREEHAND_MODE_UV
 				}
 			};
 			builder.draw_texture((264, 26), freehand_uv, (16, 16));
@@ -225,11 +215,12 @@ impl Tab {
 		{
 			let enabled = self.path.as_deref().is_some_and(|path| path.exists()) && !cfg!(target_arch = "wasm32");
 			let widget_uv = if enabled {
-				if (296..312).contains(&ctx.mouse_x) && (26..42).contains(&ctx.mouse_y) {
+				let (mouse_x, mouse_y) = ctx.mouse_pos().into();
+				if (296..312).contains(&mouse_x) && (26..42).contains(&mouse_y) {
 					#[cfg(target_arch = "wasm32")]
-					builder.draw_tooltip(&["Refresh Tab (Disabled on WebAssembly version)"], (ctx.mouse_x, ctx.mouse_y), false);
+					builder.draw_tooltip(&["Refresh Tab (Disabled on WebAssembly version)"], ctx.mouse_pos(), false);
 					#[cfg(not(target_arch = "wasm32"))]
-					builder.draw_tooltip(&["Refresh Tab (Ctrl + R)"], (ctx.mouse_x, ctx.mouse_y), false);
+					builder.draw_tooltip(&["Refresh Tab (Ctrl + R)"], ctx.mouse_pos(), false);
 					HOVERED_WIDGET_UV
 				} else {
 					SELECTED_WIDGET_UV
@@ -306,7 +297,7 @@ impl Tab {
 		if steal_delta > 0.0 {
 			let y = ((mouse_y - HEADER_SIZE) & !15) + HEADER_SIZE;
 			let height = (16.0 * steal_delta).round() as usize;
-			builder.draw_texture_region_z((ctx.left_margin - 2, y + (16 - height)), JUST_OVERLAPPING_BASE_Z, STEAL_ANIMATION_OVERLAY_UV, (builder.window_width() + 2 - ctx.left_margin, height), (16, 16));
+			builder.draw_texture_region_z((ctx.left_margin() - 2, y + (16 - height)), JUST_OVERLAPPING_BASE_Z, STEAL_ANIMATION_OVERLAY_UV, (builder.window_width() + 2 - ctx.left_margin(), height), (16, 16));
 		}
 	}
 
@@ -323,7 +314,7 @@ impl Tab {
 
 	pub fn set_selected_text(&mut self, y: Option<usize>, selected_text: Option<SelectedText>) {
 		self.selected_text = selected_text;
-		let now = since_epoch();
+		let now = now();
 		if let Some(selected_text) = self.selected_text.as_mut() && let Some(y) = y {
 			let (old_y, times_clicked, timestamp) = core::mem::replace(&mut self.last_selected_text_interaction, (y, 0, now));
 			if now - timestamp < TEXT_DOUBLE_CLICK_INTERVAL && old_y == y && !selected_text.value.is_empty() {
@@ -347,6 +338,7 @@ impl Tab {
 	pub fn append_to_history(&mut self, action: WorkbenchAction) {
 		self.undos.push(action);
 		self.redos.clear();
+		self.unsaved_changes = true;
 	}
 
 	#[must_use]
@@ -422,7 +414,7 @@ impl Tab {
 	#[inline]
 	#[must_use]
 	#[allow(clippy::too_many_lines)]
-	pub fn close_selected_text(&mut self, on_invalid_format: bool, window_properties: &mut WindowProperties) -> bool {
+	pub fn write_selected_text(&mut self, on_invalid_format: bool, window_properties: &mut WindowProperties, close_selected_text: bool) -> bool {
 		if let Some(SelectedText(Text { value, editable: true, additional: SelectedTextAdditional { indices, prefix, suffix, .. }, .. })) = self.selected_text.clone() {
 			if let Some((&last, rem)) = indices.split_last() {
 				let value = CompactString::from(value);
@@ -434,7 +426,9 @@ impl Tab {
 							let idx = compound.entries.idx_of(&value);
 							if let Some(idx) = idx {
 								return if idx == last {
-									self.selected_text = None;
+									if close_selected_text {
+										self.selected_text = None;
+									}
 									true
 								} else {
 									on_invalid_format
@@ -448,7 +442,9 @@ impl Tab {
 							let idx = chunk.entries.idx_of(&value);
 							if let Some(idx) = idx {
 								return if idx == last {
-									self.selected_text = None;
+									if close_selected_text {
+										self.selected_text = None;
+									}
 									true
 								} else {
 									on_invalid_format
@@ -471,7 +467,9 @@ impl Tab {
 							.expect("Type of indices tail can accept value writes");
 						if !success { return on_invalid_format }
 						if previous == child.value().0 {
-							self.selected_text = None;
+							if close_selected_text {
+								self.selected_text = None;
+							}
 							return true
 						}
 						(None, Some(previous))
@@ -483,7 +481,9 @@ impl Tab {
 					key,
 					value,
 				});
-				self.selected_text = None;
+				if close_selected_text {
+					self.selected_text = None;
+				}
 			} else {
 				if self.path.as_ref().map(|path| path.as_os_str().to_string_lossy()).as_deref().unwrap_or(&self.name) == value {
 					return true;
@@ -509,7 +509,9 @@ impl Tab {
 						),
 					};
 					self.append_to_history(action);
-					self.selected_text = None;
+					if close_selected_text {
+						self.selected_text = None;
+					}
 					true
 				} else {
 					false
@@ -571,7 +573,7 @@ impl Tab {
 	pub fn refresh(&mut self) -> Result<()> {
 		let Some(path) = self.path.as_deref() else { return Ok(()) };
 
-		if self.unsaved_changes && (since_epoch() - core::mem::replace(&mut self.last_close_attempt, since_epoch())) > TAB_CLOSE_DOUBLE_CLICK_INTERVAL {
+		if self.unsaved_changes && (now() - core::mem::replace(&mut self.last_close_attempt, now())) > TAB_CLOSE_DOUBLE_CLICK_INTERVAL {
 			return Ok(());
 		}
 
@@ -694,6 +696,10 @@ impl FileFormat {
 	}
 }
 
-impl ToString for FileFormat {
-	fn to_string(&self) -> String { self.into_str().to_owned() }
+impl Display for FileFormat {
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+		write!(f, "{}", self.into_str())
+	}
 }
+
+pub const TAB_CLOSE_DOUBLE_CLICK_INTERVAL: Duration = Duration::from_millis(2000);

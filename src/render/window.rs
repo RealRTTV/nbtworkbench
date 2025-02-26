@@ -1,11 +1,10 @@
 use std::borrow::Cow;
-use std::cell::UnsafeCell;
 use std::rc::Rc;
 use std::time::Duration;
 
+use wgpu::util::{BufferInitDescriptor, DeviceExt};
 #[allow(clippy::wildcard_imports)]
 use wgpu::*;
-use wgpu::util::{BufferInitDescriptor, DeviceExt};
 use winit::application::ApplicationHandler;
 use winit::dpi::{PhysicalPosition, PhysicalSize};
 #[allow(clippy::wildcard_imports)]
@@ -21,18 +20,20 @@ use zune_inflate::DeflateOptions;
 #[cfg(target_arch = "wasm32")]
 use wasm_bindgen::JsValue;
 
-use crate::{assets, config, error, since_epoch, WINDOW_PROPERTIES, WindowProperties, WORKBENCH};
-use crate::alert::Alert;
-use crate::assets::HEADER_SIZE;
-use crate::color::TextColor;
-use crate::vertex_buffer_builder::VertexBufferBuilder;
+use crate::assets::{atlas, icon, ATLAS_HEIGHT, ATLAS_WIDTH, HEADER_SIZE, ICON_HEIGHT, ICON_WIDTH, UNICODE_LEN};
+use crate::config::get_theme;
+use crate::render::{TextColor, VertexBufferBuilder};
+use crate::util::now;
+use crate::widget::Alert;
 use crate::workbench::Workbench;
+use crate::{error, WINDOW_PROPERTIES, WORKBENCH};
 
 pub const WINDOW_HEIGHT: usize = 420;
 pub const WINDOW_WIDTH: usize = 720;
 pub const MIN_WINDOW_HEIGHT: usize = HEADER_SIZE + 16;
 pub const MIN_WINDOW_WIDTH: usize = 480;
 
+#[allow(static_mut_refs)]
 pub async fn run() -> ! {
 	struct Handler<'window> {
 		state: State<'window>,
@@ -55,7 +56,7 @@ pub async fn run() -> ! {
 			if self.workbench.should_ignore_event() || !State::input(&event, self.workbench, self.window_properties) {
 				match event {
 					WindowEvent::RedrawRequested => {
-						match self.state.render(self.workbench, self.window.as_ref()) {
+						match self.state.render(self.workbench, self.window.as_ref(), self.window_properties) {
 							Ok(()) => {}
 							Err(SurfaceError::Lost | SurfaceError::Outdated) => self.state.surface.configure(&self.state.device, &self.state.config),
 							Err(SurfaceError::OutOfMemory) => std::process::exit(1),
@@ -83,7 +84,7 @@ pub async fn run() -> ! {
 		}
 	}
 
-	let event_loop = EventLoop::builder().build().expect("Event loop was unconstructable");
+	let event_loop = EventLoop::with_user_event().build().expect("Event loop was unconstructable");
 	let mut builder = WindowAttributes::default()
 		.with_title("NBT Workbench")
 		.with_inner_size(PhysicalSize::new(7680, 4320))
@@ -93,9 +94,9 @@ pub async fn run() -> ! {
 		))
 		.with_window_icon(Some(
 			Icon::from_rgba(
-				assets::icon(),
-				assets::ICON_WIDTH as u32,
-				assets::ICON_HEIGHT as u32,
+				icon(),
+				ICON_WIDTH as u32,
+				ICON_HEIGHT as u32,
 			)
 			.expect("valid format"),
 		));
@@ -132,11 +133,9 @@ pub async fn run() -> ! {
 		size
 	};
 	let state = State::new(&window, window_size).await;
-	unsafe { std::ptr::write(std::ptr::addr_of_mut!(WINDOW_PROPERTIES), UnsafeCell::new(WindowProperties::new(Rc::clone(&window)))); }
-	let window_properties = unsafe { WINDOW_PROPERTIES.get_mut() };
-	unsafe { std::ptr::write(std::ptr::addr_of_mut!(WORKBENCH), UnsafeCell::new(Workbench::new(window_properties, Some(window_size)))); }
-	let workbench = unsafe { WORKBENCH.get_mut() };
-	let mut handler = Handler { state, window_properties, workbench, window: Rc::clone(&window) };
+	unsafe { std::ptr::write(std::ptr::addr_of_mut!(WINDOW_PROPERTIES), WindowProperties::new(Rc::clone(&window))); }
+	unsafe { std::ptr::write(std::ptr::addr_of_mut!(WORKBENCH), Workbench::new(&mut WINDOW_PROPERTIES, Some(window_size))); }
+	let mut handler = unsafe { Handler { state, window_properties: &mut WINDOW_PROPERTIES, workbench: &mut WORKBENCH, window: Rc::clone(&window) } };
 	event_loop.run_app(&mut handler).expect("Event loop failed");
 	loop {}
 }
@@ -211,8 +210,8 @@ impl<'window> State<'window> {
 		};
 		surface.configure(&device, &config);
 		let diffuse_texture_size = Extent3d {
-			width: assets::ATLAS_WIDTH as u32,
-			height: assets::ATLAS_HEIGHT as u32,
+			width: ATLAS_WIDTH as u32,
+			height: ATLAS_HEIGHT as u32,
 			depth_or_array_layers: 1,
 		};
 		let diffuse_texture = device.create_texture(&TextureDescriptor {
@@ -232,11 +231,11 @@ impl<'window> State<'window> {
 				origin: Origin3d::ZERO,
 				aspect: TextureAspect::All,
 			},
-			assets::atlas(config::get_theme()),
+			atlas(get_theme()),
 			ImageDataLayout {
 				offset: 0,
-				bytes_per_row: Some(4 * assets::ATLAS_WIDTH as u32),
-				rows_per_image: Some(assets::ATLAS_HEIGHT as u32),
+				bytes_per_row: Some(4 * ATLAS_WIDTH as u32),
+				rows_per_image: Some(ATLAS_HEIGHT as u32),
 			},
 			diffuse_texture_size,
 		);
@@ -288,7 +287,7 @@ impl<'window> State<'window> {
 		});
 		let shader = device.create_shader_module(ShaderModuleDescriptor {
 			label: Some("Shader"),
-			source: ShaderSource::Wgsl(Cow::Borrowed(crate::shader::SOURCE)),
+			source: ShaderSource::Wgsl(Cow::Borrowed(crate::render::shader::SOURCE)),
 		});
 		let render_pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
 			label: Some("Render Pipeline Layout"),
@@ -346,7 +345,7 @@ impl<'window> State<'window> {
 			label: Some("Unicode Texture Array"),
 			size: Extent3d {
 				width: 512,
-				height: assets::UNICODE_LEN as u32 / 512,
+				height: UNICODE_LEN as u32 / 512,
 				depth_or_array_layers: 1,
 			},
 			mip_level_count: 1,
@@ -358,16 +357,16 @@ impl<'window> State<'window> {
 		});
 		queue.write_texture(unicode_texture.as_image_copy(), &{
 			zune_inflate::DeflateDecoder::new_with_options(
-				include_bytes!("assets/unicode.hex.zib"),
+				include_bytes!("../assets/unicode.hex.zib"),
 				DeflateOptions::default().set_confirm_checksum(false),
 			).decode_zlib().ok().expect("there is no way this fails, otherwise i deserve the ub that comes from this.")
 		}, ImageDataLayout {
 			offset: 0,
 			bytes_per_row: Some(512),
-			rows_per_image: Some(assets::UNICODE_LEN as u32 / 512),
+			rows_per_image: Some(UNICODE_LEN as u32 / 512),
 		}, Extent3d {
 			width: 512,
-			height: assets::UNICODE_LEN as u32 / 512,
+			height: UNICODE_LEN as u32 / 512,
 			depth_or_array_layers: 1,
 		});
 		let unicode_texture_view = unicode_texture.create_view(&TextureViewDescriptor::default());
@@ -394,7 +393,7 @@ impl<'window> State<'window> {
 		});
 		let text_shader = device.create_shader_module(ShaderModuleDescriptor {
 			label: Some("Text Shader"),
-			source: ShaderSource::Wgsl(Cow::Borrowed(crate::text_shader::SOURCE)),
+			source: ShaderSource::Wgsl(Cow::Borrowed(crate::render::text_shader::SOURCE)),
 		});
 		let text_render_pipeline_layout = device.create_pipeline_layout(&PipelineLayoutDescriptor {
 			label: Some("Text Render Pipeline Layout"),
@@ -461,12 +460,12 @@ impl<'window> State<'window> {
 			text_render_pipeline,
 			unicode_bind_group,
 			last_tick: Duration::ZERO,
-			previous_theme: config::get_theme(),
+			previous_theme: get_theme(),
 		}
 	}
 
 	fn get_backdrop_color(&self) -> Color {
-		match config::get_theme() {
+		match get_theme() {
 			Theme::Light => Color {
 				r: 0xfb as f64 / 255.0,
 				g: 0xf8 as f64 / 255.0,
@@ -551,17 +550,17 @@ impl<'window> State<'window> {
 		}
 	}
 
-	fn render(&mut self, workbench: &mut Workbench, window: &Window) -> Result<(), SurfaceError> {
-		if (since_epoch() - self.last_tick).as_millis() >= 25
+	fn render(&mut self, workbench: &mut Workbench, window: &Window, window_properties: &mut WindowProperties) -> Result<(), SurfaceError> {
+		if (now() - self.last_tick).as_millis() >= 25
 		{
-			workbench.tick();
-			self.last_tick = since_epoch();
+			workbench.tick(window_properties);
+			self.last_tick = now();
 		}
 		if let Err(e) = workbench.try_subscription() {
 			workbench.alert(Alert::new("Error!", TextColor::Red, e.to_string()))
 		}
 		
-		if self.previous_theme != config::get_theme() {
+		if self.previous_theme != get_theme() {
 			self.queue.write_texture(
 				ImageCopyTexture {
 					texture: &self.diffuse_texture,
@@ -569,21 +568,21 @@ impl<'window> State<'window> {
 					origin: Origin3d::ZERO,
 					aspect: TextureAspect::All,
 				},
-				assets::atlas(config::get_theme()),
+				atlas(get_theme()),
 				ImageDataLayout {
 					offset: 0,
-					bytes_per_row: Some(4 * assets::ATLAS_WIDTH as u32),
-					rows_per_image: Some(assets::ATLAS_HEIGHT as u32),
+					bytes_per_row: Some(4 * ATLAS_WIDTH as u32),
+					rows_per_image: Some(ATLAS_HEIGHT as u32),
 				},
 				Extent3d {
-					width: assets::ATLAS_WIDTH as u32,
-					height: assets::ATLAS_HEIGHT as u32,
+					width: ATLAS_WIDTH as u32,
+					height: ATLAS_HEIGHT as u32,
 					depth_or_array_layers: 1,
 				},
 			);
 		}
 		
-		self.previous_theme = config::get_theme();
+		self.previous_theme = get_theme();
 		let surface_texture = self.surface.get_current_texture()?;
 		let view = surface_texture.texture.create_view(&TextureViewDescriptor::default());
 		let size = Extent3d {
@@ -699,5 +698,34 @@ impl<'window> State<'window> {
 		self.queue.submit(Some(encoder.finish()));
 		surface_texture.present();
 		Ok(())
+	}
+}
+
+pub enum WindowProperties {
+	Real(Rc<Window>),
+	Fake,
+}
+
+impl WindowProperties {
+	pub const fn new(window: Rc<Window>) -> Self {
+		Self::Real(window)
+	}
+
+	pub fn window_title(&mut self, title: &str) -> &mut Self {
+		if let Self::Real(window) = self {
+			window.set_title(title);
+			#[cfg(target_arch = "wasm32")]
+			if let Some(document) = web_sys::window().and_then(|window| window.document()) {
+				let _ = document.set_title(title);
+			}
+		}
+		self
+	}
+
+	pub fn get_window_size(&self) -> Option<PhysicalSize<u32>> {
+		match self {
+			Self::Real(window) => Some(window.inner_size()),
+			Self::Fake => None,
+		}
 	}
 }

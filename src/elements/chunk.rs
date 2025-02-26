@@ -8,19 +8,15 @@ use std::slice::{Iter, IterMut};
 #[cfg(not(target_arch = "wasm32"))]
 use std::thread::Scope;
 
-use compact_str::{CompactString, format_compact};
+use compact_str::{format_compact, CompactString};
 use zune_inflate::{DeflateDecoder, DeflateOptions};
 
-use crate::{DropFn, RenderContext, StrExt};
-use crate::assets::{BASE_Z, CHUNK_UV, CONNECTION_UV, HEADER_SIZE, JUST_OVERLAPPING_BASE_TEXT_Z, LINE_NUMBER_CONNECTOR_Z, LINE_NUMBER_SEPARATOR_UV, REGION_UV, ZOffset, CHUNK_GHOST_UV, REGION_GRID_UV, JUST_OVERLAPPING_BOOKMARK_Z};
-use crate::color::TextColor;
-use crate::elements::compound::NbtCompound;
-use crate::elements::element::NbtElement;
-use crate::encoder::UncheckedBufWriter;
-use crate::formatter::PrettyFormatter;
-use crate::marked_line::MarkedLines;
-use crate::tab::FileFormat;
-use crate::vertex_buffer_builder::VertexBufferBuilder;
+use crate::assets::{ZOffset, BASE_Z, CHUNK_GHOST_UV, CHUNK_UV, CONNECTION_UV, HEADER_SIZE, JUST_OVERLAPPING_BASE_TEXT_Z, JUST_OVERLAPPING_BOOKMARK_Z, LINE_NUMBER_CONNECTOR_Z, LINE_NUMBER_SEPARATOR_UV, REGION_GRID_UV, REGION_UV};
+use crate::elements::{NbtCompound, NbtElement};
+use crate::render::{RenderContext, TextColor, VertexBufferBuilder};
+use crate::serialization::{PrettyFormatter, UncheckedBufWriter};
+use crate::util::StrExt;
+use crate::workbench::{DropFn, FileFormat, MarkedLines};
 
 #[repr(C)]
 pub struct NbtRegion {
@@ -423,7 +419,7 @@ impl NbtRegion {
 	#[inline]
 	#[allow(clippy::too_many_lines)]
 	pub fn render_root(&self, builder: &mut VertexBufferBuilder, str: &str, ctx: &mut RenderContext) {
-		use std::fmt::Write;
+		use std::fmt::Write as _;
 
 		builder.draw_texture_z(
 			ctx.pos() - (20, 2),
@@ -439,6 +435,8 @@ impl NbtRegion {
 				ctx.skip_line_numbers(1);
 				break 'head;
 			}
+			
+			let pos = ctx.pos();
 
 			// not used on the grid layout
 			if !self.is_grid_layout() {
@@ -447,28 +445,28 @@ impl NbtRegion {
 				ctx.skip_line_numbers(1);
 			}
 			// fun hack for connection
-			self.render_icon(ctx.pos(), BASE_Z, builder);
-			builder.draw_texture(ctx.pos() - (16, 0), CONNECTION_UV, (16, 9));
+			self.render_icon(pos, BASE_Z, builder);
+			builder.draw_texture(pos - (16, 0), CONNECTION_UV, (16, 9));
 			if !self.is_empty() {
-				ctx.draw_toggle(ctx.pos() - (16, 0), self.is_open(), builder);
+				ctx.draw_toggle(pos - (16, 0), self.is_open(), builder);
 			}
-			ctx.render_errors(ctx.pos(), builder);
-			if ctx.forbid(ctx.pos()) {
-				builder.settings(ctx.pos() + (20, 0), false, JUST_OVERLAPPING_BASE_TEXT_Z);
+			ctx.render_errors(pos, builder);
+			if ctx.forbid(pos) {
+				builder.settings(pos + (20, 0), false, JUST_OVERLAPPING_BASE_TEXT_Z);
 				builder.color = TextColor::TreeKey.to_raw();
 				let _ = write!(builder, "{str}: [{}]", self.value());
 			}
 
-			ctx.y_offset += 16;
+			ctx.offset_pos(0, 16);
 		}
 
-		ctx.x_offset += 16;
+		ctx.offset_pos(16, 0);
 
 		if self.is_open() {
 			if self.is_grid_layout() {
-				let initial_x_offset = ctx.x_offset;
+				let initial_x_offset = ctx.pos().x;
 				for z in 0..32 {
-					if ctx.y_offset > builder.window_height() {
+					if ctx.pos().y > builder.window_height() {
 						break;
 					}
 
@@ -500,9 +498,9 @@ impl NbtRegion {
 
 						chunk.render_icon(ctx.pos(), JUST_OVERLAPPING_BOOKMARK_Z, builder);
 
-						if ctx.mouse_x > ctx.left_margin && ctx.mouse_y > HEADER_SIZE {
-							let mx = ((ctx.mouse_x - ctx.left_margin) & !15) + ctx.left_margin;
-							let my = ((ctx.mouse_y - HEADER_SIZE) & !15) + HEADER_SIZE;
+						if ctx.mouse_pos().x > ctx.left_margin() && ctx.mouse_pos().y > HEADER_SIZE {
+							let mx = ((ctx.mouse_pos().x - ctx.left_margin()) & !15) + ctx.left_margin();
+							let my = ((ctx.mouse_pos().y - HEADER_SIZE) & !15) + HEADER_SIZE;
 							if ctx.pos() == (mx, my) {
 								let text = chunk.value();
 								builder.color = TextColor::White.to_raw();
@@ -514,15 +512,16 @@ impl NbtRegion {
 						ctx.draw_held_entry_grid_chunk(pos, builder, |x, y| pos == (x, y) || pos == (x, y - 8), |x| self.can_insert(x));
 
 
-						ctx.x_offset += 16;
+						ctx.offset_pos(16, 0);
 					}
 
-					ctx.y_offset += 16;
-					ctx.x_offset = initial_x_offset;
+					ctx.offset_pos(0, 16);
+					let x = ctx.pos().x;
+					ctx.offset_pos(initial_x_offset as isize - x as isize, 0);
 				}
 			} else {
 				for (idx, value) in self.children().enumerate() {
-					if ctx.y_offset > builder.window_height() {
+					if ctx.pos().y > builder.window_height() {
 						break;
 					}
 
@@ -908,9 +907,9 @@ impl NbtChunk {
 	#[inline]
 	#[allow(clippy::too_many_lines)]
 	pub fn render(&self, builder: &mut VertexBufferBuilder, remaining_scroll: &mut usize, tail: bool, ctx: &mut RenderContext) {
-		use std::fmt::Write;
+		use std::fmt::Write as _;
 
-		let mut y_before = ctx.y_offset;
+		let mut y_before = ctx.pos().y;
 
 		'head: {
 			if *remaining_scroll > 0 {
@@ -918,35 +917,37 @@ impl NbtChunk {
 				ctx.skip_line_numbers(1);
 				break 'head;
 			}
+			
+			let pos = ctx.pos();
 
 			ctx.line_number();
-			self.render_icon(ctx.pos(), BASE_Z, builder);
+			self.render_icon(pos, BASE_Z, builder);
 			if !self.is_empty() {
-				ctx.draw_toggle(ctx.pos() - (16, 0), self.open(), builder);
+				ctx.draw_toggle(pos - (16, 0), self.open(), builder);
 			}
 			ctx.check_for_invalid_key(|key| !key.parse::<usize>().is_ok_and(|x| (0..=31).contains(&x)));
 			ctx.check_for_invalid_value(|value| !value.parse::<usize>().is_ok_and(|z| (0..=31).contains(&z)));
-			ctx.render_errors(ctx.pos(), builder);
-			if ctx.forbid(ctx.pos()) {
-				builder.settings(ctx.pos() + (20, 0), false, JUST_OVERLAPPING_BASE_TEXT_Z);
+			ctx.render_errors(pos, builder);
+			if ctx.forbid(pos) {
+				builder.settings(pos + (20, 0), false, JUST_OVERLAPPING_BASE_TEXT_Z);
 				builder.color = TextColor::TreeKey.to_raw();
 				let _ = write!(builder, "{}, {}", self.x, self.z);
 			}
 
-			ctx.y_offset += 16;
+			ctx.offset_pos(0, 16);
 			y_before += 16;
 		}
 
-		let x_before = ctx.x_offset - 16;
+		let x_before = ctx.pos().x - 16;
 
 		if self.open() {
-			ctx.x_offset += 16;
+			ctx.offset_pos(16, 0);
 
 			{
 				let children_contains_forbidden = 'f: {
-					let mut y = ctx.y_offset;
+					let mut y = ctx.pos().y;
 					for (_, value) in self.children() {
-						if y.saturating_sub(*remaining_scroll * 16) == ctx.selected_y && ctx.selected_y >= HEADER_SIZE {
+						if ctx.selected_text_y() == Some(y.saturating_sub(*remaining_scroll * 16)) && ctx.selected_text_y().is_some_and(|y| y >= HEADER_SIZE) {
 							break 'f true;
 						}
 						y += value.height() * 16;
@@ -954,13 +955,13 @@ impl NbtChunk {
 					false
 				};
 				if children_contains_forbidden {
-					let mut y = ctx.y_offset;
+					let mut y = ctx.pos().y;
 					for (name, value) in self.children() {
 						ctx.check_for_key_duplicate(|text, _| text == name, false);
-						if y.saturating_sub(*remaining_scroll * 16) != ctx.selected_y && y.saturating_sub(*remaining_scroll * 16) >= HEADER_SIZE && ctx.key_duplicate_error {
-							ctx.red_line_numbers[1] = y.saturating_sub(*remaining_scroll * 16);
+						if ctx.selected_text_y() == Some(y.saturating_sub(*remaining_scroll * 16)) && y.saturating_sub(*remaining_scroll * 16) >= HEADER_SIZE && ctx.has_duplicate_key_error() {
+							ctx.set_red_line_number(y.saturating_sub(*remaining_scroll * 16), 1);
 							ctx.draw_error_underline(
-								ctx.x_offset,
+								ctx.pos().x,
 								y.saturating_sub(*remaining_scroll * 16),
 								builder,
 							);
@@ -972,7 +973,8 @@ impl NbtChunk {
 			}
 
 			for (idx, (key, entry)) in self.children().enumerate() {
-				if ctx.y_offset > builder.window_height() {
+				let pos = ctx.pos();
+				if pos.y > builder.window_height() {
 					break;
 				}
 
@@ -985,7 +987,7 @@ impl NbtChunk {
 
 				if *remaining_scroll == 0 {
 					builder.draw_texture(
-						ctx.pos() - (16, 0),
+						pos - (16, 0),
 						CONNECTION_UV,
 						(
 							16,
@@ -994,8 +996,8 @@ impl NbtChunk {
 					);
 				}
 				ctx.check_for_key_duplicate(|text, _| self.inner.entries.has(text) && key != text, false);
-				if ctx.key_duplicate_error && ctx.y_offset == ctx.selected_y {
-					ctx.red_line_numbers[0] = ctx.y_offset;
+				if ctx.has_duplicate_key_error() && Some(pos.y) == ctx.selected_text_y() {
+					ctx.set_red_line_number(pos.y, 0);
 				}
 				entry.render(
 					remaining_scroll,
@@ -1007,13 +1009,13 @@ impl NbtChunk {
 			}
 
 			if !tail {
-				let len = (ctx.y_offset - y_before) / 16;
+				let len = (ctx.pos().y - y_before) / 16;
 				for i in 0..len {
 					builder.draw_texture((x_before, y_before + i * 16), CONNECTION_UV, (8, 16));
 				}
 			}
 
-			ctx.x_offset -= 16;
+			ctx.offset_pos(-16, 0);
 		} else {
 			ctx.skip_line_numbers(self.true_height() - 1);
 		}

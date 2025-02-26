@@ -7,13 +7,10 @@ use std::ptr::NonNull;
 
 use compact_str::CompactString;
 
-use crate::{RenderContext, StrExt, VertexBufferBuilder};
-use crate::assets::{BASE_Z, JUST_OVERLAPPING_BASE_TEXT_Z, STRING_UV, ZOffset};
-use crate::be_decoder::BigEndianDecoder;
-use crate::color::TextColor;
-use crate::encoder::UncheckedBufWriter;
-use crate::formatter::PrettyFormatter;
-use crate::le_decoder::LittleEndianDecoder;
+use crate::assets::{ZOffset, BASE_Z, JUST_OVERLAPPING_BASE_TEXT_Z, STRING_UV};
+use crate::render::{RenderContext, TextColor, VertexBufferBuilder};
+use crate::serialization::{Decoder, PrettyFormatter, UncheckedBufWriter};
+use crate::util::StrExt;
 
 #[repr(transparent)]
 #[allow(clippy::module_name_repetitions)]
@@ -41,7 +38,7 @@ impl NbtString {
 	}
 
 	#[inline]
-	pub fn from_be_bytes(decoder: &mut BigEndianDecoder) -> Option<Self> {
+	pub fn from_bytes<'a, D: Decoder<'a>>(decoder: &mut D) -> Option<Self> {
 		unsafe {
 			decoder.assert_len(2)?;
 			Some(Self {
@@ -52,16 +49,6 @@ impl NbtString {
 
 	#[inline]
 	pub fn to_be_bytes(&self, writer: &mut UncheckedBufWriter) { writer.write_be_str(self.str.as_str()); }
-
-	#[inline]
-	pub fn from_le_bytes(decoder: &mut LittleEndianDecoder) -> Option<Self> {
-		unsafe {
-			decoder.assert_len(2)?;
-			Some(Self {
-				str: TwentyThree::new(decoder.string()?),
-			})
-		}
-	}
 
 	#[inline]
 	pub fn to_le_bytes(&self, writer: &mut UncheckedBufWriter) { writer.write_le_str(self.str.as_str()); }
@@ -94,7 +81,7 @@ impl NbtString {
 impl NbtString {
 	#[inline]
 	pub fn render(&self, builder: &mut VertexBufferBuilder, name: Option<&str>, ctx: &mut RenderContext) {
-		use std::fmt::Write;
+		use std::fmt::Write as _;
 
 		ctx.line_number();
 		self.render_icon(ctx.pos(), BASE_Z, builder);
@@ -110,7 +97,7 @@ impl NbtString {
 			let _ = write!(builder, "{}", self.str.as_str());
 		}
 
-		ctx.y_offset += 16;
+		ctx.offset_pos(0, 16);
 	}
 
 	#[inline]

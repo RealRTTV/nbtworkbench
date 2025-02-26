@@ -2,10 +2,9 @@ use std::time::Duration;
 
 use enum_map::Enum;
 
-use crate::{since_epoch, smoothstep64, split_lines, StrExt};
 use crate::assets::{NOTIFICATION_BAR_BACKDROP_UV, NOTIFICATION_BAR_UV, NOTIFICATION_TEXT_Z, NOTIFICATION_UV, NOTIFICATION_Z};
-use crate::color::TextColor;
-use crate::vertex_buffer_builder::{Vec2u, VertexBufferBuilder};
+use crate::render::{Vec2u, VertexBufferBuilder, TextColor};
+use crate::util::{smoothstep64, split_lines, StrExt, now};
 
 #[derive(Copy, Clone, Enum)]
 pub enum NotificationKind {
@@ -43,7 +42,7 @@ impl Notification {
         self.message_len = lines.iter().map(String::len).sum();
         self.lines = lines.into_boxed_slice();
         self.text_color = text_color.to_raw();
-        let now = since_epoch();
+        let now = now();
         if let Some(timestamp) = self.timestamp {
             let diff = (now - timestamp).as_millis();
             if diff <= 250 {
@@ -174,14 +173,14 @@ impl Notification {
 
     #[allow(clippy::wrong_self_convention)]
     pub fn is_invisible(&mut self) -> bool {
-        let now = since_epoch();
+        let now = now();
         let ms = now.saturating_sub(*self.timestamp.get_or_insert(now)).as_millis() as usize;
         let display_time = self.message_len * 60 + 3000 + 500;
         ms > display_time
     }
 
     fn get_bar_width(&mut self) -> usize {
-        let now = since_epoch();
+        let now = now();
         let ms = (now.saturating_sub(*self.timestamp.get_or_insert(now)).as_millis() as usize).saturating_sub(250);
         let width = self.width + 4;
         let display_time = self.message_len * 60 + 3000;
@@ -189,7 +188,7 @@ impl Notification {
     }
 
     fn get_inset(&mut self) -> usize {
-        let now = since_epoch();
+        let now = now();
         let mut ms = now.saturating_sub(*self.timestamp.get_or_insert(now)).as_millis() as usize;
         let width = self.width + 10;
         let display_time = self.message_len * 60 + 3000;

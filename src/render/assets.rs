@@ -1,19 +1,17 @@
-use std::cell::LazyCell;
 use std::mem::ManuallyDrop;
-use std::ops::Deref;
-
+use lazy_static::lazy_static;
 use winit::window::Theme;
 use zune_png::zune_core::options::DecoderOptions;
 
 pub use ZOffset::*;
 
-use crate::since_epoch;
-use crate::vertex_buffer_builder::Vec2u;
+use crate::util::now;
+use crate::render::Vec2u;
 
 pub const HEADER_SIZE: usize = 48;
 
-pub const DARK_ATLAS_ENCODED: &[u8] = include_bytes!("assets/dark_atlas.png");
-pub const LIGHT_ATLAS_ENCODED: &[u8] = include_bytes!("assets/light_atlas.png");
+pub const DARK_ATLAS_ENCODED: &[u8] = include_bytes!("../assets/dark_atlas.png");
+pub const LIGHT_ATLAS_ENCODED: &[u8] = include_bytes!("../assets/light_atlas.png");
 pub const ATLAS_WIDTH: usize = 256;
 pub const ATLAS_HEIGHT: usize = 256;
 pub const UNICODE_LEN: usize = 1_818_624;
@@ -21,14 +19,14 @@ pub const UNICODE_LEN: usize = 1_818_624;
 pub const ICON_WIDTH: usize = 64;
 pub const ICON_HEIGHT: usize = 64;
 
-const OTHERSIDE_MUSIC_DISC_ICON: &[u8] = include_bytes!("assets/discs/otherside.hex");
-const PIGSTEP_MUSIC_DISC_ICON: &[u8] = include_bytes!("assets/discs/pigstep.hex");
-const MELLOHI_MUSIC_DISC_ICON: &[u8] = include_bytes!("assets/discs/mellohi.hex");
-const FIVE_MUSIC_DISC_ICON: &[u8] = include_bytes!("assets/discs/5.hex");
-const WARD_MUSIC_DISC_ICON: &[u8] = include_bytes!("assets/discs/ward.hex");
-const ELEVEN_MUSIC_DISC_ICON: &[u8] = include_bytes!("assets/discs/11.hex");
-const RELIC_MUSIC_DISC_ICON: &[u8] = include_bytes!("assets/discs/relic.hex");
-const STAL_MUSIC_DISC_ICON: &[u8] = include_bytes!("assets/discs/stal.hex");
+const OTHERSIDE_MUSIC_DISC_ICON: &[u8] = include_bytes!("../assets/discs/otherside.hex");
+const PIGSTEP_MUSIC_DISC_ICON: &[u8] = include_bytes!("../assets/discs/pigstep.hex");
+const MELLOHI_MUSIC_DISC_ICON: &[u8] = include_bytes!("../assets/discs/mellohi.hex");
+const FIVE_MUSIC_DISC_ICON: &[u8] = include_bytes!("../assets/discs/5.hex");
+const WARD_MUSIC_DISC_ICON: &[u8] = include_bytes!("../assets/discs/ward.hex");
+const ELEVEN_MUSIC_DISC_ICON: &[u8] = include_bytes!("../assets/discs/11.hex");
+const RELIC_MUSIC_DISC_ICON: &[u8] = include_bytes!("../assets/discs/relic.hex");
+const STAL_MUSIC_DISC_ICON: &[u8] = include_bytes!("../assets/discs/stal.hex");
 
 pub const CONNECTION_UV: Vec2u = Vec2u::new(64, 64);
 pub const UNKNOWN_NBT_UV: Vec2u = Vec2u::new(112, 32);
@@ -182,19 +180,21 @@ pub enum ZOffset {
     TOOLTIP_Z = 255,
 }
 
-static mut DARK_ATLAS_CELL: LazyCell<Vec<u8>> = LazyCell::new(|| zune_png::PngDecoder::new_with_options(DARK_ATLAS_ENCODED, DecoderOptions::new_fast().png_set_confirm_crc(false)).decode_raw().unwrap());
-static mut LIGHT_ATLAS_CELL: LazyCell<Vec<u8>> = LazyCell::new(|| zune_png::PngDecoder::new_with_options(LIGHT_ATLAS_ENCODED, DecoderOptions::new_fast().png_set_confirm_crc(false)).decode_raw().unwrap());
+lazy_static! {
+	static ref DARK_ATLAS_CELL: Vec<u8> = zune_png::PngDecoder::new_with_options(DARK_ATLAS_ENCODED, DecoderOptions::new_fast().png_set_confirm_crc(false)).decode_raw().unwrap();
+	static ref LIGHT_ATLAS_CELL: Vec<u8> = zune_png::PngDecoder::new_with_options(LIGHT_ATLAS_ENCODED, DecoderOptions::new_fast().png_set_confirm_crc(false)).decode_raw().unwrap();
+}
 
 pub fn atlas(theme: Theme) -> &'static [u8] {
 	match theme {
-		Theme::Light => unsafe { LIGHT_ATLAS_CELL.deref().as_slice() }
-		Theme::Dark => unsafe { DARK_ATLAS_CELL.deref().as_slice() }
+		Theme::Light => &LIGHT_ATLAS_CELL,
+		Theme::Dark => &DARK_ATLAS_CELL,
 	}
 }
 
 #[allow(clippy::cast_ptr_alignment)]
 pub fn icon() -> Vec<u8> {
-	let original = match (since_epoch().as_millis() & 7) as u8 {
+	let original = match (now().as_millis() & 7) as u8 {
 		// it's a good random only because its used once
 		0 => OTHERSIDE_MUSIC_DISC_ICON,
 		1 => PIGSTEP_MUSIC_DISC_ICON,

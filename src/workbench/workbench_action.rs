@@ -1,16 +1,13 @@
+use compact_str::{CompactString, ToCompactString};
 use std::cell::SyncUnsafeCell;
 use std::ffi::OsStr;
 use std::mem::MaybeUninit;
 use std::path::PathBuf;
 use std::sync::Arc;
-use compact_str::{CompactString, ToCompactString};
 
-use crate::{FileUpdateSubscription, hash, HeldEntry, add_element, remove_element, NbtElementAndKey, replace_element, recache_along_indices, swap_elements};
-use crate::sum_indices;
-use crate::Navigate;
-use crate::elements::compound::{CompoundMap, Entry};
-use crate::elements::element::NbtElement;
-use crate::marked_line::MarkedLines;
+use crate::elements::{CompoundMap, Entry, NbtElement, NbtElementAndKey};
+use crate::hash;
+use crate::workbench::{add_element, recache_along_indices, remove_element, replace_element, sum_indices, swap_elements, FileUpdateSubscription, HeldEntry, MarkedLines, Navigate};
 
 #[derive(Debug)]
 pub enum WorkbenchAction {

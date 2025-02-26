@@ -1,67 +1,47 @@
-use std::{fmt, fmt::Write};
-use std::alloc::{alloc, dealloc, Layout};
+pub(in crate::elements) use std::alloc::{dealloc, Layout};
 use std::fmt::{Debug, Display, Error, Formatter};
-use std::intrinsics::likely;
 use std::mem::{ManuallyDrop, MaybeUninit};
-use std::ops::{Deref, Index, IndexMut};
-use std::slice::{Iter, IterMut};
+use std::ops::{Index, IndexMut};
+use std::slice::Iter;
 #[cfg(not(target_arch = "wasm32"))]
 use std::thread::Scope;
 
-use compact_str::{CompactString, format_compact, ToCompactString};
+use compact_str::{CompactString, ToCompactString};
 use hashbrown::HashTable;
 use polonius_the_crab::{polonius, polonius_return};
 
-use crate::{array, assets::JUST_OVERLAPPING_BASE_TEXT_Z, DropFn, primitive, RenderContext, since_epoch, StrExt, TextColor, VertexBufferBuilder, NbtElementAndKey, width_ascii};
-use crate::assets::{BASE_Z, BYTE_ARRAY_UV, BYTE_UV, CONNECTION_UV, DOUBLE_UV, FLOAT_UV, INT_ARRAY_UV, INT_UV, LONG_ARRAY_UV, LONG_UV, SHORT_UV, ZOffset};
-use crate::be_decoder::BigEndianDecoder;
-use crate::element_action::ElementAction;
-use crate::elements::chunk::{NbtChunk, NbtRegion};
-use crate::elements::compound::{CompoundMap, CompoundMapIter, Entry, NbtCompound};
-use crate::elements::list::NbtList;
-use crate::elements::null::NbtNull;
-use crate::elements::string::NbtString;
-use crate::encoder::UncheckedBufWriter;
-use crate::formatter::PrettyFormatter;
-use crate::le_decoder::LittleEndianDecoder;
-use crate::marked_line::MarkedLines;
-use crate::tab::FileFormat;
-
-primitive!(BYTE_UV, { Some('b') }, NbtByte, i8, 1);
-primitive!(SHORT_UV, { Some('s') }, NbtShort, i16, 2);
-primitive!(INT_UV, { None::<char> }, NbtInt, i32, 3);
-primitive!(LONG_UV, { Some('L') }, NbtLong, i64, 4);
-primitive!(FLOAT_UV, { Some('f') }, NbtFloat, f32, 5);
-primitive!(DOUBLE_UV, { Some('d') }, NbtDouble, f64, 6);
-array!(byte, NbtByteArray, i8, 7, 1, 'B', BYTE_ARRAY_UV, BYTE_UV);
-array!(int, NbtIntArray, i32, 11, 3, 'I', INT_ARRAY_UV, INT_UV);
-array!(long, NbtLongArray, i64, 12, 4, 'L', LONG_ARRAY_UV, LONG_UV);
+use crate::assets::ZOffset;
+use crate::elements::{CompoundMap, CompoundMapIter, Entry, NbtByte, NbtByteArray, NbtChunk, NbtCompound, NbtDouble, NbtElementAndKey, NbtFloat, NbtInt, NbtIntArray, NbtList, NbtLong, NbtLongArray, NbtNull, NbtRegion, NbtShort, NbtString};
+use crate::render::{RenderContext, TextColor, VertexBufferBuilder};
+use crate::serialization::{BigEndianDecoder, Decoder, LittleEndianDecoder, PrettyFormatter, UncheckedBufWriter};
+use crate::util::{now, width_ascii, StrExt};
+use crate::workbench::{DropFn, ElementAction, FileFormat, MarkedLines};
 
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub struct NbtElementId {
 	_pad: [MaybeUninit<u8>; 23],
-	pub id: u8,
+	pub(in crate::elements) id: u8,
 }
 
 #[repr(C)]
 pub union NbtElement {
-	chunk: ManuallyDrop<NbtChunk>,
-	region: ManuallyDrop<NbtRegion>,
-	byte: ManuallyDrop<NbtByte>,
-	short: ManuallyDrop<NbtShort>,
-	int: ManuallyDrop<NbtInt>,
-	long: ManuallyDrop<NbtLong>,
-	float: ManuallyDrop<NbtFloat>,
-	double: ManuallyDrop<NbtDouble>,
-	byte_array: ManuallyDrop<NbtByteArray>,
-	string: ManuallyDrop<NbtString>,
-	list: ManuallyDrop<NbtList>,
-	compound: ManuallyDrop<NbtCompound>,
-	int_array: ManuallyDrop<NbtIntArray>,
-	long_array: ManuallyDrop<NbtLongArray>,
-	null: ManuallyDrop<NbtNull>,
-	id: NbtElementId,
+	pub(in crate::elements) chunk: ManuallyDrop<NbtChunk>,
+	pub(in crate::elements) region: ManuallyDrop<NbtRegion>,
+	pub(in crate::elements) byte: ManuallyDrop<NbtByte>,
+	pub(in crate::elements) short: ManuallyDrop<NbtShort>,
+	pub(in crate::elements) int: ManuallyDrop<NbtInt>,
+	pub(in crate::elements) long: ManuallyDrop<NbtLong>,
+	pub(in crate::elements) float: ManuallyDrop<NbtFloat>,
+	pub(in crate::elements) double: ManuallyDrop<NbtDouble>,
+	pub(in crate::elements) byte_array: ManuallyDrop<NbtByteArray>,
+	pub(in crate::elements) string: ManuallyDrop<NbtString>,
+	pub(in crate::elements) list: ManuallyDrop<NbtList>,
+	pub(in crate::elements) compound: ManuallyDrop<NbtCompound>,
+	pub(in crate::elements) int_array: ManuallyDrop<NbtIntArray>,
+	pub(in crate::elements) long_array: ManuallyDrop<NbtLongArray>,
+	pub(in crate::elements) null: ManuallyDrop<NbtNull>,
+	pub(in crate::elements) id: NbtElementId,
 }
 
 impl NbtElement {
@@ -92,7 +72,6 @@ impl NbtElement {
 }
 
 impl PartialEq for NbtElement {
-	#[inline(never)]
 	fn eq(&self, other: &Self) -> bool {
 		if self.id() != other.id() { return false }
 
@@ -120,7 +99,6 @@ impl PartialEq for NbtElement {
 }
 
 impl Clone for NbtElement {
-	#[inline(never)]
 	fn clone(&self) -> Self {
 		unsafe {
 			let mut element = match self.id() {
@@ -495,7 +473,7 @@ impl NbtElement {
 							inner,
 							(x, z),
 							FileFormat::Zlib,
-							since_epoch().as_secs() as u32,
+							now().as_secs() as u32,
 						)),
 					)
 				}),
@@ -511,26 +489,24 @@ impl NbtElement {
 		NbtString::from_str0(s).map(|(s, x)| (s, Self::String(x)))
 	}
 
-	#[inline(never)]
-	pub fn from_be_bytes(element: u8, decoder: &mut BigEndianDecoder) -> Option<Self> {
+	pub fn from_bytes<'a, D: Decoder<'a>>(element: u8, decoder: &mut D) -> Option<Self> {
 		Some(match element {
-			NbtByte::ID => Self::Byte(NbtByte::from_be_bytes(decoder)?),
-			NbtShort::ID => Self::Short(NbtShort::from_be_bytes(decoder)?),
-			NbtInt::ID => Self::Int(NbtInt::from_be_bytes(decoder)?),
-			NbtLong::ID => Self::Long(NbtLong::from_be_bytes(decoder)?),
-			NbtFloat::ID => Self::Float(NbtFloat::from_be_bytes(decoder)?),
-			NbtDouble::ID => Self::Double(NbtDouble::from_be_bytes(decoder)?),
-			NbtByteArray::ID => Self::ByteArray(NbtByteArray::from_be_bytes(decoder)?),
-			NbtString::ID => Self::String(NbtString::from_be_bytes(decoder)?),
-			NbtList::ID => Self::List(NbtList::from_be_bytes(decoder)?),
-			NbtCompound::ID => Self::Compound(NbtCompound::from_be_bytes(decoder)?),
-			NbtIntArray::ID => Self::IntArray(NbtIntArray::from_be_bytes(decoder)?),
-			NbtLongArray::ID => Self::LongArray(NbtLongArray::from_be_bytes(decoder)?),
+			NbtByte::ID => Self::Byte(NbtByte::from_bytes(decoder)?),
+			NbtShort::ID => Self::Short(NbtShort::from_bytes(decoder)?),
+			NbtInt::ID => Self::Int(NbtInt::from_bytes(decoder)?),
+			NbtLong::ID => Self::Long(NbtLong::from_bytes(decoder)?),
+			NbtFloat::ID => Self::Float(NbtFloat::from_bytes(decoder)?),
+			NbtDouble::ID => Self::Double(NbtDouble::from_bytes(decoder)?),
+			NbtByteArray::ID => Self::ByteArray(NbtByteArray::from_bytes(decoder)?),
+			NbtString::ID => Self::String(NbtString::from_bytes(decoder)?),
+			NbtList::ID => Self::List(NbtList::from_bytes(decoder)?),
+			NbtCompound::ID => Self::Compound(NbtCompound::from_bytes(decoder)?),
+			NbtIntArray::ID => Self::IntArray(NbtIntArray::from_bytes(decoder)?),
+			NbtLongArray::ID => Self::LongArray(NbtLongArray::from_bytes(decoder)?),
 			_ => return None,
 		})
 	}
 
-	#[inline(never)]
 	pub fn to_be_bytes(&self, writer: &mut UncheckedBufWriter) {
 		unsafe {
 			match self.id() {
@@ -554,26 +530,6 @@ impl NbtElement {
 		}
 	}
 
-	#[inline(never)]
-	pub fn from_le_bytes(element: u8, decoder: &mut LittleEndianDecoder) -> Option<Self> {
-		Some(match element {
-			NbtByte::ID => Self::Byte(NbtByte::from_le_bytes(decoder)?),
-			NbtShort::ID => Self::Short(NbtShort::from_le_bytes(decoder)?),
-			NbtInt::ID => Self::Int(NbtInt::from_le_bytes(decoder)?),
-			NbtLong::ID => Self::Long(NbtLong::from_le_bytes(decoder)?),
-			NbtFloat::ID => Self::Float(NbtFloat::from_le_bytes(decoder)?),
-			NbtDouble::ID => Self::Double(NbtDouble::from_le_bytes(decoder)?),
-			NbtByteArray::ID => Self::ByteArray(NbtByteArray::from_le_bytes(decoder)?),
-			NbtString::ID => Self::String(NbtString::from_le_bytes(decoder)?),
-			NbtList::ID => Self::List(NbtList::from_le_bytes(decoder)?),
-			NbtCompound::ID => Self::Compound(NbtCompound::from_le_bytes(decoder)?),
-			NbtIntArray::ID => Self::IntArray(NbtIntArray::from_le_bytes(decoder)?),
-			NbtLongArray::ID => Self::LongArray(NbtLongArray::from_le_bytes(decoder)?),
-			_ => return None,
-		})
-	}
-
-	#[inline(never)]
 	pub fn to_le_bytes(&self, writer: &mut UncheckedBufWriter) {
 		unsafe {
 			match self.id() {
@@ -621,7 +577,7 @@ impl NbtElement {
 				NbtCompound::new(),
 				(0, 0),
 				FileFormat::Zlib,
-				since_epoch().as_secs() as u32,
+				now().as_secs() as u32,
 			)),
 			_ => Self::Null(NbtNull),
 		}
@@ -635,11 +591,11 @@ impl NbtElement {
 		unsafe {
 			if decoder.u8() != NbtCompound::ID { return None }
 			// fix for >= 1.20.2 protocol since they removed the empty field
-			if decoder.assert_len(2).is_none() || decoder.data.cast::<u16>().read_unaligned() == 0_u16.to_be() {
-				let _ = decoder.u16();
+			if decoder.assert_len(2).is_some() && decoder.u16() != 0_u16.to_be() {
+				decoder.skip(-2_isize as usize);
 			}
 		}
-		let nbt = Self::Compound(NbtCompound::from_be_bytes(&mut decoder)?);
+		let nbt = Self::Compound(NbtCompound::from_bytes(&mut decoder)?);
 		Some(nbt)
 	}
 
@@ -672,15 +628,15 @@ impl NbtElement {
 					decoder.assert_len(2)?;
 					let skip = decoder.u16() as usize;
 					decoder.skip(skip);
-					Some((Self::Compound(NbtCompound::from_le_bytes(&mut decoder)?), decoder.header()))
+					Some((Self::Compound(NbtCompound::from_bytes(&mut decoder)?), decoder.header()))
 				},
 				NbtList::ID => {
 					decoder.assert_len(2)?;
 					let skip = decoder.u16() as usize;
 					decoder.skip(skip);
-					Some((Self::List(NbtList::from_le_bytes(&mut decoder)?), decoder.header()))
+					Some((Self::List(NbtList::from_bytes(&mut decoder)?), decoder.header()))
 				},
-				_ => return None,
+				_ => None,
 			}
 		}
 	}
@@ -1498,7 +1454,7 @@ impl NbtElement {
 }
 
 impl Display for NbtElement {
-	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
 		unsafe {
 			match self.id() {
 				NbtByte::ID => write!(f, "{}", &*self.byte),
@@ -1548,7 +1504,7 @@ impl NbtElement {
 }
 
 impl Debug for NbtElement {
-	fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
 		let mut formatter = PrettyFormatter::new();
 		self.pretty_fmt(&mut formatter);
 		write!(f, "{}", formatter.finish())

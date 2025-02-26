@@ -4,11 +4,14 @@ use std::time::Duration;
 
 use winit::keyboard::KeyCode;
 
-use crate::{flags, get_clipboard, is_jump_char_boundary, is_utf8_char_boundary, LinkedQueue, OptionExt, set_clipboard, since_epoch, StrExt};
-use crate::assets::{SELECTION_UV, ZOffset};
-use crate::color::TextColor;
-use crate::text::KeyResult::{Escape, Failed, Finish, NothingSpecial};
-use crate::vertex_buffer_builder::{Vec2u, VertexBufferBuilder};
+use crate::assets::{ZOffset, SELECTION_UV};
+use crate::flags;
+use crate::render::{TextColor, Vec2u, VertexBufferBuilder};
+use crate::util::{get_clipboard, is_jump_char_boundary, is_utf8_char_boundary, now, set_clipboard, LinkedQueue, StrExt};
+use crate::widget::KeyResult::{Escape, Failed, Finish, NothingSpecial};
+
+pub const TEXT_DOUBLE_CLICK_INTERVAL: Duration = Duration::from_millis(250);
+pub const CURSOR_BLINK_RATE: Duration = Duration::from_millis(500);
 
 #[repr(u8)]
 #[derive(PartialEq, Eq)]
@@ -162,7 +165,7 @@ impl<Additional: Clone, Cache: Cachelike<Additional>> Text<Additional, Cache> {
             value,
             cursor,
             selection: None,
-            last_interaction: since_epoch(),
+            last_interaction: now(),
             editable,
             undos: LinkedQueue::new(),
             redos: LinkedQueue::new(),
@@ -187,7 +190,7 @@ impl<Additional: Clone, Cache: Cachelike<Additional>> Text<Additional, Cache> {
 
     #[inline]
     pub fn interact(&mut self) {
-        self.last_interaction = since_epoch();
+        self.last_interaction = now();
     }
 
     #[must_use]
@@ -509,7 +512,7 @@ impl<Additional: Clone, Cache: Cachelike<Additional>> Text<Additional, Cache> {
     }
 
     pub fn render(&self, builder: &mut VertexBufferBuilder, color: TextColor, pos: Vec2u, z: ZOffset, selection_z: ZOffset) {
-        use std::fmt::Write;
+        use std::fmt::Write as _;
 
         let (x, y) = pos.into();
 
@@ -520,7 +523,7 @@ impl<Additional: Clone, Cache: Cachelike<Additional>> Text<Additional, Cache> {
 
         if self.editable {
             let cursor_prefixing = self.value.split_at(self.cursor).0;
-            let duration_from_last_interaction = since_epoch() - self.last_interaction;
+            let duration_from_last_interaction = now() - self.last_interaction;
             if let Some(selection) = self.selection && self.editable {
                 let (start, end) = if self.cursor > selection {
                     (selection, self.cursor)
@@ -536,7 +539,7 @@ impl<Additional: Clone, Cache: Cachelike<Additional>> Text<Additional, Cache> {
                     (end - start - 1, 16),
                     (14, 14),
                 );
-                if duration_from_last_interaction < Duration::from_millis(500) || duration_from_last_interaction.subsec_millis() < 500 {
+                if duration_from_last_interaction < CURSOR_BLINK_RATE || duration_from_last_interaction.subsec_millis() < CURSOR_BLINK_RATE.subsec_micros() {
                     builder.draw_texture_region_z(
                         (x + cursor_prefixing.width() - 1, y),
                         selection_z,
@@ -546,7 +549,7 @@ impl<Additional: Clone, Cache: Cachelike<Additional>> Text<Additional, Cache> {
                     );
                 }
             } else {
-                if duration_from_last_interaction < Duration::from_millis(500) || duration_from_last_interaction.subsec_millis() < 500 {
+                if duration_from_last_interaction < CURSOR_BLINK_RATE || duration_from_last_interaction.subsec_millis() < CURSOR_BLINK_RATE.subsec_millis() {
                     builder.draw_texture_region_z(
                         (x + cursor_prefixing.width(), y),
                         selection_z,
@@ -573,7 +576,7 @@ impl<Additional: Clone, Cache: Cachelike<Additional>> Text<Additional, Cache> {
     pub fn cache(&mut self) {
         let current = Cache::new(self);
 
-        let should_cache = core::mem::replace(&mut self.last_interaction, since_epoch()).as_millis() >= 1_500;
+        let should_cache = core::mem::replace(&mut self.last_interaction, now()).as_millis() >= 1_500;
         if should_cache && self.editable && self.undos.get().is_none_or(|x| x.ne(&current)) {
             if self.redos.pop().is_none_or(|x| x.ne(&current)) {
                 self.redos = LinkedQueue::new();
@@ -594,6 +597,6 @@ impl<Additional: Clone, Cache: Cachelike<Additional>> Text<Additional, Cache> {
         self.redos.clear();
         self.undos.clear();
         self.selection = None;
-        self.last_interaction = since_epoch();
+        self.last_interaction = now();
     }
 }

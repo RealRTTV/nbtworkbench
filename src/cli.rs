@@ -1,14 +1,16 @@
 use std::fmt::Formatter;
-use std::fs::{File, read};
+use std::fs::{read, File};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use glob::glob;
 
-use crate::{create_regex, error, log, WindowProperties};
-use crate::elements::element::NbtElement;
-use crate::search_box::{SearchBox, SearchFlags, SearchPredicate, SearchPredicateInner};
-use crate::tab::FileFormat;
+use crate::{error, log};
+use crate::elements::{NbtElement};
+use crate::widget::{SearchBox, SearchFlags, SearchPredicate, SearchPredicateInner};
+use crate::render::WindowProperties;
+use crate::util::create_regex;
+use crate::workbench::FileFormat;
 use crate::workbench::Workbench;
 
 struct SearchResult {
@@ -60,9 +62,9 @@ fn get_predicate(args: &mut Vec<String>) -> SearchPredicate {
     let search_flags = match get_argument_any(&["--search", "-s"], args).as_deref() {
         Some("key") => SearchFlags::Keys,
         Some("value") => SearchFlags::Values,
-        Some("all") | None => SearchFlags::KeysValues,
+        Some("any") | None => SearchFlags::KeysValues,
         Some(x) => {
-            error!("Invalid search kind '{x}', valid ones are: `key`, `value`, and `all`.");
+            error!("Invalid search kind '{x}', valid ones are: `key`, `value`, and `any`.");
             std::process::exit(1);
         }
     };

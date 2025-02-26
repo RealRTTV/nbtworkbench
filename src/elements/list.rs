@@ -5,17 +5,13 @@ use std::slice::{Iter, IterMut};
 #[cfg(not(target_arch = "wasm32"))]
 use std::thread::Scope;
 
-use compact_str::{CompactString, format_compact};
+use compact_str::{format_compact, CompactString};
 
-use crate::{DropFn, RenderContext, VertexBufferBuilder};
-use crate::assets::{BASE_Z, CONNECTION_UV, JUST_OVERLAPPING_BASE_TEXT_Z, LIST_UV, ZOffset};
-use crate::be_decoder::BigEndianDecoder;
-use crate::color::TextColor;
-use crate::elements::chunk::NbtChunk;
-use crate::elements::element::{id_to_string_name, NbtElement};
-use crate::encoder::UncheckedBufWriter;
-use crate::formatter::PrettyFormatter;
-use crate::le_decoder::LittleEndianDecoder;
+use crate::assets::{ZOffset, BASE_Z, CONNECTION_UV, JUST_OVERLAPPING_BASE_TEXT_Z, LIST_UV};
+use crate::elements::{id_to_string_name, NbtChunk, NbtElement};
+use crate::render::{RenderContext, TextColor, VertexBufferBuilder};
+use crate::serialization::{Decoder, PrettyFormatter, UncheckedBufWriter};
+use crate::workbench::DropFn;
 
 #[allow(clippy::module_name_repetitions)]
 #[repr(C)]
@@ -89,7 +85,7 @@ impl NbtList {
 	}
 	#[allow(clippy::cast_ptr_alignment)]
 	#[inline]
-	pub fn from_be_bytes(decoder: &mut BigEndianDecoder) -> Option<Self> {
+	pub fn from_bytes<'a, D: Decoder<'a>>(decoder: &mut D) -> Option<Self> {
 		unsafe {
 			decoder.assert_len(5)?;
 			let element = decoder.u8();
@@ -97,7 +93,7 @@ impl NbtList {
 			let ptr = alloc(Layout::array::<NbtElement>(len).unwrap_unchecked()).cast::<NbtElement>();
 			let mut true_height = 1;
 			for n in 0..len {
-				let element = NbtElement::from_be_bytes(element, decoder)?;
+				let element = NbtElement::from_bytes(element, decoder)?;
 				true_height += element.true_height() as u32;
 				ptr.add(n).write(element);
 			}
@@ -120,33 +116,6 @@ impl NbtList {
 		writer.write(&(self.len() as u32).to_be_bytes());
 		for element in self.elements.iter() {
 			element.to_be_bytes(writer);
-		}
-	}
-
-	#[allow(clippy::cast_ptr_alignment)]
-	#[inline]
-	pub fn from_le_bytes(decoder: &mut LittleEndianDecoder) -> Option<Self> {
-		unsafe {
-			decoder.assert_len(5)?;
-			let element = decoder.u8();
-			let len = decoder.u32() as usize;
-			let ptr = alloc(Layout::array::<NbtElement>(len).unwrap_unchecked()).cast::<NbtElement>();
-			let mut true_height = 1;
-			for n in 0..len {
-				let element = NbtElement::from_le_bytes(element, decoder)?;
-				true_height += element.true_height() as u32;
-				ptr.add(n).write(element);
-			}
-			let box_ptr = alloc(Layout::new::<Vec<NbtElement>>()).cast::<Vec<NbtElement>>();
-			box_ptr.write(Vec::from_raw_parts(ptr, len, len));
-			Some(Self {
-				elements: Box::from_raw(box_ptr),
-				height: 1 + len as u32,
-				true_height,
-				max_depth: 0,
-				element,
-				open: false,
-			})
 		}
 	}
 
@@ -350,14 +319,14 @@ impl NbtList {
 			let pos = ctx.pos();
 			if ctx.draw_held_entry_bar(ctx.pos() + (16, 16), builder, |x, y| pos + (16, 8) == (x, y), |x| self.can_insert(x)) {} else if self.height() == 1 && ctx.draw_held_entry_bar(ctx.pos() + (16, 16), builder, |x, y| pos + (16, 16) == (x, y), |x| self.can_insert(x)) {}
 
-			ctx.y_offset += 16;
+			ctx.offset_pos(0, 16);
 		}
 
 		if self.open {
-			ctx.x_offset += 16;
+			ctx.offset_pos(16, 0);
 
 			for (idx, element) in self.children().enumerate() {
-				if ctx.y_offset > builder.window_height() {
+				if ctx.pos().y > builder.window_height() {
 					break;
 				}
 
@@ -394,7 +363,7 @@ impl NbtList {
 				ctx.draw_held_entry_bar(ctx.pos(), builder, |x, y| pos == (x, y + 8), |x| self.can_insert(x));
 			}
 
-			ctx.x_offset -= 16;
+			ctx.offset_pos(-16, 0);
 		} else {
 			ctx.skip_line_numbers(self.true_height() - 1);
 		}
@@ -402,7 +371,7 @@ impl NbtList {
 
 	#[inline]
 	pub fn render(&self, builder: &mut VertexBufferBuilder, name: Option<&str>, remaining_scroll: &mut usize, tail: bool, ctx: &mut RenderContext) {
-		let mut y_before = ctx.y_offset;
+		let mut y_before = ctx.pos().y;
 
 		'head: {
 			if *remaining_scroll > 0 {
@@ -410,15 +379,17 @@ impl NbtList {
 				ctx.skip_line_numbers(1);
 				break 'head;
 			}
+			
+			let pos = ctx.pos();
 
 			ctx.line_number();
-			self.render_icon(ctx.pos(), BASE_Z, builder);
+			self.render_icon(pos, BASE_Z, builder);
 			if !self.is_empty() {
-				ctx.draw_toggle(ctx.pos() - (16, 0), self.open, builder);
+				ctx.draw_toggle(pos - (16, 0), self.open, builder);
 			}
-			ctx.render_errors(ctx.pos(), builder);
-			if ctx.forbid(ctx.pos()) {
-				builder.settings(ctx.pos() + (20, 0), false, JUST_OVERLAPPING_BASE_TEXT_Z);
+			ctx.render_errors(pos, builder);
+			if ctx.forbid(pos) {
+				builder.settings(pos + (20, 0), false, JUST_OVERLAPPING_BASE_TEXT_Z);
 				if let Some(key) = name {
 					builder.color = TextColor::TreeKey.to_raw();
 					let _ = write!(builder, "{key}: ");
@@ -428,20 +399,19 @@ impl NbtList {
 				let _ = write!(builder, "{}", self.value());
 			}
 
-			let pos = ctx.pos();
-			if ctx.draw_held_entry_bar(ctx.pos() + (16, 16), builder, |x, y| pos + (16, 8) == (x, y), |x| self.can_insert(x)) {} else if self.height() == 1 && ctx.draw_held_entry_bar(ctx.pos() + (16, 16), builder, |x, y| pos + (16, 16) == (x, y), |x| self.can_insert(x)) {}
+			if ctx.draw_held_entry_bar(pos + (16, 16), builder, |x, y| pos + (16, 8) == (x, y), |x| self.can_insert(x)) {} else if self.height() == 1 && ctx.draw_held_entry_bar(pos + (16, 16), builder, |x, y| pos + (16, 16) == (x, y), |x| self.can_insert(x)) {}
 
-			ctx.y_offset += 16;
+			ctx.offset_pos(0, 16);
 			y_before += 16;
 		}
 
-		let x_before = ctx.x_offset - 16;
+		let x_before = ctx.pos().x - 16;
 
 		if self.open {
-			ctx.x_offset += 16;
+			ctx.offset_pos(16, 0);
 
 			for (idx, element) in self.children().enumerate() {
-				if ctx.y_offset > builder.window_height() {
+				if ctx.pos().y > builder.window_height() {
 					break;
 				}
 
@@ -478,14 +448,14 @@ impl NbtList {
 				ctx.draw_held_entry_bar(ctx.pos(), builder, |x, y| pos == (x, y + 8), |x| self.can_insert(x));
 			}
 
-			let difference = ctx.y_offset - y_before;
+			let difference = ctx.pos().y - y_before;
 			if !tail {
 				for i in 0..difference / 16 {
 					builder.draw_texture((x_before, y_before + i * 16), CONNECTION_UV, (8, 16));
 				}
 			}
 
-			ctx.x_offset -= 16;
+			ctx.offset_pos(-16, 0);
 		} else {
 			ctx.skip_line_numbers(self.true_height() - 1);
 		}

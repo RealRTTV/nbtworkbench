@@ -5,8 +5,8 @@ use std::ops::BitAnd;
 use winit::dpi::PhysicalSize;
 
 use crate::assets::{BASE_TEXT_Z, BASE_Z, TOOLTIP_UV, TOOLTIP_Z, ZOffset};
-use crate::color::TextColor;
-use crate::StrExt;
+use crate::render::TextColor;
+use crate::util::StrExt;
 
 pub struct VertexBufferBuilder {
 	vertices: Vec<f32>,
@@ -52,7 +52,7 @@ impl core::fmt::Write for VertexBufferBuilder {
 }
 
 impl VertexBufferBuilder {
-	pub const CHAR_WIDTH: &'static [u8] = include_bytes!("assets/char_widths.hex");
+	pub const CHAR_WIDTH: &'static [u8] = include_bytes!("../assets/char_widths.hex");
 	pub const CHAR_HEIGHT: usize = 16;
 
 	pub fn new(size: PhysicalSize<u32>, scroll: usize, scale: f32) -> Self {
@@ -324,7 +324,6 @@ impl VertexBufferBuilder {
 		self.draw_texture_region_z(pos, z, uv, dims, dims);
 	}
 
-	#[inline(never)]
 	#[allow(clippy::many_single_char_names)]
 	pub fn draw_texture_region_z(&mut self, pos: impl Into<(usize, usize)>, z: ZOffset, uv: impl Into<(usize, usize)>, dims: impl Into<(usize, usize)>, uv_dims: impl Into<(usize, usize)>) {
 		unsafe {

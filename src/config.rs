@@ -1,9 +1,9 @@
 use fxhash::FxHashMap;
 use parking_lot::RwLock;
 use winit::window::Theme;
-use crate::search_box::{SearchFlags, SearchMode};
 
-use crate::SortAlgorithm;
+use crate::widget::{SearchFlags, SearchMode};
+use crate::workbench::SortAlgorithm;
 
 struct Config {
     theme: Theme,
@@ -84,7 +84,7 @@ pub fn write() -> bool {
 #[inline]
 #[must_use]
 fn write0() -> String {
-    use std::fmt::Write;
+    use std::fmt::Write as _;
     
     let mut builder = String::new();
     writeln!(&mut builder, "theme={}", match get_theme() { Theme::Light => "light", Theme::Dark => "dark" }).unwrap_or(());

@@ -6,20 +6,17 @@ use std::ops::Deref;
 #[cfg(not(target_arch = "wasm32"))]
 use std::thread::Scope;
 
-use compact_str::{CompactString, format_compact, ToCompactString};
+use compact_str::{format_compact, CompactString, ToCompactString};
 use hashbrown::hash_table::Entry::*;
 use hashbrown::hash_table::HashTable;
 
-use crate::{config, hash, width_ascii, DropFn, NbtElementAndKey, RenderContext, StrExt, VertexBufferBuilder};
-use crate::assets::{BASE_Z, COMPOUND_ROOT_UV, COMPOUND_UV, CONNECTION_UV, HEADER_SIZE, JUST_OVERLAPPING_BASE_TEXT_Z, LINE_NUMBER_CONNECTOR_Z, LINE_NUMBER_SEPARATOR_UV, ZOffset};
-use crate::be_decoder::BigEndianDecoder;
-use crate::color::TextColor;
-use crate::elements::chunk::NbtChunk;
-use crate::elements::element::NbtElement;
-use crate::encoder::UncheckedBufWriter;
-use crate::formatter::PrettyFormatter;
-use crate::le_decoder::LittleEndianDecoder;
-use crate::marked_line::MarkedLineSlice;
+use crate::assets::{ZOffset, BASE_Z, COMPOUND_ROOT_UV, COMPOUND_UV, CONNECTION_UV, HEADER_SIZE, JUST_OVERLAPPING_BASE_TEXT_Z, LINE_NUMBER_CONNECTOR_Z, LINE_NUMBER_SEPARATOR_UV};
+use crate::elements::{NbtChunk, NbtElement, NbtElementAndKey};
+use crate::render::{RenderContext, TextColor, VertexBufferBuilder};
+use crate::serialization::{Decoder, PrettyFormatter, UncheckedBufWriter};
+use crate::util::{width_ascii, StrExt};
+use crate::workbench::{DropFn, MarkedLineSlice};
+use crate::{config, hash};
 
 #[allow(clippy::module_name_repetitions)]
 #[repr(C)]
@@ -85,7 +82,7 @@ impl NbtCompound {
 	}
 
 	#[inline]
-	pub fn from_be_bytes(decoder: &mut BigEndianDecoder) -> Option<Self> {
+	pub fn from_bytes<'a, D: Decoder<'a>>(decoder: &mut D) -> Option<Self> {
 		let mut compound = Self::new();
 		unsafe {
 			decoder.assert_len(1)?;
@@ -93,7 +90,7 @@ impl NbtCompound {
 			while current_element != 0 {
 				decoder.assert_len(2)?;
 				let key = decoder.string()?;
-				let value = NbtElement::from_be_bytes(current_element, decoder)?;
+				let value = NbtElement::from_bytes(current_element, decoder)?;
 				compound.insert_replacing(key, value);
 				match decoder.assert_len(1) {
 					Some(()) => {}
@@ -114,28 +111,6 @@ impl NbtCompound {
 			value.to_be_bytes(writer);
 		}
 		writer.write(&[0x00]);
-	}
-
-	#[inline]
-	pub fn from_le_bytes(decoder: &mut LittleEndianDecoder) -> Option<Self> {
-		let mut compound = Self::new();
-		unsafe {
-			decoder.assert_len(1)?;
-			let mut current_element = decoder.u8();
-			while current_element != 0 {
-				decoder.assert_len(2)?;
-				let key = decoder.string()?;
-				let value = NbtElement::from_le_bytes(current_element, decoder)?;
-				compound.insert_replacing(key, value);
-				match decoder.assert_len(1) {
-					Some(()) => {}
-					None => break, // wow mojang, saving one byte, so cool of you
-				};
-				current_element = decoder.u8();
-			}
-			decoder.sort(&mut compound.entries);
-			Some(compound)
-		}
 	}
 
 	#[inline]
@@ -278,41 +253,42 @@ impl NbtCompound {
 				ctx.skip_line_numbers(1);
 				break 'head;
 			}
+			
+			let pos = ctx.pos();
 
 			ctx.line_number();
 			// fun texture hack for connection
 			builder.draw_texture_z(
-				ctx.pos() - (20, 2),
+				pos - (20, 2),
 				LINE_NUMBER_CONNECTOR_Z,
 				LINE_NUMBER_SEPARATOR_UV,
 				(2, 2),
 			);
-			builder.draw_texture(ctx.pos(), COMPOUND_ROOT_UV, (16, 16));
-			builder.draw_texture(ctx.pos() - (16, 0), CONNECTION_UV, (16, 9));
+			builder.draw_texture(pos, COMPOUND_ROOT_UV, (16, 16));
+			builder.draw_texture(pos - (16, 0), CONNECTION_UV, (16, 9));
 			if !self.is_empty() {
-				ctx.draw_toggle(ctx.pos() - (16, 0), self.open, builder);
+				ctx.draw_toggle(pos - (16, 0), self.open, builder);
 			}
-			ctx.render_errors(ctx.pos(), builder);
-			if ctx.forbid(ctx.pos()) {
-				builder.settings(ctx.pos() + (20, 0), false, JUST_OVERLAPPING_BASE_TEXT_Z);
+			ctx.render_errors(pos, builder);
+			if ctx.forbid(pos) {
+				builder.settings(pos + (20, 0), false, JUST_OVERLAPPING_BASE_TEXT_Z);
 				builder.color = TextColor::TreeKey.to_raw();
 				let _ = write!(builder, "{str}: [{}]", self.value());
 			}
 
-			let pos = ctx.pos();
-			if ctx.draw_held_entry_bar(ctx.pos() + (16, 16), builder, |x, y| pos + (16, 8) == (x, y), |x| self.can_insert(x)) {} else if self.height() == 1 && ctx.draw_held_entry_bar(ctx.pos() + (16, 16), builder, |x, y| pos + (16, 16) == (x, y), |x| self.can_insert(x)) {}
+			if ctx.draw_held_entry_bar(pos + (16, 16), builder, |x, y| pos + (16, 8) == (x, y), |x| self.can_insert(x)) {} else if self.height() == 1 && ctx.draw_held_entry_bar(pos + (16, 16), builder, |x, y| pos + (16, 16) == (x, y), |x| self.can_insert(x)) {}
 
-			ctx.y_offset += 16;
+			ctx.offset_pos(0, 16);
 		}
 
-		ctx.x_offset += 16;
+		ctx.offset_pos(16, 0);
 
 		if self.open {
 			{
 				let children_contains_forbidden = 'f: {
-					let mut y = ctx.y_offset;
+					let mut y = ctx.pos().y;
 					for (_, value) in self.children() {
-						if y.saturating_sub(remaining_scroll * 16) == ctx.selected_y && ctx.selected_y >= HEADER_SIZE {
+						if ctx.selected_text_y() == Some(y.saturating_sub(remaining_scroll * 16)) && ctx.selected_text_y().is_some_and(|y| y >= HEADER_SIZE) {
 							break 'f true;
 						}
 						y += value.height() * 16;
@@ -320,13 +296,13 @@ impl NbtCompound {
 					false
 				};
 				if children_contains_forbidden {
-					let mut y = ctx.y_offset;
+					let mut y = ctx.pos().y;
 					for (name, value) in self.children() {
 						ctx.check_for_key_duplicate(|text, _| text == name, false);
-						if y.saturating_sub(remaining_scroll * 16) != ctx.selected_y && y.saturating_sub(remaining_scroll * 16) >= HEADER_SIZE && ctx.key_duplicate_error {
-							ctx.red_line_numbers[1] = y.saturating_sub(remaining_scroll * 16);
+						if ctx.selected_text_y() != Some(y.saturating_sub(remaining_scroll * 16)) && y.saturating_sub(remaining_scroll * 16) >= HEADER_SIZE && ctx.has_duplicate_key_error() {
+							ctx.set_red_line_number(y.saturating_sub(remaining_scroll * 16), 1);
 							ctx.draw_error_underline(
-								ctx.x_offset,
+								ctx.pos().x,
 								y.saturating_sub(remaining_scroll * 16),
 								builder,
 							);
@@ -338,7 +314,8 @@ impl NbtCompound {
 			}
 
 			for (idx, (name, value)) in self.children().enumerate() {
-				if ctx.y_offset > builder.window_height() {
+				let pos = ctx.pos();
+				if pos.y > builder.window_height() {
 					break;
 				}
 
@@ -348,13 +325,12 @@ impl NbtCompound {
 					ctx.skip_line_numbers(value.true_height());
 					continue;
 				}
-
-				let pos = ctx.pos();
-				ctx.draw_held_entry_bar(ctx.pos(), builder, |x, y| pos == (x, y), |x| self.can_insert(x));
+				
+				ctx.draw_held_entry_bar(pos, builder, |x, y| pos == (x, y), |x| self.can_insert(x));
 
 				if remaining_scroll == 0 {
 					builder.draw_texture(
-						ctx.pos() - (16, 0),
+						pos - (16, 0),
 						CONNECTION_UV,
 						(
 							16,
@@ -363,8 +339,8 @@ impl NbtCompound {
 					);
 				}
 				ctx.check_for_key_duplicate(|text, _| self.entries.has(text) && name != text, false);
-				if ctx.key_duplicate_error && ctx.y_offset == ctx.selected_y {
-					ctx.red_line_numbers[0] = ctx.y_offset;
+				if ctx.has_duplicate_key_error() && ctx.selected_text_y() == Some(pos.y) {
+					ctx.set_red_line_number(pos.y, 0);
 				}
 				value.render(
 					&mut remaining_scroll,
@@ -373,9 +349,8 @@ impl NbtCompound {
 					idx == self.len() - 1,
 					ctx,
 				);
-
-				let pos = ctx.pos();
-				ctx.draw_held_entry_bar(ctx.pos(), builder, |x, y| pos == (x, y + 8), |x| self.can_insert(x));
+				
+				ctx.draw_held_entry_bar(pos, builder, |x, y| pos == (x, y + 8), |x| self.can_insert(x));
 			}
 		}
 	}
@@ -464,7 +439,8 @@ impl NbtCompound {
 	#[inline]
 	#[allow(clippy::too_many_lines)]
 	pub fn render(&self, builder: &mut VertexBufferBuilder, name: Option<&str>, remaining_scroll: &mut usize, tail: bool, ctx: &mut RenderContext) {
-		let mut y_before = ctx.y_offset;
+		let pos = ctx.pos();
+		let mut y_before = pos.y;
 
 		'head: {
 			if *remaining_scroll > 0 {
@@ -474,13 +450,13 @@ impl NbtCompound {
 			}
 
 			ctx.line_number();
-			self.render_icon(ctx.pos(), BASE_Z, builder);
+			self.render_icon(pos, BASE_Z, builder);
 			if !self.is_empty() {
-				ctx.draw_toggle(ctx.pos() - (16, 0), self.open, builder);
+				ctx.draw_toggle(pos - (16, 0), self.open, builder);
 			}
-			ctx.render_errors(ctx.pos(), builder);
-			if ctx.forbid(ctx.pos()) {
-				builder.settings(ctx.pos() + (20, 0), false, JUST_OVERLAPPING_BASE_TEXT_Z);
+			ctx.render_errors(pos, builder);
+			if ctx.forbid(pos) {
+				builder.settings(pos + (20, 0), false, JUST_OVERLAPPING_BASE_TEXT_Z);
 				if let Some(key) = name {
 					builder.color = TextColor::TreeKey.to_raw();
 					let _ = write!(builder, "{key}: ");
@@ -490,23 +466,22 @@ impl NbtCompound {
 				let _ = write!(builder, "{}", self.value());
 			}
 
-			let pos = ctx.pos();
-			if ctx.draw_held_entry_bar(ctx.pos() + (16, 16), builder, |x, y| pos + (16, 8) == (x, y), |x| self.can_insert(x)) {} else if self.height() == 1 && ctx.draw_held_entry_bar(ctx.pos() + (16, 16), builder, |x, y| pos + (16, 16) == (x, y), |x| self.can_insert(x)) {}
+			if ctx.draw_held_entry_bar(pos + (16, 16), builder, |x, y| pos + (16, 8) == (x, y), |x| self.can_insert(x)) {} else if self.height() == 1 && ctx.draw_held_entry_bar(pos + (16, 16), builder, |x, y| pos + (16, 16) == (x, y), |x| self.can_insert(x)) {}
 
-			ctx.y_offset += 16;
+			ctx.offset_pos(0, 16);
 			y_before += 16;
 		}
 
-		let x_before = ctx.x_offset - 16;
+		let x_before = ctx.pos().x - 16;
 
 		if self.open {
-			ctx.x_offset += 16;
+			ctx.offset_pos(16, 0);
 
 			{
 				let children_contains_forbidden = 'f: {
-					let mut y = ctx.y_offset;
+					let mut y = ctx.pos().y;
 					for (_, value) in self.children() {
-						if y.saturating_sub(*remaining_scroll * 16) == ctx.selected_y && ctx.selected_y >= HEADER_SIZE {
+						if ctx.selected_text_y() == Some(y.saturating_sub(*remaining_scroll * 16)) && ctx.selected_text_y().is_some_and(|y| y >= HEADER_SIZE) {
 							break 'f true;
 						}
 						y += value.height() * 16;
@@ -514,13 +489,13 @@ impl NbtCompound {
 					false
 				};
 				if children_contains_forbidden {
-					let mut y = ctx.y_offset;
+					let mut y = ctx.pos().y;
 					for (name, value) in self.children() {
 						ctx.check_for_key_duplicate(|text, _| text == name, false);
-						if y.saturating_sub(*remaining_scroll * 16) != ctx.selected_y && y.saturating_sub(*remaining_scroll * 16) >= HEADER_SIZE && ctx.key_duplicate_error {
-							ctx.red_line_numbers[1] = y.saturating_sub(*remaining_scroll * 16);
+						if ctx.selected_text_y() != Some(y.saturating_sub(*remaining_scroll * 16)) && y.saturating_sub(*remaining_scroll * 16) >= HEADER_SIZE && ctx.has_duplicate_key_error() {
+							ctx.set_red_line_number(y.saturating_sub(*remaining_scroll * 16), 1);
 							ctx.draw_error_underline(
-								ctx.x_offset,
+								ctx.pos().x,
 								y.saturating_sub(*remaining_scroll * 16),
 								builder,
 							);
@@ -532,7 +507,9 @@ impl NbtCompound {
 			}
 
 			for (idx, (key, entry)) in self.children().enumerate() {
-				if ctx.y_offset > builder.window_height() {
+				let pos = ctx.pos();
+				
+				if pos.y > builder.window_height() {
 					break;
 				}
 
@@ -543,12 +520,11 @@ impl NbtCompound {
 					continue;
 				}
 
-				let pos = ctx.pos();
-				ctx.draw_held_entry_bar(ctx.pos(), builder, |x, y| pos == (x, y),|x| self.can_insert(x));
+				ctx.draw_held_entry_bar(pos, builder, |x, y| pos == (x, y),|x| self.can_insert(x));
 
 				if *remaining_scroll == 0 {
 					builder.draw_texture(
-						ctx.pos() - (16, 0),
+						pos - (16, 0),
 						CONNECTION_UV,
 						(
 							16,
@@ -557,8 +533,8 @@ impl NbtCompound {
 					);
 				}
 				ctx.check_for_key_duplicate(|text, _| self.entries.has(text) && key != text, false);
-				if ctx.key_duplicate_error && ctx.y_offset == ctx.selected_y {
-					ctx.red_line_numbers[0] = ctx.y_offset;
+				if ctx.has_duplicate_key_error() && ctx.selected_text_y() == Some(pos.y) {
+					ctx.set_red_line_number(pos.y, 0);
 				}
 				entry.render(
 					remaining_scroll,
@@ -568,18 +544,17 @@ impl NbtCompound {
 					ctx,
 				);
 
-				let pos = ctx.pos();
-				ctx.draw_held_entry_bar(ctx.pos(), builder, |x, y| pos == (x, y + 8), |x| self.can_insert(x));
+				ctx.draw_held_entry_bar(pos, builder, |x, y| pos == (x, y + 8), |x| self.can_insert(x));
 			}
 
 			if !tail {
-				let len = (ctx.y_offset - y_before) / 16;
+				let len = (ctx.pos().y - y_before) / 16;
 				for i in 0..len {
 					builder.draw_texture((x_before, y_before + i * 16), CONNECTION_UV, (8, 16));
 				}
 			}
 
-			ctx.x_offset -= 16;
+			ctx.offset_pos(-16, 0);
 		} else {
 			ctx.skip_line_numbers(self.true_height() - 1);
 		}

@@ -1,11 +1,8 @@
 use std::fmt::{Display, Formatter, Write};
 
-use crate::assets::{BASE_Z, JUST_OVERLAPPING_BASE_TEXT_Z, ZOffset};
-use crate::color::TextColor;
-use crate::encoder::UncheckedBufWriter;
-use crate::formatter::PrettyFormatter;
-use crate::RenderContext;
-use crate::vertex_buffer_builder::VertexBufferBuilder;
+use crate::assets::{ZOffset, BASE_Z, JUST_OVERLAPPING_BASE_TEXT_Z};
+use crate::render::{RenderContext, TextColor, VertexBufferBuilder};
+use crate::serialization::{PrettyFormatter, UncheckedBufWriter};
 
 #[derive(Clone, PartialEq)]
 pub struct NbtNull;
@@ -36,7 +33,7 @@ impl NbtNull {
             let _ = write!(builder, "null");
         }
 
-        ctx.y_offset += 16;
+        ctx.offset_pos(0, 16);
     }
 
     #[inline]

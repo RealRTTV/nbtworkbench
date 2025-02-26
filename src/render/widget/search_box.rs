@@ -7,14 +7,13 @@ use winit::event::MouseButton;
 use winit::keyboard::KeyCode;
 use winit::window::Theme;
 
-use crate::{config, create_regex, flags, since_epoch, NbtElementAndKey, SortAlgorithm, StrExt};
-use crate::assets::{SEARCH_BOOKMARKS_UV, BASE_Z, BOOKMARK_UV, DARK_STRIPE_UV, HIDDEN_BOOKMARK_UV, HOVERED_WIDGET_UV, REGEX_SEARCH_MODE_UV, SEARCH_APPEND_BOOKMARKS_UV, SEARCH_BOX_SELECTION_Z, SEARCH_BOX_Z, SEARCH_KEYS_AND_VALUES_UV, SEARCH_KEYS_UV, SEARCH_VALUES_UV, SNBT_SEARCH_MODE_UV, STRING_SEARCH_MODE_UV, UNSELECTED_WIDGET_UV, SELECTED_WIDGET_UV, EXACT_MATCH_ON_UV, EXACT_MATCH_OFF_UV};
-use crate::color::TextColor;
-use crate::elements::element::NbtElement;
-use crate::marked_line::{MarkedLine, MarkedLines};
-use crate::selected_text::get_cursor_idx;
-use crate::text::{Cachelike, SearchBoxKeyResult, Text};
-use crate::vertex_buffer_builder::{Vec2u, VertexBufferBuilder};
+use crate::assets::{BASE_Z, BOOKMARK_UV, DARK_STRIPE_UV, EXACT_MATCH_OFF_UV, EXACT_MATCH_ON_UV, HIDDEN_BOOKMARK_UV, HOVERED_WIDGET_UV, REGEX_SEARCH_MODE_UV, SEARCH_APPEND_BOOKMARKS_UV, SEARCH_BOOKMARKS_UV, SEARCH_BOX_SELECTION_Z, SEARCH_BOX_Z, SEARCH_KEYS_AND_VALUES_UV, SEARCH_KEYS_UV, SEARCH_VALUES_UV, SELECTED_WIDGET_UV, SNBT_SEARCH_MODE_UV, STRING_SEARCH_MODE_UV, UNSELECTED_WIDGET_UV};
+use crate::{config, flags};
+use crate::elements::{NbtElement, NbtElementAndKey};
+use crate::render::{TextColor, Vec2u, VertexBufferBuilder};
+use crate::util::{create_regex, now, StrExt};
+use crate::widget::{get_cursor_idx, Cachelike, SearchBoxKeyResult, Text};
+use crate::workbench::{MarkedLine, MarkedLines, SortAlgorithm};
 
 pub const SEARCH_BOX_START_X: usize = 332;
 pub const SEARCH_BOX_END_X: usize = 2;
@@ -45,7 +44,7 @@ impl Display for SearchFlags {
         write!(f, "{}", match self {
             Self::Values => "Values only",
             Self::Keys => "Keys only",
-            Self::KeysValues => "Keys + Values",
+            Self::KeysValues => "Keys or Values",
         })
     }
 }
@@ -69,9 +68,9 @@ impl SearchFlags {
 
     pub fn uv(self) -> Vec2u {
         match self {
-            SearchFlags::Values => SEARCH_VALUES_UV,
-            SearchFlags::Keys => SEARCH_KEYS_UV,
-            SearchFlags::KeysValues => SEARCH_KEYS_AND_VALUES_UV
+            Self::Values => SEARCH_VALUES_UV,
+            Self::Keys => SEARCH_KEYS_UV,
+            Self::KeysValues => SEARCH_KEYS_AND_VALUES_UV
         }
     }
 }
@@ -409,14 +408,14 @@ impl SearchBox {
             return;
         }
 
-        let start = since_epoch();
+        let start = now();
         let new_bookmarks = if self.value.is_empty() {
             MarkedLines::new()
         } else {
             let Some(predicate) = config::get_search_mode().into_predicate(self.value.clone(), config::get_search_exact_match()) else { return };
             Self::search0(root, &predicate)
         };
-        self.hits = Some((new_bookmarks.len(), since_epoch() - start));
+        self.hits = Some((new_bookmarks.len(), now() - start));
         if !count_only && !new_bookmarks.is_empty() {
             bookmarks.add_bookmarks(new_bookmarks);
         }

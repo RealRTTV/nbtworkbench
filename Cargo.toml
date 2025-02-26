@@ -50,13 +50,13 @@ winres = "0.1.12"
 
 [dependencies]
 zune-inflate = { version = "0.2.54", features = ["gzip", "zlib"] }
-flate2 = "1.0.31"
+flate2 = "1.0.35"
 winit = "0.30.5"
 wgpu = { version = "23.0.1", default-features = false, features = ["webgl", "wgsl", "dx12", "metal"] }
 fxhash = "0.2.1"
 hashbrown = { version = "0.15.2", features = ["inline-more", "nightly"], default-features = false }
 notify = "7.0.0"
-uuid = { version = "1.10.0", features = ["v4"] }
+uuid = { version = "1.11.0", features = ["v4"] }
 compact_str = "0.8.0"
 wgsl-inline = { version = "0.2.1", features = ["minify"] }
 static_assertions = "1.1.0"
@@ -68,6 +68,7 @@ zune-png = { version = "0.4.10", features = [] }
 polonius-the-crab = "0.4.2"
 enum-map = "3.0.0-beta.2"
 parking_lot = "0.12.3"
+lazy_static = "1.5.0"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 winapi = { version = "0.3.9", features = ["wincon"] }

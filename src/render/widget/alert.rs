@@ -1,9 +1,8 @@
 use std::time::Duration;
 
-use crate::{since_epoch, smoothstep64, split_lines, StrExt};
 use crate::assets::{ALERT_UV, NOTIFICATION_BAR_BACKDROP_UV, NOTIFICATION_BAR_UV, NOTIFICATION_TEXT_Z, NOTIFICATION_Z};
-use crate::color::TextColor;
-use crate::vertex_buffer_builder::{Vec2u, VertexBufferBuilder};
+use crate::render::{TextColor, Vec2u, VertexBufferBuilder};
+use crate::util::{smoothstep64, split_lines, StrExt, now};
 
 pub struct Alert {
 	timestamp: Option<Duration>,
@@ -130,13 +129,13 @@ impl Alert {
 
 	#[allow(clippy::wrong_self_convention)]
 	pub fn is_invisible(&mut self) -> bool {
-		let ms = since_epoch().saturating_sub(*self.timestamp.get_or_insert(since_epoch())).as_millis() as usize;
+		let ms = now().saturating_sub(*self.timestamp.get_or_insert(now())).as_millis() as usize;
 		let display_time = (self.message_len + self.title.len()) * 60 + 3000;
 		ms > 500 + display_time
 	}
 
 	fn get_bar_width(&mut self) -> usize {
-		let now = since_epoch();
+		let now = now();
 		let ms = (now.saturating_sub(*self.timestamp.get_or_insert(now)).as_millis() as usize).saturating_sub(250);
 		let width = self.width + 4;
 		let display_time = (self.message_len + self.title.len()) * 60 + 3000;
@@ -144,7 +143,7 @@ impl Alert {
 	}
 
 	fn get_inset(&mut self) -> usize {
-		let mut ms = since_epoch().saturating_sub(*self.timestamp.get_or_insert(since_epoch())).as_millis() as usize;
+		let mut ms = now().saturating_sub(*self.timestamp.get_or_insert(now())).as_millis() as usize;
 		let width = self.width + 24;
 		let display_time = (self.message_len + self.title.len()) * 60 + 3000;
 		if ms < 250 { return (smoothstep64((250 - ms) as f64 / 250.0) * width as f64) as usize }

@@ -1,4 +1,3 @@
-#[macro_export]
 macro_rules! primitive {
 	($uv:ident, $s:expr, $name:ident, $t:ty, $id:literal) => {
 		primitive!($uv, $s, $name, $t, $id, |x: $t| x.to_compact_string());
@@ -17,27 +16,17 @@ macro_rules! primitive {
 			pub fn to_be_bytes(&self, writer: &mut UncheckedBufWriter) { writer.write(self.value.to_be_bytes().as_ref()); }
 
 			#[inline]
-			pub fn from_be_bytes(decoder: &mut BigEndianDecoder) -> Option<Self> {
+			pub fn from_bytes<'a, D: Decoder<'a>>(decoder: &mut D) -> Option<Self> {
 				unsafe {
 					decoder.assert_len(core::mem::size_of::<$t>())?;
 					Some(Self {
-						value: <$t>::from_be_bytes(decoder.read_bytes::<{ core::mem::size_of::<$t>() }>()),
+						value: <$t>::from_ne_bytes(decoder.read_ne_bytes::<{ core::mem::size_of::<$t>() }>()),
 					})
 				}
 			}
 
 			#[inline]
 			pub fn to_le_bytes(&self, writer: &mut UncheckedBufWriter) { writer.write(self.value.to_le_bytes().as_ref()); }
-			
-			#[inline]
-			pub fn from_le_bytes(decoder: &mut LittleEndianDecoder) -> Option<Self> {
-				unsafe {
-					decoder.assert_len(core::mem::size_of::<$t>())?;
-					Some(Self {
-						value: <$t>::from_le_bytes(decoder.read_bytes::<{ core::mem::size_of::<$t>() }>()),
-					})
-				}
-			}
 
 			#[inline]
 			pub fn render(&self, builder: &mut VertexBufferBuilder, name: Option<&str>, ctx: &mut RenderContext) {
@@ -57,7 +46,7 @@ macro_rules! primitive {
 					let _ = write!(builder, "{str}");
 				}
 
-				ctx.y_offset += 16;
+				ctx.offset_pos(0, 16);
 			}
 
 			#[inline]
@@ -86,3 +75,17 @@ macro_rules! primitive {
 		}
 	};
 }
+
+use compact_str::{CompactString, ToCompactString};
+use std::fmt::{Formatter, Write, Display};
+
+use crate::assets::{ZOffset, BASE_Z, BYTE_UV, DOUBLE_UV, FLOAT_UV, INT_UV, JUST_OVERLAPPING_BASE_TEXT_Z, LONG_UV, SHORT_UV};
+use crate::render::{RenderContext, TextColor, VertexBufferBuilder};
+use crate::serialization::{Decoder, UncheckedBufWriter, PrettyFormatter};
+
+primitive!(BYTE_UV, { Some('b') }, NbtByte, i8, 1);
+primitive!(SHORT_UV, { Some('s') }, NbtShort, i16, 2);
+primitive!(INT_UV, { None::<char> }, NbtInt, i32, 3);
+primitive!(LONG_UV, { Some('L') }, NbtLong, i64, 4);
+primitive!(FLOAT_UV, { Some('f') }, NbtFloat, f32, 5);
+primitive!(DOUBLE_UV, { Some('d') }, NbtDouble, f64, 6);

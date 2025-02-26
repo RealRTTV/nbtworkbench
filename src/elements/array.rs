@@ -1,9 +1,8 @@
-#[macro_export]
 macro_rules! array {
 	($element_field:ident, $name:ident, $t:ty, $my_id:literal, $id:literal, $char:literal, $uv:ident, $element_uv:ident) => {
 		#[repr(C)]
 		pub struct $name {
-			values: Box<Vec<NbtElement>>,
+			pub(in crate::elements) values: Box<Vec<NbtElement>>,
 			max_depth: u32,
 			open: bool,
 		}
@@ -86,7 +85,7 @@ macro_rules! array {
 			}
 
 			#[inline]
-			pub fn from_be_bytes(decoder: &mut BigEndianDecoder) -> Option<Self> {
+			pub fn from_bytes<'a, D: Decoder<'a>>(decoder: &mut D) -> Option<Self> {
 				unsafe {
 					decoder.assert_len(4)?;
 					let len = decoder.u32() as usize;
@@ -94,18 +93,12 @@ macro_rules! array {
 					let vec = alloc(Layout::array::<NbtElement>(len).unwrap_unchecked()).cast::<NbtElement>();
 					for idx in 0..len {
 						let mut element = NbtElement {
-							$element_field: core::mem::transmute(<$t>::from_be_bytes(
-								decoder
-									.data
-									.add(idx * core::mem::size_of::<$t>())
-									.cast::<[u8; core::mem::size_of::<$t>()]>()
-									.read(),
-							)),
+							$element_field: core::mem::transmute(<$t>::from_ne_bytes(decoder.read_ne_bytes::<{ core::mem::size_of::<$t>() }>()))
 						};
-						element.id.id = $id;
+						element.set_id($id);
 						vec.add(idx).write(element);
 					}
-					decoder.data = decoder.data.add(len * core::mem::size_of::<$t>());
+					decoder.skip(len * core::mem::size_of::<$t>());
 					let boxx = alloc(Layout::new::<Vec<NbtElement>>()).cast::<Vec<NbtElement>>();
 					boxx.write(Vec::from_raw_parts(vec, len, len));
 					Some(Self {
@@ -125,37 +118,6 @@ macro_rules! array {
 			}
 
 			#[inline]
-			pub fn from_le_bytes(decoder: &mut LittleEndianDecoder) -> Option<Self> {
-				unsafe {
-					decoder.assert_len(4)?;
-					let len = decoder.u32() as usize;
-					decoder.assert_len(len * core::mem::size_of::<$t>())?;
-					let vec = alloc(Layout::array::<NbtElement>(len).unwrap_unchecked()).cast::<NbtElement>();
-					for idx in 0..len {
-						let mut element = NbtElement {
-							$element_field: core::mem::transmute(<$t>::from_le_bytes(
-								decoder
-									.data
-									.add(idx * core::mem::size_of::<$t>())
-									.cast::<[u8; core::mem::size_of::<$t>()]>()
-									.read(),
-							)),
-						};
-						element.id.id = $id;
-						vec.add(idx).write(element);
-					}
-					decoder.data = decoder.data.add(len * core::mem::size_of::<$t>());
-					let boxx = alloc(Layout::new::<Vec<NbtElement>>()).cast::<Vec<NbtElement>>();
-					boxx.write(Vec::from_raw_parts(vec, len, len));
-					Some(Self {
-						values: Box::from_raw(boxx),
-						open: false,
-						max_depth: 0,
-					})
-				}
-			}
-
-			#[inline]
 			pub fn to_le_bytes(&self, writer: &mut UncheckedBufWriter) {
 				writer.write(&(self.len() as u32).to_le_bytes());
 				for entry in self.values.iter() {
@@ -166,7 +128,7 @@ macro_rules! array {
 
 		impl $name {
 			#[inline(always)]
-			fn transmute(element: &NbtElement) -> $t { unsafe { element.deref().$element_field.deref().value } }
+			fn transmute(element: &NbtElement) -> $t { unsafe { element.$element_field.value } }
 
 			#[inline]
 			pub fn increment(&mut self, _: usize, _: usize) {}
@@ -249,15 +211,17 @@ macro_rules! array {
 						ctx.skip_line_numbers(1);
 						break 'head;
 					}
+					
+					let pos = ctx.pos();
 
 					ctx.line_number();
-					self.render_icon(ctx.pos(), BASE_Z, builder);
+					self.render_icon(pos, BASE_Z, builder);
 					if !self.is_empty() {
-						ctx.draw_toggle(ctx.pos() - (16, 0), self.open, builder);
+						ctx.draw_toggle(pos - (16, 0), self.open, builder);
 					}
-					ctx.render_errors(ctx.pos(), builder);
-					if ctx.forbid(ctx.pos()) {
-						builder.settings(ctx.pos() + (20, 0), false, JUST_OVERLAPPING_BASE_TEXT_Z);
+					ctx.render_errors(pos, builder);
+					if ctx.forbid(pos) {
+						builder.settings(pos + (20, 0), false, JUST_OVERLAPPING_BASE_TEXT_Z);
 						if let Some(key) = key {
 							builder.color = TextColor::TreeKey.to_raw();
 							let _ = write!(builder, "{key}: ");
@@ -267,17 +231,17 @@ macro_rules! array {
 						let _ = write!(builder, "{}", self.value());
 					}
 
-					let pos = ctx.pos();
-					if ctx.draw_held_entry_bar(ctx.pos() + (16, 16), builder, |x, y| pos == (x - 16, y - 8), |x| self.can_insert(x)) {} else if self.height() == 1 && ctx.draw_held_entry_bar(ctx.pos() + (16, 16), builder, |x, y| pos == (x - 16, y - 16), |x| self.can_insert(x)) {}
+					if ctx.draw_held_entry_bar(pos + (16, 16), builder, |x, y| pos == (x - 16, y - 8), |x| self.can_insert(x)) {} else if self.height() == 1 && ctx.draw_held_entry_bar(pos + (16, 16), builder, |x, y| pos == (x - 16, y - 16), |x| self.can_insert(x)) {}
 
-					ctx.y_offset += 16;
+					ctx.offset_pos(0, 16);
 				}
 
 				if self.open {
-					ctx.x_offset += 16;
+					ctx.offset_pos(16, 0);
 
 					for (idx, element) in self.children().enumerate() {
-						if ctx.y_offset > builder.window_height() {
+						let pos = ctx.pos();
+						if pos.y > builder.window_height() {
 							break;
 						}
 
@@ -287,11 +251,10 @@ macro_rules! array {
 							continue;
 						}
 
-						let pos = ctx.pos();
-						ctx.draw_held_entry_bar(ctx.pos(), builder, |x, y| pos == (x, y), |x| self.can_insert(x));
+						ctx.draw_held_entry_bar(pos, builder, |x, y| pos == (x, y), |x| self.can_insert(x));
 
 						builder.draw_texture(
-							ctx.pos() - (16, 0),
+							pos - (16, 0),
 							CONNECTION_UV,
 							(
 								16,
@@ -299,27 +262,27 @@ macro_rules! array {
 							),
 						);
 						if !tail {
-							builder.draw_texture(ctx.pos() - (32, 0), CONNECTION_UV, (8, 16));
+							builder.draw_texture(pos - (32, 0), CONNECTION_UV, (8, 16));
 						}
 
 						ctx.line_number();
-						Self::render_element_icon(ctx.pos(), builder);
+						Self::render_element_icon(pos, builder);
 						ctx.check_for_invalid_value(|value| value.parse::<$t>().is_err());
-						ctx.render_errors(ctx.pos(), builder);
+						ctx.render_errors(pos, builder);
 						let str = Self::transmute(element).to_compact_string();
-						if ctx.forbid(ctx.pos()) {
-							builder.settings(ctx.pos() + (20, 0), false, JUST_OVERLAPPING_BASE_TEXT_Z);
+						if ctx.forbid(pos) {
+							builder.settings(pos + (20, 0), false, JUST_OVERLAPPING_BASE_TEXT_Z);
 							builder.color = TextColor::TreePrimitive.to_raw();
 							let _ = write!(builder, "{str}");
 						}
 
-						ctx.y_offset += 16;
+						ctx.offset_pos(0, 16);
 
 						let pos = ctx.pos();
-						ctx.draw_held_entry_bar(ctx.pos(), builder, |x, y| pos == (x, y + 8), |x| self.can_insert(x));
+						ctx.draw_held_entry_bar(pos, builder, |x, y| pos == (x, y + 8), |x| self.can_insert(x));
 					}
 
-					ctx.x_offset -= 16;
+					ctx.offset_pos(-16, 0);
 				} else {
 					ctx.skip_line_numbers(self.len());
 				}
@@ -468,3 +431,22 @@ macro_rules! array {
 		}
 	};
 }
+
+use std::fmt::{Display, Write};
+use std::alloc::{alloc, Layout};
+use std::slice::{Iter, IterMut};
+use std::intrinsics::likely;
+use std::fmt;
+
+use compact_str::{format_compact, CompactString, ToCompactString};
+
+use crate::assets::{ZOffset, BASE_Z, BYTE_ARRAY_UV, BYTE_UV, CONNECTION_UV, INT_ARRAY_UV, INT_UV, JUST_OVERLAPPING_BASE_TEXT_Z, LONG_ARRAY_UV, LONG_UV};
+use crate::render::{RenderContext, TextColor, VertexBufferBuilder};
+use crate::serialization::{Decoder, PrettyFormatter, UncheckedBufWriter};
+use crate::elements::{id_to_string_name, NbtElement};
+use crate::workbench::{DropFn};
+use crate::util::{StrExt};
+
+array!(byte, NbtByteArray, i8, 7, 1, 'B', BYTE_ARRAY_UV, BYTE_UV);
+array!(int, NbtIntArray, i32, 11, 3, 'I', INT_ARRAY_UV, INT_UV);
+array!(long, NbtLongArray, i64, 12, 4, 'L', LONG_ARRAY_UV, LONG_UV);

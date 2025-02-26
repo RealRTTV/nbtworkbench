@@ -3,12 +3,11 @@ use std::ops::{Deref, DerefMut};
 
 use winit::keyboard::KeyCode;
 
-use crate::{CharExt, flags, OptionExt, StrExt};
 use crate::assets::{BASE_TEXT_Z, HEADER_SIZE, SELECTED_TEXT_SELECTION_Z, SELECTED_TEXT_Z, SELECTION_UV};
-use crate::color::TextColor;
-use crate::selected_text::SelectedTextKeyResult::{Down, ForceClose, ForceOpen, Keyfix, ShiftDown, ShiftUp, Up, Valuefix};
-use crate::text::{Cachelike, SelectedTextKeyResult, Text};
-use crate::vertex_buffer_builder::VertexBufferBuilder;
+use crate::flags;
+use crate::render::{TextColor, VertexBufferBuilder};
+use crate::util::{CharExt, StrExt};
+use crate::widget::{Cachelike, SelectedTextKeyResult, SelectedTextKeyResult::{Down, ForceClose, ForceOpen, Keyfix, ShiftDown, ShiftUp, Up, Valuefix}, Text};
 
 #[derive(Clone, Debug)]
 #[allow(clippy::module_name_repetitions)] // yeah no, it's better like this

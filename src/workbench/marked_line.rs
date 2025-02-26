@@ -4,8 +4,8 @@ use std::convert::identity;
 use std::ops::{Deref, DerefMut, Index, IndexMut, RangeBounds};
 
 use crate::assets::{BOOKMARK_UV, HIDDEN_BOOKMARK_UV};
-use crate::combined_two_sorted;
-use crate::vertex_buffer_builder::Vec2u;
+use crate::util::combined_two_sorted;
+use crate::render::Vec2u;
 
 macro_rules! slice {
     ($($t:tt)*) => {
@@ -245,40 +245,6 @@ impl DerefMut for MarkedLineSlice {
     }
 }
 
-pub struct Iter<'a>(&'a [MarkedLine]);
-
-impl<'a> Iterator for Iter<'a> {
-    type Item = MarkedLine;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if let Some((&item, rest)) = self.0.split_first() {
-            self.0 = rest;
-            Some(item)
-        } else {
-            None
-        }
-    }
-}
-
-pub struct IterMut<'a>(&'a mut [MarkedLine]);
-
-impl<'a> Iterator for IterMut<'a> {
-    type Item = &'a mut MarkedLine;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.0.is_empty() {
-            None
-        } else {
-            unsafe {
-                let ptr = self.0.as_mut_ptr();
-                let len = self.0.len();
-                self.0 = core::slice::from_raw_parts_mut(ptr.add(1), len - 1);
-                Some(core::mem::transmute(ptr))
-            }
-        }
-    }
-}
-
 impl<R: RangeBounds<usize>> Index<R> for MarkedLineSlice {
     type Output = MarkedLineSlice;
 
@@ -311,4 +277,38 @@ impl<R: RangeBounds<usize>> IndexMut<R> for MarkedLineSlice {
             (Bound::Excluded(ref start), Bound::Excluded(ref end)) => { let start = self.binary_search(start).map_or_else(identity, |x| x + 1); let end = self.binary_search(end).unwrap_or_else(identity); slice_mut!(self.0[start..end]) },
         }
     }
+}
+
+pub struct Iter<'a>(&'a [MarkedLine]);
+
+impl<'a> Iterator for Iter<'a> {
+	type Item = MarkedLine;
+
+	fn next(&mut self) -> Option<Self::Item> {
+		if let Some((&item, rest)) = self.0.split_first() {
+			self.0 = rest;
+			Some(item)
+		} else {
+			None
+		}
+	}
+}
+
+pub struct IterMut<'a>(&'a mut [MarkedLine]);
+
+impl<'a> Iterator for IterMut<'a> {
+	type Item = &'a mut MarkedLine;
+
+	fn next(&mut self) -> Option<Self::Item> {
+		if self.0.is_empty() {
+			None
+		} else {
+			unsafe {
+				let ptr = self.0.as_mut_ptr();
+				let len = self.0.len();
+				self.0 = core::slice::from_raw_parts_mut(ptr.add(1), len - 1);
+				Some(core::mem::transmute(ptr))
+			}
+		}
+	}
 }
