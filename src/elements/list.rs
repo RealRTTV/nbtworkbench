@@ -151,7 +151,7 @@ impl NbtList {
 				element.to_le_bytes(writer);
 				writer.write(&[0x00]);
 			} else {
-				element.to_be_bytes(writer);
+				element.to_le_bytes(writer);
 			}
 		}
 	}

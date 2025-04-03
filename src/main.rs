@@ -12,7 +12,6 @@
     optimize_attribute,
 	panic_update_hook,
     stmt_expr_attributes,
-	float_next_up_down,
 	variant_count,
 	sync_unsafe_cell,
 	duration_millis_float,
