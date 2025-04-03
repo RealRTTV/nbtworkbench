@@ -705,6 +705,9 @@ impl NbtElement {
 			}
 		}
 		let nbt = Self::Compound(NbtCompound::from_bytes(&mut decoder)?);
+		if decoder.assert_len(1).is_some() {
+			return None;
+		}
 		Some(nbt)
 	}
 
@@ -732,7 +735,7 @@ impl NbtElement {
 		unsafe {
 			decoder.assert_len(1)?;
 			let kind = decoder.u8();
-			match kind {
+			let result = match kind {
 				NbtCompound::ID => {
 					decoder.assert_len(2)?;
 					let skip = decoder.u16() as usize;
@@ -746,7 +749,11 @@ impl NbtElement {
 					Some((Self::List(NbtList::from_bytes(&mut decoder)?), decoder.header()))
 				},
 				_ => None,
+			};
+			if decoder.assert_len(1).is_some() {
+				return None;
 			}
+			result
 		}
 	}
 
