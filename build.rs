@@ -1,4 +1,3 @@
-#![feature(maybe_uninit_uninit_array)]
 #![feature(maybe_uninit_array_assume_init)]
 
 use flate2::Compression;
@@ -10,7 +9,7 @@ const UNICODE: &[u8] = include_bytes!("src/assets/build/unicode.hex");
 
 fn main() {
 	{
-		let mut char_widths: [MaybeUninit<u8>; 56832] = MaybeUninit::uninit_array();
+		let mut char_widths: [MaybeUninit<u8>; 56832] = [const { MaybeUninit::uninit() }; 56832];
 		for (idx, maybe) in char_widths.iter_mut().enumerate() {
 			maybe.write('a: {
 				for x_pixel in (0..16).rev() {
