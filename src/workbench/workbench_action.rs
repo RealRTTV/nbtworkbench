@@ -1,13 +1,13 @@
-use compact_str::{CompactString, ToCompactString};
+use compact_str::CompactString;
 use std::cell::SyncUnsafeCell;
-use std::ffi::OsStr;
 use std::mem::MaybeUninit;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::elements::{CompoundMap, Entry, NbtElement, NbtElementAndKey};
 use crate::hash;
-use crate::workbench::{add_element, recache_along_indices, remove_element, replace_element, sum_indices, swap_elements, FileUpdateSubscription, HeldEntry, MarkedLines, Navigate};
+use crate::render::WindowProperties;
+use crate::workbench::{add_element, remove_element, rename_element, replace_element, sum_indices, same_depth_swap_element, HeldEntry, MarkedLines, MutableIndices, Navigate};
 
 #[derive(Debug)]
 pub enum WorkbenchAction {
@@ -64,70 +64,26 @@ pub enum WorkbenchAction {
 
 impl WorkbenchAction {
 	#[cfg_attr(debug_assertions, inline(never))]
-	pub fn undo(self, root: &mut NbtElement, bookmarks: &mut MarkedLines, subscription: &mut Option<FileUpdateSubscription>, path: &mut Option<PathBuf>, name: &mut Box<str>, held_entry: &mut HeldEntry) -> Self {
+	pub fn undo<'m1, 'm2: 'm1>(self, root: &mut NbtElement, bookmarks: &mut MarkedLines, mutable_indices: &'m1 mut MutableIndices<'m2>, path: &mut Option<PathBuf>, name: &mut Box<str>, held_entry: &mut HeldEntry, window_properties: &mut WindowProperties) -> Self {
 		unsafe {
-			self.undo0(root, bookmarks, subscription, path, name, held_entry)
+			self.undo0(root, bookmarks, mutable_indices, path, name, held_entry, window_properties)
 				.expect("Failed to undo action")
 		}
 	}
 
-	#[cfg_attr(not(debug_assertions), inline(always))]
 	#[cfg_attr(debug_assertions, inline(never))]
 	#[allow(
 		clippy::collapsible_else_if,
 		clippy::too_many_lines,
 		clippy::cognitive_complexity
 	)]
-	unsafe fn undo0(self, root: &mut NbtElement, bookmarks: &mut MarkedLines, subscription: &mut Option<FileUpdateSubscription>, path: &mut Option<PathBuf>, name: &mut Box<str>, held_entry: &mut HeldEntry) -> Option<Self> {
+	unsafe fn undo0<'m1, 'm2: 'm1>(self, root: &mut NbtElement, bookmarks: &mut MarkedLines, mutable_indices: &'m1 mut MutableIndices<'m2>, path: &mut Option<PathBuf>, name: &mut Box<str>, held_entry: &mut HeldEntry, window_properties: &mut WindowProperties) -> Option<Self> {
 		Some(match self {
-			Self::Remove { element: (key, value), indices, } => add_element(root, key, value, indices, bookmarks, subscription).expect("Couldn't add element"),
-			Self::Add { indices } => remove_element(root, indices, bookmarks, subscription).expect("Could remove element").into_action(),
-			Self::Replace { indices, value, } => replace_element(root, value, indices, bookmarks, subscription).expect("Could not replace element").into_action(),
-			Self::Rename { indices, key, value } => {
-				if let Some((&last, rem)) = indices.split_last() {
-					let key = if let Some(key) = key {
-						let parent = Navigate::new(rem.iter().copied(), root).last().2;
-						Some(if let Some(compound) = parent.as_compound_mut() {
-							compound.entries.update_key(last, key)?
-						} else if let Some(chunk) = parent.as_chunk_mut() {
-							chunk.entries.update_key(last, key)?
-						} else {
-							key
-						})
-					} else {
-						None
-					};
-					let value = value.and_then(|value| {
-						Navigate::new(indices.iter().copied(), root)
-							.last()
-							.2
-							.set_value(value)
-							.map(|x| x.0)
-					});
-					if key.is_some() || value.is_some() {
-						recache_along_indices(rem, root);
-					}
-					Self::Rename {
-						indices,
-						key,
-						value,
-					}
-				} else {
-					let new = PathBuf::from(value?.into_string());
-					let new_name = new
-						.file_name()
-						.and_then(OsStr::to_str)?
-						.to_owned()
-						.into_boxed_str();
-					let old = path
-						.replace(new)
-						.and_then(|new| new.to_str().map(|s| s.to_compact_string()))
-						.unwrap_or_else(|| name.to_compact_string());
-					*name = new_name;
-					Self::Rename { indices, key, value: Some(old) }
-				}
-			}
-			Self::Swap { parent, a, b, } => swap_elements(root, parent, a, b, bookmarks, subscription).expect("Couldn't swap element").into_action(),
+			Self::Remove { element: (key, value), indices, } => add_element(root, key, value, indices, bookmarks, mutable_indices).expect("Couldn't add element"),
+			Self::Add { indices } => remove_element(root, indices, bookmarks, mutable_indices).expect("Could remove element").into_action(),
+			Self::Replace { indices, value, } => replace_element(root, value, indices, bookmarks, mutable_indices).expect("Could not replace element").into_action(),
+			Self::Rename { indices, key, value } => rename_element(root, indices, key, value, path, name, window_properties).expect("Could not rename element").into_action(),
+			Self::Swap { parent, a, b, } => same_depth_swap_element(root, parent, a, b, bookmarks, mutable_indices).into_action(),
 			Self::ReorderCompound { indices: traversal_indices, reordering_indices } => {
 				let line_number = sum_indices(traversal_indices.iter().copied(), root);
 				let (_, _, element, true_line_number) = Navigate::new(traversal_indices.iter().copied(), root).last();
@@ -187,12 +143,12 @@ impl WorkbenchAction {
 					HeldEntry::FromAether(value) => (value, None),
 					HeldEntry::FromKnown(value, indices, is_swap) => (value, Some((indices, is_swap))),
 				};
-				let (indices, kv, _) = replace_element(root, (original_key, value), indices, bookmarks, subscription).expect("Could replace element").into_raw();
+				let (indices, kv, _) = replace_element(root, (original_key, value), indices, bookmarks, mutable_indices).expect("Could replace element").into_raw();
 				*held_entry = if let Some((held_entry_indices, is_swap)) = known_data { HeldEntry::FromKnown(kv, held_entry_indices, is_swap) } else { HeldEntry::FromAether(kv) };
 				Self::HeldEntrySwap { indices, original_key: new_key }
 			},
 			Self::HeldEntryDrop { from_indices, indices, original_key } => {
-				let (indices, (new_key, value), _) = remove_element(root, indices, bookmarks, subscription).expect("Able to remove element").into_raw();
+				let (indices, (new_key, value), _) = remove_element(root, indices, bookmarks, mutable_indices).expect("Able to remove element").into_raw();
 				*held_entry = if let Some(from_indices) = &from_indices { HeldEntry::FromKnown((original_key, value), Box::clone(&*from_indices.get()), false) } else { HeldEntry::FromAether((original_key, value)) };
 				if matches!(held_entry, HeldEntry::FromAether(_)) {
 					Self::HeldEntryStealFromAether { indices, original_key: new_key }
@@ -202,13 +158,13 @@ impl WorkbenchAction {
 			}
 			Self::HeldEntrySteal { from_indices, original_key } => {
 				let HeldEntry::FromKnown((new_key, value), indices, _) = held_entry.take() else { return None };
-				let Self::Add { indices } = add_element(root, original_key, value, indices, bookmarks, subscription).expect("Expected ability to add element") else { return None };
+				let Self::Add { indices } = add_element(root, original_key, value, indices, bookmarks, mutable_indices).expect("Expected ability to add element") else { return None };
 				Self::HeldEntryDrop { from_indices, indices, original_key: new_key }
 
 			},
 			Self::HeldEntryStealFromAether { indices, original_key } => {
 				let HeldEntry::FromAether((new_key, value)) = held_entry.take() else { return None };
-				let Self::Add { indices } = add_element(root, original_key, value, indices, bookmarks, subscription).expect("Expected ability to add element") else { return None };
+				let Self::Add { indices } = add_element(root, original_key, value, indices, bookmarks, mutable_indices).expect("Expected ability to add element") else { return None };
 				Self::HeldEntryDrop {
 					from_indices: None,
 					indices,
@@ -226,7 +182,7 @@ impl WorkbenchAction {
 				let mut new_actions = Vec::with_capacity(actions.len());
 
 				for action in actions.into_vec().into_iter().rev() {
-					new_actions.push(action.undo(root, bookmarks, subscription, path, name, held_entry));
+					new_actions.push(action.undo0(root, bookmarks, mutable_indices, path, name, held_entry, window_properties)?);
 				}
 
 				Self::Bulk {

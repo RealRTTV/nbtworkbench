@@ -77,11 +77,11 @@ macro_rules! primitive {
 }
 
 use compact_str::{CompactString, ToCompactString};
-use std::fmt::{Formatter, Write, Display};
+use std::fmt::{Display, Formatter, Write};
 
 use crate::assets::{ZOffset, BASE_Z, BYTE_UV, DOUBLE_UV, FLOAT_UV, INT_UV, JUST_OVERLAPPING_BASE_TEXT_Z, LONG_UV, SHORT_UV};
 use crate::render::{RenderContext, TextColor, VertexBufferBuilder};
-use crate::serialization::{Decoder, UncheckedBufWriter, PrettyFormatter};
+use crate::serialization::{Decoder, PrettyFormatter, UncheckedBufWriter};
 
 primitive!(BYTE_UV, { Some('b') }, NbtByte, i8, 1);
 primitive!(SHORT_UV, { Some('s') }, NbtShort, i16, 2);

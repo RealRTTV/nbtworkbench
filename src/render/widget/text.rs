@@ -7,7 +7,7 @@ use winit::keyboard::KeyCode;
 use crate::assets::{ZOffset, SELECTION_UV};
 use crate::flags;
 use crate::render::{TextColor, Vec2u, VertexBufferBuilder};
-use crate::util::{get_clipboard, is_jump_char_boundary, is_utf8_char_boundary, now, set_clipboard, LinkedQueue, StrExt};
+use crate::util::{get_clipboard, is_jump_char_boundary, is_utf8_char_boundary, now, set_clipboard, CharExt, LinkedQueue, StrExt};
 use crate::widget::KeyResult::{Escape, Failed, Finish, NothingSpecial};
 
 pub const TEXT_DOUBLE_CLICK_INTERVAL: Duration = Duration::from_millis(250);
@@ -36,9 +36,20 @@ pub enum SearchBoxKeyResult {
     Failed,
     NothingSpecial,
     Escape,
+    MoveToReplaceBox,
     Search,
     SearchCountOnly,
     ClearAndSearch,
+}
+
+#[derive(PartialEq, Eq)]
+#[repr(u8)]
+pub enum ReplaceBoxKeyResult {
+    Failed,
+    NothingSpecial,
+    Escape,
+    MoveToSearchBox,
+    ReplaceAll,
 }
 
 #[repr(u8)]
@@ -68,6 +79,17 @@ impl From<KeyResult> for SearchBoxKeyResult {
             NothingSpecial => Self::NothingSpecial,
             Escape => Self::Escape,
             Finish => Self::Search,
+        }
+    }
+}
+
+impl From<KeyResult> for ReplaceBoxKeyResult {
+    fn from(value: KeyResult) -> Self {
+        match value {
+            Failed => Self::Failed,
+            NothingSpecial => Self::NothingSpecial,
+            Escape => Self::Escape,
+            Finish => Self::ReplaceAll,
         }
     }
 }
@@ -140,6 +162,7 @@ pub struct Text<Additional: Clone, Cache: Cachelike<Additional>> {
     pub selection: Option<usize>,
     pub editable: bool,
     pub additional: Additional,
+    drag_selectable: bool,
     last_interaction: Duration,
     undos: LinkedQueue<Cache>,
     redos: LinkedQueue<Cache>,
@@ -170,6 +193,7 @@ impl<Additional: Clone, Cache: Cachelike<Additional>> Text<Additional, Cache> {
             undos: LinkedQueue::new(),
             redos: LinkedQueue::new(),
             additional,
+            drag_selectable: true,
         };
         this.save_state_in_history();
         this
@@ -185,7 +209,17 @@ impl<Additional: Clone, Cache: Cachelike<Additional>> Text<Additional, Cache> {
             undos: LinkedQueue::new(),
             redos: LinkedQueue::new(),
             additional: unsafe { core::mem::MaybeUninit::zeroed().assume_init() },
+            drag_selectable: true,
         }
+    }
+
+    #[must_use]
+    pub fn is_drag_selectable(&self) -> bool {
+        self.drag_selectable
+    }
+
+    pub fn set_drag_selectable(&mut self, drag_selectable: bool) {
+        self.drag_selectable = drag_selectable;
     }
 
     #[inline]
@@ -599,4 +633,17 @@ impl<Additional: Clone, Cache: Cachelike<Additional>> Text<Additional, Cache> {
         self.selection = None;
         self.last_interaction = now();
     }
+}
+
+#[inline]
+#[must_use]
+pub fn get_cursor_idx(str: &str, mut x: isize) -> usize {
+	for (i, char) in str.char_indices() {
+		let width = char.width() as isize;
+		if x <= width / 2 {
+			return i
+		}
+		x -= width;
+	}
+	str.len()
 }

@@ -1,4 +1,4 @@
-use std::alloc::{alloc, dealloc, Layout, realloc};
+use std::alloc::{alloc, dealloc, realloc, Layout};
 use std::intrinsics::likely;
 use std::mem::MaybeUninit;
 

@@ -1,8 +1,9 @@
-pub(in crate::elements) use std::alloc::{dealloc, Layout};
+pub(in crate::elements)
+use std::alloc::{dealloc, Layout};
 use std::fmt::{Debug, Display, Error, Formatter};
 use std::mem::{ManuallyDrop, MaybeUninit};
 use std::ops::{Index, IndexMut};
-use std::slice::Iter;
+use std::slice::{Iter, IterMut};
 #[cfg(not(target_arch = "wasm32"))]
 use std::thread::Scope;
 
@@ -11,7 +12,7 @@ use hashbrown::HashTable;
 use polonius_the_crab::{polonius, polonius_return};
 
 use crate::assets::ZOffset;
-use crate::elements::{CompoundMap, CompoundMapIter, Entry, NbtByte, NbtByteArray, NbtChunk, NbtCompound, NbtDouble, NbtElementAndKey, NbtFloat, NbtInt, NbtIntArray, NbtList, NbtLong, NbtLongArray, NbtNull, NbtRegion, NbtShort, NbtString};
+use crate::elements::{CompoundMap, CompoundMapIter, CompoundMapIterMut, Entry, NbtByte, NbtByteArray, NbtChunk, NbtCompound, NbtDouble, NbtElementAndKey, NbtFloat, NbtInt, NbtIntArray, NbtList, NbtLong, NbtLongArray, NbtNull, NbtRegion, NbtShort, NbtString};
 use crate::render::{RenderContext, TextColor, VertexBufferBuilder};
 use crate::serialization::{BigEndianDecoder, Decoder, LittleEndianDecoder, PrettyFormatter, UncheckedBufWriter};
 use crate::util::{now, width_ascii, StrExt};
@@ -905,7 +906,6 @@ impl NbtElement {
 		}
 	}
 
-	#[inline]
 	#[must_use]
 	#[allow(clippy::type_complexity)] // a type probably shouldn't abstract what this is, like... yeah
 	pub fn children(&self) -> Option<Result<Iter<'_, NbtElement>, CompoundMapIter<'_>>> {
@@ -918,6 +918,23 @@ impl NbtElement {
 				NbtCompound::ID => Err(self.compound.children()),
 				NbtChunk::ID => Err(self.chunk.children()),
 				NbtRegion::ID => Ok(self.region.children()),
+				_ => return None,
+			})
+		}
+	}
+
+	#[must_use]
+	#[allow(clippy::type_complexity)] // a type probably shouldn't abstract what this is, like... yeah
+	pub fn children_mut(&mut self) -> Option<Result<IterMut<'_, NbtElement>, CompoundMapIterMut<'_>>> {
+		unsafe {
+			Some(match self.id() {
+				NbtByteArray::ID => Ok(self.byte_array.children_mut()),
+				NbtIntArray::ID => Ok(self.int_array.children_mut()),
+				NbtLongArray::ID => Ok(self.long_array.children_mut()),
+				NbtList::ID => Ok(self.list.children_mut()),
+				NbtCompound::ID => Err(self.compound.children_mut()),
+				NbtChunk::ID => Err(self.chunk.children_mut()),
+				NbtRegion::ID => Ok(self.region.children_mut()),
 				_ => return None,
 			})
 		}
@@ -1098,8 +1115,8 @@ impl NbtElement {
 					(const { width_ascii("1") }) * self.long.value.abs().checked_ilog10().map_or(1, |x| x as usize + 1)
 						+ (self.long.value < 0) as usize * const { width_ascii("-") }
 				},
-				NbtFloat::ID => self.float.value().width(), // todo, barely optimize this by making a lot of code myself
-				NbtDouble::ID => self.double.value().width(), // todo, barely optimize this by making a lot of code myself
+				NbtFloat::ID => self.float.value().width(), // optimizations to this wouldn't do much because the internal BigInteger would still need a heap alloc
+				NbtDouble::ID => self.double.value().width(), // optimizations to this wouldn't do much because the internal BigInteger would still need a heap alloc
 				NbtByteArray::ID => {
 					(const { width_ascii("1") }) * self.byte_array.len().checked_ilog10().map_or(1, |x| x as usize + 1)
 						+ const { width_ascii(" ") }

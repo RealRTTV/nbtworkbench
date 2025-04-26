@@ -4,7 +4,7 @@ use std::ops::BitAnd;
 
 use winit::dpi::PhysicalSize;
 
-use crate::assets::{BASE_TEXT_Z, BASE_Z, TOOLTIP_UV, TOOLTIP_Z, ZOffset};
+use crate::assets::{ZOffset, BASE_TEXT_Z, BASE_Z, TOOLTIP_UV, TOOLTIP_Z};
 use crate::render::TextColor;
 use crate::util::StrExt;
 
@@ -123,13 +123,19 @@ impl VertexBufferBuilder {
 		self.tooltips.push((text.iter().map(|s| s.to_string()).collect::<Vec<_>>().into_boxed_slice(), Vec2u::from(pos.into()), force_draw_right, color));
 	}
 
-	pub fn clear_buffers(&mut self) {
+	pub fn reset(&mut self) {
 		self.vertices.clear();
 		self.indices.clear();
 		self.text_vertices.clear();
 		self.text_indices.clear();
-		self.text_vertices_len = 0;
 		self.vertices_len = 0;
+		self.text_vertices_len = 0;
+		self.horizontal_scroll = 0;
+		self.text_coords = (0, 0);
+		self.dropshadow = false;
+		self.text_z = BASE_TEXT_Z;
+		self.color = TextColor::White.to_raw();
+		self.tooltips = vec![];
 	}
 
 	#[inline]

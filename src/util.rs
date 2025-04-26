@@ -103,24 +103,20 @@ pub fn nth(n: usize) -> String {
 	buf
 }
 
-#[inline]
 #[must_use]
 pub fn encompasses_or_equal<T: Ord>(outer: &[T], inner: &[T]) -> bool {
 	outer.len() <= inner.len() && outer == &inner[..outer.len()]
 }
 
-#[inline]
 #[must_use]
 pub fn encompasses<T: Ord>(outer: &[T], inner: &[T]) -> bool {
 	outer.len() < inner.len() && outer == &inner[..outer.len()]
 }
 
-#[inline]
 #[must_use]
 pub const fn is_utf8_char_boundary(x: u8) -> bool { (x as i8) >= -0x40 }
 
 // importantly, no underscores
-#[inline]
 #[must_use]
 pub fn is_jump_char_boundary(x: u8) -> bool { b" \t\r\n/\\()\"'-.,:;<>~!@#$%^&*|+=[]{}~?|".contains(&x) }
 
@@ -129,16 +125,15 @@ pub struct SinglyLinkedNode<T> {
 	prev: Option<Box<SinglyLinkedNode<T>>>,
 }
 
+#[must_use]
 pub fn smoothstep64(x: f64) -> f64 {
 	let x = x.clamp(0.0, 1.0);
 	3.0 * x * x - 2.0 * x * x * x
 }
 
-#[inline]
 #[must_use]
 pub const fn valid_unescaped_char(byte: u8) -> bool { matches!(byte, b'0'..=b'9' | b'A'..=b'Z' | b'a'..=b'z' | b'_' | b'-' | b'.' | b'+') }
 
-#[inline]
 #[must_use]
 pub const fn valid_starting_char(byte: u8) -> bool { matches!(byte, b'A'..=b'Z' | b'a'..=b'z' | b'_') }
 
@@ -288,12 +283,21 @@ impl<'a, T> Iterator for LinkedQueueIter<'a, T> {
 pub trait StrExt {
 	fn snbt_string_read(&self) -> Result<(CompactString, &str), usize>;
 
+	#[must_use]
 	fn needs_escape(&self) -> bool;
 
+	#[must_use]
 	fn width(&self) -> usize;
+
+	#[must_use]
+	fn contains_ignore_ascii_case(&self, other: &Self) -> bool;
+
+	#[must_use]
+	fn replace_ignore_ascii_case(&self, from: &Self, to: &Self) -> String;
 }
 
 impl StrExt for str {
+
 	#[inline]
 	#[optimize(speed)]
 	#[allow(clippy::too_many_lines)]
@@ -522,18 +526,68 @@ impl StrExt for str {
 		}
 	}
 
+	#[inline]
 	fn needs_escape(&self) -> bool { self.as_bytes().first().copied().is_some_and(valid_starting_char) || !self.bytes().all(valid_unescaped_char) }
 
+	#[inline]
 	fn width(&self) -> usize {
 		self.chars().map(CharExt::width).sum()
+	}
+
+	#[inline]
+	fn contains_ignore_ascii_case(&self, other: &Self) -> bool {
+		let haystack = self.as_bytes();
+		let needle = other.as_bytes();
+
+		if needle.len() > haystack.len() {
+			return false;
+		}
+
+		for offset in 0..(haystack.len() - needle.len() + 1) {
+			let haystack_partition = &haystack[offset..offset + needle.len()];
+			if haystack_partition.eq_ignore_ascii_case(needle) {
+				return true;
+			}
+		}
+
+		false
+	}
+
+	#[inline]
+	fn replace_ignore_ascii_case(&self, from: &Self, to: &Self) -> String {
+		let haystack = self.as_bytes();
+		let needle = from.as_bytes();
+		let replacement = to.as_bytes();
+
+		if needle.len() > haystack.len() {
+			return self.to_owned();
+		}
+
+		let mut buf = Vec::with_capacity(if replacement.len() >= needle.len() { haystack.len() } else { 0 });
+
+		let mut offset = 0;
+		while offset < haystack.len() - needle.len() + 1 {
+			let haystack_partition = &haystack[offset..offset + needle.len()];
+			if haystack_partition.eq_ignore_ascii_case(needle) {
+				buf.extend_from_slice(replacement);
+				offset += needle.len();
+			} else {
+				buf.push(haystack[offset]);
+				offset += 1;
+			}
+		}
+
+		unsafe { String::from_utf8_unchecked(buf) }
 	}
 }
 
 pub trait CharExt {
+	#[must_use]
 	fn width(self) -> usize;
 }
 
 impl CharExt for char {
+	#[inline]
 	fn width(self) -> usize {
 		if (self as u32) < 56832 {
 			VertexBufferBuilder::CHAR_WIDTH[self as usize] as usize
@@ -543,6 +597,7 @@ impl CharExt for char {
 	}
 }
 
+#[must_use]
 pub const fn width_ascii(s: &str) -> usize {
 	let mut width = 0;
 	let mut i = 0;
@@ -553,4 +608,17 @@ pub const fn width_ascii(s: &str) -> usize {
 		}
 	}
 	width
+}
+
+pub fn drop_on_separate_thread<T: 'static>(mut t: T) {
+	#[cfg(not(target_arch = "wasm32"))]
+	{
+		let ptr = &mut t as *mut T as usize;
+		std::mem::forget(t);
+		std::thread::Builder::new().stack_size(1_048_576 * 64 /*64MiB*/).spawn(move || unsafe { drop(std::ptr::read(ptr as *mut T)) }).expect("Failed to spawn thread");
+	}
+	#[cfg(target_arch = "wasm32")]
+	{
+		drop(t)
+	}
 }

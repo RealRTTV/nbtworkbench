@@ -8,12 +8,13 @@ use winit::keyboard::KeyCode;
 use winit::window::Theme;
 
 use crate::assets::{BASE_Z, BOOKMARK_UV, DARK_STRIPE_UV, EXACT_MATCH_OFF_UV, EXACT_MATCH_ON_UV, HIDDEN_BOOKMARK_UV, HOVERED_WIDGET_UV, REGEX_SEARCH_MODE_UV, SEARCH_APPEND_BOOKMARKS_UV, SEARCH_BOOKMARKS_UV, SEARCH_BOX_SELECTION_Z, SEARCH_BOX_Z, SEARCH_KEYS_AND_VALUES_UV, SEARCH_KEYS_UV, SEARCH_VALUES_UV, SELECTED_WIDGET_UV, SNBT_SEARCH_MODE_UV, STRING_SEARCH_MODE_UV, UNSELECTED_WIDGET_UV};
-use crate::{config, flags};
 use crate::elements::{NbtElement, NbtElementAndKey};
 use crate::render::{TextColor, Vec2u, VertexBufferBuilder};
 use crate::util::{create_regex, now, StrExt};
-use crate::widget::{get_cursor_idx, Cachelike, SearchBoxKeyResult, Text};
+use crate::widget::{Cachelike, Notification, NotificationKind, SearchBoxKeyResult, Text};
 use crate::workbench::{MarkedLine, MarkedLines, SortAlgorithm};
+use crate::{config, flags};
+use crate::render::widget::text::get_cursor_idx;
 
 pub const SEARCH_BOX_START_X: usize = 332;
 pub const SEARCH_BOX_END_X: usize = 2;
@@ -120,20 +121,6 @@ impl SearchMode {
         }
     }
 
-    pub fn into_predicate(self, value: String, exact_match: bool) -> Option<SearchPredicate> {
-        let search_flags = config::get_search_flags();
-        Some(match self {
-            Self::String => SearchPredicate { inner: if exact_match { SearchPredicateInner::String(value) } else { SearchPredicateInner::StringCaseInsensitive(value.to_lowercase()) }, search_flags },
-            Self::Regex => if let Some(regex) = create_regex(value, exact_match) { SearchPredicate { inner: SearchPredicateInner::Regex(regex), search_flags } } else { return None },
-            Self::Snbt => if let Ok((key, value)) = {
-                let sort = config::set_sort_algorithm(SortAlgorithm::None);
-                let result = NbtElement::from_str(&value);
-                config::set_sort_algorithm(sort);
-                result
-            } { SearchPredicate { inner: if exact_match { SearchPredicateInner::SnbtExactMatch((key, value)) } else { SearchPredicateInner::Snbt((key, value)) }, search_flags } } else { return None },
-        })
-    }
-
     #[inline]
     pub fn has_exact_match_mode(&self) -> bool {
         matches!(self, Self::String | Self::Regex | Self::Snbt)
@@ -157,6 +144,22 @@ impl SearchMode {
 }
 
 impl SearchPredicate {
+    fn new(value: String) -> Option<Self> {
+        let search_mode = config::get_search_mode();
+        let search_flags = config::get_search_flags();
+        let exact_match = config::get_search_exact_match();
+        Some(match search_mode {
+            SearchMode::String => Self { inner: if exact_match { SearchPredicateInner::String(value) } else { SearchPredicateInner::StringCaseInsensitive(value.to_lowercase()) }, search_flags },
+            SearchMode::Regex => if let Some(regex) = create_regex(value, exact_match) { Self { inner: SearchPredicateInner::Regex(regex), search_flags } } else { return None },
+            SearchMode::Snbt => if let Ok((key, value)) = {
+                let sort = config::set_sort_algorithm(SortAlgorithm::None);
+                let result = NbtElement::from_str(&value);
+                config::set_sort_algorithm(sort);
+                result
+            } { Self { inner: if exact_match { SearchPredicateInner::SnbtExactMatch((key, value)) } else { SearchPredicateInner::Snbt((key, value)) }, search_flags } } else { return None },
+        })
+    }
+
     fn matches(&self, key: Option<&str>, value: &NbtElement) -> bool {
         let flags = self.search_flags as u8 + 1;
         match &self.inner {
@@ -166,18 +169,17 @@ impl SearchPredicate {
             }
             SearchPredicateInner::StringCaseInsensitive(matcher) => {
                 let (value, color) = value.value();
-                let (key, value) = (key.map(|s| s.to_lowercase()), value.to_lowercase());
-                ((flags & 0b01) > 0 && color != TextColor::TreeKey && value.contains(matcher)) || ((flags & 0b10) > 0 && key.is_some_and(|k| k.contains(matcher)))
+                ((flags & 0b01) > 0 && color != TextColor::TreeKey && value.contains_ignore_ascii_case(matcher)) || ((flags & 0b10) > 0 && key.is_some_and(|k| k.contains_ignore_ascii_case(matcher)))
             }
             SearchPredicateInner::Regex(regex) => {
                 let (value, color) = value.value();
                 ((flags & 0b01) > 0 && color != TextColor::TreeKey && regex.is_match(&value)) || ((flags & 0b10) > 0 && key.is_some_and(|k| regex.is_match(k)))
             }
             SearchPredicateInner::Snbt((k, element)) => {
-                (!((flags & 0b01) > 0 && !element.matches(value))) && (!((flags & 0b10) > 0 && k.as_ref().map(|k| k.as_str()) != key))
+                ((flags & 0b01) == 0 || element.matches(value)) && ((flags & 0b10) == 0 || k.as_ref().map(|k| k.as_str()) == key)
             }
             SearchPredicateInner::SnbtExactMatch((k, element)) => {
-                (!((flags & 0b01) > 0 && !element.eq(value))) && (!((flags & 0b10) > 0 && k.as_ref().map(|k| k.as_str()) != key))
+                ((flags & 0b01) == 0 || element.eq(value)) && ((flags & 0b10) == 0 || k.as_ref().map(|k| k.as_str()) == key)
             }
         }
     }
@@ -188,7 +190,6 @@ pub struct SearchBoxCache {
     value: String,
     cursor: usize,
     selection: Option<usize>,
-    hits: Option<(usize, Duration)>,
 }
 
 impl PartialEq for SearchBoxCache {
@@ -198,20 +199,24 @@ impl PartialEq for SearchBoxCache {
 }
 
 impl Cachelike<SearchBoxAdditional> for SearchBoxCache {
-    fn new(text: &Text<SearchBoxAdditional, Self>) -> Self where Self: Sized {
+    fn new(text: &Text<SearchBoxAdditional, Self>) -> Self
+    where
+        Self: Sized,
+    {
         Self {
             value: text.value.clone(),
             cursor: text.cursor,
             selection: text.selection,
-            hits: text.hits,
         }
     }
 
-    fn revert(self, text: &mut Text<SearchBoxAdditional, Self>) where Self: Sized {
+    fn revert(self, text: &mut Text<SearchBoxAdditional, Self>)
+    where
+        Self: Sized,
+    {
         text.value = self.value;
         text.cursor = self.cursor;
         text.selection = self.selection;
-        text.hits = self.hits;
     }
 }
 
@@ -219,7 +224,7 @@ impl Cachelike<SearchBoxAdditional> for SearchBoxCache {
 pub struct SearchBoxAdditional {
     selected: bool,
     pub horizontal_scroll: usize,
-    pub hits: Option<(usize, Duration)>,
+    pub last_interaction: (usize, Duration),
 }
 
 pub struct SearchBox(Text<SearchBoxAdditional, SearchBoxCache>);
@@ -240,7 +245,7 @@ impl DerefMut for SearchBox {
 
 impl SearchBox {
     pub fn new() -> Self {
-        Self(Text::new(String::new(), 0, true, SearchBoxAdditional { selected: false, horizontal_scroll: 0, hits: None }))
+        Self(Text::new(String::new(), 0, true, SearchBoxAdditional { selected: false, horizontal_scroll: 0, last_interaction: (0, Duration::ZERO) }))
     }
 
     pub const fn uninit() -> Self {
@@ -262,8 +267,6 @@ impl SearchBox {
             (16, 16),
         );
 
-        let hover = (pos.x..builder.window_width() - SEARCH_BOX_END_X - 17 - 16 - 16).contains(&mouse_x) && (23..46).contains(&mouse_y);
-
         builder.horizontal_scroll = self.horizontal_scroll;
 
         if self.value.is_empty() {
@@ -275,7 +278,10 @@ impl SearchBox {
                 SearchMode::Snbt => r#"{dialog: "search", ...}"#,
             });
         }
-        let color = match config::get_theme() { Theme::Light => TextColor::Black, Theme::Dark => TextColor::White };
+        let color = match config::get_theme() {
+            Theme::Light => TextColor::Black,
+            Theme::Dark => TextColor::White
+        };
         if self.is_selected() {
             self.0.render(builder, color, pos + (0, 3), SEARCH_BOX_Z, SEARCH_BOX_SELECTION_Z);
         } else {
@@ -284,16 +290,12 @@ impl SearchBox {
             let _ = write!(builder, "{}", self.value);
         }
 
-        if let Some((hits, stat)) = self.hits && (self.is_selected() || hover) {
-            builder.draw_tooltip(&[&format!("{hits} hit{s} for \"{arg}\" ({ms}ms)", s = if hits == 1 { "" } else { "s" }, arg = self.value, ms = stat.as_millis())], if !self.is_selected() && hover { mouse } else { (SEARCH_BOX_START_X, 30) }, true);
-        }
-
         builder.horizontal_scroll = 0;
 
         {
             let bookmark_uv = if shift { SEARCH_APPEND_BOOKMARKS_UV } else { SEARCH_BOOKMARKS_UV };
             let widget_uv = if (builder.window_width() - SEARCH_BOX_END_X - 17 - 16 - 16 - 16..builder.window_width() - SEARCH_BOX_END_X - 1 - 16 - 16 - 16).contains(&mouse_x) && (26..42).contains(&mouse_y) {
-                builder.draw_tooltip(&[if shift { "Append to search (Shift + Enter)"} else { "Search (Enter)" }], mouse, false);
+                builder.draw_tooltip(&[if shift { "Append to search (Shift + Enter)" } else { "Search (Enter)" }], mouse, false);
                 HOVERED_WIDGET_UV
             } else {
                 SELECTED_WIDGET_UV
@@ -352,20 +354,25 @@ impl SearchBox {
         }
     }
 
-    #[inline]
+    #[must_use]
+    pub fn is_within_bounds(mouse: (usize, usize), window_width: usize) -> bool {
+        let (mouse_x, mouse_y) = mouse;
+        let pos = Vec2u::new(SEARCH_BOX_START_X, 23);
+
+        (pos.x..window_width - SEARCH_BOX_END_X - 17 - 16 - 16).contains(&mouse_x) && (23..45).contains(&mouse_y)
+    }
+
     pub fn deselect(&mut self) {
         self.selected = false;
         self.cursor = 0;
         self.selection = None;
     }
 
-    #[inline]
     pub fn select(&mut self, x: usize, button: MouseButton) {
         if button == MouseButton::Right {
             self.value.clear();
             self.cursor = 0;
             self.selection = None;
-            self.hits = None;
             self.horizontal_scroll = 0;
             self.0.post_input();
         } else {
@@ -376,49 +383,44 @@ impl SearchBox {
         self.interact();
     }
 
-    #[inline]
-    pub fn on_bookmark_widget(&mut self, shift: bool, bookmarks: &mut MarkedLines, root: &mut NbtElement) {
+    #[must_use]
+    pub fn on_bookmark_widget(&mut self, shift: bool, bookmarks: &mut MarkedLines, root: &mut NbtElement) -> Notification {
         if !shift {
             bookmarks.clear();
         }
 
-        self.search(bookmarks, root, false);
+        self.search(bookmarks, root, false)
     }
 
-    #[inline]
     pub fn on_search_widget(&mut self, shift: bool) {
         config::set_search_flags(if shift { config::get_search_flags().rev_cycle() } else { config::get_search_flags().cycle() });
     }
 
-    #[inline]
     pub fn on_mode_widget(&mut self, shift: bool) {
         config::set_search_mode(if shift { config::get_search_mode().rev_cycle() } else { config::get_search_mode().cycle() });
     }
 
-    #[inline]
     pub fn on_exact_match_widget(&mut self, _shift: bool) {
         if config::get_search_mode().has_exact_match_mode() {
             config::set_search_exact_match(!config::get_search_exact_match());
         }
     }
 
-    #[inline]
-    pub fn search(&mut self, bookmarks: &mut MarkedLines, root: &NbtElement, count_only: bool) {
+    #[must_use]
+    pub fn search(&mut self, bookmarks: &mut MarkedLines, root: &NbtElement, count_only: bool) -> Notification {
         if self.value.is_empty() {
-            return;
+            return Notification::new("0 hits for \"\" (0ms)", TextColor::White, NotificationKind::Find);
         }
 
         let start = now();
-        let new_bookmarks = if self.value.is_empty() {
-            MarkedLines::new()
-        } else {
-            let Some(predicate) = config::get_search_mode().into_predicate(self.value.clone(), config::get_search_exact_match()) else { return };
-            Self::search0(root, &predicate)
-        };
-        self.hits = Some((new_bookmarks.len(), now() - start));
+        let Some(predicate) = SearchPredicate::new(self.value.clone()) else { return Notification::new(format!("Invalid search syntax ({})", self.value), TextColor::Red, NotificationKind::Find) };
+        let new_bookmarks = Self::search0(root, &predicate);
+        let hits = new_bookmarks.len();
+        let ms = now() - start;
         if !count_only && !new_bookmarks.is_empty() {
             bookmarks.add_bookmarks(new_bookmarks);
         }
+        Notification::new(format!("{hits} hit{s} for \"{arg}\" ({ms}ms)", s = if hits == 1 { "" } else { "s" }, arg = self.value, ms = ms.as_millis()), TextColor::White, NotificationKind::Find)
     }
 
     pub fn search0(root: &NbtElement, predicate: &SearchPredicate) -> MarkedLines {
@@ -450,13 +452,11 @@ impl SearchBox {
         unsafe { MarkedLines::from_raw(new_bookmarks) }
     }
 
-    #[inline]
     #[must_use]
     pub fn is_selected(&self) -> bool {
         self.selected
     }
 
-    #[inline]
     pub fn post_input(&mut self, window_dims: (usize, usize)) {
         let (window_width, _) = window_dims;
         self.0.post_input();
@@ -469,25 +469,22 @@ impl SearchBox {
 
     #[must_use]
     pub fn on_key_press(&mut self, key: KeyCode, char: Option<char>, flags: u8) -> SearchBoxKeyResult {
-        let before = self.value.clone();
-        let result = 'a: {
-            if let KeyCode::Enter | KeyCode::NumpadEnter = key && flags == flags!() {
-                break 'a SearchBoxKeyResult::ClearAndSearch
-            }
-
-            if let KeyCode::Enter | KeyCode::NumpadEnter = key && flags == flags!(Shift) {
-                break 'a SearchBoxKeyResult::Search
-            }
-
-            if let KeyCode::Enter | KeyCode::NumpadEnter = key && flags == flags!(Alt) {
-                break 'a SearchBoxKeyResult::SearchCountOnly
-            }
-
-            self.0.on_key_press(key, char, flags).into()
-        };
-        if self.value != before && !((key == KeyCode::KeyZ || key == KeyCode::KeyY) && flags == flags!(Ctrl)) {
-            self.hits = None;
+        if let KeyCode::ArrowDown | KeyCode::Tab = key && flags == flags!() {
+            return SearchBoxKeyResult::MoveToReplaceBox;
         }
-        result
+
+        if let KeyCode::Enter | KeyCode::NumpadEnter = key && flags == flags!() {
+            return SearchBoxKeyResult::ClearAndSearch;
+        }
+
+        if let KeyCode::Enter | KeyCode::NumpadEnter = key && flags == flags!(Shift) {
+            return SearchBoxKeyResult::Search;
+        }
+
+        if let KeyCode::Enter | KeyCode::NumpadEnter = key && flags == flags!(Alt) {
+            return SearchBoxKeyResult::SearchCountOnly;
+        }
+
+        self.0.on_key_press(key, char, flags).into()
     }
 }

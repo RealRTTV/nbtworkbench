@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use crate::assets::{ALERT_UV, NOTIFICATION_BAR_BACKDROP_UV, NOTIFICATION_BAR_UV, NOTIFICATION_TEXT_Z, NOTIFICATION_Z};
 use crate::render::{TextColor, Vec2u, VertexBufferBuilder};
-use crate::util::{smoothstep64, split_lines, StrExt, now};
+use crate::util::{now, smoothstep64, split_lines, StrExt};
 
 pub struct Alert {
 	timestamp: Option<Duration>,

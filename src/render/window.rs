@@ -24,13 +24,13 @@ use crate::assets::{atlas, icon, ATLAS_HEIGHT, ATLAS_WIDTH, HEADER_SIZE, ICON_HE
 use crate::config::get_theme;
 use crate::render::{TextColor, VertexBufferBuilder};
 use crate::util::now;
-use crate::widget::Alert;
+use crate::widget::{Alert, SEARCH_BOX_END_X, SEARCH_BOX_START_X};
 use crate::workbench::Workbench;
 use crate::{error, WINDOW_PROPERTIES, WORKBENCH};
 
 pub const WINDOW_HEIGHT: usize = 420;
 pub const WINDOW_WIDTH: usize = 720;
-pub const MIN_WINDOW_HEIGHT: usize = HEADER_SIZE + 16;
+pub const MIN_WINDOW_HEIGHT: usize = HEADER_SIZE + 64;
 pub const MIN_WINDOW_WIDTH: usize = 480;
 
 #[allow(static_mut_refs)]
@@ -85,6 +85,7 @@ pub async fn run() -> ! {
 	}
 
 	let event_loop = EventLoop::with_user_event().build().expect("Event loop was unconstructable");
+	#[allow(unused_mut)]
 	let mut builder = WindowAttributes::default()
 		.with_title("NBT Workbench")
 		.with_inner_size(PhysicalSize::new(7680, 4320))
@@ -499,9 +500,8 @@ impl<'window> State<'window> {
 		match event {
 			WindowEvent::Resized(size) => {
 				workbench.window_height = size.height as usize;
-				for entry in &mut workbench.tabs {
-					entry.window_height = workbench.window_height;
-					entry.scroll = entry.scroll();
+				for tab in &mut workbench.tabs {
+					tab.update_window_dimensions(workbench.window_width, workbench.window_height);
 				}
 				false
 			}
@@ -619,6 +619,11 @@ impl<'window> State<'window> {
 			let text_vertex_buffer;
 			let text_index_buffer;
 
+			let search_boxes_vertex_buffer;
+			let search_boxes_index_buffer;
+			let search_boxes_text_vertex_buffer;
+			let search_boxes_text_index_buffer;
+
 			let mut render_pass = encoder.begin_render_pass(&RenderPassDescriptor {
 				label: Some("Render Pass"),
 				color_attachments: &[Some(RenderPassColorAttachment {
@@ -690,6 +695,59 @@ impl<'window> State<'window> {
 
 				render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
 				render_pass.set_index_buffer(index_buffer.slice(..), IndexFormat::Uint16);
+
+				render_pass.draw_indexed(0..builder.indices_len(), 0, 0..1);
+			}
+
+			render_pass.set_scissor_rect(
+				(SEARCH_BOX_START_X as f32 * workbench.scale).floor() as u32,
+				(22.0 * workbench.scale).floor() as u32,
+				((workbench.window_width - SEARCH_BOX_END_X - SEARCH_BOX_START_X) as f32 * workbench.scale).ceil() as u32,
+				(46.0 * workbench.scale).ceil() as u32,
+			);
+			builder.reset();
+			workbench.render_search_boxes(&mut builder);
+
+			{
+				render_pass.set_pipeline(&self.text_render_pipeline);
+				render_pass.set_bind_group(0, &self.unicode_bind_group, &[]);
+
+				search_boxes_text_vertex_buffer = self.device.create_buffer_init(&BufferInitDescriptor {
+					label: Some("Text Vertex Buffer"),
+					contents: builder.text_vertices(),
+					usage: BufferUsages::VERTEX,
+				});
+
+				search_boxes_text_index_buffer = self.device.create_buffer_init(&BufferInitDescriptor {
+					label: Some("Text Index Buffer"),
+					contents: builder.text_indices(),
+					usage: BufferUsages::INDEX,
+				});
+
+				render_pass.set_vertex_buffer(0, search_boxes_text_vertex_buffer.slice(..));
+				render_pass.set_index_buffer(search_boxes_text_index_buffer.slice(..), IndexFormat::Uint32);
+
+				render_pass.draw_indexed(0..builder.text_indices_len(), 0, 0..1);
+			}
+
+			{
+				render_pass.set_pipeline(&self.render_pipeline);
+				render_pass.set_bind_group(0, &self.diffuse_texture_bind_group, &[]);
+
+				search_boxes_vertex_buffer = self.device.create_buffer_init(&BufferInitDescriptor {
+					label: Some("Vertex Buffer"),
+					contents: builder.vertices(),
+					usage: BufferUsages::VERTEX,
+				});
+
+				search_boxes_index_buffer = self.device.create_buffer_init(&BufferInitDescriptor {
+					label: Some("Index Buffer"),
+					contents: builder.indices(),
+					usage: BufferUsages::INDEX,
+				});
+
+				render_pass.set_vertex_buffer(0, search_boxes_vertex_buffer.slice(..));
+				render_pass.set_index_buffer(search_boxes_index_buffer.slice(..), IndexFormat::Uint16);
 
 				render_pass.draw_indexed(0..builder.indices_len(), 0, 0..1);
 			}

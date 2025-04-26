@@ -5,13 +5,13 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use glob::glob;
 
-use crate::{error, log};
-use crate::elements::{NbtElement};
-use crate::widget::{SearchBox, SearchFlags, SearchPredicate, SearchPredicateInner};
+use crate::elements::NbtElement;
 use crate::render::WindowProperties;
-use crate::util::create_regex;
+use crate::util::{create_regex, drop_on_separate_thread};
+use crate::widget::{SearchBox, SearchFlags, SearchPredicate, SearchPredicateInner};
 use crate::workbench::FileFormat;
 use crate::workbench::Workbench;
+use crate::{error, log};
 
 struct SearchResult {
     path: PathBuf,
@@ -28,6 +28,7 @@ impl std::fmt::Display for SearchResult {
     }
 }
 
+#[must_use]
 fn get_paths(mut args: Vec<String>) -> (PathBuf, Vec<PathBuf>) {
     if args.is_empty() {
         error!("Could not find path argument");
@@ -53,6 +54,7 @@ fn get_paths(mut args: Vec<String>) -> (PathBuf, Vec<PathBuf>) {
     }
 }
 
+#[must_use]
 fn get_predicate(args: &mut Vec<String>) -> SearchPredicate {
     let Some(query) = args.pop() else {
         error!("Could not find <query>");
@@ -102,6 +104,7 @@ fn get_predicate(args: &mut Vec<String>) -> SearchPredicate {
     }
 }
 
+#[must_use]
 fn file_size(path: impl AsRef<Path>) -> Option<u64> {
     File::open(path).ok().and_then(|file| file.metadata().ok()).map(|metadata| metadata.len())
 }
@@ -112,10 +115,12 @@ fn increment_progress_bar(completed: &AtomicU64, size: u64, total: u64, action: 
     let _ = std::io::Write::flush(&mut std::io::stdout());
 }
 
+#[must_use]
 fn get_argument(key: &str, args: &mut Vec<String>) -> Option<String> {
     Some(args.remove(args.iter().position(|x| x.strip_prefix(key).is_some_and(|x| x.starts_with("=")))?).split_off(key.len() + 1))
 }
 
+#[must_use]
 fn get_argument_any(keys: &[&str], args: &mut Vec<String>) -> Option<String> {
     keys.iter().filter_map(|key| get_argument(key, args)).next()
 }
@@ -160,8 +165,8 @@ pub fn find() -> ! {
                 }
 
                 let tab = workbench.tabs.remove(0);
-                let bookmarks = SearchBox::search0(&tab.value, &predicate);
-                std::thread::Builder::new().stack_size(50_331_648 /*48MiB*/).spawn(move || drop(tab)).expect("Failed to spawn thread");
+                let bookmarks = SearchBox::search0(tab.value(), &predicate);
+                drop_on_separate_thread(tab);
                 increment_progress_bar(&completed, len, total_size, "Searching");
                 if !bookmarks.is_empty() {
                     Some(SearchResult {
@@ -258,12 +263,12 @@ pub fn reformat() -> ! {
                 }
 
                 let tab = workbench.tabs.remove(0);
-                if let FileFormat::Nbt | FileFormat::Snbt | FileFormat::Gzip | FileFormat::Zlib = tab.format {} else {
-                    error!("Tab had invalid file format {}", tab.format.to_string());
+                if let FileFormat::Nbt | FileFormat::Snbt | FileFormat::Gzip | FileFormat::Zlib = tab.format() {} else {
+                    error!("Tab had invalid file format {}", tab.format().to_string());
                 }
 
-                let out = format.encode(&tab.value);
-                std::thread::Builder::new().stack_size(50_331_648 /*48MiB*/).spawn(move || drop(tab)).expect("Failed to spawn thread");
+                let out = format.encode(tab.value());
+                drop_on_separate_thread(tab);
 
                 let name = path.file_stem().expect("File must have stem").to_string_lossy().into_owned() + "." + &extension;
 
@@ -308,6 +313,6 @@ Options:
   --format, -f        Specifies the format to be reformatted to; either `nbt`, `snbt`, `dat/dat_old/gzip`, `zlib`, 'lnbt' (little endian nbt), or 'lhnbt' (little endian nbt with header).
   --out-dir, -d       Specifies the output directory. [default: ./]
   --out-ext, -e       Specifies the output file extension (if not specified, it will infer from --format)"#);
-    
+
     std::process::exit(0);
 }

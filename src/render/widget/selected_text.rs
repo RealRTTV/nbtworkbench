@@ -4,10 +4,12 @@ use std::ops::{Deref, DerefMut};
 use winit::keyboard::KeyCode;
 
 use crate::assets::{BASE_TEXT_Z, HEADER_SIZE, SELECTED_TEXT_SELECTION_Z, SELECTED_TEXT_Z, SELECTION_UV};
+use crate::elements::NbtElement;
 use crate::flags;
 use crate::render::{TextColor, VertexBufferBuilder};
 use crate::util::{CharExt, StrExt};
 use crate::widget::{Cachelike, SelectedTextKeyResult, SelectedTextKeyResult::{Down, ForceClose, ForceOpen, Keyfix, ShiftDown, ShiftUp, Up, Valuefix}, Text};
+use crate::workbench::sum_indices;
 
 #[derive(Clone, Debug)]
 #[allow(clippy::module_name_repetitions)] // yeah no, it's better like this
@@ -65,6 +67,7 @@ impl DerefMut for SelectedText {
 
 #[derive(Clone)]
 pub struct SelectedTextAdditional  {
+	// todo, change this to be Option<usize> and a cache that removes itself on every write
 	pub y: usize,
 	pub indices: Box<[usize]>,
 	pub value_color: TextColor,
@@ -301,6 +304,11 @@ impl SelectedText {
 		self.0.post_input()
 	}
 
+	pub fn recache_y(&mut self, root: &NbtElement) {
+		let line_number = sum_indices(self.indices.iter().copied(), root);
+		self.y = line_number * 16 + HEADER_SIZE;
+	}
+
 	#[inline]
 	pub fn render(&self, builder: &mut VertexBufferBuilder, left_margin: usize) {
 		let x = self.indices.len() * 16 + 32 + 4 + left_margin;
@@ -330,17 +338,4 @@ impl SelectedText {
 			let _ = write!(builder, "{valuefix}");
 		}
 	}
-}
-
-#[inline]
-#[must_use]
-pub fn get_cursor_idx(str: &str, mut x: isize) -> usize {
-	for (i, char) in str.char_indices() {
-		let width = char.width() as isize;
-		if x <= width / 2 {
-			return i
-		}
-		x -= width;
-	}
-	str.len()
 }

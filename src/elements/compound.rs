@@ -253,7 +253,7 @@ impl NbtCompound {
 				ctx.skip_line_numbers(1);
 				break 'head;
 			}
-			
+
 			let pos = ctx.pos();
 
 			ctx.line_number();
@@ -325,7 +325,7 @@ impl NbtCompound {
 					ctx.skip_line_numbers(value.true_height());
 					continue;
 				}
-				
+
 				ctx.draw_held_entry_bar(pos, builder, |x, y| pos == (x, y), |x| self.can_insert(x));
 
 				if remaining_scroll == 0 {
@@ -349,7 +349,7 @@ impl NbtCompound {
 					idx == self.len() - 1,
 					ctx,
 				);
-				
+
 				let pos = ctx.pos();
 				ctx.draw_held_entry_bar(pos, builder, |x, y| pos == (x, y + 8), |x| self.can_insert(x));
 			}
@@ -509,7 +509,7 @@ impl NbtCompound {
 
 			for (idx, (key, entry)) in self.children().enumerate() {
 				let pos = ctx.pos();
-				
+
 				if pos.y > builder.window_height() {
 					break;
 				}
@@ -923,7 +923,7 @@ impl CompoundMap {
 	}
 
 	pub fn shift_remove_idx(&mut self, idx: usize) -> Option<(CompactString, NbtElement)> {
-		if idx > self.entries.len() { return None }
+		if idx >= self.entries.len() { return None }
 		unsafe {
 			if let Ok(entry) = self.indices.find_entry(hash!(self.entries.get_unchecked(idx).key), |&found_idx| found_idx == idx) {
 				entry.remove();

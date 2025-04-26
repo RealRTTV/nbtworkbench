@@ -4,18 +4,21 @@
 	incomplete_features,
 )]
 #![feature(
+	duration_millis_float,
+	let_chains,
+	maybe_uninit_array_assume_init,
+	panic_update_hook,
+	str_from_raw_parts,
+	sync_unsafe_cell,
+	variant_count,
     array_chunks,
     box_patterns,
+    box_into_inner,
     core_intrinsics,
     iter_array_chunks,
     iter_next_chunk,
     optimize_attribute,
-	panic_update_hook,
     stmt_expr_attributes,
-	variant_count,
-	sync_unsafe_cell,
-	duration_millis_float,
-	let_chains
 )]
 #![windows_subsystem = "windows"]
 

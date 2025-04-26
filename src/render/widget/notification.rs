@@ -3,12 +3,14 @@ use std::time::Duration;
 use enum_map::Enum;
 
 use crate::assets::{NOTIFICATION_BAR_BACKDROP_UV, NOTIFICATION_BAR_UV, NOTIFICATION_TEXT_Z, NOTIFICATION_UV, NOTIFICATION_Z};
-use crate::render::{Vec2u, VertexBufferBuilder, TextColor};
-use crate::util::{smoothstep64, split_lines, StrExt, now};
+use crate::render::{TextColor, Vec2u, VertexBufferBuilder};
+use crate::util::{now, smoothstep64, split_lines, StrExt};
 
 #[derive(Copy, Clone, Enum)]
 pub enum NotificationKind {
     Scale,
+    Find,
+    Replace
 }
 
 pub struct Notification {
@@ -17,31 +19,37 @@ pub struct Notification {
     message_len: usize,
     text_color: u32,
     width: usize,
+    raw_message: String,
+    kind: NotificationKind,
 }
 
 impl Notification {
-    pub fn new(message: impl Into<String>, text_color: TextColor) -> Self {
+    pub fn new(message: impl Into<String>, text_color: TextColor, kind: NotificationKind) -> Self {
         let message = message.into();
-        let lines = split_lines::<256>(message);
+        let lines = split_lines::<256>(message.clone());
         Self {
             timestamp: None,
             width: lines.iter().map(|s| s.width()).max().unwrap_or(0),
             message_len: lines.iter().map(String::len).sum(),
             lines: lines.into_boxed_slice(),
             text_color: text_color.to_raw(),
+            kind,
+            raw_message: message,
         }
     }
 
-    pub fn update(&mut self, message: impl Into<String>, text_color: TextColor) {
-        let message = message.into();
+    pub fn update(&mut self, notification: Notification) {
+        let message = notification.raw_message;
+        let text_color = notification.text_color;
 
         let old_display_time = self.message_len * 60 + 3000;
         let old_width = self.width;
-        let lines = split_lines::<256>(message);
+        let lines = split_lines::<256>(message.clone());
         self.width = lines.iter().map(|s| s.width()).max().unwrap_or(0);
         self.message_len = lines.iter().map(String::len).sum();
         self.lines = lines.into_boxed_slice();
-        self.text_color = text_color.to_raw();
+        self.text_color = text_color;
+        self.raw_message = message;
         let now = now();
         if let Some(timestamp) = self.timestamp {
             let diff = (now - timestamp).as_millis();
@@ -179,6 +187,7 @@ impl Notification {
         ms > display_time
     }
 
+    #[must_use]
     fn get_bar_width(&mut self) -> usize {
         let now = now();
         let ms = (now.saturating_sub(*self.timestamp.get_or_insert(now)).as_millis() as usize).saturating_sub(250);
@@ -187,6 +196,7 @@ impl Notification {
         ((1.0 - (ms as f64 / display_time as f64)).clamp(0.0, 1.0) * width as f64).round() as usize
     }
 
+    #[must_use]
     fn get_inset(&mut self) -> usize {
         let now = now();
         let mut ms = now.saturating_sub(*self.timestamp.get_or_insert(now)).as_millis() as usize;
@@ -201,7 +211,13 @@ impl Notification {
         }
     }
     
+    #[must_use]
     pub fn height(&self) -> usize {
         6 + self.lines.len() * 16
+    }
+    
+    #[must_use]
+    pub fn kind(&self) -> NotificationKind {
+        self.kind
     }
 }

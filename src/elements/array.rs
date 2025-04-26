@@ -49,7 +49,6 @@ macro_rules! array {
 		}
 
 		impl $name {
-			#[inline]
 			#[must_use]
 			pub fn new() -> Self {
 				Self {
@@ -128,16 +127,12 @@ macro_rules! array {
 		}
 
 		impl $name {
-			#[inline(always)]
 			fn transmute(element: &NbtElement) -> $t { unsafe { element.$element_field.value } }
 
-			#[inline]
 			pub fn increment(&mut self, _: usize, _: usize) {}
 
-			#[inline]
 			pub fn decrement(&mut self, _: usize, _: usize) {}
 
-			#[inline]
 			#[must_use]
 			pub fn height(&self) -> usize {
 				if self.open {
@@ -147,32 +142,26 @@ macro_rules! array {
 				}
 			}
 
-			#[inline]
 			#[must_use]
 			pub fn true_height(&self) -> usize { self.len() + 1 }
 
-			#[inline]
 			pub fn toggle(&mut self) -> Option<()> {
 				self.open = !self.open && !self.is_empty();
 				Some(())
 			}
 
-			#[inline]
 			#[must_use]
 			pub const fn open(&self) -> bool { self.open }
 
-			#[inline]
 			#[must_use]
 			pub fn len(&self) -> usize { self.values.len() }
 
-			#[inline]
 			#[must_use]
 			pub fn is_empty(&self) -> bool { self.values.is_empty() }
 
 			/// # Errors
 			///
 			/// * Element type was not supported for `$name`
-			#[inline]
 			pub fn insert(&mut self, idx: usize, value: NbtElement) -> Result<Option<NbtElement>, NbtElement> {
 				if value.id() == $id {
 					// the time complexity is fine here
@@ -212,7 +201,7 @@ macro_rules! array {
 						ctx.skip_line_numbers(1);
 						break 'head;
 					}
-					
+
 					let pos = ctx.pos();
 
 					ctx.line_number();
@@ -433,20 +422,20 @@ macro_rules! array {
 	};
 }
 
-use std::fmt::{Display, Write};
 use std::alloc::{alloc, Layout};
-use std::slice::{Iter, IterMut};
-use std::intrinsics::likely;
 use std::fmt;
+use std::fmt::{Display, Write};
+use std::intrinsics::likely;
+use std::slice::{Iter, IterMut};
 
 use compact_str::{format_compact, CompactString, ToCompactString};
 
 use crate::assets::{ZOffset, BASE_Z, BYTE_ARRAY_UV, BYTE_UV, CONNECTION_UV, INT_ARRAY_UV, INT_UV, JUST_OVERLAPPING_BASE_TEXT_Z, LONG_ARRAY_UV, LONG_UV};
+use crate::elements::{id_to_string_name, NbtElement};
 use crate::render::{RenderContext, TextColor, VertexBufferBuilder};
 use crate::serialization::{Decoder, PrettyFormatter, UncheckedBufWriter};
-use crate::elements::{id_to_string_name, NbtElement};
-use crate::workbench::{DropFn};
-use crate::util::{StrExt};
+use crate::util::StrExt;
+use crate::workbench::DropFn;
 
 array!(byte, NbtByteArray, i8, 7, 1, 'B', BYTE_ARRAY_UV, BYTE_UV, parse_byte, array_try_into_byte);
 array!(int, NbtIntArray, i32, 11, 3, 'I', INT_ARRAY_UV, INT_UV, parse_int, array_try_into_int);

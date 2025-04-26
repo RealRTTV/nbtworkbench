@@ -66,7 +66,6 @@ impl<'a> Decoder<'a> for BigEndianDecoder<'a> {
     }
 
     #[optimize(speed)]
-    #[must_use]
     fn assert_len(&self, remaining_len: usize) -> Option<()> {
         // <= end because it will read *until* that byte
         if unsafe { likely((self.data.add(remaining_len) as usize) <= self.end as usize) } {
@@ -186,7 +185,6 @@ impl<'a> Decoder<'a> for LittleEndianDecoder<'a> {
     }
 
     #[optimize(speed)]
-    #[must_use]
     fn assert_len(&self, remaining_len: usize) -> Option<()> {
         // <= end because it will read *until* that byte
         if unsafe { likely((self.data.add(remaining_len) as usize) <= self.end as usize) } {

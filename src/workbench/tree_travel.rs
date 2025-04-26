@@ -1,10 +1,12 @@
+use std::ffi::OsStr;
 use std::iter::Peekable;
-
+use std::path::PathBuf;
 use compact_str::{CompactString, ToCompactString};
-use anyhow::{anyhow, Context};
 
 use crate::elements::{NbtByteArray, NbtElement, NbtElementAndKey, NbtIntArray, NbtLongArray, NbtPatternMut};
+use crate::render::WindowProperties;
 use crate::util::{encompasses, encompasses_or_equal};
+use crate::widget::SelectedText;
 use crate::workbench::{FileUpdateSubscription, MarkedLineSlice, MarkedLines, WorkbenchAction};
 
 /// Navigates a tree from the given route of an indices list, will cause UB on invalid lists. Typically used for operations which are saved and not direct clicking interaction.
@@ -88,6 +90,7 @@ impl<'a, I: Iterator<Item = usize> + ExactSizeIterator> Navigate<'a, I> {
 		Some(())
 	}
 
+	#[must_use]
 	#[allow(clippy::should_implement_trait)] // no
 	pub fn next(&mut self) -> Option<(Position, usize, Option<&str>, &mut NbtElement, usize)> {
 		let head = core::mem::replace(&mut self.at_head, false);
@@ -388,6 +391,7 @@ impl<'a> TraverseParents<'a> {
 		Some(())
 	}
 
+	#[must_use]
 	fn extras(&mut self) -> (usize, Option<CompactString>, bool) {
 		let Some(node) = self.node.as_ref() else { self.killed = true; return (0, None, true) };
 		if let Some(region) = node.as_region() {
@@ -452,6 +456,7 @@ impl<'a> TraverseParents<'a> {
 		panic!("Expected parent element to be complex")
 	}
 
+	#[must_use]
 	#[allow(clippy::should_implement_trait)] // no
 	pub fn next(
 		&mut self,
@@ -505,6 +510,7 @@ pub enum Position {
 	Last,
 }
 
+#[must_use]
 pub fn sum_indices<I: Iterator<Item = usize>>(indices: I, mut root: &NbtElement) -> usize {
 	let mut total = 0;
 	let mut indices = indices.peekable();
@@ -600,6 +606,69 @@ pub fn recache_along_indices(indices: &[usize], parent: &mut NbtElement) {
 	}
 }
 
+pub struct MutableIndices<'m2> {
+	is_empty: bool,
+	subscription: &'m2 mut Option<FileUpdateSubscription>,
+	selected_text: &'m2 mut Option<SelectedText>,
+}
+
+impl<'m1, 'm2: 'm1> MutableIndices<'m2> {
+	#[must_use]
+	pub fn new(subscription: &'m2 mut Option<FileUpdateSubscription>, selected_text: &'m2 mut Option<SelectedText>) -> Self {
+		Self {
+			is_empty: false,
+			subscription,
+			selected_text,
+		}
+	}
+
+	#[must_use]
+	pub fn empty() -> &'static mut Self {
+		static mut EMPTY_SUBSCRIPTION: Option<FileUpdateSubscription> = None;
+		static mut EMPTY_SELECTED_TEXT: Option<SelectedText> = None;
+		static mut EMPTY: MutableIndices<'static> = MutableIndices {
+			is_empty: true,
+			subscription: unsafe { &mut EMPTY_SUBSCRIPTION },
+			selected_text: unsafe { &mut EMPTY_SELECTED_TEXT },
+		};
+
+		unsafe { &mut EMPTY }
+	}
+
+	pub fn apply<F: FnMut(&mut Box<[usize]>) -> bool>(&mut self, mut f: F) {
+		if self.is_empty {
+			return;
+		}
+
+		if let Some(subscription) = self.subscription.as_mut() && f(&mut subscription.indices) {
+			self.subscription.take();
+		}
+
+		if let Some(selected_text) = self.selected_text.as_mut() && f(&mut selected_text.indices) {
+			self.subscription.take();
+		}
+	}
+
+	/// required to be here because it is the only mutable reference to `FileUpdateSubscription` available when *_element-ing
+	pub fn set_subscription(&mut self, subscription: Option<FileUpdateSubscription>) {
+		if self.is_empty {
+			return;
+		}
+
+		*self.subscription = subscription;
+	}
+
+	pub fn set_selected_text_indices(&mut self, indices: Box<[usize]>) {
+		if self.is_empty {
+			return;
+		}
+
+		if let Some(selected_text) = self.selected_text.as_mut() {
+			selected_text.indices = indices;
+		}
+	}
+}
+
 /// Properly adds an element under the specified indices, updating the following relevant data
 /// - Subscription Indices
 /// - Bookmarked Lines
@@ -623,7 +692,7 @@ pub fn recache_along_indices(indices: &[usize], parent: &mut NbtElement) {
 /// )?;
 /// tab.append_to_history(action);
 /// ```
-pub fn add_element(root: &mut NbtElement, key: Option<CompactString>, value: NbtElement, indices: Box<[usize]>, bookmarks: &mut MarkedLines, subscription: &mut Option<FileUpdateSubscription>) -> anyhow::Result<WorkbenchAction> {
+pub fn add_element<'m1, 'm2: 'm1>(root: &mut NbtElement, key: Option<CompactString>, value: NbtElement, indices: Box<[usize]>, bookmarks: &mut MarkedLines, mutable_indices: &'m1 mut MutableIndices<'m2>) -> Option<WorkbenchAction> {
 	let (&last, rem) = indices.split_last().expect("You can't remove the head!");
 
 	let (_, _, parent, mut line_number) = Navigate::new(rem.iter().copied(), root).last();
@@ -632,7 +701,7 @@ pub fn add_element(root: &mut NbtElement, key: Option<CompactString>, value: Nbt
 	let old_value = match unsafe { parent.insert(last, (key, value)) } {
 		Ok(Some(old)) => Some(old),
 		Ok(None) => None,
-		Err(_) => return Err(anyhow!("Invalid type to insert into parent")),
+		Err(_) => return None,
 	};
 	let (parent_height, parent_true_height) = (parent.height(), parent.true_height());
 	let (diff, true_diff) = (parent_height.wrapping_sub(old_parent_height), parent_true_height.wrapping_sub(old_parent_true_height));
@@ -646,11 +715,14 @@ pub fn add_element(root: &mut NbtElement, key: Option<CompactString>, value: Nbt
 	bookmarks.remove(line_number..line_number + old_true_height.unwrap_or(0));
 	bookmarks[line_number..].increment(diff, true_diff);
 
-	if let Some(subscription) = subscription && encompasses_or_equal(rem, &subscription.indices) {
-		if subscription.indices[rem.len()] <= last && !been_replaced {
-			subscription.indices[rem.len()] += 1;
+	mutable_indices.apply(|indices| {
+		if encompasses_or_equal(rem, &indices) {
+			if indices[rem.len()] <= last && !been_replaced {
+				indices[rem.len()] += 1;
+			}
 		}
-	}
+		false
+	});
 
 	recache_along_indices(rem, root);
 
@@ -660,7 +732,7 @@ pub fn add_element(root: &mut NbtElement, key: Option<CompactString>, value: Nbt
 		WorkbenchAction::Add { indices }
 	};
 
-	Ok(action)
+	Some(action)
 }
 
 /// Properly removes an element under the specified indices, updating the following relevant data
@@ -682,8 +754,8 @@ pub fn add_element(root: &mut NbtElement, key: Option<CompactString>, value: Nbt
 /// )?;
 /// tab.append_to_history(result.into_action());
 /// ```
-pub fn remove_element(root: &mut NbtElement, indices: Box<[usize]>, bookmarks: &mut MarkedLines, subscription: &mut Option<FileUpdateSubscription>) -> anyhow::Result<RemoveElementResult> {
-	let (&last, rem) = indices.split_last().context("Cannot remove the root")?;
+pub fn remove_element<'m1, 'm2: 'm1>(root: &mut NbtElement, indices: Box<[usize]>, bookmarks: &mut MarkedLines, mutable_indices: &'m1 mut MutableIndices<'m2>) -> Option<RemoveElementResult> {
+	let (&last, rem) = indices.split_last()?;
 	let (_, _, parent, mut line_number) = Navigate::new(rem.iter().copied(), root).last();
 	for n in 0..last {
 		line_number += parent[n].true_height();
@@ -691,7 +763,7 @@ pub fn remove_element(root: &mut NbtElement, indices: Box<[usize]>, bookmarks: &
 	line_number += 1;
 	let (old_parent_height, old_parent_true_height) = (parent.height(), parent.true_height());
 	// SAFETY: we have updated all the relevant data
-	let (key, value) = unsafe { parent.remove(last) }.context("Could not remove element")?;
+	let (key, value) = unsafe { parent.remove(last) }?;
 	let (height, true_height) = (value.height(), value.true_height());
 	let (parent_height, parent_true_height) = (parent.height(), parent.true_height());
 	let (diff, true_diff) = (parent_height.wrapping_sub(old_parent_height), parent_true_height.wrapping_sub(old_parent_true_height));
@@ -699,19 +771,20 @@ pub fn remove_element(root: &mut NbtElement, indices: Box<[usize]>, bookmarks: &
 	bookmarks.remove(line_number..line_number);
 	bookmarks[line_number..].decrement(diff, true_diff);
 
-	if let Some(inner_subscription) = subscription {
-		if encompasses_or_equal(&indices, &inner_subscription.indices) {
-			*subscription = None;
-		} else if encompasses(rem, &inner_subscription.indices) {
-			if inner_subscription.indices[rem.len()] >= last && !been_replaced {
-				inner_subscription.indices[rem.len()] -= 1;
+	mutable_indices.apply(|mutable_indices| {
+		if encompasses_or_equal(&indices, &mutable_indices) {
+			return true
+		} else if encompasses(rem, &mutable_indices) {
+			if mutable_indices[rem.len()] >= last && !been_replaced {
+				mutable_indices[rem.len()] -= 1;
 			}
 		}
-	}
+		false
+	});
 
 	recache_along_indices(rem, root);
 
-	Ok(RemoveElementResult {
+	Some(RemoveElementResult {
 		indices,
 		kv: (key, value),
 		replaces: been_replaced,
@@ -740,18 +813,18 @@ pub fn remove_element(root: &mut NbtElement, indices: Box<[usize]>, bookmarks: &
 /// )?;
 /// tab.append_to_history(result.into_action());
 /// ```
-pub fn replace_element(root: &mut NbtElement, value: NbtElementAndKey, indices: Box<[usize]>, bookmarks: &mut MarkedLines, subscription: &mut Option<FileUpdateSubscription>) -> anyhow::Result<RemoveElementResult> {
+pub fn replace_element<'m1, 'm2: 'm1>(root: &mut NbtElement, value: NbtElementAndKey, indices: Box<[usize]>, bookmarks: &mut MarkedLines, mutable_indices: &'m1 mut MutableIndices<'m2>) -> Option<RemoveElementResult> {
 	let Some((&last, rem)) = indices.split_last() else {
 		return if root.id() == value.1.id() {
 			bookmarks.remove(..);
 
-			Ok(RemoveElementResult {
+			Some(RemoveElementResult {
 				indices: Box::new([]),
 				kv: (None, core::mem::replace(root, value.1)),
 				replaces: true,
 			})
 		} else {
-			Err(anyhow!("Root element type cannot be changed"))
+			None
 		}
 	};
 
@@ -763,22 +836,18 @@ pub fn replace_element(root: &mut NbtElement, value: NbtElementAndKey, indices: 
 
 	let (old_parent_height, old_parent_true_height) = (parent.height(), parent.true_height());
 	// SAFETY: we have updated all the relevant data
-	let (old_key, old_value) = unsafe { parent.replace_key_value(last, value) }.context("Failed to replace element")?;
+	let (old_key, old_value) = unsafe { parent.replace_key_value(last, value) }?;
 	let (_old_height, old_true_height) = (old_value.height(), old_value.true_height());
 	let (parent_height, parent_true_height) = (parent.height(), parent.true_height());
 	let (diff, true_diff) = (parent_height.wrapping_sub(old_parent_height), parent_true_height.wrapping_sub(old_parent_true_height));
 	bookmarks.remove(line_number..line_number + old_true_height);
 	bookmarks[line_number..].increment(diff, true_diff);
 
-	if let Some(inner_subscription) = subscription {
-		if encompasses_or_equal(&indices, &inner_subscription.indices) {
-			*subscription = None;
-		}
-	}
+	mutable_indices.apply(|mutable_indices| encompasses_or_equal(&indices, &mutable_indices));
 
 	recache_along_indices(rem, root);
 
-	Ok(RemoveElementResult {
+	Some(RemoveElementResult {
 		indices,
 		kv: (old_key, old_value),
 		replaces: true,
@@ -791,7 +860,23 @@ pub fn replace_element(root: &mut NbtElement, value: NbtElementAndKey, indices: 
 /// - Heights and True Heights
 /// - Workbench Actions
 /// - Horizontal Scroll
-pub fn swap_elements(root: &mut NbtElement, parent_indices: Box<[usize]>, a: usize, b: usize, bookmarks: &mut MarkedLines, subscription: &mut Option<FileUpdateSubscription>) -> anyhow::Result<SwapElementResult> {
+///
+/// # Examples
+/// ```rust
+/// let workbench = ...;
+/// let tab = tab_mut!(workbench);
+/// let action = swap_element(
+///     &mut tab.value,
+///     None,
+///     Box::new([]),
+///     0,
+///     1,
+///     &mut tab.bookmarks,
+///     &mut self.subscription
+/// ).into_action();
+/// tab.append_to_history(action);
+/// ```
+pub fn same_depth_swap_element<'m1, 'm2: 'm1>(root: &mut NbtElement, parent_indices: Box<[usize]>, a: usize, b: usize, bookmarks: &mut MarkedLines, mutable_indices: &'m1 mut MutableIndices<'m2>) -> SwapElementResult {
 	let (a, b) = if a <= b { (a, b) } else { (b, a) };
 	let parent_y = sum_indices(parent_indices.iter().copied(), root);
 	let (_, _, parent, parent_line_number) = Navigate::new(parent_indices.iter().copied(), root).last();
@@ -831,24 +916,118 @@ pub fn swap_elements(root: &mut NbtElement, parent_indices: Box<[usize]>, a: usi
 	bookmarks.add_bookmarks(a_bookmarks);
 	bookmarks.add_bookmarks(b_bookmarks);
 
-	if let Some(subscription_inner) = subscription && encompasses(&parent_indices, &subscription_inner.indices) {
-		let sibling = &mut subscription_inner.indices[parent_indices.len()];
-		if *sibling == a {
-			*sibling = b;
-		} else if *sibling == b {
-			*sibling = a;
+	mutable_indices.apply(|indices| {
+		if encompasses(&parent_indices, &indices) {
+			let sibling = &mut indices[parent_indices.len()];
+			if *sibling == a {
+				*sibling = b;
+			} else if *sibling == b {
+				*sibling = a;
+			}
 		}
-	}
+		false
+	});
 
 	parent.swap(a, b);
 
 	recache_along_indices(&parent_indices, root);
 
-	Ok(SwapElementResult {
+	SwapElementResult {
 		parent: parent_indices,
 		a,
 		b,
-	})
+	}
+}
+
+/// Properly renames an element under its specified indices, keeping these caches correct:
+/// - Subscription Indices
+/// - Bookmarked Lines
+/// - Heights and True Heights
+/// - Workbench Actions
+/// - Horizontal Scroll
+///
+/// # Examples
+/// ```rust
+/// let workbench = ...;
+/// let tab = tab_mut!(workbench);
+/// let action = rename_element(
+///     &mut tab.value,
+///     Box::new([]),
+///     Some("id".to_compact_string()),
+///     Some("minecraft:stone".to_compact_string()),
+///     &mut tab.path,
+///     &mut tab.name,
+///     window_properties,
+/// )?.into_action();
+/// tab.append_to_history(action);
+/// ```
+pub fn rename_element(root: &mut NbtElement, indices: Box<[usize]>, key: Option<CompactString>, value: Option<CompactString>, path: &mut Option<PathBuf>, name: &mut Box<str>, window_properties: &mut WindowProperties) -> Option<RenameElementResult> {
+	if key.is_none() && value.is_none() {
+		return None;
+	}
+
+	if let Some((&last, rem)) = indices.split_last() {
+		let element = Navigate::new(rem.iter().copied(), root).last().2;
+		let old_key = if let Some(key) = key {
+			if let Some(compound) = element.as_compound_mut() {
+				Some(compound.entries.update_key(last, key.clone()).unwrap_or(key))
+			} else if let Some(chunk) = element.as_chunk_mut() {
+				Some(chunk.entries.update_key(last, key.clone()).unwrap_or(key))
+			} else {
+				None
+			}
+		} else {
+			None
+		};
+
+		let old_value = if let Some(value) = value {
+			// no drops dw, well except for the value, but that's a simple thing dw
+			let child = element
+				.get_mut(last)
+				.expect("Last index was valid");
+			let (previous, success) = child
+				.set_value(value)
+				.expect("Type of indices tail can accept value writes");
+			if !success || previous == child.value().0 { return None; }
+			Some(previous)
+		} else {
+			None
+		};
+
+		Some(RenameElementResult {
+			indices,
+			key: old_key,
+			value: old_value,
+		})
+	} else if let Some(key) = key && value.is_none() {
+		if path.as_ref().map(|path| path.as_os_str().to_string_lossy()).as_deref().unwrap_or(&name) == key {
+			return None;
+		}
+		let buf = PathBuf::from(key);
+		if let Some(new_name) = buf
+			.file_name()
+			.and_then(OsStr::to_str)
+			.map(ToOwned::to_owned)
+		{
+			window_properties.window_title(&format!("{new_name} - NBT Workbench"));
+			let old_name = core::mem::replace(name, new_name.into_boxed_str());
+			Some(RenameElementResult {
+				indices: Box::new([]),
+				key: None,
+				value: Some(
+					path.replace(buf)
+						.as_deref()
+						.and_then(|path| path.to_str())
+						.map(|str| str.to_compact_string())
+						.unwrap_or_else(|| old_name.to_compact_string()),
+				),
+			})
+		} else {
+			None
+		}
+	} else {
+		None
+	}
 }
 
 #[derive(Clone)]
@@ -859,10 +1038,12 @@ pub struct RemoveElementResult {
 }
 
 impl RemoveElementResult {
+	#[must_use]
 	pub fn into_raw(self) -> (Box<[usize]>, NbtElementAndKey, bool) {
 		(self.indices, self.kv, self.replaces)
 	}
 
+	#[must_use]
 	pub fn into_action(self) -> WorkbenchAction {
 		if self.replaces {
 			WorkbenchAction::Replace {
@@ -886,17 +1067,43 @@ pub struct SwapElementResult {
 }
 
 impl SwapElementResult {
+	#[must_use]
 	pub fn as_raw(&self) -> (&[usize], usize, usize) { (&self.parent, self.a, self.b) }
-	
+
+	#[must_use]
 	pub fn into_raw(self) -> (Box<[usize]>, usize, usize) {
 		(self.parent, self.a, self.b)
 	}
 
+	#[must_use]
 	pub fn into_action(self) -> WorkbenchAction {
 		WorkbenchAction::Swap {
 			parent: self.parent,
 			a: self.a,
 			b: self.b,
+		}
+	}
+}
+
+#[derive(Clone)]
+pub struct RenameElementResult {
+	indices: Box<[usize]>,
+	key: Option<CompactString>,
+	value: Option<CompactString>
+}
+
+impl RenameElementResult {
+	#[must_use]
+	pub fn into_raw(self) -> (Box<[usize]>, Option<CompactString>, Option<CompactString>) {
+		(self.indices, self.key, self.value)
+	}
+
+	#[must_use]
+	pub fn into_action(self) -> WorkbenchAction {
+		WorkbenchAction::Rename {
+			indices: self.indices,
+			key: self.key,
+			value: self.value,
 		}
 	}
 }

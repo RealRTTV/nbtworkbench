@@ -7,41 +7,40 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{anyhow, Context, Result};
-use compact_str::{CompactString, ToCompactString};
 use flate2::Compression;
 use uuid::Uuid;
 use zune_inflate::DeflateDecoder;
 
+use super::{rename_element, HeldEntry, MarkedLines, WorkbenchAction};
 use crate::assets::{ZOffset, BASE_Z, BYTE_ARRAY_GHOST_UV, BYTE_ARRAY_UV, BYTE_GRAYSCALE_UV, BYTE_UV, CHUNK_GHOST_UV, CHUNK_UV, COMPOUND_GHOST_UV, COMPOUND_ROOT_UV, COMPOUND_UV, DIM_LIGHTBULB_UV, DISABLED_REFRESH_UV, DOUBLE_GRAYSCALE_UV, DOUBLE_UV, ENABLED_FREEHAND_MODE_UV, FLOAT_GRAYSCALE_UV, FLOAT_UV, FREEHAND_MODE_UV, GZIP_FILE_TYPE_UV, HEADER_SIZE, HELD_SCROLLBAR_UV, HOVERED_WIDGET_UV, INT_ARRAY_GHOST_UV, INT_ARRAY_UV, INT_GRAYSCALE_UV, INT_UV, JUST_OVERLAPPING_BASE_Z, LIGHTBULB_UV, LINE_NUMBER_SEPARATOR_UV, LIST_GHOST_UV, LIST_UV, LITTLE_ENDIAN_HEADER_NBT_FILE_TYPE_UV, LITTLE_ENDIAN_NBT_FILE_TYPE_UV, LONG_ARRAY_GHOST_UV, LONG_ARRAY_UV, LONG_GRAYSCALE_UV, LONG_UV, MCA_FILE_TYPE_UV, NBT_FILE_TYPE_UV, REFRESH_UV, REGION_UV, SCROLLBAR_Z, SELECTED_WIDGET_UV, SHORT_GRAYSCALE_UV, SHORT_UV, SNBT_FILE_TYPE_UV, STEAL_ANIMATION_OVERLAY_UV, STRING_GHOST_UV, STRING_UV, UNHELD_SCROLLBAR_UV, UNKNOWN_NBT_GHOST_UV, UNKNOWN_NBT_UV, UNSELECTED_WIDGET_UV, ZLIB_FILE_TYPE_UV};
 use crate::elements::{NbtCompound, NbtElement, NbtList, NbtRegion};
 use crate::render::{RenderContext, TextColor, Vec2u, VertexBufferBuilder, WindowProperties};
+use crate::util::{drop_on_separate_thread, now, LinkedQueue, StrExt};
 use crate::widget::{get_cursor_left_jump_idx, get_cursor_right_jump_idx, SelectedText, SelectedTextAdditional, Text, TEXT_DOUBLE_CLICK_INTERVAL};
-use crate::util::{LinkedQueue, StrExt, now};
-use super::{HeldEntry, MarkedLines, Navigate, WorkbenchAction};
 
 pub struct Tab {
-	pub value: Box<NbtElement>,
-	pub name: Box<str>,
-	pub path: Option<PathBuf>,
-	pub format: FileFormat,
-	pub undos: LinkedQueue<WorkbenchAction>,
-	pub redos: LinkedQueue<WorkbenchAction>,
-	pub unsaved_changes: bool,
-	pub scroll: usize,
-	pub horizontal_scroll: usize,
-	pub window_height: usize,
-	pub window_width: usize,
-	pub bookmarks: MarkedLines,
-	pub uuid: Uuid,
-	pub freehand_mode: bool,
-	pub selected_text: Option<SelectedText>,
-	pub last_close_attempt: Duration,
-	pub last_selected_text_interaction: (usize, usize, Duration),
-	pub last_interaction: Duration,
-	pub last_double_click_interaction: (usize, Duration),
-	pub held_entry: HeldEntry,
+	pub(in crate::workbench) value: Box<NbtElement>,
+	pub(in crate::workbench) name: Box<str>,
+	pub(in crate::workbench) path: Option<PathBuf>,
+	pub(in crate::workbench) format: FileFormat,
+	pub(in crate::workbench) undos: LinkedQueue<WorkbenchAction>,
+	pub(in crate::workbench) redos: LinkedQueue<WorkbenchAction>,
+	pub(in crate::workbench) unsaved_changes: bool,
+	pub(in crate::workbench) scroll: usize,
+	pub(in crate::workbench) horizontal_scroll: usize,
+	pub(in crate::workbench) window_height: usize,
+	pub(in crate::workbench) window_width: usize,
+	pub(in crate::workbench) bookmarks: MarkedLines,
+	pub(in crate::workbench) uuid: Uuid,
+	pub(in crate::workbench) freehand_mode: bool,
+	pub(in crate::workbench) selected_text: Option<SelectedText>,
+	pub(in crate::workbench) last_close_attempt: Duration,
+	pub(in crate::workbench) last_selected_text_interaction: (usize, usize, Duration),
+	pub(in crate::workbench) last_interaction: Duration,
+	pub(in crate::workbench) last_double_click_interaction: (usize, Duration),
+	pub(in crate::workbench) held_entry: HeldEntry,
 	// this took me two days
-	pub from_indices_arc: Option<Arc<SyncUnsafeCell<Box<[usize]>>>>,
+	pub(in crate::workbench) from_indices_arc: Option<Arc<SyncUnsafeCell<Box<[usize]>>>>,
 }
 
 impl Tab {
@@ -54,6 +53,7 @@ impl Tab {
 		("Little Endian NBT File (With Header)", &["dat"]),
 	];
 	pub const AUTOSAVE_INTERVAL: Duration = Duration::from_secs(30);
+	pub const TAB_CLOSE_DOUBLE_CLICK_INTERVAL: Duration = Duration::from_millis(2_000);
 	pub const AUTOSAVE_MAXIMUM_LINES: usize = 1_000_000;
 
 	pub fn new(nbt: NbtElement, path: &Path, format: FileFormat, window_height: usize, window_width: usize) -> Result<Self> {
@@ -261,8 +261,8 @@ impl Tab {
 				(LIST_UV, LIST_GHOST_UV, "List (-)"),
 				(COMPOUND_UV, COMPOUND_GHOST_UV, "Compound (=)"),
 			]
-			.into_iter()
-			.enumerate()
+				.into_iter()
+				.enumerate()
 			{
 				let uv = if mx == Some(idx * 16) && !skip_tooltips {
 					builder.draw_tooltip(&[name], (idx * 16 + 16 + 16 + 4, 26 + 16), false);
@@ -343,6 +343,21 @@ impl Tab {
 	}
 
 	#[must_use]
+	pub fn value(&self) -> &NbtElement {
+		&self.value
+	}
+
+	#[must_use]
+	pub fn value_mut(&mut self) -> &mut NbtElement {
+		&mut self.value
+	}
+
+	#[must_use]
+	pub fn format(&self) -> FileFormat {
+		self.format
+	}
+
+	#[must_use]
 	pub fn scroll(&self) -> usize {
 		let height = self.value.height() * 16 + 32 + 15;
 		let scroll = self.scroll;
@@ -369,16 +384,20 @@ impl Tab {
 		scroll.min(max)
 	}
 
-	#[inline]
 	pub fn refresh_scrolls(&mut self) {
 		self.scroll = self.scroll();
 		self.horizontal_scroll = self.horizontal_scroll();
 	}
 
+	pub fn update_window_dimensions(&mut self, window_width: usize, window_height: usize) {
+		self.window_width = window_width;
+		self.window_height = window_height;
+		self.refresh_scrolls();
+	}
+
 	#[must_use]
 	pub fn left_margin(&self) -> usize { ((self.value.true_height() + self.held_entry.element().map_or(0, NbtElement::true_height)).ilog10() as usize + 1) * 8 + 4 + 8 }
 
-	#[inline]
 	pub fn set_scroll(&mut self, scroll: f32) {
 		#[cfg(target_os = "macos")]
 		const SCROLL_MULTIPLIER: f32 = 4.0;
@@ -395,8 +414,7 @@ impl Tab {
 		self.scroll = self.scroll();
 	}
 
-	#[inline]
-	pub fn set_horizontal_scroll(&mut self, scroll: f32,) {
+	pub fn set_horizontal_scroll(&mut self, scroll: f32) {
 		#[cfg(target_os = "macos")]
 		const SCROLL_MULTIPLIER: f32 = 4.0;
 		#[cfg(not(target_os = "macos"))]
@@ -412,117 +430,25 @@ impl Tab {
 		self.horizontal_scroll = self.horizontal_scroll();
 	}
 
-	#[inline]
 	#[must_use]
 	#[allow(clippy::too_many_lines)]
 	pub fn write_selected_text(&mut self, on_invalid_format: bool, window_properties: &mut WindowProperties, close_selected_text: bool) -> bool {
 		if let Some(SelectedText(Text { value, editable: true, additional: SelectedTextAdditional { indices, prefix, suffix, .. }, .. })) = self.selected_text.clone() {
-			if let Some((&last, rem)) = indices.split_last() {
-				let value = CompactString::from(value);
-				let key = prefix.0.is_empty() && !suffix.0.is_empty();
-				let (key, value) = {
-					let element = Navigate::new(rem.iter().copied(), &mut self.value).last().2;
-					if key {
-						if let Some(compound) = element.as_compound_mut() {
-							let idx = compound.entries.idx_of(&value);
-							if let Some(idx) = idx {
-								return if idx == last {
-									if close_selected_text {
-										self.selected_text = None;
-									}
-									true
-								} else {
-									on_invalid_format
-								};
-							}
-							(
-								Some(compound.entries.update_key(last, value.clone()).unwrap_or(value)),
-								None,
-							)
-						} else if let Some(chunk) = element.as_chunk_mut() {
-							let idx = chunk.entries.idx_of(&value);
-							if let Some(idx) = idx {
-								return if idx == last {
-									if close_selected_text {
-										self.selected_text = None;
-									}
-									true
-								} else {
-									on_invalid_format
-								};
-							}
-							(
-								Some(chunk.entries.update_key(last, value.clone()).unwrap_or(value)),
-								None,
-							)
-						} else {
-							panic!("Expected key-value indices chain tail to be of type compound")
-						}
-					} else {
-						// no drops dw, well except for the value, but that's a simple thing dw
-						let child = element
-							.get_mut(last)
-							.expect("Last index was valid");
-						let (previous, success) = child
-							.set_value(value)
-							.expect("Type of indices tail can accept value writes");
-						if !success { return on_invalid_format }
-						if previous == child.value().0 {
-							if close_selected_text {
-								self.selected_text = None;
-							}
-							return true
-						}
-						(None, Some(previous))
-					}
-				};
-
-				self.append_to_history(WorkbenchAction::Rename {
-					indices,
-					key,
-					value,
-				});
+			let key = prefix.0.is_empty() && !suffix.0.is_empty();
+			let (key, value) = if key { (Some(value.into()), None) } else { (None, Some(value.into())) };
+			return if let Some(result) = rename_element(&mut self.value, indices, key, value, &mut self.path, &mut self.name, window_properties) {
 				if close_selected_text {
 					self.selected_text = None;
 				}
+				self.append_to_history(result.into_action());
+				true
 			} else {
-				if self.path.as_ref().map(|path| path.as_os_str().to_string_lossy()).as_deref().unwrap_or(&self.name) == value {
-					return true;
-				}
-				let buf = PathBuf::from(value);
-				return if let Some(name) = buf
-					.file_name()
-					.and_then(OsStr::to_str)
-					.map(ToOwned::to_owned)
-				{
-					window_properties.window_title(&format!("{name} - NBT Workbench"));
-					let old_name = core::mem::replace(&mut self.name, name.into_boxed_str());
-					let action = WorkbenchAction::Rename {
-						indices: Box::new([]),
-						key: None,
-						value: Some(
-							self.path
-								.replace(buf)
-								.as_deref()
-								.and_then(|path| path.to_str())
-								.map(|str| str.to_compact_string())
-								.unwrap_or_else(|| old_name.to_compact_string()),
-						),
-					};
-					self.append_to_history(action);
-					if close_selected_text {
-						self.selected_text = None;
-					}
-					true
-				} else {
-					false
-				};
+				on_invalid_format
 			}
 		}
 		true
 	}
 
-	#[inline]
 	pub fn parse_raw(path: &Path, buf: Vec<u8>) -> Result<(NbtElement, FileFormat)> {
 		Ok(if let Some("mca" | "mcr") = path.extension().and_then(OsStr::to_str) {
 			(
@@ -574,7 +500,7 @@ impl Tab {
 	pub fn refresh(&mut self) -> Result<()> {
 		let Some(path) = self.path.as_deref() else { return Ok(()) };
 
-		if self.unsaved_changes && (now() - core::mem::replace(&mut self.last_close_attempt, now())) > TAB_CLOSE_DOUBLE_CLICK_INTERVAL {
+		if self.unsaved_changes && (now() - core::mem::replace(&mut self.last_close_attempt, now())) > Self::TAB_CLOSE_DOUBLE_CLICK_INTERVAL {
 			return Ok(());
 		}
 
@@ -589,7 +515,7 @@ impl Tab {
 		self.selected_text = None;
 		self.last_close_attempt = Duration::ZERO;
 		let old = (core::mem::replace(&mut self.value, Box::new(value)), core::mem::replace(&mut self.undos, LinkedQueue::new()), core::mem::replace(&mut self.redos, LinkedQueue::new()));
-		std::thread::Builder::new().stack_size(50_331_648 /*48MiB*/).spawn(move || drop(old)).expect("Failed to spawn thread");
+		drop_on_separate_thread(old);
 
 		Ok(())
 	}
@@ -702,5 +628,3 @@ impl Display for FileFormat {
 		write!(f, "{}", self.into_str())
 	}
 }
-
-pub const TAB_CLOSE_DOUBLE_CLICK_INTERVAL: Duration = Duration::from_millis(2000);

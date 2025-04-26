@@ -39,11 +39,11 @@ pub fn read() -> bool {
     true
 }
 
+#[must_use]
 fn parse_lines(str: &str) -> FxHashMap<String, String> {
     str.lines().filter_map(|line| line.split_once('=')).map(|(a, b)| (a.to_owned(), b.to_owned())).collect::<FxHashMap<String, String>>()
 }
 
-#[inline]
 fn read0(map: &FxHashMap<String, String>) {
     if let Some(theme) = map.get("theme").and_then(|s| match s.as_str() { "dark" => Some(Theme::Dark), "light" => Some(Theme::Light), _ => None }) {
         set_theme(theme);
@@ -81,7 +81,6 @@ pub fn write() -> bool {
     local_storage.set_item("config", &value).is_ok()
 }
 
-#[inline]
 #[must_use]
 fn write0() -> String {
     use std::fmt::Write as _;
@@ -96,13 +95,11 @@ fn write0() -> String {
     builder
 }
 
-#[inline]
 #[must_use]
 pub fn get_theme() -> Theme {
     CONFIG.read().theme
 }
 
-#[inline]
 pub fn set_theme(theme: Theme) -> Theme {
     let old_theme = core::mem::replace(&mut CONFIG.write().theme, theme);
     write();
@@ -110,65 +107,55 @@ pub fn set_theme(theme: Theme) -> Theme {
 }
 
 
-#[inline]
 #[must_use]
 pub fn get_sort_algorithm() -> SortAlgorithm {
     CONFIG.read().sort_algorithm
 }
 
-#[inline]
 pub fn set_sort_algorithm(sort_algorithm: SortAlgorithm) -> SortAlgorithm {
     let old_sort_algorithm = core::mem::replace(&mut CONFIG.write().sort_algorithm, sort_algorithm);
     write();
     old_sort_algorithm
 }
 
-#[inline]
 #[must_use]
 pub fn get_search_mode() -> SearchMode {
     CONFIG.read().search_mode
 }
 
-#[inline]
 pub fn set_search_mode(search_mode: SearchMode) -> SearchMode {
     let old_search_mode = core::mem::replace(&mut CONFIG.write().search_mode, search_mode);
     write();
     old_search_mode
 }
 
-#[inline]
 #[must_use]
 pub fn get_search_flags() -> SearchFlags {
     CONFIG.read().search_flags
 }
 
-#[inline]
 pub fn set_search_flags(search_flags: SearchFlags) -> SearchFlags {
     let old_search_flags = core::mem::replace(&mut CONFIG.write().search_flags, search_flags);
     write();
     old_search_flags
 }
 
-#[inline]
 #[must_use]
 pub fn get_search_exact_match() -> bool {
     CONFIG.read().search_exact_match
 }
 
-#[inline]
 pub fn set_search_exact_match(search_exact_match: bool) -> bool {
     let old_search_exact_match = core::mem::replace(&mut CONFIG.write().search_exact_match, search_exact_match);
     write();
     old_search_exact_match
 }
 
-#[inline]
 #[must_use]
 pub fn get_scale() -> Option<f32> {
     CONFIG.read().scale
 }
 
-#[inline]
 pub fn set_scale(scale: Option<f32>) -> Option<f32> {
     let old_scale = core::mem::replace(&mut CONFIG.write().scale, scale);
     write();

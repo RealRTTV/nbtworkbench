@@ -1,12 +1,12 @@
-use std::mem::ManuallyDrop;
 use lazy_static::lazy_static;
+use std::mem::ManuallyDrop;
 use winit::window::Theme;
 use zune_png::zune_core::options::DecoderOptions;
 
 pub use ZOffset::*;
 
-use crate::util::now;
 use crate::render::Vec2u;
+use crate::util::now;
 
 pub const HEADER_SIZE: usize = 48;
 
@@ -172,8 +172,10 @@ pub enum ZOffset {
     ACTION_WHEEL_Z = 190,
     SCROLLBAR_BOOKMARK_Z = 199,
     SCROLLBAR_Z = 200,
-    HELD_ENTRY_Z = 210,
-    HELD_ENTRY_TEXT_Z = 211,
+	REPLACE_BOX_Z = 210,
+	REPLACE_BOX_SELECTION_Z = 211,
+    HELD_ENTRY_Z = 220,
+    HELD_ENTRY_TEXT_Z = 221,
     NOTIFICATION_Z = 240,
     NOTIFICATION_TEXT_Z = 241,
 	DEBUG_TEXT_Z = 251,

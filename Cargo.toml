@@ -1,6 +1,6 @@
 [package]
 name = "nbtworkbench"
-version = "1.5.1"
+version = "1.6.0"
 edition = "2021"
 description = "A modern NBT Editor written in Rust designed for performance and efficiency."
 license-file = "LICENSE"

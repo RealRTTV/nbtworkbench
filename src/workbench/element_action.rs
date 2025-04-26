@@ -10,9 +10,9 @@ use uuid::Uuid;
 use crate::assets::{ACTION_WHEEL_Z, COPY_FORMATTED_UV, COPY_RAW_UV, INSERT_FROM_CLIPBOARD_UV, SORT_COMPOUND_BY_NAME_UV, SORT_COMPOUND_BY_TYPE_UV};
 use crate::elements::{NbtByte, NbtByteArray, NbtChunk, NbtCompound, NbtDouble, NbtElement, NbtFloat, NbtInt, NbtIntArray, NbtList, NbtLong, NbtLongArray, NbtShort, NbtString};
 use crate::render::{TextColor, VertexBufferBuilder};
-use crate::widget::Alert;
-use crate::workbench::{MarkedLines, WorkbenchAction, FileUpdateSubscription, add_element, FileUpdateSubscriptionType};
 use crate::util::{get_clipboard, now, set_clipboard, StrExt};
+use crate::widget::Alert;
+use crate::workbench::{add_element, FileUpdateSubscription, FileUpdateSubscriptionType, MarkedLines, MutableIndices, WorkbenchAction};
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::assets::{OPEN_ARRAY_IN_HEX_UV, OPEN_IN_TXT_UV};
@@ -114,7 +114,7 @@ impl ElementAction {
 	}
 
 	#[allow(clippy::too_many_lines)]
-	pub fn apply(self, key: Option<CompactString>, indices: Box<[usize]>, _tab_uuid: Uuid, true_line_number: usize, line_number: usize, element: &mut NbtElement, bookmarks: &mut MarkedLines, subscription: &mut Option<FileUpdateSubscription>, alerts: &mut Vec<Alert>) -> Option<WorkbenchAction> {
+	pub fn apply<'a>(self, key: Option<CompactString>, indices: Box<[usize]>, _tab_uuid: Uuid, true_line_number: usize, line_number: usize, element: &mut NbtElement, bookmarks: &mut MarkedLines, mutable_indices: &'a mut MutableIndices<'a>, alerts: &mut Vec<Alert>) -> Option<WorkbenchAction> {
 		#[must_use]
 		#[cfg(not(target_arch = "wasm32"))]
 		fn open_file(str: &str) -> bool {
@@ -246,13 +246,13 @@ impl ElementAction {
 						drop(file);
 						if watcher.watch(&path, RecursiveMode::NonRecursive).is_err() { break 'm; };
 						if !open_file(&path.display().to_string()) { break 'm; }
-						*subscription = Some(FileUpdateSubscription {
+						mutable_indices.set_subscription(Some(FileUpdateSubscription {
 							subscription_type,
 							indices: indices.clone(),
 							rx,
 							watcher,
 							tab_uuid: _tab_uuid,
-						});
+						}));
 					}
 				}
 				#[cfg(not(target_arch = "wasm32"))]
@@ -296,13 +296,13 @@ impl ElementAction {
 						drop(file);
 						if watcher.watch(&path, RecursiveMode::NonRecursive).is_err() { break 'm; };
 						if !open_file(&path.display().to_string()) { break 'm; }
-						*subscription = Some(FileUpdateSubscription {
+						mutable_indices.set_subscription(Some(FileUpdateSubscription {
 							subscription_type: FileUpdateSubscriptionType::Snbt,
 							indices: indices.clone(),
 							rx,
 							watcher,
 							tab_uuid: _tab_uuid,
-						});
+						}));
 					}
 				}
 				Self::SortCompoundByName => {
@@ -347,8 +347,8 @@ impl ElementAction {
 					};
 					let mut indices = indices.into_vec();
 					indices.push(0);
-					if let Err(e) = add_element(element, key, value, Box::new([0]), bookmarks, subscription) {
-						alerts.push(Alert::new("Error!", TextColor::Red, e.to_string()));
+					if let None = add_element(element, key, value, Box::new([0]), bookmarks, mutable_indices) {
+						alerts.push(Alert::new("Error!", TextColor::Red, "Failed to insert from clipboard"));
 						return None;
 					}
 

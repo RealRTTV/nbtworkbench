@@ -86,7 +86,6 @@ impl NbtList {
 		Ok((s, list))
 	}
 	#[allow(clippy::cast_ptr_alignment)]
-	#[inline]
 	pub fn from_bytes<'a, D: Decoder<'a>>(decoder: &mut D) -> Option<Self> {
 		unsafe {
 			decoder.assert_len(5)?;
@@ -124,7 +123,6 @@ impl NbtList {
 		}
 	}
 
-	#[inline]
 	pub fn to_be_bytes(&self, writer: &mut UncheckedBufWriter) {
 		let heterogeneous = self.is_heterogeneous();
 		writer.write(&[self.serialize_id()]);
@@ -140,7 +138,6 @@ impl NbtList {
 		}
 	}
 
-	#[inline]
 	pub fn to_le_bytes(&self, writer: &mut UncheckedBufWriter) {
 		let heterogeneous = self.is_heterogeneous();
 		writer.write(&[self.serialize_id()]);
@@ -158,7 +155,6 @@ impl NbtList {
 }
 
 impl NbtList {
-	#[inline]
 	pub fn new(elements: Vec<NbtElement>) -> Self {
 		let mut this = Self {
 			height: elements.iter().map(NbtElement::height).sum::<usize>() as u32 + 1,
@@ -172,19 +168,16 @@ impl NbtList {
 		this
 	}
 
-	#[inline]
 	pub fn increment(&mut self, amount: usize, true_amount: usize) {
 		self.height = self.height.wrapping_add(amount as u32);
 		self.true_height = self.true_height.wrapping_add(true_amount as u32);
 	}
 
-	#[inline]
 	pub fn decrement(&mut self, amount: usize, true_amount: usize) {
 		self.height = self.height.wrapping_sub(amount as u32);
 		self.true_height = self.true_height.wrapping_sub(true_amount as u32);
 	}
 
-	#[inline]
 	#[must_use]
 	pub const fn height(&self) -> usize {
 		if self.open {
@@ -194,15 +187,12 @@ impl NbtList {
 		}
 	}
 
-	#[inline]
 	#[must_use]
 	pub const fn true_height(&self) -> usize { self.true_height as usize }
-	
-	#[inline]
+
 	#[must_use]
 	pub const fn is_heterogeneous(&self) -> bool { !self.elements_bitset.is_power_of_two() }
 
-	#[inline]
 	#[must_use]
 	pub const fn id(&self) -> u8 {
 		if self.is_heterogeneous() {
@@ -211,8 +201,7 @@ impl NbtList {
 			self.elements_bitset.trailing_zeros() as u8
 		}
 	}
-	
-	#[inline]
+
 	#[must_use]
 	pub const fn serialize_id(&self) -> u8 {
 		if self.is_heterogeneous() {
@@ -222,7 +211,6 @@ impl NbtList {
 		}
 	}
 
-	#[inline]
 	pub fn toggle(&mut self) -> Option<()> {
 		self.open = !self.open && !self.is_empty();
 		if !self.open {
@@ -231,25 +219,20 @@ impl NbtList {
 		Some(())
 	}
 
-	#[inline]
 	#[must_use]
 	pub const fn open(&self) -> bool { self.open }
 
-	#[inline]
 	#[must_use]
 	pub fn len(&self) -> usize { self.elements.len() }
 
-	#[inline]
 	#[must_use]
 	pub fn is_empty(&self) -> bool { self.elements.is_empty() }
-	
-	#[inline]
+
 	#[must_use]
 	pub fn can_insert(&self, value: &NbtElement) -> bool {
 		value.id() != NbtChunk::ID
 	}
 
-	#[inline]
 	pub fn insert(&mut self, idx: usize, value: NbtElement) -> Result<Option<NbtElement>, NbtElement> {
 		if self.can_insert(&value) {
 			self.increment(value.height(), value.true_height());
@@ -263,7 +246,6 @@ impl NbtList {
 		}
 	}
 
-	#[inline]
 	#[must_use]
 	pub fn remove(&mut self, idx: usize) -> NbtElement {
 		let removed = self.elements.remove(idx);
@@ -272,7 +254,6 @@ impl NbtList {
 		removed
 	}
 
-	#[inline]
 	pub fn replace(&mut self, idx: usize, value: NbtElement) -> Option<NbtElement> {
 		if !self.can_insert(&value) || idx >= self.len() { return None; }
 		self.increment(value.height(), value.true_height());
@@ -281,15 +262,12 @@ impl NbtList {
 		Some(old)
 	}
 
-	#[inline]
 	#[must_use]
 	pub fn get(&self, idx: usize) -> Option<&NbtElement> { self.elements.get(idx) }
 
-	#[inline]
 	#[must_use]
 	pub fn get_mut(&mut self, idx: usize) -> Option<&mut NbtElement> { self.elements.get_mut(idx) }
 
-	#[inline]
 	#[must_use]
 	pub fn value(&self) -> CompactString {
 		let (single, multiple) = id_to_string_name(self.id());
@@ -302,6 +280,7 @@ impl NbtList {
 }
 
 impl Display for NbtList {
+	#[inline]
 	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
 		let heterogeneous = self.is_heterogeneous();
 		write!(f, "[")?;
@@ -351,7 +330,6 @@ impl NbtList {
 }
 
 impl NbtList {
-	#[inline]
 	pub fn render_root(&self, builder: &mut VertexBufferBuilder, str: &str, ctx: &mut RenderContext) {
 		let mut remaining_scroll = builder.scroll() / 16;
 
@@ -427,7 +405,6 @@ impl NbtList {
 		}
 	}
 
-	#[inline]
 	pub fn render(&self, builder: &mut VertexBufferBuilder, name: Option<&str>, remaining_scroll: &mut usize, tail: bool, ctx: &mut RenderContext) {
 		let mut y_before = ctx.pos().y;
 
@@ -437,7 +414,7 @@ impl NbtList {
 				ctx.skip_line_numbers(1);
 				break 'head;
 			}
-			
+
 			let pos = ctx.pos();
 
 			ctx.line_number();
@@ -519,10 +496,8 @@ impl NbtList {
 		}
 	}
 
-	#[inline]
 	pub fn children(&self) -> Iter<'_, NbtElement> { self.elements.iter() }
 
-	#[inline]
 	pub fn children_mut(&mut self) -> IterMut<'_, NbtElement> { self.elements.iter_mut() }
 
 	pub fn drop(&mut self, mut key: Option<CompactString>, mut element: NbtElement, y: &mut usize, depth: usize, target_depth: usize, mut line_number: usize, indices: &mut Vec<usize>) -> DropFn {
@@ -605,7 +580,6 @@ impl NbtList {
 		DropFn::Missed((key, element))
 	}
 
-	#[inline]
 	pub fn shut(&mut self) {
 		for element in self.children_mut() {
 			if element.open() {
@@ -616,7 +590,6 @@ impl NbtList {
 		self.height = self.len() as u32 + 1;
 	}
 
-	#[inline]
 	#[cfg(not(target_arch = "wasm32"))]
 	pub fn expand<'a, 'b>(&'b mut self, scope: &'a Scope<'a, 'b>) {
 		self.open = !self.is_empty();
@@ -626,7 +599,6 @@ impl NbtList {
 		}
 	}
 
-	#[inline]
 	#[cfg(target_arch = "wasm32")]
 	pub fn expand(&mut self) {
 		self.open = !self.is_empty();
@@ -636,10 +608,8 @@ impl NbtList {
 		}
 	}
 
-	#[inline]
 	pub fn render_icon(&self, pos: impl Into<(usize, usize)>, z: ZOffset, builder: &mut VertexBufferBuilder) { builder.draw_texture_z(pos, z, LIST_UV, (16, 16)); }
 
-	#[inline]
 	pub fn recache(&mut self) {
 		let mut height = 1;
 		let mut true_height = 1;
@@ -659,8 +629,7 @@ impl NbtList {
 		self.max_depth = max_depth as u32;
 		self.recache_elements_bitset();
 	}
-	
-	#[inline]
+
 	pub fn recache_elements_bitset(&mut self) {
 		let mut elements_bitset = 0_u16;
 		for element in self.children() {
@@ -669,7 +638,6 @@ impl NbtList {
 		self.elements_bitset = elements_bitset;
 	}
 
-	#[inline]
 	#[must_use]
 	pub const fn max_depth(&self) -> usize { self.max_depth as usize }
 }
