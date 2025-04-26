@@ -9,7 +9,7 @@ use crate::flags;
 use crate::render::{TextColor, VertexBufferBuilder};
 use crate::util::{CharExt, StrExt};
 use crate::widget::{Cachelike, SelectedTextKeyResult, SelectedTextKeyResult::{Down, ForceClose, ForceOpen, Keyfix, ShiftDown, ShiftUp, Up, Valuefix}, Text};
-use crate::workbench::sum_indices;
+use crate::tree::sum_indices;
 
 #[derive(Clone, Debug)]
 #[allow(clippy::module_name_repetitions)] // yeah no, it's better like this

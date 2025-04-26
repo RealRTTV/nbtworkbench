@@ -34,6 +34,7 @@ pub mod workbench;
 #[cfg(target_arch = "wasm32")]
 pub mod wasm;
 pub mod util;
+mod tree;
 
 pub use render::assets;
 pub use render::widget;

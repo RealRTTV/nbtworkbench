@@ -1,7 +1,8 @@
 use compact_str::CompactString;
 use crate::elements::NbtElement;
 use crate::util::encompasses_or_equal;
-use crate::workbench::{recache_along_indices, MarkedLines, MutableIndices, Navigate, WorkbenchAction};
+use crate::workbench::{MarkedLines, WorkbenchAction};
+use super::super::{recache_along_indices, MutableIndices, Navigate};
 
 /// Properly adds an element under the specified indices, updating the following relevant data
 /// - Mutable Indices

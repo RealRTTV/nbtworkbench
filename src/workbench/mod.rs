@@ -1,16 +1,12 @@
 mod tab;
 mod workbench_action;
 mod marked_line;
-mod tree_travel;
 mod element_action;
-pub mod actions;
 
 pub use element_action::*;
 pub use marked_line::*;
 pub use tab::*;
-pub use tree_travel::*;
 pub use workbench_action::*;
-use actions::*;
 
 use std::cell::SyncUnsafeCell;
 use std::fmt::{Display, Formatter, Write};
@@ -29,6 +25,8 @@ use crate::serialization::{BigEndianDecoder, Decoder, UncheckedBufWriter};
 use crate::util::{drop_on_separate_thread, encompasses_or_equal, get_clipboard, now, nth, set_clipboard, LinkedQueue, StrExt};
 use crate::widget::{get_cursor_idx, get_cursor_left_jump_idx, get_cursor_right_jump_idx, Alert, Notification, NotificationKind, ReplaceBox, ReplaceBoxKeyResult, SearchBox, SearchBoxKeyResult, SelectedText, SelectedTextAdditional, SelectedTextKeyResult, Text, SEARCH_BOX_END_X, SEARCH_BOX_START_X, TEXT_DOUBLE_CLICK_INTERVAL};
 use crate::{flags, get_interaction_information, hash, tab, tab_mut};
+use crate::tree::{replace_element, remove_element, add_element, swap_element_same_depth, MutableIndices, Traverse, TraverseParents, Navigate, recache_along_indices, sum_indices};
+
 use anyhow::{anyhow, Context, Result};
 use compact_str::{format_compact, CompactString, ToCompactString};
 use enum_map::EnumMap;
@@ -38,6 +36,7 @@ use winit::dpi::{PhysicalPosition, PhysicalSize};
 use winit::event::{ElementState, KeyEvent, MouseButton, MouseScrollDelta};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::Theme;
+use itertools::Position;
 
 #[derive(Debug)]
 pub enum InteractionInformation<'a> {
@@ -1321,7 +1320,7 @@ impl Workbench {
             if *last == 0 || parent.len().is_none() { return };
             *y -= 16;
             let mut mutable_indices = MutableIndices::new(&mut self.subscription, &mut tab.selected_text);
-            let result = same_depth_swap_element(&mut tab.value, rem.to_vec().into_boxed_slice(), *last, *last - 1, &mut tab.bookmarks, &mut mutable_indices);
+            let result = swap_element_same_depth(&mut tab.value, rem.to_vec().into_boxed_slice(), *last, *last - 1, &mut tab.bookmarks, &mut mutable_indices);
 
             let mut selected_text_indices = result.as_raw().0.to_vec();
             selected_text_indices.push(*last - 1);
@@ -1345,7 +1344,7 @@ impl Workbench {
             if parent.len().is_none_or(|len| *last + 1 >= len) { return };
             *y += 16;
             let mut mutable_indices = MutableIndices::new(&mut self.subscription, &mut tab.selected_text);
-            let result = same_depth_swap_element(&mut tab.value, rem.to_vec().into_boxed_slice(), *last, *last + 1, &mut tab.bookmarks, &mut mutable_indices);
+            let result = swap_element_same_depth(&mut tab.value, rem.to_vec().into_boxed_slice(), *last, *last + 1, &mut tab.bookmarks, &mut mutable_indices);
             let mut selected_text_indices = result.as_raw().0.to_vec();
             selected_text_indices.push(*last + 1);
             mutable_indices.set_selected_text_indices(selected_text_indices.into_boxed_slice());
@@ -2755,7 +2754,7 @@ impl Display for SortAlgorithm {
 
 pub struct FileUpdateSubscription {
     subscription_type: FileUpdateSubscriptionType,
-    indices: Box<[usize]>,
+    pub indices: Box<[usize]>,
     rx: std::sync::mpsc::Receiver<Vec<u8>>,
     watcher: notify::PollWatcher,
     tab_uuid: Uuid,
@@ -2771,4 +2770,10 @@ pub enum FileUpdateSubscriptionType {
     ShortList,
     IntList,
     LongList,
+}
+
+pub enum DropFn {
+    Dropped(usize, usize, Option<CompactString>, usize, Option<NbtElementAndKey>),
+    Missed(NbtElementAndKey),
+    InvalidType(NbtElementAndKey),
 }

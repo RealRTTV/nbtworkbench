@@ -12,8 +12,8 @@ use crate::render::{TextColor, Vec2u, VertexBufferBuilder, WindowProperties};
 use crate::render::widget::text::get_cursor_idx;
 use crate::util::{create_regex, now, StrExt};
 use crate::widget::{Cachelike, Notification, NotificationKind, ReplaceBoxKeyResult, SearchBox, SearchFlags, SearchMode, Text, SEARCH_BOX_END_X, SEARCH_BOX_START_X};
-use crate::workbench::{MarkedLines, MutableIndices, SortAlgorithm, WorkbenchAction};
-use crate::workbench::actions::{rename_element, replace_element, RenameElementResult, ReplaceElementResult};
+use crate::workbench::{MarkedLines, SortAlgorithm, WorkbenchAction};
+use crate::tree::{rename_element, replace_element, RenameElementResult, ReplaceElementResult, MutableIndices};
 
 pub struct ReplaceBox(Text<ReplaceBoxAdditional, ReplaceBoxCache>);
 

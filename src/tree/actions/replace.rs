@@ -1,8 +1,9 @@
 use crate::elements::{NbtElement, NbtElementAndKey};
-use crate::util::{encompasses, encompasses_or_equal};
-use crate::workbench::{recache_along_indices, MarkedLines, MutableIndices, Navigate, WorkbenchAction};
+use crate::util::encompasses_or_equal;
+use crate::workbench::{MarkedLines, WorkbenchAction};
+use super::{recache_along_indices, MutableIndices, Navigate};
 
-/// Properly removes an element under the specified indices, updating the following relevant data
+/// Properly replaces an element under the specified indices, updating the following relevant data
 /// - Mutable Indices
 /// - Bookmarked Lines
 /// - Heights and True Heights
@@ -13,59 +14,66 @@ use crate::workbench::{recache_along_indices, MarkedLines, MutableIndices, Navig
 /// ```rust
 /// let workbench = ...;
 /// let tab = tab_mut!(workbench);
-/// let result = remove_element(
+/// let result = replace_element(
 ///     &mut tab.value,
+///     NbtElement::from_str(
+///         r#"{"registry":"minecraft:item","value":"minecraft:stone"}"#
+///     ).unwrap(),
 ///     Box::new([0]),
 ///     &mut tab.bookmarks,
 ///     &mut workbench.subscription
 /// )?;
 /// tab.append_to_history(result.into_action());
 /// ```
-pub fn remove_element<'m1, 'm2: 'm1>(root: &mut NbtElement, indices: Box<[usize]>, bookmarks: &mut MarkedLines, mutable_indices: &'m1 mut MutableIndices<'m2>) -> Option<RemoveElementResult> {
-    let (&last, rem) = indices.split_last()?;
+pub fn replace_element<'m1, 'm2: 'm1>(root: &mut NbtElement, value: NbtElementAndKey, indices: Box<[usize]>, bookmarks: &mut MarkedLines, mutable_indices: &'m1 mut MutableIndices<'m2>) -> Option<ReplaceElementResult> {
+    let Some((&last, rem)) = indices.split_last() else {
+        return if root.id() == value.1.id() {
+            bookmarks.remove(..);
+
+            Some(ReplaceElementResult {
+                indices: Box::new([]),
+                kv: (None, core::mem::replace(root, value.1)),
+                replaces: true,
+            })
+        } else {
+            None
+        }
+    };
+
     let (_, _, parent, mut line_number) = Navigate::new(rem.iter().copied(), root).last();
     for n in 0..last {
         line_number += parent[n].true_height();
     }
     line_number += 1;
+
     let (old_parent_height, old_parent_true_height) = (parent.height(), parent.true_height());
     // SAFETY: we have updated all the relevant data
-    let (key, value) = unsafe { parent.remove(last) }?;
-    let (height, true_height) = (value.height(), value.true_height());
+    let (old_key, old_value) = unsafe { parent.replace_key_value(last, value) }?;
+    let (_old_height, old_true_height) = (old_value.height(), old_value.true_height());
     let (parent_height, parent_true_height) = (parent.height(), parent.true_height());
     let (diff, true_diff) = (parent_height.wrapping_sub(old_parent_height), parent_true_height.wrapping_sub(old_parent_true_height));
-    let been_replaced = !(height == diff && true_height == true_diff);
-    bookmarks.remove(line_number..line_number);
-    bookmarks[line_number..].decrement(diff, true_diff);
+    bookmarks.remove(line_number..line_number + old_true_height);
+    bookmarks[line_number..].increment(diff, true_diff);
 
-    mutable_indices.apply(|mutable_indices| {
-        if encompasses_or_equal(&indices, &mutable_indices) {
-            return true
-        } else if encompasses(rem, &mutable_indices) {
-            if mutable_indices[rem.len()] >= last && !been_replaced {
-                mutable_indices[rem.len()] -= 1;
-            }
-        }
-        false
-    });
+    mutable_indices.apply(|mutable_indices| encompasses_or_equal(&indices, &mutable_indices));
 
     recache_along_indices(rem, root);
 
-    Some(RemoveElementResult {
+    Some(ReplaceElementResult {
         indices,
-        kv: (key, value),
-        replaces: been_replaced,
+        kv: (old_key, old_value),
+        replaces: true,
     })
 }
 
 #[derive(Clone)]
-pub struct RemoveElementResult {
+pub struct ReplaceElementResult {
     indices: Box<[usize]>,
     kv: NbtElementAndKey,
     replaces: bool,
 }
 
-impl RemoveElementResult {
+impl ReplaceElementResult {
     #[must_use]
     pub fn into_raw(self) -> (Box<[usize]>, NbtElementAndKey, bool) {
         (self.indices, self.kv, self.replaces)

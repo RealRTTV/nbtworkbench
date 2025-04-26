@@ -12,8 +12,8 @@ use crate::elements::{NbtByte, NbtByteArray, NbtChunk, NbtCompound, NbtDouble, N
 use crate::render::{TextColor, VertexBufferBuilder};
 use crate::util::{get_clipboard, now, set_clipboard, StrExt};
 use crate::widget::Alert;
-use crate::workbench::{FileUpdateSubscription, FileUpdateSubscriptionType, MarkedLines, MutableIndices, WorkbenchAction};
-use crate::workbench::actions::add_element;
+use crate::workbench::{FileUpdateSubscription, FileUpdateSubscriptionType, MarkedLines, WorkbenchAction};
+use crate::tree::{add_element, MutableIndices};
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::assets::{OPEN_ARRAY_IN_HEX_UV, OPEN_IN_TXT_UV};

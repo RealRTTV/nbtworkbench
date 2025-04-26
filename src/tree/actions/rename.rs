@@ -3,7 +3,8 @@ use std::path::PathBuf;
 use compact_str::{CompactString, ToCompactString};
 use crate::elements::NbtElement;
 use crate::render::WindowProperties;
-use crate::workbench::{Navigate, WorkbenchAction};
+use crate::workbench::WorkbenchAction;
+use super::Navigate;
 
 /// Properly renames an element under its specified indices, keeping these caches correct:
 /// - Mutable Indices
@@ -103,6 +104,7 @@ pub struct RenameElementResult {
     value: Option<CompactString>
 }
 
+#[allow(dead_code)]
 impl RenameElementResult {
     #[must_use]
     pub fn into_raw(self) -> (Box<[usize]>, Option<CompactString>, Option<CompactString>) {

@@ -1,6 +1,7 @@
 use crate::elements::NbtElement;
 use crate::util::encompasses;
-use crate::workbench::{recache_along_indices, sum_indices, MarkedLineSlice, MarkedLines, MutableIndices, Navigate, WorkbenchAction};
+use crate::workbench::{MarkedLineSlice, MarkedLines, WorkbenchAction};
+use super::{recache_along_indices, sum_indices, MutableIndices, Navigate};
 
 /// Properly swaps two elements under their specified indices (requires them to be at the same depth), updating the following relevant data
 /// - Mutable Indices
@@ -24,7 +25,7 @@ use crate::workbench::{recache_along_indices, sum_indices, MarkedLineSlice, Mark
 /// ).into_action();
 /// tab.append_to_history(action);
 /// ```
-pub fn same_depth_swap_element<'m1, 'm2: 'm1>(root: &mut NbtElement, parent_indices: Box<[usize]>, a: usize, b: usize, bookmarks: &mut MarkedLines, mutable_indices: &'m1 mut MutableIndices<'m2>) -> SwapSameDepthElementResult {
+pub fn swap_element_same_depth<'m1, 'm2: 'm1>(root: &mut NbtElement, parent_indices: Box<[usize]>, a: usize, b: usize, bookmarks: &mut MarkedLines, mutable_indices: &'m1 mut MutableIndices<'m2>) -> SwapElementResultSameDepth {
     let (a, b) = if a <= b { (a, b) } else { (b, a) };
     let parent_y = sum_indices(parent_indices.iter().copied(), root);
     let (_, _, parent, parent_line_number) = Navigate::new(parent_indices.iter().copied(), root).last();
@@ -80,7 +81,7 @@ pub fn same_depth_swap_element<'m1, 'm2: 'm1>(root: &mut NbtElement, parent_indi
 
     recache_along_indices(&parent_indices, root);
 
-    SwapSameDepthElementResult {
+    SwapElementResultSameDepth {
         parent: parent_indices,
         a,
         b,
@@ -88,13 +89,14 @@ pub fn same_depth_swap_element<'m1, 'm2: 'm1>(root: &mut NbtElement, parent_indi
 }
 
 #[derive(Clone)]
-pub struct SwapSameDepthElementResult {
+pub struct SwapElementResultSameDepth {
     parent: Box<[usize]>,
     a: usize,
     b: usize,
 }
 
-impl SwapSameDepthElementResult {
+#[allow(dead_code)]
+impl SwapElementResultSameDepth {
     #[must_use]
     pub fn as_raw(&self) -> (&[usize], usize, usize) { (&self.parent, self.a, self.b) }
 

@@ -7,8 +7,8 @@ use std::sync::Arc;
 use crate::elements::{CompoundMap, Entry, NbtElement, NbtElementAndKey};
 use crate::hash;
 use crate::render::WindowProperties;
-use crate::workbench::actions::{add_element, remove_element, rename_element, replace_element, same_depth_swap_element};
-use crate::workbench::{sum_indices, HeldEntry, MarkedLines, MutableIndices, Navigate};
+use crate::tree::{add_element, remove_element, rename_element, replace_element, swap_element_same_depth, sum_indices, MutableIndices, Navigate};
+use crate::workbench::{HeldEntry, MarkedLines};
 
 #[derive(Debug)]
 pub enum WorkbenchAction {
@@ -84,7 +84,7 @@ impl WorkbenchAction {
 			Self::Add { indices } => remove_element(root, indices, bookmarks, mutable_indices).expect("Could remove element").into_action(),
 			Self::Replace { indices, value, } => replace_element(root, value, indices, bookmarks, mutable_indices).expect("Could not replace element").into_action(),
 			Self::Rename { indices, key, value } => rename_element(root, indices, key, value, path, name, window_properties).expect("Could not rename element").into_action(),
-			Self::Swap { parent, a, b, } => same_depth_swap_element(root, parent, a, b, bookmarks, mutable_indices).into_action(),
+			Self::Swap { parent, a, b, } => swap_element_same_depth(root, parent, a, b, bookmarks, mutable_indices).into_action(),
 			Self::ReorderCompound { indices: traversal_indices, reordering_indices } => {
 				let line_number = sum_indices(traversal_indices.iter().copied(), root);
 				let (_, _, element, true_line_number) = Navigate::new(traversal_indices.iter().copied(), root).last();
