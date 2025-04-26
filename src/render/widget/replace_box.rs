@@ -12,7 +12,8 @@ use crate::render::{TextColor, Vec2u, VertexBufferBuilder, WindowProperties};
 use crate::render::widget::text::get_cursor_idx;
 use crate::util::{create_regex, now, StrExt};
 use crate::widget::{Cachelike, Notification, NotificationKind, ReplaceBoxKeyResult, SearchBox, SearchFlags, SearchMode, Text, SEARCH_BOX_END_X, SEARCH_BOX_START_X};
-use crate::workbench::{rename_element, replace_element, MarkedLines, MutableIndices, RemoveElementResult, RenameElementResult, SortAlgorithm, WorkbenchAction};
+use crate::workbench::{MarkedLines, MutableIndices, SortAlgorithm, WorkbenchAction};
+use crate::workbench::actions::{rename_element, replace_element, RenameElementResult, ReplaceElementResult};
 
 pub struct ReplaceBox(Text<ReplaceBoxAdditional, ReplaceBoxCache>);
 
@@ -384,7 +385,7 @@ impl SearchReplacement {
                 (rename_element(root, indices.to_vec().into_boxed_slice(), key, value, &mut None, fake_name, &mut WindowProperties::Fake).map(RenameElementResult::into_action), false)
             },
             SearchReplacementInner::Snbt { replacement, .. } => {
-                (replace_element(root, replacement.clone(), indices.to_vec().into_boxed_slice(), bookmarks, mutable_indices).map(RemoveElementResult::into_action), true)
+                (replace_element(root, replacement.clone(), indices.to_vec().into_boxed_slice(), bookmarks, mutable_indices).map(ReplaceElementResult::into_action), true)
             },
         }
     }

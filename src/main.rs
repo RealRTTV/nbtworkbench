@@ -126,6 +126,8 @@ pub static mut WINDOW_PROPERTIES: render::WindowProperties = render::WindowPrope
 /// # Refactor
 /// * render trees using [`RenderLine`](RenderLine) struct/enum
 /// * rendering code is duplicated af
+/// * add [`Indices`](workbench::tree_travel::Indices)
+/// * refactor drop to return indices - and potentially use it for drop rendering code
 /// # Long-Term Goals
 /// * smart screen
 /// * [chunk](elements::chunk::NbtChunk) section rendering

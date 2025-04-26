@@ -7,7 +7,8 @@ use std::sync::Arc;
 use crate::elements::{CompoundMap, Entry, NbtElement, NbtElementAndKey};
 use crate::hash;
 use crate::render::WindowProperties;
-use crate::workbench::{add_element, remove_element, rename_element, replace_element, sum_indices, same_depth_swap_element, HeldEntry, MarkedLines, MutableIndices, Navigate};
+use crate::workbench::actions::{add_element, remove_element, rename_element, replace_element, same_depth_swap_element};
+use crate::workbench::{sum_indices, HeldEntry, MarkedLines, MutableIndices, Navigate};
 
 #[derive(Debug)]
 pub enum WorkbenchAction {

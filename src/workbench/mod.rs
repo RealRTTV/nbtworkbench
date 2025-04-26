@@ -3,12 +3,14 @@ mod workbench_action;
 mod marked_line;
 mod tree_travel;
 mod element_action;
+pub mod actions;
 
 pub use element_action::*;
 pub use marked_line::*;
 pub use tab::*;
 pub use tree_travel::*;
 pub use workbench_action::*;
+use actions::*;
 
 use std::cell::SyncUnsafeCell;
 use std::fmt::{Display, Formatter, Write};
