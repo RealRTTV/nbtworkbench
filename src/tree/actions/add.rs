@@ -22,7 +22,7 @@ use super::super::{recache_along_indices, MutableIndices, Navigate};
 ///     NbtElement::from_str(
 ///         r#"{"registry":"minecraft:item","value":"minecraft:stone"}"#
 ///     ).unwrap().1,
-///     Box::new([0]),
+///     Indices::from_slice(&[0]).to_owned(),
 ///     &mut tab.bookmarks,
 ///     &mut self.subscription
 /// )?;
@@ -45,13 +45,12 @@ pub fn add_element<'m1, 'm2: 'm1>(root: &mut NbtElement, key: Option<CompactStri
     bookmarks.remove(true_line_number..true_line_number + old_true_height.unwrap_or(0));
     bookmarks[true_line_number..].increment(diff, true_diff);
 
-    mutable_indices.apply(|indices| {
+    mutable_indices.apply(|indices, ci| {
         if parent_indices.encompasses_or_equal(indices) {
             if indices[parent_indices.len()] <= idx && !been_replaced {
                 indices[parent_indices.len()] += 1;
             }
         }
-        false
     });
 
     recache_along_indices(&parent_indices, root);

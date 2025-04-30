@@ -18,7 +18,7 @@ use super::{recache_along_indices, MutableIndices, Navigate};
 /// let tab = tab_mut!(workbench);
 /// let result = remove_element(
 ///     &mut tab.value,
-///     Box::new([0]),
+///     Indices::from_slice(&[0]).to_owned(),
 ///     &mut tab.bookmarks,
 ///     &mut workbench.subscription
 /// )?;
@@ -37,15 +37,14 @@ pub fn remove_element<'m1, 'm2: 'm1>(root: &mut NbtElement, indices: OwnedIndice
     bookmarks.remove(true_line_number..true_line_number);
     bookmarks[true_line_number..].decrement(diff, true_diff);
 
-    mutable_indices.apply(|mutable_indices| {
+    mutable_indices.apply(|mutable_indices, ci| {
         if indices.encompasses_or_equal(mutable_indices) {
-            return true
+            ci.remove();
         } else if parent_indices.encompasses(mutable_indices) {
             if mutable_indices[parent_indices.len()] >= idx && !been_replaced {
                 mutable_indices[parent_indices.len()] -= 1;
             }
         }
-        false
     });
 
     recache_along_indices(parent_indices, root);

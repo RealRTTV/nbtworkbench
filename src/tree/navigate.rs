@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 use std::iter::Peekable;
 use compact_str::{CompactString, ToCompactString};
 use crate::elements::{NbtElement, NbtPatternMut};
@@ -175,18 +177,18 @@ impl<'a> NavigationInformationMut<'a> {
     }
 }
 
-pub struct ParentNavigationInformation<'a> {
+pub struct ParentNavigationInformation<'nbt, 'indices> {
     pub idx: usize,
-    pub key: Option<&'a str>,
-    pub parent: &'a NbtElement,
+    pub key: Option<&'nbt str>,
+    pub parent: &'nbt NbtElement,
     pub line_number: usize,
     pub true_line_number: usize,
-    pub parent_indices: &'a Indices,
+    pub parent_indices: &'indices Indices,
 }
 
-impl<'a> ParentNavigationInformation<'a> {
+impl<'nbt, 'indices> ParentNavigationInformation<'nbt, 'indices> {
     #[must_use]
-    pub fn from(mut parent: &'a NbtElement, indices: &'a Indices) -> Option<Self> {
+    pub fn from(mut parent: &'nbt NbtElement, indices: &'indices Indices) -> Option<Self> {
         let (last, parent_indices) = indices.split_last()?;
 
         let mut line_number = 1;
@@ -223,18 +225,18 @@ impl<'a> ParentNavigationInformation<'a> {
     }
 }
 
-pub struct ParentNavigationInformationMut<'a> {
+pub struct ParentNavigationInformationMut<'nbt, 'indices> {
     pub idx: usize,
-    pub key: Option<&'a str>,
-    pub parent: &'a mut NbtElement,
+    pub key: Option<CompactString>,
+    pub parent: &'nbt mut NbtElement,
     pub line_number: usize,
     pub true_line_number: usize,
-    pub parent_indices: &'a Indices,
+    pub parent_indices: &'indices Indices,
 }
 
-impl<'a> ParentNavigationInformationMut<'a> {
+impl<'nbt, 'indices> ParentNavigationInformationMut<'nbt, 'indices> {
     #[must_use]
-    pub fn from(mut parent: &'a mut NbtElement, indices: &'a Indices) -> Option<Self> {
+    pub fn from(mut parent: &'nbt mut NbtElement, indices: &'indices Indices) -> Option<Self> {
         let (last, parent_indices) = indices.split_last()?;
 
         let mut line_number = 1;
@@ -262,7 +264,7 @@ impl<'a> ParentNavigationInformationMut<'a> {
 
         Some(Self {
             idx: last,
-            key: parent.get(last).and_then(|(a, b)| a),
+            key: parent.get(last).and_then(|(a, b)| a.map(|x| x.to_compact_string())),
             parent,
             line_number,
             true_line_number,

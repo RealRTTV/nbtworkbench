@@ -14,9 +14,9 @@ use crate::workbench::FileUpdateSubscription;
 
 #[must_use]
 #[deprecated = "deprecated in favor of NbtElement::navigate"]
-pub fn sum_indices(indices: impl IntoIterator<Item = usize>, mut root: &NbtElement) -> usize {
+pub fn sum_indices(indices: &Indices, mut root: &NbtElement) -> usize {
     let mut total = 0;
-    for idx in indices.into_iter() {
+    for idx in indices {
         for jdx in 0..idx {
             total += root[jdx].height();
         }
@@ -26,9 +26,10 @@ pub fn sum_indices(indices: impl IntoIterator<Item = usize>, mut root: &NbtEleme
     total
 }
 
-pub fn recache_along_indices(indices: impl IntoIterator<Item = usize>, mut root: &mut NbtElement) {
+#[deprecated = "deprecated in favor of NbtElement::recache_along_indices"]
+pub fn recache_along_indices(indices: &Indices, mut root: &mut NbtElement) {
     root.recache();
-    for idx in indices.into_iter() {
+    for idx in indices {
         root = &mut root[idx];
         root.recache();
     }
@@ -63,17 +64,25 @@ impl<'m1, 'm2: 'm1> MutableIndices<'m2> {
         unsafe { &mut EMPTY }
     }
 
-    pub fn apply<F: FnMut(&mut OwnedIndices) -> bool>(&mut self, mut f: F) {
+    pub fn apply<F: FnMut(&mut OwnedIndices, &mut CallbackInfo)>(&mut self, mut f: F) {
         if self.is_empty {
             return;
         }
 
-        if let Some(subscription) = self.subscription.as_mut() && f(&mut subscription.indices) {
-            self.subscription.take();
+        if let Some(subscription) = self.subscription.as_mut() {
+            let mut ci = CallbackInfo::new();
+            f(&mut subscription.indices, &mut ci);
+            if ci.removed() {
+                self.subscription.take();
+            }
         }
 
-        if let Some(selected_text) = self.selected_text.as_mut() && f(&mut selected_text.indices) {
-            self.subscription.take();
+        if let Some(selected_text) = self.selected_text.as_mut() {
+            let mut ci = CallbackInfo::new();
+            f(&mut selected_text.indices, &mut ci);
+            if ci.removed() {
+                self.subscription.take();
+            }
         }
     }
 
@@ -85,15 +94,36 @@ impl<'m1, 'm2: 'm1> MutableIndices<'m2> {
 
         *self.subscription = subscription;
     }
+}
 
-    pub fn set_selected_text_indices(&mut self, indices: OwnedIndices) {
-        if self.is_empty {
-            return;
+mod callback_info {
+    pub struct CallbackInfo {
+        removed: bool,
+    }
+
+    impl Default for CallbackInfo {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
+    impl CallbackInfo {
+        #[must_use]
+        pub fn new() -> Self {
+            Self {
+                removed: false,
+            }
         }
 
-        if let Some(selected_text) = self.selected_text.as_mut() {
-            selected_text.indices = indices;
+        pub fn remove(&mut self) {
+            self.removed = true;
+        }
+
+        #[must_use]
+        pub fn removed(&self) -> bool {
+            self.removed
         }
     }
 }
 
+pub use callback_info::CallbackInfo;

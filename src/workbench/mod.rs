@@ -25,7 +25,7 @@ use crate::serialization::{BigEndianDecoder, Decoder, UncheckedBufWriter};
 use crate::util::{drop_on_separate_thread, encompasses_or_equal, get_clipboard, now, nth, set_clipboard, LinkedQueue, StrExt};
 use crate::widget::{get_cursor_idx, get_cursor_left_jump_idx, get_cursor_right_jump_idx, Alert, Notification, NotificationKind, ReplaceBox, ReplaceBoxKeyResult, SearchBox, SearchBoxKeyResult, SelectedText, SelectedTextAdditional, SelectedTextKeyResult, Text, SEARCH_BOX_END_X, SEARCH_BOX_START_X, TEXT_DOUBLE_CLICK_INTERVAL};
 use crate::{flags, get_interaction_information, hash, tab, tab_mut};
-use crate::tree::{replace_element, remove_element, add_element, swap_element_same_depth, MutableIndices, Traverse, TraverseParents, Navigate, recache_along_indices, sum_indices, OwnedIndices};
+use crate::tree::{replace_element, remove_element, add_element, swap_element_same_depth, MutableIndices, Traverse, TraverseParents, Navigate, recache_along_indices, sum_indices, OwnedIndices, NavigationInformation, ParentNavigationInformationMut, TraversalInformation, TraversalInformationMut};
 
 use anyhow::{anyhow, Context, Result};
 use compact_str::{format_compact, CompactString, ToCompactString};
@@ -42,7 +42,7 @@ use itertools::Position;
 pub enum InteractionInformation<'a> {
     Header,
     InvalidContent { x: usize, y: usize },
-    Content { is_in_left_margin: bool, depth: usize, x: usize, y: usize, true_line_number: usize, key: Option<CompactString>, value: &'a mut NbtElement, indices: OwnedIndices },
+    Content { is_in_left_margin: bool, depth: usize, x: usize, y: usize, line_number: usize, true_line_number: usize, key: Option<CompactString>, value: &'a mut NbtElement, indices: OwnedIndices },
 }
 
 pub struct Workbench {
@@ -544,7 +544,8 @@ impl Workbench {
         }
 
         fn write_array(subscription: &FileUpdateSubscription, tab: &mut Tab, new_value: NbtElement) -> Result<()> {
-            let key = Navigate::new(&subscription.indices, &mut tab.value).last().1;
+            let NavigationInformation { key, .. } = tab.value.navigate(&subscription.indices).context("Failed to navigate subscription indices")?;
+            let key = key.map(CompactString::from);
             let action = replace_element(&mut tab.value, (key, new_value), subscription.indices.clone(), &mut tab.bookmarks, MutableIndices::empty()).context("Failed to replace element")?.into_action();
             tab.append_to_history(action);
             tab.refresh_scrolls();
@@ -1076,9 +1077,8 @@ impl Workbench {
         let x = (mouse_x + horizontal_scroll).saturating_sub(left_margin) / 16;
         if y >= value.height() { return InteractionInformation::InvalidContent { x, y } };
 
-        let result = Traverse::new(x, y, value).last();
-        match result {
-            Some((depth, (_, key, value, true_line_number, indices))) => InteractionInformation::Content { is_in_left_margin, depth, key, value, true_line_number, x, y, indices },
+        match value.traverse_mut(y, Some(x)) {
+            Some(TraversalInformationMut { depth, key, element: value, line_number, true_line_number, indices }) => InteractionInformation::Content { is_in_left_margin, depth, key, value, line_number, true_line_number, x, y, indices },
             None => InteractionInformation::InvalidContent { x, y },
         }
     }
@@ -1305,52 +1305,38 @@ impl Workbench {
         }
     }
 
-    pub fn shift_selected_text_up(&mut self) {
+    pub fn shift_selected_text_same_depth(&mut self, sibling_idx: impl FnOnce(usize) -> Option<usize>) -> Option<()> {
         let tab = tab_mut!(self);
-        if let Some(SelectedText(Text { additional: SelectedTextAdditional { y, indices, .. }, .. })) = &mut tab.selected_text {
-            if indices.is_empty() { return };
-            let mut owned_indices = core::mem::take(indices);
-            let Some((last, rem)) = owned_indices.split_last_mut() else { return };
-            let parent = Navigate::new(
-                rem,
-                &mut tab.value,
-            ).last().2;
-            if *last == 0 || parent.len().is_none() { return };
-            *y -= 16;
-            let mut mutable_indices = MutableIndices::new(&mut self.subscription, &mut tab.selected_text);
-            let result = swap_element_same_depth(&mut tab.value, rem.to_vec().into_boxed_slice(), *last, *last - 1, &mut tab.bookmarks, &mut mutable_indices);
+        let Some(SelectedText(Text { additional: SelectedTextAdditional { indices, .. }, .. })) = &tab.selected_text else { return None };
+        let ParentNavigationInformationMut { parent, idx: a_idx, parent_indices, .. } = tab.value.navigate_parent_mut(indices)?;
+        let b_idx = sibling_idx(a_idx)?;
+        if parent.get(a_idx).is_none() || parent.get(b_idx).is_none() { return None };
+        let result = match swap_element_same_depth(&mut tab.value, parent_indices.to_owned(), a_idx, b_idx, &mut tab.bookmarks, &mut MutableIndices::new(&mut self.subscription, &mut tab.selected_text)) {
+            Some(action) => action,
+            None => {
+                self.alert(Alert::new("Error!", TextColor::Red, "Failed to swap elements"));
+                return None
+            }
+        };
 
-            let mut selected_text_indices = result.as_raw().0.to_vec();
-            selected_text_indices.push(*last - 1);
-            mutable_indices.set_selected_text_indices(selected_text_indices.into_boxed_slice());
-            tab.refresh_scrolls();
-            tab.append_to_history(result.into_action());
-            *last -= 1;
+        let mut result_indices = result.as_raw().0.to_owned();
+        result_indices.push(b_idx);
+        tab.refresh_scrolls();
+        tab.append_to_history(result.into_action());
+
+        if let Some(selected_text) = &mut tab.selected_text {
+            selected_text.set_indices(result_indices, &tab.value);
         }
+
+        Some(())
     }
 
-    pub fn shift_selected_text_down(&mut self) {
-        let tab = tab_mut!(self);
-        if let Some(SelectedText(Text { additional: SelectedTextAdditional { y, indices, .. }, .. })) = &mut tab.selected_text {
-            if indices.is_empty() { return };
-            let mut owned_indices = core::mem::take(indices);
-            let Some((last, rem)) = owned_indices.split_last_mut() else { return };
-            let parent = Navigate::new(
-                rem,
-                &mut tab.value,
-            ).last().2;
-            if parent.len().is_none_or(|len| *last + 1 >= len) { return };
-            *y += 16;
-            let mut mutable_indices = MutableIndices::new(&mut self.subscription, &mut tab.selected_text);
-            let result = swap_element_same_depth(&mut tab.value, rem.to_vec().into_boxed_slice(), *last, *last + 1, &mut tab.bookmarks, &mut mutable_indices);
-            let mut selected_text_indices = result.as_raw().0.to_vec();
-            selected_text_indices.push(*last + 1);
-            mutable_indices.set_selected_text_indices(selected_text_indices.into_boxed_slice());
-            tab.refresh_scrolls();
-            tab.append_to_history(result.into_action());
-            *last += 1;
+    pub fn shift_selected_text_up(&mut self) -> Option<()> {
+        self.shift_selected_text_same_depth(|idx| idx.checked_sub(1))
+    }
 
-        }
+    pub fn shift_selected_text_down(&mut self) -> Option<()> {
+        self.shift_selected_text_same_depth(|idx| idx.checked_add(1))
     }
 
     /// # Safety

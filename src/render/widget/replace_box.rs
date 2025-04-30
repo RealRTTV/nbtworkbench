@@ -13,7 +13,7 @@ use crate::render::widget::text::get_cursor_idx;
 use crate::util::{create_regex, now, StrExt};
 use crate::widget::{Cachelike, Notification, NotificationKind, ReplaceBoxKeyResult, SearchBox, SearchFlags, SearchMode, Text, SEARCH_BOX_END_X, SEARCH_BOX_START_X};
 use crate::workbench::{MarkedLines, SortAlgorithm, WorkbenchAction};
-use crate::tree::{rename_element, replace_element, RenameElementResult, ReplaceElementResult, MutableIndices, Indices};
+use crate::tree::{rename_element, replace_element, RenameElementResult, ReplaceElementResult, MutableIndices, Indices, OwnedIndices};
 
 pub struct ReplaceBox(Text<ReplaceBoxAdditional, ReplaceBoxCache>);
 
@@ -214,7 +214,7 @@ impl ReplaceBox {
         // therefore, in the case of all writes, (as long as `element` isn't read after it is replaced)
         let alternative_root: &'root2 mut NbtElement = unsafe { (&raw const root).cast::<&'root2 mut NbtElement>().read() };
 
-        let mut current_indices = vec![];
+        let mut current_indices = OwnedIndices::new();
         let mut indices_max = vec![];
         let mut actions = vec![];
         let mut queue = vec![(None, &*root)];

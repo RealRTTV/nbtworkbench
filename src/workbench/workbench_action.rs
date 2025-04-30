@@ -71,6 +71,24 @@ impl WorkbenchAction {
 				.expect("Failed to undo action")
 		}
 	}
+	
+	pub fn shrink_to_fit(&mut self) {
+		match self {
+			Self::Remove { indices, .. } => indices.shrink_to_fit(),
+			Self::Add { indices, .. } => indices.shrink_to_fit(),
+			Self::Rename { indices, .. } => indices.shrink_to_fit(),
+			Self::Swap { parent, .. } => parent.shrink_to_fit(),
+			Self::Replace { indices, .. } => indices.shrink_to_fit(),
+			Self::ReorderCompound { indices, .. } => indices.shrink_to_fit(),
+			Self::HeldEntrySwap { indices, .. } => indices.shrink_to_fit(),
+			Self::HeldEntryDrop { indices, .. } => indices.shrink_to_fit(),
+			Self::HeldEntrySteal { .. } => (),
+			Self::HeldEntryStealFromAether { indices, .. } => indices.shrink_to_fit(),
+			Self::CreateHeldEntry => (),
+			Self::DeleteHeldEntry { .. } => (),
+			Self::Bulk { actions } => for action in actions { action.shrink_to_fit(); },
+		}
+	}
 
 	#[cfg_attr(debug_assertions, inline(never))]
 	#[allow(
@@ -84,7 +102,7 @@ impl WorkbenchAction {
 			Self::Add { indices } => remove_element(root, indices, bookmarks, mutable_indices).expect("Could remove element").into_action(),
 			Self::Replace { indices, value, } => replace_element(root, value, indices, bookmarks, mutable_indices).expect("Could not replace element").into_action(),
 			Self::Rename { indices, key, value } => rename_element(root, indices, key, value, path, name, window_properties).expect("Could not rename element").into_action(),
-			Self::Swap { parent, a, b, } => swap_element_same_depth(root, parent, a, b, bookmarks, mutable_indices).into_action(),
+			Self::Swap { parent, a, b, } => swap_element_same_depth(root, parent, a, b, bookmarks, mutable_indices).expect("Could not swap elements").into_action(),
 			Self::ReorderCompound { indices: traversal_indices, reordering_indices } => {
 				let line_number = sum_indices(&traversal_indices, root);
 				let (_, _, element, true_line_number) = Navigate::new(&traversal_indices, root).last();

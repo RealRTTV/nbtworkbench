@@ -10,10 +10,12 @@ use crate::util;
 pub struct Indices([usize]);
 
 impl Indices {
+    #[must_use]
     pub fn from_slice<'a>(slice: &'a [usize]) -> &'a Self {
         unsafe { core::mem::transmute::<&'a [usize], &'a Self>(slice) }
     }
 
+    #[must_use]
     pub fn from_slice_mut<'a>(slice: &'a mut [usize]) -> &'a mut Self {
         unsafe { core::mem::transmute::<&'a mut [usize], &'a mut Self>(slice) }
     }
@@ -43,6 +45,22 @@ impl OwnedIndices {
     
     pub fn push(&mut self, index: usize) {
         self.0.push(index)
+    }
+    
+    pub fn pop(&mut self) -> Option<usize> {
+        self.0.pop()
+    }
+    
+    pub fn shrink_to_fit(&mut self) {
+        self.0.shrink_to_fit();
+    }
+    
+    pub unsafe fn as_inner(&self) -> &Vec<usize> {
+        &self.0
+    }
+    
+    pub unsafe fn as_inner_mut(&mut self) -> &mut Vec<usize> {
+        &mut self.0
     }
 }
 

@@ -16,7 +16,7 @@ use crate::elements::{CompoundMap, CompoundMapIter, CompoundMapIterMut, Entry, N
 use crate::render::{RenderContext, TextColor, VertexBufferBuilder};
 use crate::serialization::{BigEndianDecoder, Decoder, LittleEndianDecoder, PrettyFormatter, UncheckedBufWriter};
 use crate::tree;
-use crate::tree::{Indices, NavigationInformation, NavigationInformationMut, ParentNavigationInformation, ParentNavigationInformationMut};
+use crate::tree::{Indices, NavigationInformation, NavigationInformationMut, ParentNavigationInformation, ParentNavigationInformationMut, TraversalInformation, TraversalInformationMut};
 use crate::util::{now, width_ascii, StrExt};
 use crate::workbench::{DropFn, ElementAction, FileFormat, MarkedLines};
 
@@ -961,23 +961,39 @@ impl NbtElement {
 	}
 
 	#[must_use]
-	pub fn navigate<'a>(&'a self, indices: &'a Indices) -> Option<NavigationInformation<'a>> {
+	#[allow(dead_code)]
+	pub fn navigate<'a>(&'a self, indices: &Indices) -> Option<NavigationInformation<'a>> {
 		NavigationInformation::from(self, indices)
 	}
 
 	#[must_use]
-	pub fn navigate_mut<'a>(&'a mut self, indices: &'a Indices) -> Option<NavigationInformationMut<'a>> {
+	#[allow(dead_code)]
+	pub fn navigate_mut<'a>(&'a mut self, indices: &Indices) -> Option<NavigationInformationMut<'a>> {
 		NavigationInformationMut::from(self, indices)
 	}
 
 	#[must_use]
-	pub fn navigate_parent<'a>(&'a self, indices: &'a Indices) -> Option<ParentNavigationInformation<'a>> {
+	#[allow(dead_code)]
+	pub fn navigate_parent<'nbt, 'indices>(&'nbt self, indices: &'indices Indices) -> Option<ParentNavigationInformation<'nbt, 'indices>> {
 		ParentNavigationInformation::from(self, indices)
 	}
 
 	#[must_use]
-	pub fn navigate_parent_mut<'a>(&'a mut self, indices: &'a Indices) -> Option<ParentNavigationInformationMut<'a>> {
+	#[allow(dead_code)]
+	pub fn navigate_parent_mut<'nbt, 'indices>(&'nbt mut self, indices: &'indices Indices) -> Option<ParentNavigationInformationMut<'nbt, 'indices>> {
 		ParentNavigationInformationMut::from(self, indices)
+	}
+
+	#[must_use]
+	#[allow(dead_code)]
+	pub fn traverse(&self, y: usize, x: Option<usize>) -> Option<TraversalInformation> {
+		TraversalInformation::from(self, y, x)
+	}
+
+	#[must_use]
+	#[allow(dead_code)]
+	pub fn traverse_mut(&mut self, y: usize, x: Option<usize>) -> Option<TraversalInformationMut> {
+		TraversalInformationMut::from(self, y, x)
 	}
 
 	pub fn recache(&mut self) {
@@ -992,6 +1008,15 @@ impl NbtElement {
 				NbtRegion::ID => self.region.recache(),
 				_ => {}
 			}
+		}
+	}
+
+	pub fn recache_along_indices(&mut self, indices: &Indices) {
+		let mut this = self;
+		this.recache();
+		for idx in indices {
+			this = &mut this[idx];
+			this.recache();
 		}
 	}
 	
@@ -2022,6 +2047,7 @@ impl NbtElement {
 		}
 	}
 
+	#[must_use]
 	pub fn as_pattern_mut(&mut self) -> NbtPatternMut {
 		match self.id() {
 			NbtByte::ID => NbtPatternMut::Byte(unsafe { self.as_byte_unchecked_mut() }),

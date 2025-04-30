@@ -20,7 +20,7 @@ use super::Navigate;
 /// let tab = tab_mut!(workbench);
 /// let action = rename_element(
 ///     &mut tab.value,
-///     Box::new([]),
+///     Indices::from_slice(&[0, 0, 0]).to_owned(),
 ///     Some("id".to_compact_string()),
 ///     Some("minecraft:stone".to_compact_string()),
 ///     &mut tab.path,

@@ -5,6 +5,7 @@ use itertools::Position;
 /// Navigates through an [`NbtElement`] tree using a y value.
 /// This traversal will return parents with their child indices and keys with their parent's element.
 #[must_use]
+#[deprecated]
 pub struct TraverseParents<'a> {
     node: Option<&'a mut NbtElement>,
     x: usize,
@@ -15,6 +16,7 @@ pub struct TraverseParents<'a> {
 }
 
 impl<'a> TraverseParents<'a> {
+    #[deprecated]
     pub fn new(x: usize, y: usize, root: &'a mut NbtElement) -> Self {
         Self {
             killed: y >= root.height() || y == 0,

@@ -337,7 +337,8 @@ impl Tab {
 		}
 	}
 
-	pub fn append_to_history(&mut self, action: WorkbenchAction) {
+	pub fn append_to_history(&mut self, mut action: WorkbenchAction) {
+		action.shrink_to_fit();
 		self.undos.push(action);
 		self.redos.clear();
 		self.unsaved_changes = true;

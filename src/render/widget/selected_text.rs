@@ -308,6 +308,11 @@ impl SelectedText {
 		let line_number = sum_indices(&self.indices, root);
 		self.y = line_number * 16 + HEADER_SIZE;
 	}
+	
+	pub fn set_indices(&mut self, indices: OwnedIndices, root: &NbtElement) {
+		self.indices = indices;
+		self.recache_y(root);
+	}
 
 	#[inline]
 	pub fn render(&self, builder: &mut VertexBufferBuilder, left_margin: usize) {
