@@ -19,6 +19,7 @@
     iter_next_chunk,
     optimize_attribute,
     stmt_expr_attributes,
+	generic_associated_types,
 )]
 #![windows_subsystem = "windows"]
 

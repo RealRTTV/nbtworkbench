@@ -25,7 +25,7 @@ use crate::serialization::{BigEndianDecoder, Decoder, UncheckedBufWriter};
 use crate::util::{drop_on_separate_thread, encompasses_or_equal, get_clipboard, now, nth, set_clipboard, LinkedQueue, StrExt};
 use crate::widget::{get_cursor_idx, get_cursor_left_jump_idx, get_cursor_right_jump_idx, Alert, Notification, NotificationKind, ReplaceBox, ReplaceBoxKeyResult, SearchBox, SearchBoxKeyResult, SelectedText, SelectedTextAdditional, SelectedTextKeyResult, Text, SEARCH_BOX_END_X, SEARCH_BOX_START_X, TEXT_DOUBLE_CLICK_INTERVAL};
 use crate::{flags, get_interaction_information, hash, tab, tab_mut};
-use crate::tree::{replace_element, remove_element, add_element, swap_element_same_depth, MutableIndices, Traverse, TraverseParents, Navigate, recache_along_indices, sum_indices};
+use crate::tree::{replace_element, remove_element, add_element, swap_element_same_depth, MutableIndices, Traverse, TraverseParents, Navigate, recache_along_indices, sum_indices, OwnedIndices};
 
 use anyhow::{anyhow, Context, Result};
 use compact_str::{format_compact, CompactString, ToCompactString};
@@ -42,7 +42,7 @@ use itertools::Position;
 pub enum InteractionInformation<'a> {
     Header,
     InvalidContent { x: usize, y: usize },
-    Content { is_in_left_margin: bool, depth: usize, x: usize, y: usize, true_line_number: usize, key: Option<CompactString>, value: &'a mut NbtElement, indices: Box<[usize]> },
+    Content { is_in_left_margin: bool, depth: usize, x: usize, y: usize, true_line_number: usize, key: Option<CompactString>, value: &'a mut NbtElement, indices: OwnedIndices },
 }
 
 pub struct Workbench {
@@ -482,11 +482,10 @@ impl Workbench {
                         break 'a;
                     };
                     let highlight_idx = (((cy as f64 - self.mouse_y as f64).atan2(cx as f64 - self.mouse_x as f64) + core::f64::consts::FRAC_PI_8 + core::f64::consts::FRAC_PI_2 + core::f64::consts::FRAC_PI_4).rem_euclid(core::f64::consts::TAU) * core::f64::consts::FRAC_2_PI * 2.0) as usize;
-                    let mut indices = Vec::new();
+                    let mut indices = OwnedIndices::new();
                     let mut depth = 0;
                     if (cy & !15) + scroll == HEADER_SIZE {
                         if let Some(action) = tab.value.actions().get(highlight_idx) {
-                            let indices = indices.into_boxed_slice();
                             if let Some(action) = action.apply(None, indices.clone(), tab.uuid, 1, 0, &mut tab.value, &mut tab.bookmarks, &mut MutableIndices::new(&mut self.subscription, &mut tab.selected_text), &mut self.alerts) {
                                 recache_along_indices(&indices, &mut tab.value);
                                 tab.append_to_history(action);
@@ -512,7 +511,6 @@ impl Workbench {
                             if !(min_x..max_x).contains(&cx) {
                                 break 'a;
                             };
-                            let indices = indices.into_boxed_slice();
                             if let Some(action) = action.apply(key, indices.clone(), tab.uuid, true_line_number, y, element, &mut tab.bookmarks, &mut MutableIndices::new(&mut self.subscription, &mut tab.selected_text), &mut self.alerts) {
                                 recache_along_indices(&indices, &mut tab.value);
                                 tab.append_to_history(action);
@@ -546,7 +544,7 @@ impl Workbench {
         }
 
         fn write_array(subscription: &FileUpdateSubscription, tab: &mut Tab, new_value: NbtElement) -> Result<()> {
-            let key = Navigate::new(subscription.indices.iter().copied(), &mut tab.value).last().1;
+            let key = Navigate::new(&subscription.indices, &mut tab.value).last().1;
             let action = replace_element(&mut tab.value, (key, new_value), subscription.indices.clone(), &mut tab.bookmarks, MutableIndices::empty()).context("Failed to replace element")?.into_action();
             tab.append_to_history(action);
             tab.refresh_scrolls();
@@ -717,7 +715,7 @@ impl Workbench {
             HEADER_SIZE,
             Some((name, TextColor::TreeKey, true)),
             Some((suffix, TextColor::TreeKey, false)),
-            vec![],
+            OwnedIndices::new(),
         ));
         tab.selected_text.is_some()
     }
@@ -812,7 +810,7 @@ impl Workbench {
         }
     }
 
-    fn drop(&mut self, pair: NbtElementAndKey, from_known_data: Option<Box<[usize]>>, from_indices_arc: Option<Arc<SyncUnsafeCell<Box<[usize]>>>>, left_margin: usize, is_swap: bool) -> bool {
+    fn drop(&mut self, pair: NbtElementAndKey, from_known_data: Option<OwnedIndices>, from_indices_arc: Option<Arc<SyncUnsafeCell<OwnedIndices>>>, left_margin: usize, is_swap: bool) -> bool {
         let (key, element) = pair;
         let horizontal_scroll = self.horizontal_scroll();
 
@@ -823,7 +821,7 @@ impl Workbench {
         let tab = tab_mut!(self);
 
         if element.id() == NbtChunk::ID && tab.value.id() != NbtRegion::ID { return false }
-        let mut indices = vec![];
+        let mut indices = OwnedIndices::new();
         match NbtElement::drop(
             &mut tab.value,
             key.clone(),
@@ -1311,10 +1309,10 @@ impl Workbench {
         let tab = tab_mut!(self);
         if let Some(SelectedText(Text { additional: SelectedTextAdditional { y, indices, .. }, .. })) = &mut tab.selected_text {
             if indices.is_empty() { return };
-            let mut owned_indices = core::mem::replace(indices, Box::new([]));
+            let mut owned_indices = core::mem::take(indices);
             let Some((last, rem)) = owned_indices.split_last_mut() else { return };
             let parent = Navigate::new(
-                rem.iter().copied(),
+                rem,
                 &mut tab.value,
             ).last().2;
             if *last == 0 || parent.len().is_none() { return };
@@ -1335,10 +1333,10 @@ impl Workbench {
         let tab = tab_mut!(self);
         if let Some(SelectedText(Text { additional: SelectedTextAdditional { y, indices, .. }, .. })) = &mut tab.selected_text {
             if indices.is_empty() { return };
-            let mut owned_indices = core::mem::replace(indices, Box::new([]));
+            let mut owned_indices = core::mem::take(indices);
             let Some((last, rem)) = owned_indices.split_last_mut() else { return };
             let parent = Navigate::new(
-                rem.iter().copied(),
+                rem,
                 &mut tab.value,
             ).last().2;
             if parent.len().is_none_or(|len| *last + 1 >= len) { return };
@@ -1407,7 +1405,7 @@ impl Workbench {
                             ),
                         ),
                     );
-                let new_y = sum_indices(indices.iter().copied(), &tab.value) * 16;
+                let new_y = sum_indices(&indices, &tab.value) * 16;
                 (k, v, indices, new_y)
             } else {
                 let new_y = (y - HEADER_SIZE) / 16 - 1;
@@ -2653,7 +2651,7 @@ pub const LINE_DOUBLE_CLICK_INTERVAL: Duration = Duration::from_millis(250);
 pub enum HeldEntry {
     Empty,
     FromAether(NbtElementAndKey),
-    FromKnown(NbtElementAndKey, Box<[usize]>, bool),
+    FromKnown(NbtElementAndKey, OwnedIndices, bool),
 }
 
 impl HeldEntry {
@@ -2754,7 +2752,7 @@ impl Display for SortAlgorithm {
 
 pub struct FileUpdateSubscription {
     subscription_type: FileUpdateSubscriptionType,
-    pub indices: Box<[usize]>,
+    pub indices: OwnedIndices,
     rx: std::sync::mpsc::Receiver<Vec<u8>>,
     watcher: notify::PollWatcher,
     tab_uuid: Uuid,

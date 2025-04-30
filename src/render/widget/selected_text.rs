@@ -9,7 +9,7 @@ use crate::flags;
 use crate::render::{TextColor, VertexBufferBuilder};
 use crate::util::{CharExt, StrExt};
 use crate::widget::{Cachelike, SelectedTextKeyResult, SelectedTextKeyResult::{Down, ForceClose, ForceOpen, Keyfix, ShiftDown, ShiftUp, Up, Valuefix}, Text};
-use crate::tree::sum_indices;
+use crate::tree::{sum_indices, OwnedIndices};
 
 #[derive(Clone, Debug)]
 #[allow(clippy::module_name_repetitions)] // yeah no, it's better like this
@@ -69,7 +69,7 @@ impl DerefMut for SelectedText {
 pub struct SelectedTextAdditional  {
 	// todo, change this to be Option<usize> and a cache that removes itself on every write
 	pub y: usize,
-	pub indices: Box<[usize]>,
+	pub indices: OwnedIndices,
 	pub value_color: TextColor,
 	pub keyfix: Option<(String, TextColor)>,
 	pub prefix: (String, TextColor),
@@ -81,7 +81,7 @@ impl SelectedText {
 	#[inline]
 	#[must_use]
 	#[allow(clippy::too_many_lines)]
-	pub fn new(target_x: usize, mouse_x: usize, y: usize, key: Option<(Box<str>, TextColor, bool)>, value: Option<(Box<str>, TextColor, bool)>, indices: Vec<usize>) -> Option<Self> {
+	pub fn new(target_x: usize, mouse_x: usize, y: usize, key: Option<(Box<str>, TextColor, bool)>, value: Option<(Box<str>, TextColor, bool)>, indices: OwnedIndices) -> Option<Self> {
 		let key_width = if let Some((key, key_color, true)) = key.clone() {
 			let key_width = key.width();
 
@@ -103,7 +103,7 @@ impl SelectedText {
 					return Some(
 						Self(Text::new(key.into_string(), 0, true, SelectedTextAdditional {
 							y,
-							indices: indices.into_boxed_slice(),
+							indices,
 							value_color: key_color,
 							keyfix: None,
 							prefix: (String::new(), TextColor::White),
@@ -126,7 +126,7 @@ impl SelectedText {
 					return Some(
 						Self(Text::new(key.clone().into_string(), key.len(), true, SelectedTextAdditional {
 							y,
-							indices: indices.into_boxed_slice(),
+							indices,
 							value_color: key_color,
 							keyfix: None,
 							prefix: (String::new(), TextColor::White),
@@ -149,7 +149,7 @@ impl SelectedText {
 					} else if x < key_width {
 						return Some(Self(Text::new(key.into_string(), cursor, true, SelectedTextAdditional {
 							y,
-							indices: indices.into_boxed_slice(),
+							indices,
 							value_color: key_color,
 							keyfix: None,
 							prefix: (String::new(), TextColor::White),
@@ -184,7 +184,7 @@ impl SelectedText {
 				if mouse_x <= value_x {
 					return Some(Self(Text::new(value.as_ref().to_owned(), 0, true, SelectedTextAdditional {
 						y,
-						indices: indices.into_boxed_slice(),
+						indices,
 						value_color: *value_color,
 						keyfix,
 						prefix,
@@ -209,7 +209,7 @@ impl SelectedText {
 				{
 					return Some(Self(Text::new(value.as_ref().to_owned(), value.len(), true, SelectedTextAdditional {
 						y,
-						indices: indices.into_boxed_slice(),
+						indices,
 						value_color: *value_color,
 						keyfix,
 						prefix,
@@ -229,7 +229,7 @@ impl SelectedText {
 					} else if x < value_width {
 						return Some(Self(Text::new(value.as_ref().to_owned(), cursor, true, SelectedTextAdditional {
 							y,
-							indices: indices.into_boxed_slice(),
+							indices,
 							value_color: *value_color,
 							keyfix,
 							prefix,
@@ -251,7 +251,7 @@ impl SelectedText {
 		if key.as_ref().is_none_or(|(_, _, display)| !*display) && value.as_ref().is_none_or(|(_, _, display)| !*display) && mouse_x <= target_x + full_width && mouse_x + 16 >= target_x {
 			Some(Self(Text::new(if key.is_some() { ": ".to_owned() } else { String::new() }, 0, false, SelectedTextAdditional {
 				y,
-				indices: indices.into_boxed_slice(),
+				indices,
 				value_color: TextColor::TreeKey,
 				keyfix: key.map(|(x, color, _)| (x.into_string(), color)),
 				prefix: (String::new(), TextColor::White),
@@ -305,7 +305,7 @@ impl SelectedText {
 	}
 
 	pub fn recache_y(&mut self, root: &NbtElement) {
-		let line_number = sum_indices(self.indices.iter().copied(), root);
+		let line_number = sum_indices(&self.indices, root);
 		self.y = line_number * 16 + HEADER_SIZE;
 	}
 

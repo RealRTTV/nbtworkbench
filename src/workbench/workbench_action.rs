@@ -7,51 +7,51 @@ use std::sync::Arc;
 use crate::elements::{CompoundMap, Entry, NbtElement, NbtElementAndKey};
 use crate::hash;
 use crate::render::WindowProperties;
-use crate::tree::{add_element, remove_element, rename_element, replace_element, swap_element_same_depth, sum_indices, MutableIndices, Navigate};
+use crate::tree::{add_element, remove_element, rename_element, replace_element, swap_element_same_depth, sum_indices, MutableIndices, Navigate, OwnedIndices};
 use crate::workbench::{HeldEntry, MarkedLines};
 
 #[derive(Debug)]
 pub enum WorkbenchAction {
 	Remove {
 		element: NbtElementAndKey,
-		indices: Box<[usize]>,
+		indices: OwnedIndices,
 	},
 	Add {
-		indices: Box<[usize]>,
+		indices: OwnedIndices,
 	},
 	Rename {
-		indices: Box<[usize]>,
+		indices: OwnedIndices,
 		key: Option<CompactString>,
 		value: Option<CompactString>,
 	},
 	Swap {
-		parent: Box<[usize]>,
+		parent: OwnedIndices,
 		a: usize,
 		b: usize,
 	},
 	Replace {
-		indices: Box<[usize]>,
+		indices: OwnedIndices,
 		value: NbtElementAndKey,
 	},
 	ReorderCompound {
-		indices: Box<[usize]>,
+		indices: OwnedIndices,
 		reordering_indices: Box<[usize]>,
 	},
 	HeldEntrySwap {
-		indices: Box<[usize]>,
+		indices: OwnedIndices,
 		original_key: Option<CompactString>,
 	},
 	HeldEntryDrop {
-		from_indices: Option<Arc<SyncUnsafeCell<Box<[usize]>>>>,
-		indices: Box<[usize]>,
+		from_indices: Option<Arc<SyncUnsafeCell<OwnedIndices>>>,
+		indices: OwnedIndices,
 		original_key: Option<CompactString>,
 	},
 	HeldEntrySteal {
-		from_indices: Option<Arc<SyncUnsafeCell<Box<[usize]>>>>,
+		from_indices: Option<Arc<SyncUnsafeCell<OwnedIndices>>>,
 		original_key: Option<CompactString>,
 	},
 	HeldEntryStealFromAether {
-		indices: Box<[usize]>,
+		indices: OwnedIndices,
 		original_key: Option<CompactString>,
 	},
 	CreateHeldEntry,
@@ -86,8 +86,8 @@ impl WorkbenchAction {
 			Self::Rename { indices, key, value } => rename_element(root, indices, key, value, path, name, window_properties).expect("Could not rename element").into_action(),
 			Self::Swap { parent, a, b, } => swap_element_same_depth(root, parent, a, b, bookmarks, mutable_indices).into_action(),
 			Self::ReorderCompound { indices: traversal_indices, reordering_indices } => {
-				let line_number = sum_indices(traversal_indices.iter().copied(), root);
-				let (_, _, element, true_line_number) = Navigate::new(traversal_indices.iter().copied(), root).last();
+				let line_number = sum_indices(&traversal_indices, root);
+				let (_, _, element, true_line_number) = Navigate::new(&traversal_indices, root).last();
 				let open = element.open();
 				let true_height = element.true_height();
 				let CompoundMap { indices, entries } = if let Some(compound) = element.as_compound_mut() {

@@ -1,4 +1,5 @@
 use crate::elements::NbtElement;
+use crate::tree::{Indices, OwnedIndices};
 use crate::util::encompasses;
 use crate::workbench::{MarkedLineSlice, MarkedLines, WorkbenchAction};
 use super::{recache_along_indices, sum_indices, MutableIndices, Navigate};
@@ -25,10 +26,10 @@ use super::{recache_along_indices, sum_indices, MutableIndices, Navigate};
 /// ).into_action();
 /// tab.append_to_history(action);
 /// ```
-pub fn swap_element_same_depth<'m1, 'm2: 'm1>(root: &mut NbtElement, parent_indices: Box<[usize]>, a: usize, b: usize, bookmarks: &mut MarkedLines, mutable_indices: &'m1 mut MutableIndices<'m2>) -> SwapElementResultSameDepth {
+pub fn swap_element_same_depth<'m1, 'm2: 'm1>(root: &mut NbtElement, parent_indices: OwnedIndices, a: usize, b: usize, bookmarks: &mut MarkedLines, mutable_indices: &'m1 mut MutableIndices<'m2>) -> SwapElementResultSameDepth {
     let (a, b) = if a <= b { (a, b) } else { (b, a) };
-    let parent_y = sum_indices(parent_indices.iter().copied(), root);
-    let (_, _, parent, parent_line_number) = Navigate::new(parent_indices.iter().copied(), root).last();
+    let parent_y = sum_indices(&parent_indices, root);
+    let (_, _, parent, parent_line_number) = Navigate::new(&parent_indices, root).last();
 
     let mut a_line_number = parent_line_number;
     let mut a_y = parent_y;
@@ -66,7 +67,7 @@ pub fn swap_element_same_depth<'m1, 'm2: 'm1>(root: &mut NbtElement, parent_indi
     bookmarks.add_bookmarks(b_bookmarks);
 
     mutable_indices.apply(|indices| {
-        if encompasses(&parent_indices, &indices) {
+        if parent_indices.encompasses(indices) {
             let sibling = &mut indices[parent_indices.len()];
             if *sibling == a {
                 *sibling = b;
@@ -90,7 +91,7 @@ pub fn swap_element_same_depth<'m1, 'm2: 'm1>(root: &mut NbtElement, parent_indi
 
 #[derive(Clone)]
 pub struct SwapElementResultSameDepth {
-    parent: Box<[usize]>,
+    parent: OwnedIndices,
     a: usize,
     b: usize,
 }
@@ -98,10 +99,10 @@ pub struct SwapElementResultSameDepth {
 #[allow(dead_code)]
 impl SwapElementResultSameDepth {
     #[must_use]
-    pub fn as_raw(&self) -> (&[usize], usize, usize) { (&self.parent, self.a, self.b) }
+    pub fn as_raw(&self) -> (&Indices, usize, usize) { (&self.parent, self.a, self.b) }
 
     #[must_use]
-    pub fn into_raw(self) -> (Box<[usize]>, usize, usize) {
+    pub fn into_raw(self) -> (OwnedIndices, usize, usize) {
         (self.parent, self.a, self.b)
     }
 

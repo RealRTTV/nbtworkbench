@@ -15,6 +15,8 @@ use crate::assets::ZOffset;
 use crate::elements::{CompoundMap, CompoundMapIter, CompoundMapIterMut, Entry, NbtByte, NbtByteArray, NbtChunk, NbtCompound, NbtDouble, NbtElementAndKey, NbtFloat, NbtInt, NbtIntArray, NbtList, NbtLong, NbtLongArray, NbtNull, NbtRegion, NbtShort, NbtString};
 use crate::render::{RenderContext, TextColor, VertexBufferBuilder};
 use crate::serialization::{BigEndianDecoder, Decoder, LittleEndianDecoder, PrettyFormatter, UncheckedBufWriter};
+use crate::tree;
+use crate::tree::{Indices, NavigationInformation, NavigationInformationMut, ParentNavigationInformation, ParentNavigationInformationMut};
 use crate::util::{now, width_ascii, StrExt};
 use crate::workbench::{DropFn, ElementAction, FileFormat, MarkedLines};
 
@@ -892,6 +894,24 @@ impl NbtElement {
 				NbtCompound::ID => self.compound.height(),
 				NbtChunk::ID => self.chunk.height(),
 				NbtRegion::ID => self.region.height(),
+				NbtNull::ID => 0,
+				_ => 1,
+			}
+		}
+	}
+
+	#[must_use]
+	pub fn true_height(&self) -> usize {
+		unsafe {
+			match self.id() {
+				NbtByteArray::ID => self.byte_array.true_height(),
+				NbtIntArray::ID => self.int_array.true_height(),
+				NbtLongArray::ID => self.long_array.true_height(),
+				NbtList::ID => self.list.true_height(),
+				NbtCompound::ID => self.compound.true_height(),
+				NbtRegion::ID => self.region.true_height(),
+				NbtChunk::ID => self.chunk.true_height(),
+				NbtNull::ID => 0,
 				_ => 1,
 			}
 		}
@@ -940,6 +960,79 @@ impl NbtElement {
 		}
 	}
 
+	#[must_use]
+	pub fn navigate<'a>(&'a self, indices: &'a Indices) -> Option<NavigationInformation<'a>> {
+		NavigationInformation::from(self, indices)
+	}
+
+	#[must_use]
+	pub fn navigate_mut<'a>(&'a mut self, indices: &'a Indices) -> Option<NavigationInformationMut<'a>> {
+		NavigationInformationMut::from(self, indices)
+	}
+
+	#[must_use]
+	pub fn navigate_parent<'a>(&'a self, indices: &'a Indices) -> Option<ParentNavigationInformation<'a>> {
+		ParentNavigationInformation::from(self, indices)
+	}
+
+	#[must_use]
+	pub fn navigate_parent_mut<'a>(&'a mut self, indices: &'a Indices) -> Option<ParentNavigationInformationMut<'a>> {
+		ParentNavigationInformationMut::from(self, indices)
+	}
+
+	pub fn recache(&mut self) {
+		unsafe {
+			match self.id() {
+				NbtByteArray::ID => self.byte_array.recache(),
+				NbtIntArray::ID => self.int_array.recache(),
+				NbtLongArray::ID => self.long_array.recache(),
+				NbtList::ID => self.list.recache(),
+				NbtCompound::ID => self.compound.recache(),
+				NbtChunk::ID => self.chunk.recache(),
+				NbtRegion::ID => self.region.recache(),
+				_ => {}
+			}
+		}
+	}
+	
+	#[must_use]
+	pub fn update_key(&mut self, idx: usize, key: CompactString) -> Option<Option<CompactString>> {
+		unsafe {
+			match self.id() {
+				NbtCompound::ID => Some(self.compound.entries.update_key(idx, key)),
+				NbtChunk::ID => Some(self.chunk.entries.update_key(idx, key)),
+				_ => None,
+			}
+		}
+	}
+
+	#[must_use]
+	pub fn as_nonnull(&self) -> Option<&Self> {
+		if self.is_null() {
+			None
+		} else {
+			Some(self)
+		}
+	}
+
+	#[must_use]
+	pub fn as_nonnull_mut(&mut self) -> Option<&mut Self> {
+		if self.is_null() {
+			None
+		} else {
+			Some(self)
+		}
+	}
+
+	#[must_use]
+	pub fn into_nonnull(self) -> Option<Self> {
+		if self.is_null() {
+			None
+		} else {
+			Some(self)
+		}
+	}
+
 	#[inline]
 	pub fn set_value(&mut self, value: CompactString) -> Option<(CompactString, bool)> {
 		unsafe {
@@ -984,22 +1077,6 @@ impl NbtElement {
 				),
 				_ => return None,
 			})
-		}
-	}
-
-	#[must_use]
-	pub fn true_height(&self) -> usize {
-		unsafe {
-			match self.id() {
-				NbtByteArray::ID => self.byte_array.true_height(),
-				NbtIntArray::ID => self.int_array.true_height(),
-				NbtLongArray::ID => self.long_array.true_height(),
-				NbtList::ID => self.list.true_height(),
-				NbtCompound::ID => self.compound.true_height(),
-				NbtRegion::ID => self.region.true_height(),
-				NbtChunk::ID => self.chunk.true_height(),
-				_ => 1,
-			}
 		}
 	}
 
@@ -1394,16 +1471,16 @@ impl NbtElement {
 
 	#[inline]
 	#[must_use]
-	pub fn get(&self, idx: usize) -> Option<&Self> {
+	pub fn get(&self, idx: usize) -> Option<(Option<&str>, &Self)> {
 		unsafe {
 			match self.id() {
-				NbtByteArray::ID => self.byte_array.get(idx),
-				NbtIntArray::ID => self.int_array.get(idx),
-				NbtLongArray::ID => self.long_array.get(idx),
-				NbtList::ID => self.list.get(idx),
-				NbtCompound::ID => self.compound.get(idx).map(|(_, x)| x),
-				NbtRegion::ID => self.region.get(idx),
-				NbtChunk::ID => self.chunk.get(idx).map(|(_, x)| x),
+				NbtByteArray::ID => self.byte_array.get(idx).map(|x| (None, x)),
+				NbtIntArray::ID => self.int_array.get(idx).map(|x| (None, x)),
+				NbtLongArray::ID => self.long_array.get(idx).map(|x| (None, x)),
+				NbtList::ID => self.list.get(idx).map(|x| (None, x)),
+				NbtCompound::ID => self.compound.get(idx).map(|(a, b)| (Some(a), b)),
+				NbtRegion::ID => self.region.get(idx).map(|x| (None, x)),
+				NbtChunk::ID => self.chunk.get(idx).map(|(a, b)| (Some(a), b)),
 				_ => None,
 			}
 		}
@@ -1411,16 +1488,16 @@ impl NbtElement {
 
 	#[inline]
 	#[must_use]
-	pub fn get_mut(&mut self, idx: usize) -> Option<&mut Self> {
+	pub fn get_mut(&mut self, idx: usize) -> Option<(Option<&str>, &mut Self)> {
 		unsafe {
 			match self.id() {
-				NbtByteArray::ID => self.byte_array.get_mut(idx),
-				NbtIntArray::ID => self.int_array.get_mut(idx),
-				NbtLongArray::ID => self.long_array.get_mut(idx),
-				NbtList::ID => self.list.get_mut(idx),
-				NbtCompound::ID => self.compound.get_mut(idx).map(|(_, x)| x),
-				NbtRegion::ID => self.region.get_mut(idx),
-				NbtChunk::ID => self.chunk.get_mut(idx).map(|(_, x)| x),
+				NbtByteArray::ID => self.byte_array.get_mut(idx).map(|x| (None, x)),
+				NbtIntArray::ID => self.int_array.get_mut(idx).map(|x| (None, x)),
+				NbtLongArray::ID => self.long_array.get_mut(idx).map(|x| (None, x)),
+				NbtList::ID => self.list.get_mut(idx).map(|x| (None, x)),
+				NbtCompound::ID => self.compound.get_mut(idx).map(|(a, b)| (Some(a), b)),
+				NbtRegion::ID => self.region.get_mut(idx).map(|x| (None, x)),
+				NbtChunk::ID => self.chunk.get_mut(idx).map(|(a, b)| (Some(a), b)),
 				_ => None,
 			}
 		}
@@ -1794,11 +1871,13 @@ impl<'a> Index<&'a str> for NbtElement {
 
 impl<'a> IndexMut<&'a str> for NbtElement {
 	fn index_mut(&mut self, index: &str) -> &mut Self::Output {
-		fn try_index<'b>(this: &'b mut NbtElement, index: &str) -> Option<&'b mut NbtElement> {
-			let map = match this.as_pattern_mut() {
+		pub static mut NULL_MUT: NbtElement = NbtElement::NULL;
+
+		let result = 'a: {
+			let map = match self.as_pattern_mut() {
 				NbtPatternMut::Compound(compound) => &mut *compound.entries,
 				NbtPatternMut::Chunk(chunk) => &mut *chunk.entries,
-				_ => return None,
+				_ => break 'a None,
 			};
 
 			if let Some(idx) = map.idx_of(index) && let Some((_, value)) = map.get_idx_mut(idx) {
@@ -1806,15 +1885,12 @@ impl<'a> IndexMut<&'a str> for NbtElement {
 			} else {
 				None
 			}
-		}
+		};
 
-		let mut this = self;
-		polonius!(|this| -> &'polonius mut NbtElement {
-			if let Some(x) = try_index(this, index) {
-				polonius_return!(x);
-			}
-		});
-		this
+		result.unwrap_or_else(|| {
+			unsafe { NULL_MUT = Self::NULL; }
+			unsafe { &mut NULL_MUT }
+		})
 	}
 }
 
@@ -1822,19 +1898,22 @@ impl Index<usize> for NbtElement {
 	type Output = NbtElement;
 
 	fn index(&self, idx: usize) -> &Self::Output {
-		self.get(idx).unwrap_or(Self::NULL_REF)
+		self.get(idx)
+			.map(|(a, b)| b)
+			.unwrap_or(Self::NULL_REF)
 	}
 }
 
 impl IndexMut<usize> for NbtElement {
 	fn index_mut(&mut self, idx: usize) -> &mut Self::Output {
-		let mut this = self;
-		polonius!(|this| -> &'polonius mut NbtElement {
-			if let Some(x) = this.get_mut(idx) {
-				polonius_return!(x);
-			}
-		});
-		this
+		pub static mut NULL_MUT: NbtElement = NbtElement::NULL;
+
+		self.get_mut(idx)
+			.map(|(a, b)| b)
+			.unwrap_or_else(|| {
+			unsafe { NULL_MUT = NbtElement::NULL; }
+			unsafe { &mut NULL_MUT }
+		})
 	}
 }
 

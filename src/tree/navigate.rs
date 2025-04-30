@@ -1,7 +1,7 @@
 use std::iter::Peekable;
 use compact_str::{CompactString, ToCompactString};
 use crate::elements::{NbtElement, NbtPatternMut};
-use itertools::Position;
+use crate::tree::Indices;
 
 /// Navigates a tree from the given route of an indices list, will cause UB on invalid lists. Typically used for operations which are saved and not direct clicking interaction.
 #[must_use]
@@ -13,7 +13,8 @@ pub struct Navigate<'a, I: IntoIterator + ExactSizeIterator> {
 }
 
 impl<'a, I: Iterator<Item = usize> + ExactSizeIterator> Navigate<'a, I> {
-    pub fn new(iter: impl IntoIterator<IntoIter = I> + ExactSizeIterator, root: &'a mut NbtElement) -> Self {
+    #[deprecated]
+    pub fn new(iter: impl IntoIterator<Item = usize>, root: &'a mut NbtElement) -> Self {
         Self {
             iter: iter.into_iter().peekable(),
             at_head: true,
@@ -85,30 +86,6 @@ impl<'a, I: Iterator<Item = usize> + ExactSizeIterator> Navigate<'a, I> {
     }
 
     #[must_use]
-    #[allow(dead_code)]
-    #[allow(clippy::should_implement_trait)] // no
-    pub fn next(&mut self) -> Option<(Position, usize, Option<&str>, &mut NbtElement, usize)> {
-        let head = core::mem::replace(&mut self.at_head, false);
-
-        if !head {
-            self.step();
-        }
-
-        let tail = self.iter.peek().is_none();
-
-        let position = match (head, tail) {
-            (true, false) => Position::First,
-            (false, false) => Position::Middle,
-            (false, true) => Position::Last,
-            (true, true) => Position::Only,
-        };
-
-        let (idx, key, element) = self.node.as_mut()?;
-
-        Some((position, *idx, key.as_deref(), *element, self.line_number))
-    }
-
-    #[must_use]
     pub fn last(mut self) -> (usize, Option<CompactString>, &'a mut NbtElement, usize) {
         while self.iter.peek().is_some() {
             self.step();
@@ -117,5 +94,179 @@ impl<'a, I: Iterator<Item = usize> + ExactSizeIterator> Navigate<'a, I> {
         self.node
             .map(|(a, b, c)| (a, b, c, self.line_number))
             .expect("List cannot be empty")
+    }
+}
+
+pub struct NavigationInformation<'a> {
+    pub idx: Option<usize>,
+    pub key: Option<&'a str>,
+    pub element: &'a NbtElement,
+    pub line_number: usize,
+    pub true_line_number: usize,
+}
+
+impl<'a> NavigationInformation<'a> {
+    #[must_use]
+    pub fn from(mut element: &'a NbtElement, indices: &Indices) -> Option<Self> {
+        let mut line_number = 1;
+        let mut true_line_number = 0;
+        let mut key = None;
+
+        for idx in indices {
+            line_number += 1;
+            true_line_number += 1;
+            for jdx in 0..idx {
+                let sibling = &element[jdx];
+                line_number += sibling.height();
+                true_line_number += sibling.true_height();
+            }
+
+            let (k, v) = element.get(idx)?;
+            key = k;
+            element = v;
+        }
+
+        Some(Self {
+            idx: indices.last(),
+            key,
+            element,
+            line_number,
+            true_line_number,
+        })
+    }
+}
+
+pub struct NavigationInformationMut<'a> {
+    pub idx: Option<usize>,
+    pub key: Option<&'a str>,
+    pub element: &'a mut NbtElement,
+    pub line_number: usize,
+    pub true_line_number: usize,
+}
+
+impl<'a> NavigationInformationMut<'a> {
+    #[must_use]
+    pub fn from(mut element: &'a mut NbtElement, indices: &Indices) -> Option<Self> {
+        let mut line_number = 1;
+        let mut true_line_number = 0;
+        let mut key = None;
+
+        for idx in indices {
+            line_number += 1;
+            true_line_number += 1;
+            for jdx in 0..idx {
+                let sibling = &element[jdx];
+                line_number += sibling.height();
+                true_line_number += sibling.true_height();
+            }
+
+            let (k, v) = element.get_mut(idx)?;
+            key = k;
+            element = v;
+        }
+
+        Some(Self {
+            idx: indices.last(),
+            key,
+            element,
+            line_number,
+            true_line_number,
+        })
+    }
+}
+
+pub struct ParentNavigationInformation<'a> {
+    pub idx: usize,
+    pub key: Option<&'a str>,
+    pub parent: &'a NbtElement,
+    pub line_number: usize,
+    pub true_line_number: usize,
+    pub parent_indices: &'a Indices,
+}
+
+impl<'a> ParentNavigationInformation<'a> {
+    #[must_use]
+    pub fn from(mut parent: &'a NbtElement, indices: &'a Indices) -> Option<Self> {
+        let (last, parent_indices) = indices.split_last()?;
+
+        let mut line_number = 1;
+        let mut true_line_number = 0;
+
+        for idx in parent_indices {
+            line_number += 1;
+            true_line_number += 1;
+            for jdx in 0..idx {
+                let sibling = parent[jdx].as_nonnull()?;
+                line_number += sibling.height();
+                true_line_number += sibling.true_height();
+            }
+
+            parent = parent[idx].as_nonnull()?;
+        }
+
+        line_number += 1;
+        true_line_number += 1;
+        for jdx in 0..last {
+            let sibling = parent[jdx].as_nonnull()?;
+            line_number += sibling.height();
+            true_line_number += sibling.true_height();
+        }
+
+        Some(Self {
+            idx: last,
+            key: parent.get(last).and_then(|(a, b)| a),
+            parent,
+            line_number,
+            true_line_number,
+            parent_indices,
+        })
+    }
+}
+
+pub struct ParentNavigationInformationMut<'a> {
+    pub idx: usize,
+    pub key: Option<&'a str>,
+    pub parent: &'a mut NbtElement,
+    pub line_number: usize,
+    pub true_line_number: usize,
+    pub parent_indices: &'a Indices,
+}
+
+impl<'a> ParentNavigationInformationMut<'a> {
+    #[must_use]
+    pub fn from(mut parent: &'a mut NbtElement, indices: &'a Indices) -> Option<Self> {
+        let (last, parent_indices) = indices.split_last()?;
+
+        let mut line_number = 1;
+        let mut true_line_number = 0;
+
+        for idx in parent_indices {
+            line_number += 1;
+            true_line_number += 1;
+            for jdx in 0..idx {
+                let sibling = parent[jdx].as_nonnull()?;
+                line_number += sibling.height();
+                true_line_number += sibling.true_height();
+            }
+
+            parent = parent[idx].as_nonnull_mut()?;
+        }
+
+        line_number += 1;
+        true_line_number += 1;
+        for jdx in 0..last {
+            let sibling = parent[jdx].as_nonnull()?;
+            line_number += sibling.height();
+            true_line_number += sibling.true_height();
+        }
+
+        Some(Self {
+            idx: last,
+            key: parent.get(last).and_then(|(a, b)| a),
+            parent,
+            line_number,
+            true_line_number,
+            parent_indices,
+        })
     }
 }

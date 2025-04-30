@@ -13,7 +13,7 @@ use crate::render::widget::text::get_cursor_idx;
 use crate::util::{create_regex, now, StrExt};
 use crate::widget::{Cachelike, Notification, NotificationKind, ReplaceBoxKeyResult, SearchBox, SearchFlags, SearchMode, Text, SEARCH_BOX_END_X, SEARCH_BOX_START_X};
 use crate::workbench::{MarkedLines, SortAlgorithm, WorkbenchAction};
-use crate::tree::{rename_element, replace_element, RenameElementResult, ReplaceElementResult, MutableIndices};
+use crate::tree::{rename_element, replace_element, RenameElementResult, ReplaceElementResult, MutableIndices, Indices};
 
 pub struct ReplaceBox(Text<ReplaceBoxAdditional, ReplaceBoxCache>);
 
@@ -361,7 +361,7 @@ impl SearchReplacement {
         (flags & 0b01) > 0 && !matches!(self.inner, SearchReplacementInner::Snbt { .. })
     }
 
-    pub fn replace<'m1, 'm2: 'm1>(&self, root: &mut NbtElement, key: Option<String>, value: Option<String>, bookmarks: &mut MarkedLines, mutable_indices: &'m1 mut MutableIndices<'m2>, indices: &[usize]) -> (Option<WorkbenchAction>, bool) {
+    pub fn replace<'m1, 'm2: 'm1>(&self, root: &mut NbtElement, key: Option<String>, value: Option<String>, bookmarks: &mut MarkedLines, mutable_indices: &'m1 mut MutableIndices<'m2>, indices: &Indices) -> (Option<WorkbenchAction>, bool) {
         #[inline]
         #[must_use]
         fn replace_case_sensitivity(value: &str, find: &str, replacement: &str, case_sensitive: bool) -> String {
@@ -377,15 +377,15 @@ impl SearchReplacement {
             SearchReplacementInner::Substring { find, replacement, case_sensitive } => {
                 let key = key.map(|key| replace_case_sensitivity(&key, find, replacement, *case_sensitive).into());
                 let value = value.map(|value| replace_case_sensitivity(&value, find, replacement, *case_sensitive).into());
-                (rename_element(root, indices.to_vec().into_boxed_slice(), key, value, &mut None, fake_name, &mut WindowProperties::Fake).map(RenameElementResult::into_action), false)
+                (rename_element(root, indices.to_owned(), key, value, &mut None, fake_name, &mut WindowProperties::Fake).map(RenameElementResult::into_action), false)
             }
             SearchReplacementInner::Regex { regex, replacement } => {
                 let key = key.map(|key| regex.replace_all(&key, replacement).into());
                 let value = value.map(|value| regex.replace_all(&value, replacement).into());
-                (rename_element(root, indices.to_vec().into_boxed_slice(), key, value, &mut None, fake_name, &mut WindowProperties::Fake).map(RenameElementResult::into_action), false)
+                (rename_element(root, indices.to_owned(), key, value, &mut None, fake_name, &mut WindowProperties::Fake).map(RenameElementResult::into_action), false)
             },
             SearchReplacementInner::Snbt { replacement, .. } => {
-                (replace_element(root, replacement.clone(), indices.to_vec().into_boxed_slice(), bookmarks, mutable_indices).map(ReplaceElementResult::into_action), true)
+                (replace_element(root, replacement.clone(), indices.to_owned(), bookmarks, mutable_indices).map(ReplaceElementResult::into_action), true)
             },
         }
     }

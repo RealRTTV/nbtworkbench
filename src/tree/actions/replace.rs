@@ -1,4 +1,5 @@
 use crate::elements::{NbtElement, NbtElementAndKey};
+use crate::tree::OwnedIndices;
 use crate::util::encompasses_or_equal;
 use crate::workbench::{MarkedLines, WorkbenchAction};
 use super::{recache_along_indices, MutableIndices, Navigate};
@@ -25,13 +26,13 @@ use super::{recache_along_indices, MutableIndices, Navigate};
 /// )?;
 /// tab.append_to_history(result.into_action());
 /// ```
-pub fn replace_element<'m1, 'm2: 'm1>(root: &mut NbtElement, value: NbtElementAndKey, indices: Box<[usize]>, bookmarks: &mut MarkedLines, mutable_indices: &'m1 mut MutableIndices<'m2>) -> Option<ReplaceElementResult> {
-    let Some((&last, rem)) = indices.split_last() else {
+pub fn replace_element<'m1, 'm2: 'm1>(root: &mut NbtElement, value: NbtElementAndKey, indices: OwnedIndices, bookmarks: &mut MarkedLines, mutable_indices: &'m1 mut MutableIndices<'m2>) -> Option<ReplaceElementResult> {
+    let Some((last, rem)) = indices.split_last() else {
         return if root.id() == value.1.id() {
             bookmarks.remove(..);
 
             Some(ReplaceElementResult {
-                indices: Box::new([]),
+                indices: OwnedIndices::new(),
                 kv: (None, core::mem::replace(root, value.1)),
                 replaces: true,
             })
@@ -40,7 +41,7 @@ pub fn replace_element<'m1, 'm2: 'm1>(root: &mut NbtElement, value: NbtElementAn
         }
     };
 
-    let (_, _, parent, mut line_number) = Navigate::new(rem.iter().copied(), root).last();
+    let (_, _, parent, mut line_number) = Navigate::new(rem, root).last();
     for n in 0..last {
         line_number += parent[n].true_height();
     }
@@ -68,14 +69,14 @@ pub fn replace_element<'m1, 'm2: 'm1>(root: &mut NbtElement, value: NbtElementAn
 
 #[derive(Clone)]
 pub struct ReplaceElementResult {
-    indices: Box<[usize]>,
+    indices: OwnedIndices,
     kv: NbtElementAndKey,
     replaces: bool,
 }
 
 impl ReplaceElementResult {
     #[must_use]
-    pub fn into_raw(self) -> (Box<[usize]>, NbtElementAndKey, bool) {
+    pub fn into_raw(self) -> (OwnedIndices, NbtElementAndKey, bool) {
         (self.indices, self.kv, self.replaces)
     }
 
