@@ -2,7 +2,7 @@ use crate::elements::NbtElement;
 use crate::tree::{Indices, NavigationInformation, NavigationInformationMut, OwnedIndices};
 use crate::util::encompasses;
 use crate::workbench::{MarkedLineSlice, MarkedLines, WorkbenchAction};
-use super::{recache_along_indices, sum_indices, MutableIndices, Navigate};
+use super::{recache_along_indices, line_number_at, MutableIndices, Navigate};
 
 /// Properly swaps two elements under their specified indices (requires them to be at the same depth), updating the following relevant data
 /// - Mutable Indices

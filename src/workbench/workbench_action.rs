@@ -7,7 +7,7 @@ use std::sync::Arc;
 use crate::elements::{CompoundMap, Entry, NbtElement, NbtElementAndKey};
 use crate::hash;
 use crate::render::WindowProperties;
-use crate::tree::{add_element, remove_element, rename_element, replace_element, swap_element_same_depth, sum_indices, MutableIndices, Navigate, OwnedIndices};
+use crate::tree::{add_element, remove_element, rename_element, replace_element, swap_element_same_depth, line_number_at, MutableIndices, Navigate, OwnedIndices};
 use crate::workbench::{HeldEntry, MarkedLines};
 
 #[derive(Debug)]
@@ -104,7 +104,7 @@ impl WorkbenchAction {
 			Self::Rename { indices, key, value } => rename_element(root, indices, key, value, path, name, window_properties).expect("Could not rename element").into_action(),
 			Self::Swap { parent, a, b, } => swap_element_same_depth(root, parent, a, b, bookmarks, mutable_indices).expect("Could not swap elements").into_action(),
 			Self::ReorderCompound { indices: traversal_indices, reordering_indices } => {
-				let line_number = sum_indices(&traversal_indices, root);
+				let line_number = line_number_at(&traversal_indices, root);
 				let (_, _, element, true_line_number) = Navigate::new(&traversal_indices, root).last();
 				let open = element.open();
 				let true_height = element.true_height();

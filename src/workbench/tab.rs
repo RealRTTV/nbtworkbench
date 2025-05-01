@@ -20,28 +20,29 @@ use crate::util::{drop_on_separate_thread, now, LinkedQueue, StrExt};
 use crate::widget::{get_cursor_left_jump_idx, get_cursor_right_jump_idx, SelectedText, SelectedTextAdditional, Text, TEXT_DOUBLE_CLICK_INTERVAL};
 
 pub struct Tab {
-	pub(in crate::workbench) value: Box<NbtElement>,
-	pub(in crate::workbench) name: Box<str>,
-	pub(in crate::workbench) path: Option<PathBuf>,
-	pub(in crate::workbench) format: FileFormat,
-	pub(in crate::workbench) undos: LinkedQueue<WorkbenchAction>,
-	pub(in crate::workbench) redos: LinkedQueue<WorkbenchAction>,
-	pub(in crate::workbench) unsaved_changes: bool,
-	pub(in crate::workbench) scroll: usize,
-	pub(in crate::workbench) horizontal_scroll: usize,
-	pub(in crate::workbench) window_height: usize,
-	pub(in crate::workbench) window_width: usize,
-	pub(in crate::workbench) bookmarks: MarkedLines,
-	pub(in crate::workbench) uuid: Uuid,
-	pub(in crate::workbench) freehand_mode: bool,
-	pub(in crate::workbench) selected_text: Option<SelectedText>,
-	pub(in crate::workbench) last_close_attempt: Duration,
-	pub(in crate::workbench) last_selected_text_interaction: (usize, usize, Duration),
-	pub(in crate::workbench) last_interaction: Duration,
-	pub(in crate::workbench) last_double_click_interaction: (usize, Duration),
-	pub(in crate::workbench) held_entry: HeldEntry,
-	// this took me two days
-	pub(in crate::workbench) from_indices_arc: Option<Arc<SyncUnsafeCell<OwnedIndices>>>,
+	pub(super) value: Box<NbtElement>,
+	pub(super) name: Box<str>,
+	pub(super) path: Option<PathBuf>,
+	pub(super) format: FileFormat,
+	pub(super) undos: LinkedQueue<WorkbenchAction>,
+	pub(super) redos: LinkedQueue<WorkbenchAction>,
+	pub(super) unsaved_changes: bool,
+	pub(super) scroll: usize,
+	pub(super) horizontal_scroll: usize,
+	pub(super) window_height: usize,
+	pub(super) window_width: usize,
+	pub(super) bookmarks: MarkedLines,
+	pub(super) uuid: Uuid,
+	pub(super) freehand_mode: bool,
+	pub(super) selected_text: Option<SelectedText>,
+	pub(super) last_close_attempt: Duration,
+	pub(super) last_selected_text_interaction: (usize, usize, Duration),
+	pub(super) last_interaction: Duration,
+	pub(super) last_double_click_interaction: (usize, Duration),
+	pub(super) held_entry: HeldEntry,
+	// this took me two days -- still broken
+	pub(super) from_indices_arc: Option<Arc<SyncUnsafeCell<OwnedIndices>>>,
+	pub(super) cache_cursor_x: Option<usize>,
 }
 
 impl Tab {
@@ -82,6 +83,7 @@ impl Tab {
 			last_double_click_interaction: (0, Duration::ZERO),
 			held_entry: HeldEntry::Empty,
 			from_indices_arc: None,
+			cache_cursor_x: None,
 		})
 	}
 
@@ -358,6 +360,11 @@ impl Tab {
 	pub fn format(&self) -> FileFormat {
 		self.format
 	}
+	
+	pub fn modify_scroll(&mut self, f: impl FnOnce(usize) -> usize) {
+		self.scroll = f(self.scroll);
+		self.scroll = self.scroll();
+	}
 
 	#[must_use]
 	pub fn scroll(&self) -> usize {
@@ -365,6 +372,11 @@ impl Tab {
 		let scroll = self.scroll;
 		let max = (height + HEADER_SIZE).saturating_sub(self.window_height);
 		scroll.min(max) & !15
+	}
+	
+	pub fn modify_horizontal_scroll(&mut self, f: impl FnOnce(usize) -> usize) {
+		self.horizontal_scroll = f(self.horizontal_scroll);
+		self.horizontal_scroll = self.horizontal_scroll();
 	}
 
 	#[must_use]
@@ -400,7 +412,7 @@ impl Tab {
 	#[must_use]
 	pub fn left_margin(&self) -> usize { ((self.value.true_height() + self.held_entry.element().map_or(0, NbtElement::true_height)).ilog10() as usize + 1) * 8 + 4 + 8 }
 
-	pub fn set_scroll(&mut self, scroll: f32) {
+	pub fn on_scroll(&mut self, scroll: f32) {
 		#[cfg(target_os = "macos")]
 		const SCROLL_MULTIPLIER: f32 = 4.0;
 		#[cfg(not(target_os = "macos"))]
@@ -416,7 +428,7 @@ impl Tab {
 		self.scroll = self.scroll();
 	}
 
-	pub fn set_horizontal_scroll(&mut self, scroll: f32) {
+	pub fn on_horizontal_scroll(&mut self, scroll: f32) {
 		#[cfg(target_os = "macos")]
 		const SCROLL_MULTIPLIER: f32 = 4.0;
 		#[cfg(not(target_os = "macos"))]

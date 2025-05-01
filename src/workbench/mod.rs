@@ -25,7 +25,7 @@ use crate::serialization::{BigEndianDecoder, Decoder, UncheckedBufWriter};
 use crate::util::{drop_on_separate_thread, encompasses_or_equal, get_clipboard, now, nth, set_clipboard, LinkedQueue, StrExt};
 use crate::widget::{get_cursor_idx, get_cursor_left_jump_idx, get_cursor_right_jump_idx, Alert, Notification, NotificationKind, ReplaceBox, ReplaceBoxKeyResult, SearchBox, SearchBoxKeyResult, SelectedText, SelectedTextAdditional, SelectedTextKeyResult, Text, SEARCH_BOX_END_X, SEARCH_BOX_START_X, TEXT_DOUBLE_CLICK_INTERVAL};
 use crate::{flags, get_interaction_information, hash, tab, tab_mut};
-use crate::tree::{replace_element, remove_element, add_element, swap_element_same_depth, MutableIndices, Traverse, TraverseParents, Navigate, recache_along_indices, sum_indices, OwnedIndices, NavigationInformation, ParentNavigationInformationMut, TraversalInformation, TraversalInformationMut};
+use crate::tree::{replace_element, remove_element, add_element, swap_element_same_depth, MutableIndices, Traverse, TraverseParents, Navigate, recache_along_indices, line_number_at, OwnedIndices, NavigationInformation, ParentNavigationInformationMut, TraversalInformation, TraversalInformationMut, ParentNavigationInformation};
 
 use anyhow::{anyhow, Context, Result};
 use compact_str::{format_compact, CompactString, ToCompactString};
@@ -59,7 +59,6 @@ pub struct Workbench {
     raw_window_width: usize,
     held_mouse_keys: FxHashSet<MouseButton>,
     held_keys: FxHashSet<KeyCode>,
-    cache_cursor_x: Option<usize>,
     tab_scroll: usize,
     scrollbar_offset: Option<usize>,
     action_wheel: Option<(usize, usize)>,
@@ -92,7 +91,6 @@ impl Workbench {
             raw_window_width: 0,
             held_mouse_keys: FxHashSet::with_hasher(unsafe { core::mem::zeroed() }),
             held_keys: FxHashSet::with_hasher(unsafe { core::mem::zeroed() }),
-            cache_cursor_x: None,
             tab_scroll: 0,
             scrollbar_offset: None,
             action_wheel: None,
@@ -133,7 +131,6 @@ impl Workbench {
             raw_window_width: WINDOW_WIDTH,
             held_mouse_keys: FxHashSet::with_hasher(FxBuildHasher::default()),
             held_keys: FxHashSet::with_hasher(FxBuildHasher::default()),
-            cache_cursor_x: None,
             tab_scroll: 0,
             scrollbar_offset: None,
             action_wheel: None,
@@ -265,11 +262,11 @@ impl Workbench {
         } else {
             let tab = tab_mut!(self);
             if shift {
-                tab.set_horizontal_scroll(-v);
-                tab.set_scroll(-h);
+                tab.on_horizontal_scroll(-v);
+                tab.on_scroll(-h);
             } else {
-                tab.set_horizontal_scroll(-h);
-                tab.set_scroll(-v);
+                tab.on_horizontal_scroll(-h);
+                tab.on_scroll(-v);
             }
         }
         true
@@ -385,13 +382,6 @@ impl Workbench {
                                 break 'a;
                             }
                         }
-
-                        if MouseButton::Left == button && (y - HEADER_SIZE) < 16 && x > 32 + left_margin {
-                            if self.rename(x + horizontal_scroll) {
-                                break 'a;
-                            }
-                        }
-
 
                         if button == MouseButton::Left {
                             if self.try_double_click_interaction() {
@@ -1217,39 +1207,44 @@ impl Workbench {
     fn try_select_text(&mut self, snap_to_ends: bool) -> bool {
         let left_margin = self.left_margin();
         let horizontal_scroll = self.horizontal_scroll();
+
         if self.mouse_x + horizontal_scroll < left_margin { return false }
-        if self.mouse_y < HEADER_SIZE + 16 { return false }
+        if self.mouse_y < HEADER_SIZE { return false }
+
         let y = (self.mouse_y - HEADER_SIZE) / 16 + self.scroll() / 16;
-        let x = (self.mouse_x + horizontal_scroll - left_margin) / 16;
+
+        self.set_selected_text_at_y(y, self.mouse_x, snap_to_ends)
+    }
+
+    pub fn set_selected_text_at_y(&mut self, y: usize, mouse_x: usize, snap_to_ends: bool) -> bool {
+        let left_margin = self.left_margin();
+        let horizontal_scroll = self.horizontal_scroll();
+
         let tab = tab_mut!(self);
+
+        if y == 0 {
+            let max = tab.name.width() + 32 + 4 + self.left_margin();
+            return self.rename(mouse_x.min(max))
+        }
+
         if y >= tab.value.height() { return false }
         if tab.value.as_region().is_some_and(|region| region.is_grid_layout()) { return false }
 
-        let mut indices = vec![];
-        let mut iter = TraverseParents::new(x, y, &mut tab.value);
-        while let Some((position, idx, key, value, _)) = iter.next() {
-            indices.push(idx);
-            if let Position::Last | Position::Only = position {
-                let child = &value[idx];
-                let target_x = indices.len() * 16 + 32 + 4 + left_margin;
-                if child.as_chunk().is_some() && self.mouse_x < target_x - 4 {
-                    return false;
-                }
-                let k = key.map(|x| (x.into_string().into_boxed_str(), TextColor::TreeKey, true));
-                let v = Some(child.value()).map(|(a, c)| (a.into_string().into_boxed_str(), c, c != TextColor::TreeKey));
-                let selected_text = SelectedText::new(
-                    target_x,
-                    (self.mouse_x + horizontal_scroll).clamp(if snap_to_ends { target_x } else { 0 }, if snap_to_ends { k.as_ref().map_or(0, |(k, _, b)| (*b as usize) * (k.width() + ": ".width() * v.is_some() as usize)) + v.as_ref().map_or(0, |(v, _, b)| (*b as usize) * v.width()) + target_x } else { usize::MAX }),
-                    y * 16 + HEADER_SIZE,
-                    k,
-                    v,
-                    indices,
-                );
-                tab.set_selected_text(Some(y), selected_text);
-                return tab.selected_text.is_some();
-            }
-        }
-        false
+        let TraversalInformation { indices, depth, key, element, .. } = tab.value.traverse(y, None);
+        let target_x = depth * 16 + 32 + 4 + left_margin;
+        if element.as_chunk().is_some() && self.mouse_x < target_x - 4 { return false }
+        let k = key.map(|x| (x.to_owned().into_boxed_str(), TextColor::TreeKey, true));
+        let v = Some(element.value()).map(|(a, c)| (a.into_string().into_boxed_str(), c, c != TextColor::TreeKey));
+        let mouse_x = if snap_to_ends {
+            let min_x = target_x;
+            let max_x = k.as_ref().map_or(0, |(k, _, b)| (*b as usize) * (k.width() + ": ".width() * v.is_some() as usize)) + v.as_ref().map_or(0, |(v, _, b)| (*b as usize) * v.width()) + target_x;
+            (mouse_x + horizontal_scroll).clamp(min_x, max_x)
+        } else {
+            mouse_x + horizontal_scroll
+        };
+
+        tab.set_selected_text(Some(y), SelectedText::new(target_x, mouse_x, y * 16 + HEADER_SIZE, k, v, indices));
+        tab.selected_text.is_some()
     }
 
     fn bookmark_line(&mut self, require_left_margin_cursor: bool) -> bool {
@@ -1339,196 +1334,48 @@ impl Workbench {
         self.shift_selected_text_same_depth(|idx| idx.checked_add(1))
     }
 
-    /// # Safety
-    ///
-    /// * Indices contains valid data
-    pub unsafe fn selected_text_up(&mut self, ctrl: bool, window_properties: &mut WindowProperties) {
+    pub fn move_selected_text(&mut self, window_properties: &mut WindowProperties, f: impl FnOnce(usize, &NbtElement, OwnedIndices) -> Option<usize>) -> bool {
         let left_margin = self.left_margin();
         let tab = tab_mut!(self);
-        if let Some(SelectedText(Text { value: str_value, cursor, additional: SelectedTextAdditional { y, indices, keyfix, prefix, .. }, .. })) = tab.selected_text.clone() {
-            let Some(&last_index) = indices.last() else {
-                return;
-            };
-            if !tab.write_selected_text(false, window_properties, true) { return }
-            let cache_cursor_x = self.cache_cursor_x;
-            let original_indices_len = indices.len();
-            let mouse_x = cache_cursor_x.unwrap_or(original_indices_len * 16 + 32 + 4 + left_margin + keyfix.as_ref().map_or(0, |x| x.0.width()) + prefix.0.width() + str_value.split_at(cursor).0.width());
 
-            if y == HEADER_SIZE + 16 {
-                let width = tab.name.width();
-                self.rename(mouse_x.min(width + 32 + 4 + self.left_margin()));
-                return;
-            }
+        let Some(SelectedText(Text { additional: SelectedTextAdditional { y, mut indices, keyfix, prefix, .. }, value: str_value, cursor, .. })) = tab.selected_text.clone() else { return false };
+        if !tab.write_selected_text(false, window_properties, true) { return false }
 
-            let (k, v, indices, new_y) = if ctrl && last_index > 0 {
-                let mut indices = indices.into_vec();
-                *indices
-                    .last_mut()
-                    .expect("indices cannot be empty, we're in it") = 0;
-                let (k, v) = Navigate::new(
-                    indices.iter().copied().take(original_indices_len - 1),
-                    &mut tab.value,
-                )
-                    .last()
-                    .2
-                    .children()
-                    .expect("we are a child, some must exist")
-                    .map_or_else(
-                        |mut iter| {
-                            let (k, v) = iter
-                                .next()
-                                .expect("we are a child, some must exist");
-                            (Some((k.to_compact_string(), TextColor::TreeKey)), Some(v.value()))
-                        },
-                        |iter| (
-                            None,
-                            Some(
-                                iter.enumerate()
-                                    .next()
-                                    .expect("we're the child, it can't be empty")
-                                    .1
-                                    .value(),
-                            ),
-                        ),
-                    );
-                let new_y = sum_indices(&indices, &tab.value) * 16;
-                (k, v, indices, new_y)
-            } else {
-                let new_y = (y - HEADER_SIZE) / 16 - 1;
-                let mut indices = vec![];
-                let (k, v) = 'w: {
-                    let mut iter = TraverseParents::new(original_indices_len + 1, new_y, &mut tab.value);
-                    while let Some((position, idx, key, value, _)) = iter.next() {
-                        indices.push(idx);
-                        if let Position::Last | Position::Only = position {
-                            break 'w (
-                                key.map(|k| (k, TextColor::TreeKey)),
-                                Some(value[idx].value()),
-                            );
-                        }
-                    }
-                    panic!("Iterator was empty, somehow")
-                };
-                (k, v, indices, new_y * 16)
-            };
-            tab.scroll = tab.scroll.min(new_y.saturating_sub(16));
-            tab.scroll = tab.scroll();
-            let low = indices.len() * 16 + 32 + 4 + left_margin;
-            let high = low
-                + k.as_ref()
-                .map_or(0, |(x, _)| x.width())
-                + (k.is_some() && v.as_ref().is_some_and(|(_, color)| *color != TextColor::TreeKey)) as usize * (": ".width())
-                + v.as_ref()
-                .map_or(0, |(x, color)| ((*color != TextColor::TreeKey) as usize) * x.width());
-            self.cache_cursor_x = self.cache_cursor_x.or(Some(mouse_x));
-            tab.set_selected_text(None, SelectedText::new(
-                low,
-                mouse_x.clamp(low, high),
-                new_y + HEADER_SIZE,
-                k.map(|(a, c)| (a.into_string().into_boxed_str(), c, true)),
-                v.map(|(a, c)| (a.into_string().into_boxed_str(), c, c != TextColor::TreeKey)),
-                indices,
-            ));
-        }
+        let cache_cursor_x = tab.cache_cursor_x;
+        let depth = indices.len();
+        let y = (*y - HEADER_SIZE) / 16;
+        let mouse_x = cache_cursor_x.unwrap_or(depth * 16 + 32 + 4 + left_margin + keyfix.as_ref().map_or(0, |x| x.0.width()) + prefix.0.width() + str_value.split_at(*cursor).0.width());
+
+        let Some(new_y) = f(y, &tab.value, indices) else { return false };
+
+        self.set_selected_text_at_y(new_y, mouse_x, true);
+        tab.cache_cursor_x.get_or_insert(mouse_x);
+        tab.modify_scroll(|scroll| scroll.min(new_y * 16));
+        tab.refresh_scrolls();
+        true
     }
 
-    /// # Safety
-    ///
-    /// * Indices contains valid data
-    pub unsafe fn selected_text_down(&mut self, ctrl: bool, window_properties: &mut WindowProperties) {
-        let left_margin = self.left_margin();
-
-        let tab = tab_mut!(self);
-        let new_y = if let Some(SelectedText(Text { additional: SelectedTextAdditional { y, .. }, .. })) = tab.selected_text.as_ref() {
-            if (*y - HEADER_SIZE) / 16 + 1 >= tab.value.height() { return }
-            (*y - HEADER_SIZE) / 16 + 1
+    pub fn selected_text_up(&mut self, ctrl: bool, window_properties: &mut WindowProperties) -> bool {
+        self.move_selected_text(window_properties, |y, root, mut indices| Some(if ctrl && let Some(last_idx) = indices.last_mut() && *last_idx > 0 {
+            *last_idx -= 1;
+            root.navigate(&indices)?.line_number
         } else {
-            return;
-        };
+            y - 1
+        }))
+    }
 
-        if let Some(SelectedText(Text { value: str_value, cursor, additional: SelectedTextAdditional { y, indices, keyfix, prefix, .. }, .. })) = tab.selected_text.clone() {
-            if !tab.write_selected_text(false, window_properties, true) { return }
-            let cache_cursor_x = self.cache_cursor_x;
-            let original_indices_len = indices.len();
-            let mouse_x = cache_cursor_x.unwrap_or(original_indices_len * 16 + 32 + 4 + left_margin + keyfix.as_ref().map_or(0, |x| x.0.width()) + prefix.0.width() + str_value.split_at(cursor).0.width());
-            let (k, v, end_idx) = if ctrl && indices.len() > 0 {
-                Navigate::new(
-                    indices.iter().copied().take(indices.len() - 1),
-                    &mut tab.value,
-                )
-                    .last()
-                    .2
-                    .children()
-                    .expect("we're the child")
-                    .map_or_else(
-                        |iter| {
-                            let tuple = iter
-                                .enumerate()
-                                .last()
-                                .expect("we're the child, it can't be empty");
-                            (
-                                Some((tuple.1.0.to_compact_string(), TextColor::TreeKey)),
-                                Some(tuple.1.1.value()),
-                                tuple.0,
-                            )
-                        },
-                        |iter| {
-                            let tuple = iter
-                                .enumerate()
-                                .last()
-                                .expect("we're the child, it can't be empty");
-                            (None, Some(tuple.1.value()), tuple.0)
-                        },
-                    )
+    pub fn selected_text_down(&mut self, ctrl: bool, window_properties: &mut WindowProperties) -> bool {
+        self.move_selected_text(window_properties, |y, root, mut indices| Some(if ctrl && let Some((last_idx, parent_indices)) = indices.split_last() {
+            let NavigationInformation { element: parent, line_number, .. } = root.navigate(&parent_indices)?;
+            let len = parent.len()?;
+            if last_idx + 1 == len {
+                y + 1
             } else {
-                (None, None, 0)
-            };
-            let (k, v, indices, new_y) = if ctrl && indices.len() > 0 && !indices.last().is_some_and(|x| *x == end_idx) {
-                let mut indices = indices.into_vec();
-                *indices
-                    .last_mut()
-                    .expect("it literally just can't be empty") = end_idx;
-                let new_y = sum_indices(indices.iter().copied(), &tab.value) * 16;
-                (k, v, indices, new_y)
-            } else {
-                'w: {
-                    let mut indices = vec![];
-                    let mut iter = TraverseParents::new(original_indices_len + 1, new_y, &mut tab.value);
-                    while let Some((position, idx, key, value, _)) = iter.next() {
-                        indices.push(idx);
-                        if let Position::Last | Position::Only = position {
-                            break 'w (
-                                key.map(|k| (k, TextColor::TreeKey)),
-                                Some(value[idx].value()),
-                                indices,
-                                y + 16 - HEADER_SIZE,
-                            );
-                        }
-                    }
-                    panic!("Iterator was empty, somehow")
-                }
-            };
-            let low = indices.len() * 16 + 32 + 4 + left_margin;
-            let high = low
-                + k.as_ref()
-                .map_or(0, |(x, _)| x.width())
-                + (k.is_some() && v.as_ref().is_some_and(|(_, color)| *color != TextColor::TreeKey)) as usize * ": ".width()
-                + v.as_ref()
-                .map_or(0, |(x, color)| ((*color != TextColor::TreeKey) as usize) * x.width());
-            if new_y + 48 > tab.scroll + tab.window_height - HEADER_SIZE {
-                tab.scroll = new_y + 48 - (tab.window_height - HEADER_SIZE);
-                tab.scroll = tab.scroll();
+                line_number + 1
             }
-            self.cache_cursor_x = self.cache_cursor_x.or(Some(mouse_x));
-            tab.set_selected_text(None, SelectedText::new(
-                low,
-                mouse_x.clamp(low, high),
-                new_y + HEADER_SIZE,
-                k.map(|(a, c)| (a.into_string().into_boxed_str(), c, true)),
-                v.map(|(a, c)| (a.into_string().into_boxed_str(), c, c != TextColor::TreeKey)),
-                indices,
-            ));
-        }
+        } else {
+            y + 1
+        }))
     }
 
     pub fn force_close(&mut self) {
@@ -1724,9 +1571,7 @@ impl Workbench {
                             return true;
                         }
                         SelectedTextKeyResult::Up(ctrl) => {
-                            unsafe {
-                                self.selected_text_up(ctrl, window_properties);
-                            }
+                            self.selected_text_up(ctrl, window_properties);
                             self.refresh_selected_text_horizontal_scroll();
                             return true;
                         }
@@ -1997,8 +1842,7 @@ impl Workbench {
             let scrollbar_point = start + scrollbar_offset;
             let dy = mouse_y as isize - scrollbar_point as isize;
             let pixel_delta = height as isize * dy / total as isize;
-            tab.scroll = (tab.scroll as isize + pixel_delta).max(0) as usize;
-            tab.scroll = tab.scroll();
+            tab.modify_scroll(|scroll| (scroll as isize + pixel_delta).max(0) as usize);
         }
         self.try_extend_drag_selection();
         true
@@ -2336,7 +2180,7 @@ impl Workbench {
             format!("dims: {}x{}", self.window_width, self.window_height),
             format!("mouse state: {:?}", self.last_mouse_state),
             format!("mouse px coords: {}, {}", self.mouse_y, self.mouse_y),
-            format!("cache cursor x: {:?}", self.cache_cursor_x),
+            format!("cache cursor x: {:?}", tab.cache_cursor_x),
             format!("action wheel coords: {:?}", self.action_wheel),
             format!("sub indices: {:?}", self.subscription.as_ref().map(|subscription| &*subscription.indices)),
             format!("sub tab uuid: {:?}", self.subscription.as_ref().map(|subscription| subscription.tab_uuid)),
@@ -2504,23 +2348,19 @@ impl Workbench {
     pub fn try_mouse_scroll(&mut self) {
         let tab = tab_mut!(self);
         if self.mouse_x >= self.window_width - 16 {
-            tab.horizontal_scroll += 16;
-            tab.horizontal_scroll = tab.horizontal_scroll();
+            tab.modify_horizontal_scroll(|scroll| scroll + 16);
         } else if self.mouse_x < 16 {
-            tab.horizontal_scroll = tab.horizontal_scroll.saturating_sub(16);
-            tab.horizontal_scroll = tab.horizontal_scroll();
+            tab.modify_horizontal_scroll(|scroll| scroll.saturating_sub(16));
         }
 
         if self.mouse_y < HEADER_SIZE + 16 {
-            tab.scroll = tab.scroll.saturating_sub(16);
-            tab.scroll = tab.scroll();
+            tab.modify_scroll(|scroll| scroll.saturating_sub(16));
         } else if self.mouse_y
             >= usize::min(
             self.window_height - 16,
             tab.value.height() * 16 + HEADER_SIZE,
         ) {
-            tab.scroll += 16;
-            tab.scroll = tab.scroll();
+            tab.modify_scroll(|scroll| scroll + 16);
         }
     }
 

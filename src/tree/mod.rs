@@ -14,7 +14,7 @@ use crate::workbench::FileUpdateSubscription;
 
 #[must_use]
 #[deprecated = "deprecated in favor of NbtElement::navigate"]
-pub fn sum_indices(indices: &Indices, mut root: &NbtElement) -> usize {
+pub fn line_number_at(indices: &Indices, mut root: &NbtElement) -> usize {
     let mut total = 0;
     for idx in indices {
         for jdx in 0..idx {

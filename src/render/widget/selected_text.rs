@@ -9,7 +9,7 @@ use crate::flags;
 use crate::render::{TextColor, VertexBufferBuilder};
 use crate::util::{CharExt, StrExt};
 use crate::widget::{Cachelike, SelectedTextKeyResult, SelectedTextKeyResult::{Down, ForceClose, ForceOpen, Keyfix, ShiftDown, ShiftUp, Up, Valuefix}, Text};
-use crate::tree::{sum_indices, OwnedIndices};
+use crate::tree::{line_number_at, OwnedIndices};
 
 #[derive(Clone, Debug)]
 #[allow(clippy::module_name_repetitions)] // yeah no, it's better like this
@@ -305,7 +305,7 @@ impl SelectedText {
 	}
 
 	pub fn recache_y(&mut self, root: &NbtElement) {
-		let line_number = sum_indices(&self.indices, root);
+		let line_number = line_number_at(&self.indices, root);
 		self.y = line_number * 16 + HEADER_SIZE;
 	}
 	
