@@ -436,10 +436,10 @@ impl SearchBox {
 
             match element.children() {
                 Some(Ok(iter)) => for value in iter.rev() {
-                    queue.push((None, value, element.open()))
+                    queue.push((None, value, element.is_open()))
                 }
                 Some(Err(iter)) => for (key, value) in iter.rev() {
-                    queue.push((Some(key), value, element.open()))
+                    queue.push((Some(key), value, element.is_open()))
                 }
                 None => {}
             }
@@ -449,7 +449,7 @@ impl SearchBox {
                 line_number += 1;
             }
         }
-        unsafe { MarkedLines::from_raw(new_bookmarks) }
+        unsafe { MarkedLines::from_unchecked(new_bookmarks) }
     }
 
     #[must_use]

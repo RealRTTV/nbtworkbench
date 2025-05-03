@@ -11,7 +11,8 @@ use crate::assets::{ZOffset, BASE_Z, CONNECTION_UV, JUST_OVERLAPPING_BASE_TEXT_Z
 use crate::elements::{id_to_string_name, NbtChunk, NbtCompound, NbtElement};
 use crate::render::{RenderContext, TextColor, VertexBufferBuilder};
 use crate::serialization::{Decoder, PrettyFormatter, UncheckedBufWriter};
-use crate::workbench::DropFn;
+use crate::tree::OwnedIndices;
+use crate::workbench::DropResult;
 
 #[allow(clippy::module_name_repetitions)]
 #[repr(C)]
@@ -211,12 +212,11 @@ impl NbtList {
 		}
 	}
 
-	pub fn toggle(&mut self) -> Option<()> {
+	pub fn toggle(&mut self) {
 		self.open = !self.open && !self.is_empty();
 		if !self.open {
 			self.shut();
 		}
-		Some(())
 	}
 
 	#[must_use]
@@ -500,89 +500,9 @@ impl NbtList {
 
 	pub fn children_mut(&mut self) -> IterMut<'_, NbtElement> { self.elements.iter_mut() }
 
-	pub fn drop(&mut self, mut key: Option<CompactString>, mut element: NbtElement, y: &mut usize, depth: usize, target_depth: usize, mut line_number: usize, indices: &mut Vec<usize>) -> DropFn {
-		let can_insert = self.can_insert(&element);
-		if *y < 16 && *y >= 8 && depth == target_depth && can_insert {
-			let before = (self.height(), self.true_height());
-			indices.push(0);
-			if let Err(element) = self.insert(0, element) { return DropFn::InvalidType((key, element)) }
-			self.open = true;
-			return DropFn::Dropped(
-				self.height as usize - before.0,
-				self.true_height as usize - before.1,
-				None,
-				line_number + 1,
-				None,
-			);
-		} else if self.height() == 1 && *y < 24 && *y >= 16 && depth == target_depth && can_insert {
-			let before = self.true_height();
-			indices.push(self.len());
-			if let Err(element) = self.insert(self.len(), element) {
-				// indices are never used
-				return DropFn::InvalidType((key, element));
-			}
-			self.open = true;
-			return DropFn::Dropped(
-				self.height as usize - 1,
-				self.true_height as usize - before,
-				None,
-				line_number + before + 1,
-				None,
-			);
-		}
-
-		if *y < 16 {
-			return DropFn::Missed((key, element));
-		} else {
-			*y -= 16;
-		}
-
-		if self.open && !self.is_empty() {
-			indices.push(0);
-			let ptr = unsafe { &mut *indices.as_mut_ptr().add(indices.len() - 1) };
-			for (idx, value) in self.children_mut().enumerate() {
-				*ptr = idx;
-				let heights = (element.height(), element.true_height());
-				if *y < 8 && depth == target_depth && can_insert {
-					if let Err(element) = self.insert(idx, element) { return DropFn::InvalidType((key, element)) }
-					return DropFn::Dropped(heights.0, heights.1, None, line_number + 1, None);
-				} else if *y >= value.height() * 16 - 8 && *y < value.height() * 16 && depth == target_depth && can_insert {
-					*ptr = idx + 1;
-					let true_height = value.true_height();
-					if let Err(element) = self.insert(idx + 1, element) { return DropFn::InvalidType((key, element)) }
-					return DropFn::Dropped(heights.0, heights.1, None, line_number + true_height + 1, None);
-				}
-
-				match value.drop(
-					key,
-					element,
-					y,
-					depth + 1,
-					target_depth,
-					line_number + 1,
-					indices,
-				) {
-					x @ DropFn::InvalidType(_) => return x,
-					DropFn::Missed((k, e)) => {
-						key = k;
-						element = e;
-					}
-					DropFn::Dropped(increment, true_increment, key, line_number, value) => {
-						self.increment(increment, true_increment);
-						return DropFn::Dropped(increment, true_increment, key, line_number, value);
-					}
-				}
-
-				line_number += value.true_height();
-			}
-			indices.pop();
-		}
-		DropFn::Missed((key, element))
-	}
-
 	pub fn shut(&mut self) {
 		for element in self.children_mut() {
-			if element.open() {
+			if element.is_open() {
 				element.shut();
 			}
 		}

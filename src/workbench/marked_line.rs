@@ -4,6 +4,7 @@ use std::convert::identity;
 use std::ops::{Deref, DerefMut, Index, IndexMut, RangeBounds};
 
 use crate::assets::{BOOKMARK_UV, HIDDEN_BOOKMARK_UV};
+use crate::elements::NbtElement;
 use crate::render::Vec2u;
 use crate::util::combined_two_sorted;
 
@@ -73,10 +74,10 @@ impl MarkedLine {
     }
     
     #[must_use]
-    pub const fn offset(self, offset: usize, true_offset: usize) -> Self {
+    pub const fn offset(self, offset: isize, true_offset: isize) -> Self {
         Self {
-            true_line_number: self.true_line_number.wrapping_add(true_offset),
-            line_number: self.line_number.wrapping_add(offset),
+            true_line_number: (self.true_line_number + true_offset) as usize,
+            line_number: (self.line_number + offset) as usize,
             uv: self.uv,
         }
     }
@@ -140,7 +141,16 @@ impl MarkedLines {
     /// # Safety
     /// `inner` must be sorted least to greatest, i.e.; it is up to the caller to assure `inner.is_sorted()`
     #[must_use]
-    pub unsafe fn from_raw(inner: Vec<MarkedLine>) -> Self {
+    pub unsafe fn from_unchecked(inner: Vec<MarkedLine>) -> Self {
+        Self {
+            inner
+        }
+    }
+
+    #[must_use]
+    pub fn from(mut inner: Vec<MarkedLine>) -> Self {
+        inner.sort_unstable_by_key(|line| line.true_line_number);
+        
         Self {
             inner
         }
@@ -163,6 +173,11 @@ impl MarkedLines {
             (Bound::Excluded(ref start), Bound::Included(ref end)) => self.inner.drain(self.binary_search(start).map_or_else(identity, |x| x + 1)..=self.binary_search(end).unwrap_or_else(identity)),
             (Bound::Excluded(ref start), Bound::Excluded(ref end)) => self.inner.drain(self.binary_search(start).map_or_else(identity, |x| x + 1)..self.binary_search(end).unwrap_or_else(identity)),
         }.collect()
+    }
+    
+    #[must_use]
+    pub fn for_element(&self, element: &NbtElement, true_line_number: usize) -> &MarkedLineSlice {
+        &self[true_line_number..true_line_number + element.true_height()]
     }
 }
 
@@ -295,6 +310,26 @@ impl<R: RangeBounds<usize>> IndexMut<R> for MarkedLineSlice {
             (Bound::Excluded(ref start), Bound::Included(ref end)) => { let start = self.binary_search(start).map_or_else(identity, |x| x + 1); let end = self.binary_search(end).unwrap_or_else(identity); if end >= self.len() { slice_mut!([]) } else { slice_mut!(self.0[start..=end]) } },
             (Bound::Excluded(ref start), Bound::Excluded(ref end)) => { let start = self.binary_search(start).map_or_else(identity, |x| x + 1); let end = self.binary_search(end).unwrap_or_else(identity); slice_mut!(self.0[start..end]) },
         }
+    }
+}
+
+impl<'a> IntoIterator for &'a MarkedLineSlice {
+    type Item = &'a MarkedLine;
+    type IntoIter = Iter<'a>;
+
+    #[inline]
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter()
+    }
+}
+
+impl<'a> IntoIterator for &'a mut MarkedLineSlice {
+    type Item = &'a mut MarkedLine;
+    type IntoIter = IterMut<'a>;
+
+    #[inline]
+    fn into_iter(self) -> Self::IntoIter {
+        self.iter_mut()
     }
 }
 

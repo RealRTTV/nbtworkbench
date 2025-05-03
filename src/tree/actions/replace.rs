@@ -26,8 +26,9 @@ use super::{recache_along_indices, MutableIndices, Navigate};
 /// )?;
 /// tab.append_to_history(result.into_action());
 /// ```
+#[must_use]
 pub fn replace_element<'m1, 'm2: 'm1>(root: &mut NbtElement, value: NbtElementAndKey, indices: OwnedIndices, bookmarks: &mut MarkedLines, mutable_indices: &'m1 mut MutableIndices<'m2>) -> Option<ReplaceElementResult> {
-    let Some(ParentNavigationInformationMut { parent, true_line_number, .. }) = root.navigate_parent_mut(&indices) else {
+    let Some(ParentNavigationInformationMut { parent, true_line_number, idx, .. }) = root.navigate_parent_mut(&indices) else {
         return if root.id() == value.1.id() {
             bookmarks.remove(..);
 
@@ -43,7 +44,7 @@ pub fn replace_element<'m1, 'm2: 'm1>(root: &mut NbtElement, value: NbtElementAn
 
     let (old_parent_height, old_parent_true_height) = (parent.height(), parent.true_height());
     // SAFETY: we have updated all the relevant data
-    let (old_key, old_value) = unsafe { parent.replace_key_value(last, value) }?;
+    let (old_key, old_value) = unsafe { parent.replace_key_value(idx, value) }?;
     let (_old_height, old_true_height) = (old_value.height(), old_value.true_height());
     let (parent_height, parent_true_height) = (parent.height(), parent.true_height());
     let (diff, true_diff) = (parent_height.wrapping_sub(old_parent_height), parent_true_height.wrapping_sub(old_parent_true_height));
@@ -55,13 +56,12 @@ pub fn replace_element<'m1, 'm2: 'm1>(root: &mut NbtElement, value: NbtElementAn
             ci.remove();
         }
     });
-
-    recache_along_indices(&indices, root);
+    
+    root.recache_along_indices(&indices);
 
     Some(ReplaceElementResult {
         indices,
         kv: (old_key, old_value),
-        replaces: true,
     })
 }
 
@@ -69,27 +69,19 @@ pub fn replace_element<'m1, 'm2: 'm1>(root: &mut NbtElement, value: NbtElementAn
 pub struct ReplaceElementResult {
     indices: OwnedIndices,
     kv: NbtElementAndKey,
-    replaces: bool,
 }
 
 impl ReplaceElementResult {
     #[must_use]
-    pub fn into_raw(self) -> (OwnedIndices, NbtElementAndKey, bool) {
-        (self.indices, self.kv, self.replaces)
+    pub fn into_raw(self) -> (OwnedIndices, NbtElementAndKey) {
+        (self.indices, self.kv)
     }
 
     #[must_use]
     pub fn into_action(self) -> WorkbenchAction {
-        if self.replaces {
-            WorkbenchAction::Replace {
-                indices: self.indices,
-                value: self.kv,
-            }
-        } else {
-            WorkbenchAction::Remove {
-                element: self.kv,
-                indices: self.indices,
-            }
+        WorkbenchAction::Replace {
+            indices: self.indices,
+            value: self.kv,
         }
     }
 }

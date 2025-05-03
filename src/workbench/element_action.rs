@@ -115,7 +115,7 @@ impl ElementAction {
 	}
 
 	#[allow(clippy::too_many_lines)]
-	pub fn apply<'a>(self, key: Option<CompactString>, mut indices: OwnedIndices, _tab_uuid: Uuid, true_line_number: usize, line_number: usize, element: &mut NbtElement, bookmarks: &mut MarkedLines, mutable_indices: &'a mut MutableIndices<'a>, alerts: &mut Vec<Alert>) -> Option<WorkbenchAction> {
+	pub fn apply<'m1, 'm2: 'm1>(self, root: &mut NbtElement, indices: OwnedIndices, bookmarks: &mut MarkedLines, mutable_indices: &'m1 mut MutableIndices<'m2>, alerts: &mut Vec<Alert>) -> Option<WorkbenchAction> {
 		#[must_use]
 		#[cfg(not(target_arch = "wasm32"))]
 		fn open_file(str: &str) -> bool {
@@ -318,7 +318,7 @@ impl ElementAction {
 						panic!("Unknown element kind for compound sorting")
 					};
 
-					return Some(WorkbenchAction::ReorderCompound { indices, reordering_indices });
+					return Some(WorkbenchAction::Reorder { indices, mapping: reordering_indices });
 				}
 				Self::SortCompoundByType => {
 					let open = element.open();
@@ -332,7 +332,7 @@ impl ElementAction {
 						panic!("Unknown element kind for compound sorting")
 					};
 
-					return Some(WorkbenchAction::ReorderCompound { indices, reordering_indices });
+					return Some(WorkbenchAction::Reorder { indices, mapping: reordering_indices });
 				}
 				Self::InsertFromClipboard => {
 					let Some(clipboard) = get_clipboard() else {
@@ -347,12 +347,13 @@ impl ElementAction {
 						}
 					};
 					indices.push(0);
-					if let None = add_element(element, key, value, OwnedIndices::from(&[0]), bookmarks, mutable_indices) {
-						alerts.push(Alert::new("Error!", TextColor::Red, "Failed to insert from clipboard"));
-						return None;
+					match add_element(element, key, value, OwnedIndices::from(&[0]), bookmarks, mutable_indices) {
+						Some(action) => Some(action.into_action()),
+						None => {
+							alerts.push(Alert::new("Error!", TextColor::Red, "Failed to insert from clipboard"));
+							return None;
+						}
 					}
-
-					return Some(WorkbenchAction::Add { indices })
 				}
 			}
 		}

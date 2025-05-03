@@ -16,35 +16,35 @@ use crate::elements::{CompoundMap, CompoundMapIter, CompoundMapIterMut, Entry, N
 use crate::render::{RenderContext, TextColor, VertexBufferBuilder};
 use crate::serialization::{BigEndianDecoder, Decoder, LittleEndianDecoder, PrettyFormatter, UncheckedBufWriter};
 use crate::tree;
-use crate::tree::{Indices, NavigationInformation, NavigationInformationMut, ParentNavigationInformation, ParentNavigationInformationMut, TraversalInformation, TraversalInformationMut};
+use crate::tree::{Indices, NavigationInformation, NavigationInformationMut, OwnedIndices, ParentNavigationInformation, ParentNavigationInformationMut, TraversalInformation, TraversalInformationMut};
 use crate::util::{now, width_ascii, StrExt};
-use crate::workbench::{DropFn, ElementAction, FileFormat, MarkedLines};
+use crate::workbench::{DropResult, ElementAction, FileFormat, MarkedLines};
 
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub struct NbtElementId {
 	_pad: [MaybeUninit<u8>; 23],
-	pub(in crate::elements) id: u8,
+	id: u8,
 }
 
 #[repr(C)]
 pub union NbtElement {
-	pub(in crate::elements) chunk: ManuallyDrop<NbtChunk>,
-	pub(in crate::elements) region: ManuallyDrop<NbtRegion>,
-	pub(in crate::elements) byte: ManuallyDrop<NbtByte>,
-	pub(in crate::elements) short: ManuallyDrop<NbtShort>,
-	pub(in crate::elements) int: ManuallyDrop<NbtInt>,
-	pub(in crate::elements) long: ManuallyDrop<NbtLong>,
-	pub(in crate::elements) float: ManuallyDrop<NbtFloat>,
-	pub(in crate::elements) double: ManuallyDrop<NbtDouble>,
-	pub(in crate::elements) byte_array: ManuallyDrop<NbtByteArray>,
-	pub(in crate::elements) string: ManuallyDrop<NbtString>,
-	pub(in crate::elements) list: ManuallyDrop<NbtList>,
-	pub(in crate::elements) compound: ManuallyDrop<NbtCompound>,
-	pub(in crate::elements) int_array: ManuallyDrop<NbtIntArray>,
-	pub(in crate::elements) long_array: ManuallyDrop<NbtLongArray>,
-	pub(in crate::elements) null: ManuallyDrop<NbtNull>,
-	pub(in crate::elements) id: NbtElementId,
+	chunk: ManuallyDrop<NbtChunk>,
+	region: ManuallyDrop<NbtRegion>,
+	byte: ManuallyDrop<NbtByte>,
+	short: ManuallyDrop<NbtShort>,
+	int: ManuallyDrop<NbtInt>,
+	long: ManuallyDrop<NbtLong>,
+	float: ManuallyDrop<NbtFloat>,
+	double: ManuallyDrop<NbtDouble>,
+	byte_array: ManuallyDrop<NbtByteArray>,
+	string: ManuallyDrop<NbtString>,
+	list: ManuallyDrop<NbtList>,
+	compound: ManuallyDrop<NbtCompound>,
+	int_array: ManuallyDrop<NbtIntArray>,
+	long_array: ManuallyDrop<NbtLongArray>,
+	null: ManuallyDrop<NbtNull>,
+	id: NbtElementId,
 }
 
 impl NbtElement {
@@ -942,6 +942,22 @@ impl NbtElement {
 			})
 		}
 	}
+	
+	#[must_use]
+	pub fn values(&self) -> Option<NbtElementValues<'_>> {
+		unsafe {
+			Some(match self.id() {
+				NbtByteArray::ID => NbtElementValues::Iter(self.byte_array.children()),
+				NbtIntArray::ID => NbtElementValues::Iter(self.int_array.children()),
+				NbtLongArray::ID => NbtElementValues::Iter(self.long_array.children()),
+				NbtList::ID => NbtElementValues::Iter(self.list.children()),
+				NbtCompound::ID => NbtElementValues::CompoundMapIter(self.compound.children()),
+				NbtChunk::ID => NbtElementValues::CompoundMapIter(self.chunk.children()),
+				NbtRegion::ID => NbtElementValues::Iter(self.region.children()),
+				_ => return None,
+			})
+		}
+	}
 
 	#[must_use]
 	#[allow(clippy::type_complexity)] // a type probably shouldn't abstract what this is, like... yeah
@@ -1109,7 +1125,7 @@ impl NbtElement {
 	#[must_use]
 	pub fn toggle(&mut self) -> Option<()> {
 		unsafe {
-			match self.id() {
+			Some(match self.id() {
 				NbtByteArray::ID => self.byte_array.toggle(),
 				NbtIntArray::ID => self.int_array.toggle(),
 				NbtLongArray::ID => self.long_array.toggle(),
@@ -1117,23 +1133,23 @@ impl NbtElement {
 				NbtCompound::ID => self.compound.toggle(),
 				NbtRegion::ID => self.region.toggle(),
 				NbtChunk::ID => self.chunk.toggle(),
-				_ => None,
-			}
+				_ => return None,
+			})
 		}
 	}
 
 	#[inline]
 	#[must_use]
-	pub fn open(&self) -> bool {
+	pub fn is_open(&self) -> bool {
 		unsafe {
 			match self.id() {
 				NbtByteArray::ID => self.byte_array.open(),
 				NbtIntArray::ID => self.int_array.open(),
 				NbtLongArray::ID => self.long_array.open(),
 				NbtList::ID => self.list.open(),
-				NbtCompound::ID => self.compound.open(),
+				NbtCompound::ID => self.compound.is_open(),
 				NbtRegion::ID => self.region.is_open(),
-				NbtChunk::ID => self.chunk.open(),
+				NbtChunk::ID => self.chunk.is_open(),
 				_ => false,
 			}
 		}
@@ -1262,10 +1278,12 @@ impl NbtElement {
 	#[inline]
 	#[must_use]
 	pub fn is_primitive(&self) -> bool {
-		match self.id() {
-			NbtByte::ID | NbtShort::ID | NbtInt::ID | NbtLong::ID | NbtFloat::ID | NbtDouble::ID | NbtString::ID => true,
-			_ => false,
-		}
+		matches!(self.id(), NbtByte::ID | NbtShort::ID | NbtInt::ID | NbtLong::ID | NbtFloat::ID | NbtDouble::ID | NbtString::ID)
+	}
+	
+	#[must_use]
+	pub fn is_complex(&self) -> bool {
+		matches!(self.id(), NbtByteArray::ID | NbtList::ID | NbtCompound::ID | NbtIntArray::ID | NbtLongArray::ID | NbtChunk::ID | NbtRegion::ID)
 	}
 
 	#[inline]
@@ -1324,48 +1342,67 @@ impl NbtElement {
 		}
 	}
 
-	#[inline]
-	pub fn drop(&mut self, key: Option<CompactString>, element: Self, y: &mut usize, depth: usize, target_depth: usize, line_number: usize, indices: &mut Vec<usize>) -> DropFn {
-		unsafe {
-			let height = self.height() * 16;
-			match self.id() {
-				_ if *y >= height + 8 => {
-					*y -= height;
-					DropFn::Missed((key, element))
-				}
-				NbtByteArray::ID => self
-					.byte_array
-					.drop(key, element, y, depth, target_depth, line_number, indices),
-				NbtList::ID => self
-					.list
-					.drop(key, element, y, depth, target_depth, line_number, indices),
-				NbtCompound::ID => self
-					.compound
-					.drop(key, element, y, depth, target_depth, line_number, indices),
-				NbtIntArray::ID => self
-					.int_array
-					.drop(key, element, y, depth, target_depth, line_number, indices),
-				NbtLongArray::ID => self
-					.long_array
-					.drop(key, element, y, depth, target_depth, line_number, indices),
-				NbtChunk::ID => NbtCompound::drop(
-					&mut self.chunk,
-					key,
-					element,
-					y,
-					depth,
-					target_depth,
-					line_number,
-					indices,
-				),
-				NbtRegion::ID => self
-					.region
-					.drop(key, element, y, depth, target_depth, line_number, indices),
-				_ => {
-					*y = y.saturating_sub(16);
-					DropFn::Missed((key, element))
-				}
+	#[must_use]
+	pub fn create_drop_indices(&self, key: Option<&str>, value: &Self, mut y: usize, x: usize) -> Option<OwnedIndices> {
+		let mut indices = OwnedIndices::new();
+		match self.create_drop_indices0(key, value, &mut y, x, 0, &mut indices) {
+			DropResult::Dropped => Some(indices),
+			DropResult::Missed => None,
+			DropResult::Failed => None,
+		}
+	}
+
+	#[must_use]
+	pub(super) fn create_drop_indices0(&self, key: Option<&str>, value: &Self, y: &mut usize, current_depth: usize, x: usize, indices: &mut OwnedIndices) -> DropResult {
+		let height_px = self.height() * 16;
+		if *y >= height_px + 8 {
+			*y -= height_px;
+			return DropResult::Missed
+		}
+		if let Some(iter) = self.values() {
+			let can_insert = self.can_insert(&value);
+			let is_open = self.is_open();
+			let len = self.len().unwrap_or(0);
+
+			if *y < 16 && *y >= 8 && current_depth == x && can_insert {
+				indices.push(0);
+				return DropResult::Dropped;
 			}
+
+			if !is_open && *y < 24 && *y >= 16 && current_depth == x && can_insert {
+				indices.push(len);
+				return DropResult::Dropped;
+			}
+
+			if *y < 16 {
+				return DropResult::Missed;
+			} else {
+				*y -= 16;
+			}
+
+			if is_open && !self.is_empty() {
+				indices.push(0);
+				let ptr_idx = indices.len() - 1;
+				for (idx, child) in iter.enumerate() {
+					indices[ptr_idx] = idx;
+					if *y < 8 && current_depth == x && can_insert {
+						return DropResult::Dropped;
+					} else if *y >= child.height() * 16 - 8 && *y < child.height() * 16 && current_depth == x && can_insert {
+						indices[ptr_idx] = idx + 1;
+						return DropResult::Dropped;
+					}
+
+					match child.create_drop_indices0(key, value, y, current_depth + 1, x, indices) {
+						DropResult::Missed => (),
+						x @ (DropResult::Dropped | DropResult::Failed) => return x,
+					}
+				}
+				indices.pop();
+			}
+			DropResult::Missed
+		} else {
+			*y = y.saturating_sub(16);
+			DropResult::Missed
 		}
 	}
 
@@ -1419,11 +1456,8 @@ impl NbtElement {
 		}
 	}
 
-	/// # Errors
-	///
-	/// * `self` cannot contain that specific variant of `Self`, i.e. `Self::NbtByte` in an `Self::NbtIntArray`
-	///
-	/// If any changes are made to this error list, then the duplicate may have to be updated as it relies on this never occurring
+	/// # Safety
+	/// - must be assured to update valid indices
 	#[inline]
 	pub unsafe fn insert(&mut self, idx: usize, value: NbtElementAndKey) -> Result<Option<Self>, Self> {
 		unsafe {
@@ -1446,6 +1480,8 @@ impl NbtElement {
 		}
 	}
 
+	/// # Safety
+	/// - must be assured to update valid indices
 	#[inline]
 	pub unsafe fn replace_key_value(&mut self, idx: usize, kv: NbtElementAndKey) -> Option<NbtElementAndKey> {
 		unsafe {
@@ -1462,6 +1498,8 @@ impl NbtElement {
 		}
 	}
 
+	/// # Safety
+	/// - must be assured to update valid indices
 	#[inline]
 	pub unsafe fn remove(&mut self, idx: usize) -> Option<(Option<CompactString>, Self)> {
 		unsafe {
@@ -1985,6 +2023,22 @@ pub const fn id_to_string_name_width(id: u8) -> (usize, usize) {
 		NbtRegion::ID => (width_ascii("region"), width_ascii("regions")),
 		NbtNull::ID => (width_ascii("entry"), width_ascii("entries")),
 		_ => (0, 0),
+	}
+}
+
+pub enum NbtElementValues<'a> {
+	Iter(Iter<'a, NbtElement>),
+	CompoundMapIter(CompoundMapIter<'a>),
+}
+
+impl<'a> Iterator for NbtElementValues<'a> {
+	type Item = &'a NbtElement;
+
+	fn next(&mut self) -> Option<Self::Item> {
+		match self {
+			Self::Iter(iter) => iter.next(),
+			Self::CompoundMapIter(iter) => iter.next().map(|(a, b)| b),
+		}
 	}
 }
 

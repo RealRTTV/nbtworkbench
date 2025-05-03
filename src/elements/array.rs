@@ -145,9 +145,8 @@ macro_rules! array {
 			#[must_use]
 			pub fn true_height(&self) -> usize { self.len() + 1 }
 
-			pub fn toggle(&mut self) -> Option<()> {
+			pub fn toggle(&mut self) {
 				self.open = !self.open && !self.is_empty();
-				Some(())
 			}
 
 			#[must_use]
@@ -303,52 +302,6 @@ macro_rules! array {
 			#[inline] // ret type is #[must_use]
 			pub fn children_mut(&mut self) -> IterMut<'_, NbtElement> { self.values.iter_mut() }
 
-			pub fn drop(&mut self, key: Option<CompactString>, element: NbtElement, y: &mut usize, depth: usize, target_depth: usize, line_number: usize, indices: &mut Vec<usize>) -> DropFn {
-				if 8 <= *y && *y < 16 && depth == target_depth {
-					indices.push(0);
-					if let Err(element) = self.insert(0, element) { return DropFn::InvalidType((key, element)) }
-					self.open = true;
-					return DropFn::Dropped(1, 1, None, line_number + 1, None);
-				}
-
-				if self.height() * 16 <= *y && *y < self.height() * 16 + 8 && depth == target_depth {
-					indices.push(self.len());
-					if let Err(element) = self.insert(self.len(), element) { return DropFn::InvalidType((key, element)) }
-					self.open = true;
-					return DropFn::Dropped(1, 1, None, line_number + self.len(), None);
-				}
-
-				if *y < 16 {
-					return DropFn::Missed((key, element));
-				} else {
-					*y -= 16;
-				}
-
-				if self.open && !self.is_empty() {
-					if depth == target_depth {
-						indices.push(0);
-						let ptr = unsafe { &mut *indices.as_mut_ptr().add(indices.len() - 1) };
-						for idx in 0..self.values.len() {
-							*ptr = idx;
-							if *y < 8 && depth == target_depth {
-								if let Err(element) = self.insert(idx, element) { return DropFn::InvalidType((key, element)) }
-								return DropFn::Dropped(1, 1, None, line_number + idx + 1, None);
-							} else if *y < 16 && depth == target_depth {
-								*ptr = idx + 1;
-								if let Err(element) = self.insert(idx + 1, element) { return DropFn::InvalidType((key, element)) }
-								return DropFn::Dropped(1, 1, None, line_number + idx + 1 + 1, None);
-							}
-
-							*y -= 16;
-						}
-						indices.pop();
-					} else {
-						*y = y.saturating_sub((self.len() + 1) * 16);
-					}
-				}
-				DropFn::Missed((key, element))
-			}
-
 			#[inline]
 			pub fn shut(&mut self) { self.open = false; }
 
@@ -434,8 +387,9 @@ use crate::assets::{ZOffset, BASE_Z, BYTE_ARRAY_UV, BYTE_UV, CONNECTION_UV, INT_
 use crate::elements::{id_to_string_name, NbtElement};
 use crate::render::{RenderContext, TextColor, VertexBufferBuilder};
 use crate::serialization::{Decoder, PrettyFormatter, UncheckedBufWriter};
+use crate::tree::OwnedIndices;
 use crate::util::StrExt;
-use crate::workbench::DropFn;
+use crate::workbench::DropResult;
 
 array!(byte, NbtByteArray, i8, 7, 1, 'B', BYTE_ARRAY_UV, BYTE_UV, parse_byte, array_try_into_byte);
 array!(int, NbtIntArray, i32, 11, 3, 'I', INT_ARRAY_UV, INT_UV, parse_int, array_try_into_int);

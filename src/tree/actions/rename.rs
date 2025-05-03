@@ -29,6 +29,7 @@ use super::Navigate;
 /// )?.into_action();
 /// tab.append_to_history(action);
 /// ```
+#[must_use]
 pub fn rename_element(root: &mut NbtElement, indices: OwnedIndices, key: Option<CompactString>, value: Option<CompactString>, path: &mut Option<PathBuf>, name: &mut Box<str>, window_properties: &mut WindowProperties) -> Option<RenameElementResult> {
     if key.is_none() && value.is_none() {
         return None;

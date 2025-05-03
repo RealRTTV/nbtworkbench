@@ -21,6 +21,7 @@
     stmt_expr_attributes,
 	generic_associated_types,
 )]
+#![feature(ptr_as_ref_unchecked)]
 #![windows_subsystem = "windows"]
 
 extern crate core;
@@ -121,6 +122,13 @@ macro_rules! log {
 	}};
 }
 
+#[macro_export]
+macro_rules! mutable_indices {
+    ($workbench:ident, $tab:ident) => {
+		&mut MutableIndices::new(&mut $workbench.subscription, &mut $tab.selected_text)
+	};
+}
+
 
 pub static mut WORKBENCH: workbench::Workbench = unsafe { workbench::Workbench::uninit() };
 pub static mut WINDOW_PROPERTIES: render::WindowProperties = render::WindowProperties::Fake;
@@ -130,6 +138,7 @@ pub static mut WINDOW_PROPERTIES: render::WindowProperties = render::WindowPrope
 /// * rendering code is duplicated af
 /// * add [`Indices`](workbench::tree_travel::Indices)
 /// * refactor drop to return indices - and potentially use it for drop rendering code
+/// * rename line_number and true_line_number to y and line_number respectively
 /// # Long-Term Goals
 /// * smart screen
 /// * [chunk](elements::chunk::NbtChunk) section rendering

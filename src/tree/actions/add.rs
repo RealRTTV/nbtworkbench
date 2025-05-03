@@ -28,7 +28,8 @@ use super::super::{recache_along_indices, MutableIndices, Navigate};
 /// )?;
 /// tab.append_to_history(action);
 /// ```
-pub fn add_element<'m1, 'm2: 'm1>(root: &mut NbtElement, key: Option<CompactString>, value: NbtElement, indices: OwnedIndices, bookmarks: &mut MarkedLines, mutable_indices: &'m1 mut MutableIndices<'m2>) -> Option<WorkbenchAction> {
+#[must_use]
+pub fn add_element<'m1, 'm2: 'm1>(root: &mut NbtElement, key: Option<CompactString>, value: NbtElement, indices: OwnedIndices, bookmarks: &mut MarkedLines, mutable_indices: &'m1 mut MutableIndices<'m2>) -> Option<AddElementResult> {
     let ParentNavigationInformationMut { true_line_number, parent, idx, parent_indices, .. } = root.navigate_parent_mut(&indices)?;
     let (old_parent_height, old_parent_true_height) = (parent.height(), parent.true_height());
     // SAFETY: we have updated all the relevant data
@@ -53,13 +54,30 @@ pub fn add_element<'m1, 'm2: 'm1>(root: &mut NbtElement, key: Option<CompactStri
         }
     });
 
-    recache_along_indices(&parent_indices, root);
+    root.recache_along_indices(&parent_indices);
 
-    let action = if let Some(old_value) = old_value {
-        WorkbenchAction::Replace { indices, value: (None, old_value) }
-    } else {
-        WorkbenchAction::Add { indices }
-    };
+    Some(AddElementResult {
+        indices,
+        old_value,
+    })
+}
 
-    Some(action)
+pub struct AddElementResult {
+    indices: OwnedIndices,
+    old_value: Option<NbtElement>
+}
+
+impl AddElementResult {
+    pub fn into_raw(self) -> (OwnedIndices, Option<NbtElement>) {
+        (self.indices, self.old_value)
+    }
+
+    pub fn into_action(self) -> WorkbenchAction {
+        let Self { indices, old_value } = self;
+        if let Some(old_value) = old_value {
+            WorkbenchAction::Replace { indices, value: (None, old_value) }
+        } else {
+            WorkbenchAction::Add { indices }
+        }
+    }
 }

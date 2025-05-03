@@ -15,8 +15,9 @@ use crate::elements::{NbtChunk, NbtElement, NbtElementAndKey};
 use crate::render::{RenderContext, TextColor, VertexBufferBuilder};
 use crate::serialization::{Decoder, PrettyFormatter, UncheckedBufWriter};
 use crate::util::{width_ascii, StrExt};
-use crate::workbench::{DropFn, MarkedLineSlice};
+use crate::workbench::{DropResult, MarkedLineSlice};
 use crate::{config, hash};
+use crate::tree::OwnedIndices;
 
 #[allow(clippy::module_name_repetitions)]
 #[repr(C)]
@@ -80,8 +81,8 @@ impl NbtCompound {
 		unsafe { config::get_sort_algorithm().sort(&mut compound.entries); }
 		Ok((s, compound))
 	}
-
-	#[inline]
+	
+	#[must_use]
 	pub fn from_bytes<'a, D: Decoder<'a>>(decoder: &mut D) -> Option<Self> {
 		let mut compound = Self::new();
 		unsafe {
@@ -103,7 +104,6 @@ impl NbtCompound {
 		}
 	}
 
-	#[inline]
 	pub fn to_be_bytes(&self, writer: &mut UncheckedBufWriter) {
 		for (key, value) in self.children() {
 			writer.write(&[value.id()]);
@@ -113,7 +113,6 @@ impl NbtCompound {
 		writer.write(&[0x00]);
 	}
 
-	#[inline]
 	pub fn to_le_bytes(&self, writer: &mut UncheckedBufWriter) {
 		for (key, value) in self.children() {
 			writer.write(&[value.id()]);
@@ -138,11 +137,9 @@ impl Default for NbtCompound {
 }
 
 impl NbtCompound {
-	#[inline]
 	#[must_use]
 	pub fn new() -> Self { Self::default() }
 
-	#[inline]
 	pub fn insert(&mut self, idx: usize, mut str: CompactString, value: NbtElement) {
 		while self.entries.has(&str) {
 			str += " - Copy";
@@ -152,7 +149,6 @@ impl NbtCompound {
 		self.entries.insert_at(str, value, idx);
 	}
 
-	#[inline] // has some unchecked stuff
 	pub fn insert_replacing(&mut self, str: CompactString, element: NbtElement) {
 		self.true_height += element.true_height() as u32;
 		if let Some(element) = self.entries.insert(str, element) {
@@ -162,14 +158,14 @@ impl NbtCompound {
 		}
 	}
 
-	#[inline]
+
 	pub fn remove(&mut self, idx: usize) -> Option<(CompactString, NbtElement)> {
 		let kv = self.entries.shift_remove_idx(idx)?;
 		self.decrement(kv.1.height(), kv.1.true_height());
 		Some(kv)
 	}
 
-	#[inline]
+
 	pub fn replace(&mut self, idx: usize, str: CompactString, value: NbtElement) -> Option<NbtElementAndKey> {
 		if !self.can_insert(&value) || idx >= self.len() { return None; }
 
@@ -178,19 +174,17 @@ impl NbtCompound {
 		Some(kv)
 	}
 
-	#[inline]
+
 	pub fn increment(&mut self, amount: usize, true_amount: usize) {
 		self.height = self.height.wrapping_add(amount as u32);
 		self.true_height = self.true_height.wrapping_add(true_amount as u32);
 	}
 
-	#[inline]
 	pub fn decrement(&mut self, amount: usize, true_amount: usize) {
 		self.height = self.height.wrapping_sub(amount as u32);
 		self.true_height = self.true_height.wrapping_sub(true_amount as u32);
 	}
 
-	#[inline]
 	#[must_use]
 	pub const fn height(&self) -> usize {
 		if self.open {
@@ -200,40 +194,31 @@ impl NbtCompound {
 		}
 	}
 
-	#[inline]
 	#[must_use]
 	pub const fn true_height(&self) -> usize { self.true_height as usize }
 
-	#[inline]
-	pub fn toggle(&mut self) -> Option<()> {
+	pub fn toggle(&mut self) {
 		self.open = !self.open && !self.entries.is_empty();
 		if !self.open {
 			self.shut();
 		}
-		Some(())
 	}
 
-	#[inline]
 	#[must_use]
-	pub const fn open(&self) -> bool { self.open }
+	pub const fn is_open(&self) -> bool { self.open }
 
-	#[inline]
 	#[must_use]
 	pub fn len(&self) -> usize { self.entries.len() }
 
-	#[inline]
 	#[must_use]
 	pub fn is_empty(&self) -> bool { self.entries.is_empty() }
 
-	#[inline]
 	#[must_use]
 	pub fn get(&self, idx: usize) -> Option<(&str, &NbtElement)> { self.entries.get_idx(idx) }
 
-	#[inline]
 	#[must_use]
 	pub fn get_mut(&mut self, idx: usize) -> Option<(&str, &mut NbtElement)> { self.entries.get_idx_mut(idx) }
 
-	#[inline]
 	#[must_use]
 	pub fn value(&self) -> CompactString {
 		format_compact!(
@@ -243,7 +228,6 @@ impl NbtCompound {
 		)
 	}
 
-	#[inline]
 	#[allow(clippy::too_many_lines)]
 	pub fn render_root(&self, builder: &mut VertexBufferBuilder, str: &str, ctx: &mut RenderContext) {
 		let mut remaining_scroll = builder.scroll() / 16;
@@ -356,7 +340,6 @@ impl NbtCompound {
 		}
 	}
 
-	#[inline]
 	pub fn recache(&mut self) {
 		let mut height = 1;
 		let mut true_height = 1;
@@ -367,7 +350,7 @@ impl NbtCompound {
 		self.height = height;
 		self.true_height = true_height;
 		let mut max_depth = 0;
-		if self.open() {
+		if self.is_open() {
 			for (key, child) in self.children() {
 				max_depth = max_depth.max(16 + 4 + key.width() + const { width_ascii(": ") } + child.value_width());
 				max_depth = max_depth.max(16 + child.max_depth());
@@ -376,11 +359,9 @@ impl NbtCompound {
 		self.max_depth = max_depth as u32;
 	}
 
-	#[inline]
 	#[must_use]
 	pub const fn max_depth(&self) -> usize { self.max_depth as usize }
 
-	#[inline]
 	#[must_use]
 	pub fn can_insert(&self, value: &NbtElement) -> bool {
 		value.id() != NbtChunk::ID
@@ -437,7 +418,6 @@ impl NbtCompound {
 }
 
 impl NbtCompound {
-	#[inline]
 	#[allow(clippy::too_many_lines)]
 	pub fn render(&self, builder: &mut VertexBufferBuilder, name: Option<&str>, remaining_scroll: &mut usize, tail: bool, ctx: &mut RenderContext) {
 		let pos = ctx.pos();
@@ -561,140 +541,15 @@ impl NbtCompound {
 		}
 	}
 
-	#[inline]
 	#[must_use]
 	pub fn children(&self) -> CompoundMapIter<'_> { self.entries.iter() }
 
-	#[inline]
 	#[must_use]
 	pub fn children_mut(&mut self) -> CompoundMapIterMut<'_> { self.entries.iter_mut() }
 
-	#[inline]
-	pub fn drop(&mut self, mut key: Option<CompactString>, mut element: NbtElement, y: &mut usize, depth: usize, target_depth: usize, mut line_number: usize, indices: &mut Vec<usize>) -> DropFn {
-		let can_insert = self.can_insert(&element);
-		if *y < 16 && *y >= 8 && depth == target_depth && can_insert {
-			let before = (self.height(), self.true_height());
-			self.open = true;
-			self.insert(0, key.unwrap_or(CompactString::const_new("_")), element);
-			indices.push(0);
-			return DropFn::Dropped(
-				self.height as usize - before.0,
-				self.true_height as usize - before.1,
-				Some(
-					self.get(0)
-						.expect("We just added it")
-						.0
-						.to_compact_string(),
-				),
-				line_number + 1,
-				None,
-			);
-		}
-
-		if self.height() == 1 && *y < 24 && *y >= 16 && depth == target_depth && can_insert {
-			let before = self.true_height();
-			self.open = true;
-			indices.push(self.len());
-			self.insert(
-				self.len(),
-				key.unwrap_or(CompactString::const_new("_")),
-				element,
-			);
-			return DropFn::Dropped(
-				self.height as usize - 1,
-				self.true_height as usize - before,
-				Some(
-					self.get(self.len() - 1)
-						.expect("We just added it")
-						.0
-						.to_compact_string(),
-				),
-				line_number + before + 1,
-				None,
-			);
-		}
-
-		if *y < 16 {
-			return DropFn::Missed((key, element));
-		} else {
-			*y -= 16;
-		}
-
-		if self.open && !self.is_empty() {
-			indices.push(0);
-			let ptr = unsafe { &mut *indices.as_mut_ptr().add(indices.len() - 1) };
-			for (idx, (_, value)) in self.children_mut().enumerate() {
-				*ptr = idx;
-				let heights = (element.height(), element.true_height());
-				if *y < 8 && depth == target_depth && can_insert {
-					*y = 0;
-					self.insert(idx, key.unwrap_or(CompactString::const_new("_")), element);
-					return DropFn::Dropped(
-						heights.0,
-						heights.1,
-						Some(
-							self.get(idx)
-								.expect("We just added it")
-								.0
-								.to_compact_string(),
-						),
-						line_number + 1,
-						None,
-					);
-				} else if *y >= value.height() * 16 - 8 && *y < value.height() * 16 && depth == target_depth && can_insert {
-					*y = 0;
-					*ptr = idx + 1;
-					line_number += value.true_height();
-					self.insert(
-						idx + 1,
-						key.unwrap_or(CompactString::const_new("_")),
-						element,
-					);
-					return DropFn::Dropped(
-						heights.0,
-						heights.1,
-						Some(
-							self.get(idx + 1)
-								.expect("We just added it")
-								.0
-								.to_compact_string(),
-						),
-						line_number + 1,
-						None,
-					);
-				}
-
-				match value.drop(
-					key,
-					element,
-					y,
-					depth + 1,
-					target_depth,
-					line_number + 1,
-					indices,
-				) {
-					x @ DropFn::InvalidType(_) => return x,
-					DropFn::Missed((k, e)) => {
-						key = k;
-						element = e;
-					}
-					DropFn::Dropped(increment, true_increment, key, line_number, value) => {
-						self.increment(increment, true_increment);
-						return DropFn::Dropped(increment, true_increment, key, line_number, value);
-					}
-				}
-
-				line_number += value.true_height();
-			}
-			indices.pop();
-		}
-		DropFn::Missed((key, element))
-	}
-
-	#[inline]
 	pub fn shut(&mut self) {
 		for (_, element) in self.children_mut() {
-			if element.open() {
+			if element.is_open() {
 				element.shut();
 			}
 		}
@@ -702,7 +557,6 @@ impl NbtCompound {
 		self.height = self.len() as u32 + 1;
 	}
 
-	#[inline]
 	#[cfg(not(target_arch = "wasm32"))]
 	pub fn expand<'a, 'b>(&'b mut self, scope: &'a Scope<'a, 'b>) {
 		self.open = !self.is_empty();
@@ -712,7 +566,6 @@ impl NbtCompound {
 		}
 	}
 
-	#[inline]
 	#[cfg(target_arch = "wasm32")]
 	pub fn expand(&mut self) {
 		self.open = !self.is_empty();
@@ -722,7 +575,6 @@ impl NbtCompound {
 		}
 	}
 
-	#[inline]
 	pub fn render_icon(&self, pos: impl Into<(usize, usize)>, z: ZOffset, builder: &mut VertexBufferBuilder) { builder.draw_texture_z(pos, z, COMPOUND_UV, (16, 16)); }
 }
 
@@ -965,52 +817,14 @@ impl CompoundMap {
 		let entry = self.entries.get_mut(idx)?;
 		Some((entry.key.as_str(), &mut entry.value))
 	}
-
-	pub fn sort_by<F: Fn((&str, &NbtElement), (&str, &NbtElement)) -> Ordering>(&mut self, f: F, line_number: usize, true_line_number: usize, true_height: usize, open: bool, bookmarks: &mut MarkedLineSlice) -> Box<[usize]> {
-		let true_line_numbers = {
-			let mut current_line_number = true_line_number + 1;
-			self.entries.iter().map(|entry| { let new_line_number = current_line_number; current_line_number += entry.value.true_height(); new_line_number }).collect::<Vec<_>>()
-		};
-		let line_numbers = {
-			let mut current_line_number = line_number + 1;
-			self.entries.iter().map(|entry| { let new_line_number = current_line_number; current_line_number += entry.value.height(); new_line_number }).collect::<Vec<_>>()
-		};
-		let mut new_bookmarks = Vec::with_capacity(bookmarks[true_line_number..true_line_number + true_height].len());
-		// yeah, it's hacky... but there's not much else I *can* do. plus: it works extremely well.
-		for (idx, entry) in self.entries.iter_mut().enumerate() {
-			entry.additional = idx;
-		}
-		self.entries.sort_by(|a, b| f((&a.key, &a.value), (&b.key, &b.value)));
-		let indices = self.entries.iter().map(|entry| entry.additional).collect::<Vec<_>>();
-		let mut inverted_indices = vec![0; indices.len()];
-		let mut current_true_line_number = true_line_number + 1;
-		let mut current_line_number = line_number + 1;
-		for (new_idx, &idx) in indices.iter().enumerate() {
-			// SAFETY: these indices are valid since the length did not change and since the values written were indexes
-			unsafe {
-				let entry = self.entries.get_unchecked_mut(new_idx);
-				*self.indices.find_mut(hash!(entry.key), |&target_idx| target_idx == idx).expect("index obviously exists") = new_idx;
-
-				let true_line_number = *true_line_numbers.get_unchecked(idx);
-				let line_number = *line_numbers.get_unchecked(idx);
-				let true_height = entry.value.true_height();
-				let height = entry.value.height();
-				let true_offset = current_true_line_number as isize - true_line_number as isize;
-				let offset = if open { current_line_number as isize - line_number as isize } else { 0 };
-				for bookmark in bookmarks[true_line_number..true_line_number + true_height].iter() {
-					new_bookmarks.push(bookmark.offset(offset as usize, true_offset as usize));
-				}
-				current_true_line_number += true_height;
-				current_line_number += height;
-				inverted_indices[idx] = new_idx;
-			}
-		}
-		let bookmark_slice = &mut bookmarks[true_line_number..true_line_number + true_height];
-		bookmark_slice.copy_from_slice(&new_bookmarks);
-		inverted_indices.into_boxed_slice()
+	
+	#[must_use]
+	pub fn create_sort_mapping<F: FnMut((&str, &NbtElement), (&str, &NbtElement)) -> Ordering>(&self, mut f: F) -> Box<[usize]> {
+		let mut mapping = (0..self.len()).collect::<Vec<_>>();
+		mapping.sort_unstable_by(|&a, &b| f(self.get_idx(a).unwrap_or(("", NbtElement::NULL_REF)), self.get_idx(b).unwrap_or(("", NbtElement::NULL_REF))));
+		mapping.into_boxed_slice()
 	}
 
-	#[inline]
 	pub fn update_key(&mut self, idx: usize, key: CompactString) -> Option<CompactString> {
 		if self.get_idx(idx).is_some_and(|(k, _)| k == key) {
 			Some(key)
@@ -1022,11 +836,9 @@ impl CompoundMap {
 	}
 
 	#[must_use]
-	#[inline]
 	pub fn iter(&self) -> CompoundMapIter<'_> { CompoundMapIter(self.entries.iter()) }
 
 	#[must_use]
-	#[inline]
 	pub fn iter_mut(&mut self) -> CompoundMapIterMut<'_> { CompoundMapIterMut(self.entries.iter_mut()) }
 }
 
@@ -1036,18 +848,21 @@ pub struct CompoundMapIter<'a>(core::slice::Iter<'a, Entry>);
 impl<'a> Iterator for CompoundMapIter<'a> {
 	type Item = (&'a str, &'a NbtElement);
 
+	#[inline]
 	fn next(&mut self) -> Option<Self::Item> {
 		self.0.next().map(|Entry { key, value, .. }| (key.as_ref(), value))
 	}
 }
 
 impl<'a> DoubleEndedIterator for CompoundMapIter<'a> {
+	#[inline]
 	fn next_back(&mut self) -> Option<Self::Item> {
 		self.0.next_back().map(|Entry { key, value, .. }| (key.as_ref(), value))
 	}
 }
 
 impl<'a> ExactSizeIterator for CompoundMapIter<'a> {
+	#[inline]
 	fn len(&self) -> usize { self.0.len() }
 }
 
@@ -1057,17 +872,20 @@ pub struct CompoundMapIterMut<'a>(core::slice::IterMut<'a, Entry>);
 impl<'a> Iterator for CompoundMapIterMut<'a> {
 	type Item = (&'a str, &'a mut NbtElement);
 
+	#[inline]
 	fn next(&mut self) -> Option<Self::Item> {
 		self.0.next().map(|entry| (entry.key.as_str(), &mut entry.value))
 	}
 }
 
 impl<'a> DoubleEndedIterator for CompoundMapIterMut<'a> {
+	#[inline]
 	fn next_back(&mut self) -> Option<Self::Item> {
 		self.0.next_back().map(|entry| (entry.key.as_str(), &mut entry.value))
 	}
 }
 
 impl<'a> ExactSizeIterator for CompoundMapIterMut<'a> {
+	#[inline]
 	fn len(&self) -> usize { self.0.len() }
 }

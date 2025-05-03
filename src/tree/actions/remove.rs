@@ -24,6 +24,7 @@ use super::{recache_along_indices, MutableIndices, Navigate};
 /// )?;
 /// tab.append_to_history(result.into_action());
 /// ```
+#[must_use]
 pub fn remove_element<'m1, 'm2: 'm1>(root: &mut NbtElement, indices: OwnedIndices, bookmarks: &mut MarkedLines, mutable_indices: &'m1 mut MutableIndices<'m2>) -> Option<RemoveElementResult> {
     let ParentNavigationInformationMut { true_line_number, parent, idx, parent_indices, .. } = root.navigate_parent_mut(&indices)?;
     let (old_parent_height, old_parent_true_height) = (parent.height(), parent.true_height());
@@ -47,7 +48,7 @@ pub fn remove_element<'m1, 'm2: 'm1>(root: &mut NbtElement, indices: OwnedIndice
         }
     });
 
-    recache_along_indices(parent_indices, root);
+    root.recache_along_indices(&parent_indices);
 
     Some(RemoveElementResult {
         indices,

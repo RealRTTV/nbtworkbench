@@ -26,6 +26,7 @@ use super::{recache_along_indices, line_number_at, MutableIndices, Navigate};
 /// ).into_action();
 /// tab.append_to_history(action);
 /// ```
+#[must_use]
 pub fn swap_element_same_depth<'m1, 'm2: 'm1>(root: &mut NbtElement, parent_indices: OwnedIndices, a: usize, b: usize, bookmarks: &mut MarkedLines, mutable_indices: &'m1 mut MutableIndices<'m2>) -> Option<SwapElementResultSameDepth> {
     let (a, b) = if a <= b { (a, b) } else { (b, a) };
     let NavigationInformationMut { element: parent, true_line_number: parent_true_line_number, line_number: parent_line_number, ..  } = root.navigate_mut(&parent_indices)?;
@@ -64,7 +65,7 @@ pub fn swap_element_same_depth<'m1, 'm2: 'm1>(root: &mut NbtElement, parent_indi
 
     parent.swap(a, b);
 
-    recache_along_indices(&parent_indices, root);
+    root.recache_along_indices(&parent_indices);
 
     Some(SwapElementResultSameDepth {
         parent: parent_indices,

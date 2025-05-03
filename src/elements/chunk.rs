@@ -15,8 +15,9 @@ use crate::assets::{ZOffset, BASE_Z, CHUNK_GHOST_UV, CHUNK_UV, CONNECTION_UV, HE
 use crate::elements::{NbtCompound, NbtElement};
 use crate::render::{RenderContext, TextColor, VertexBufferBuilder};
 use crate::serialization::{PrettyFormatter, UncheckedBufWriter};
+use crate::tree::OwnedIndices;
 use crate::util::StrExt;
-use crate::workbench::{DropFn, FileFormat, MarkedLines};
+use crate::workbench::{DropResult, FileFormat, MarkedLines};
 
 #[repr(C)]
 pub struct NbtRegion {
@@ -47,7 +48,6 @@ impl PartialEq for NbtRegion {
 
 impl Clone for NbtRegion {
 	#[allow(clippy::cast_ptr_alignment)]
-	#[inline]
 	fn clone(&self) -> Self {
 		unsafe {
 			let box_ptr = alloc(Layout::new::<[NbtElement; 32 * 32]>()).cast::<[NbtElement; 32 * 32]>();
@@ -252,19 +252,16 @@ impl NbtRegion {
 		}
 	}
 
-	#[inline]
 	pub fn increment(&mut self, amount: usize, true_amount: usize) {
 		self.height = self.height.wrapping_add(amount as u32);
 		self.true_height = self.true_height.wrapping_add(true_amount as u32);
 	}
 
-	#[inline]
 	pub fn decrement(&mut self, amount: usize, true_amount: usize) {
 		self.height = self.height.wrapping_sub(amount as u32);
 		self.true_height = self.true_height.wrapping_sub(true_amount as u32);
 	}
 
-	#[inline]
 	#[must_use]
 	pub fn height(&self) -> usize {
 		if self.is_open() {
@@ -274,32 +271,25 @@ impl NbtRegion {
 		}
 	}
 
-	#[inline]
 	#[must_use]
 	pub const fn true_height(&self) -> usize { self.true_height as usize }
 
-	#[inline]
-	pub fn toggle(&mut self) -> Option<()> {
+	pub fn toggle(&mut self) {
 		let open = !self.is_open() && !self.is_empty();
 		self.set_open(open);
 		if !open {
 			self.shut();
 		}
-		Some(())
 	}
 
-	#[inline]
 	#[must_use]
 	pub fn is_open(&self) -> bool { (self.flags & 0b1) > 0 }
 
-	#[inline]
 	pub fn set_open(&mut self, open: bool) { self.flags = (self.flags & !0b1) | open as u8 }
 
-	#[inline]
 	#[must_use]
 	pub fn is_grid_layout(&self) -> bool { (self.flags & 0b10) > 0 }
 
-	#[inline]
 	pub fn toggle_grid_layout(&mut self, bookmarks: &mut MarkedLines) {
 		self.flags ^= 0b10;
 		if self.is_grid_layout() {
@@ -317,20 +307,16 @@ impl NbtRegion {
 		}
 	}
 
-	#[inline]
 	#[must_use]
 	pub fn len(&self) -> usize { 1024 }
 
-	#[inline]
 	#[must_use]
 	pub fn is_empty(&self) -> bool { false }
 
-	#[inline]
 	pub fn insert(&mut self, idx: usize, value: NbtElement) -> Result<Option<NbtElement>, NbtElement> {
 		self.replace(idx, value)
 	}
 
-	#[inline]
 	pub fn replace(&mut self, idx: usize, mut value: NbtElement) -> Result<Option<NbtElement>, NbtElement> {
 		let (height, true_height) = (value.height(), value.true_height());
 		let Some(chunk) = value.as_chunk_mut() else { return Err(value) };
@@ -360,7 +346,6 @@ impl NbtRegion {
 		self.decrement(old.height(), old.true_height());
 	}
 
-	#[inline]
 	#[must_use]
 	pub fn replace_with_empty(&mut self, pos: usize) -> NbtElement {
 		let removed = unsafe {
@@ -374,7 +359,6 @@ impl NbtRegion {
 		removed
 	}
 
-	#[inline]
 	pub fn swap(&mut self, a: usize, b: usize) {
 		if a >= self.chunks.len() || b >= self.chunks.len() { return; }
 		let a_value = self.replace_with_empty(a);
@@ -383,19 +367,16 @@ impl NbtRegion {
 		let _ = self.replace(b, a_value);
 	}
 
-	#[inline]
 	#[must_use]
 	pub fn get(&self, idx: usize) -> Option<&NbtElement> {
 		self.chunks.get(idx)
 	}
 
-	#[inline]
 	#[must_use]
 	pub fn get_mut(&mut self, idx: usize) -> Option<&mut NbtElement> {
 		self.chunks.get_mut(idx)
 	}
 
-	#[inline]
 	#[must_use]
 	pub fn value(&self) -> CompactString {
 		format_compact!(
@@ -405,18 +386,15 @@ impl NbtRegion {
 		)
 	}
 
-	#[inline]
 	#[must_use]
 	pub fn loaded_chunks(&self) -> usize {
 		self.loaded_chunks as usize
 	}
 
-	#[inline]
 	pub fn on_root_style_change(&mut self, bookmarks: &mut MarkedLines) {
 		self.toggle_grid_layout(bookmarks);
 	}
 
-	#[inline]
 	#[allow(clippy::too_many_lines)]
 	pub fn render_root(&self, builder: &mut VertexBufferBuilder, str: &str, ctx: &mut RenderContext) {
 		use std::fmt::Write as _;
@@ -558,124 +536,19 @@ impl NbtRegion {
 		}
 	}
 
-	#[inline]
 	pub fn render_icon(&self, pos: impl Into<(usize, usize)>, z: ZOffset, builder: &mut VertexBufferBuilder) { builder.draw_texture_z(pos, z, if self.is_grid_layout() { REGION_GRID_UV } else { REGION_UV }, (16, 16)); }
 
-	#[inline]
 	pub fn children(&self) -> Iter<'_, NbtElement> {
 		self.chunks.iter()
 	}
 
-	#[inline]
 	pub fn children_mut(&mut self) -> IterMut<'_, NbtElement> {
 		self.chunks.iter_mut()
 	}
 
-	#[inline]
-	pub fn drop(&mut self, mut key: Option<CompactString>, mut element: NbtElement, y: &mut usize, depth: usize, mut target_depth: usize, mut line_number: usize, indices: &mut Vec<usize>) -> DropFn {
-		if self.is_grid_layout() {
-			if *y < 16 {
-				return DropFn::Missed((key, element))
-			} else {
-				*y -= 16;
-			}
-
-			if *y >= 32 * 16 {
-				return DropFn::Missed((key, element))
-			}
-
-			if target_depth < 2 {
-				return DropFn::Missed((key, element))
-			} else {
-				target_depth -= 2;
-			}
-
-			if target_depth >= 32 {
-				return DropFn::Missed((key, element))
-			}
-
-			let heights = (element.height(), element.true_height());
-			let idx = (*y & !15) * 2 + target_depth;
-			indices.push(idx);
-			for chunk in self.children().take(idx) {
-				line_number += chunk.true_height();
-			}
-			match self.insert(idx, element) {
-				Ok(old) => DropFn::Dropped(
-					heights.0,
-					heights.1,
-					None,
-					line_number + 1,
-					if old.as_ref().and_then(NbtElement::as_chunk).is_some_and(|chunk| chunk.is_loaded()) { Some((None, old.expect("we know this will be Some since it's a region"))) } else { None },
-				),
-				Err(element) => DropFn::InvalidType((key, element))
-			}
-		} else {
-			if target_depth > depth && *y >= self.true_height() && element.as_chunk().is_some() {
-				return DropFn::InvalidType((key, element));
-			}
-
-			if *y < 16 {
-				return DropFn::Missed((key, element));
-			} else {
-				*y -= 16;
-			}
-
-			if self.is_open() && !self.is_empty() {
-				indices.push(0);
-				let ptr = unsafe { &mut *indices.as_mut_ptr().add(indices.len() - 1) };
-				for (idx, value) in self.children_mut().enumerate() {
-					*ptr = idx;
-					let heights = (element.height(), element.true_height());
-					if *y >= value.height() * 16 - 16
-						&& *y < value.height() * 16
-						&& depth == target_depth
-						&& element.as_chunk().is_some()
-					{
-						return match self.insert(idx, element) {
-							Ok(old) => DropFn::Dropped(
-								heights.0,
-								heights.1,
-								None,
-								line_number + 1,
-								if old.as_ref().and_then(NbtElement::as_chunk).is_some_and(|chunk| chunk.is_loaded()) { Some((None, old.expect("we know this will be Some since it's a region"))) } else { None },
-							),
-							Err(element) => DropFn::InvalidType((key, element)),
-						};
-					}
-
-					match value.drop(
-						key,
-						element,
-						y,
-						depth + 1,
-						target_depth,
-						line_number,
-						indices,
-					) {
-						x @ DropFn::InvalidType(_) => return x,
-						DropFn::Missed((k, e)) => {
-							key = k;
-							element = e;
-						}
-						DropFn::Dropped(increment, true_increment, key, line_number, value) => {
-							self.increment(increment, true_increment);
-							return DropFn::Dropped(increment, true_increment, key, line_number, value);
-						}
-					}
-
-					line_number += value.true_height();
-				}
-				indices.pop();
-			}
-			DropFn::Missed((key, element))
-		}
-	}
-
-	#[inline]
 	pub fn shut(&mut self) {
 		for element in self.children_mut() {
-			if element.open() {
+			if element.is_open() {
 				element.shut();
 			}
 		}
@@ -683,7 +556,6 @@ impl NbtRegion {
 		self.height = if self.is_grid_layout() { 33 } else { 1025 };
 	}
 
-	#[inline]
 	#[cfg(not(target_arch = "wasm32"))]
 	pub fn expand<'a, 'b>(&'b mut self, scope: &'a Scope<'a, 'b>) {
 		self.set_open(!self.is_empty());
@@ -709,7 +581,6 @@ impl NbtRegion {
 		}
 	}
 
-	#[inline]
 	#[cfg(target_arch = "wasm32")]
 	pub fn expand(&mut self) {
 		self.set_open(!self.is_empty());
@@ -721,7 +592,6 @@ impl NbtRegion {
 		}
 	}
 
-	#[inline]
 	pub fn recache(&mut self) {
 		let mut true_height = 1;
 		let mut height = 1;
@@ -752,11 +622,9 @@ impl NbtRegion {
 		self.max_depth = max_depth as u32;
 	}
 
-	#[inline]
 	#[must_use]
 	pub const fn max_depth(&self) -> usize { self.max_depth as usize }
 
-	#[inline]
 	#[must_use]
 	pub fn can_insert(&self, value: &NbtElement) -> bool {
 		value.id() == NbtChunk::ID
@@ -812,7 +680,6 @@ impl PartialEq for NbtChunk {
 
 impl Clone for NbtChunk {
 	#[allow(clippy::cast_ptr_alignment)]
-	#[inline]
 	fn clone(&self) -> Self {
 		unsafe {
 			let box_ptr = alloc(Layout::new::<NbtCompound>()).cast::<NbtCompound>();
@@ -876,35 +743,29 @@ impl NbtChunk {
 		}
 	}
 
-	#[inline]
 	#[must_use]
 	pub fn value(&self) -> CompactString { format_compact!("{}, {}", self.x, self.z) }
 
-	#[inline]
 	#[must_use]
 	pub fn pos(&self) -> usize {
 		self.x as usize * 32 + self.z as usize
 	}
 
-	#[inline]
 	pub fn set_pos(&mut self, pos: usize) {
 		self.x = (pos / 32) as u8;
 		self.z = (pos % 32) as u8;
 	}
 
-	#[inline]
 	#[must_use]
 	pub fn is_unloaded(&self) -> bool {
 		self.inner.is_empty() && self.last_modified == 0
 	}
 
-	#[inline]
 	#[must_use]
 	pub fn is_loaded(&self) -> bool {
 		!self.is_unloaded()
 	}
 
-	#[inline]
 	#[allow(clippy::too_many_lines)]
 	pub fn render(&self, builder: &mut VertexBufferBuilder, remaining_scroll: &mut usize, tail: bool, ctx: &mut RenderContext) {
 		use std::fmt::Write as _;
@@ -923,7 +784,7 @@ impl NbtChunk {
 			ctx.line_number();
 			self.render_icon(pos, BASE_Z, builder);
 			if !self.is_empty() {
-				ctx.draw_toggle(pos - (16, 0), self.open(), builder);
+				ctx.draw_toggle(pos - (16, 0), self.is_open(), builder);
 			}
 			ctx.check_for_invalid_key(|key| !key.parse::<usize>().is_ok_and(|x| (0..=31).contains(&x)));
 			ctx.check_for_invalid_value(|value| !value.parse::<usize>().is_ok_and(|z| (0..=31).contains(&z)));
@@ -940,7 +801,7 @@ impl NbtChunk {
 
 		let x_before = ctx.pos().x - 16;
 
-		if self.open() {
+		if self.is_open() {
 			ctx.offset_pos(16, 0);
 
 			{
@@ -1021,17 +882,18 @@ impl NbtChunk {
 		}
 	}
 
-	#[inline]
 	pub fn render_icon(&self, pos: impl Into<(usize, usize)>, z: ZOffset, builder: &mut VertexBufferBuilder) { builder.draw_texture_z(pos, z, if self.is_unloaded() { CHUNK_GHOST_UV } else { CHUNK_UV }, (16, 16)); }
 }
 
 impl Deref for NbtChunk {
 	type Target = NbtCompound;
 
+	#[inline]
 	fn deref(&self) -> &Self::Target { &self.inner }
 }
 
 impl DerefMut for NbtChunk {
+	#[inline]
 	fn deref_mut(&mut self) -> &mut Self::Target { &mut self.inner }
 }
 

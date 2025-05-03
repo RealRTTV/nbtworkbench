@@ -1,10 +1,5 @@
-mod parents;
-
-pub use parents::*;
-
 use crate::elements::NbtElement;
 use crate::tree::OwnedIndices;
-use compact_str::ToCompactString;
 use itertools::Itertools;
 
 fn find_traversal_child_idx(element: &NbtElement, y: &mut usize, line_number: &mut usize, true_line_number: &mut usize) -> Option<usize> {
@@ -35,9 +30,11 @@ impl<'a> TraversalInformation<'a> {
     pub fn from(mut element: &'a NbtElement, mut y: usize, mut x: Option<usize>) -> Option<Self> {
         let mut indices = OwnedIndices::new();
         let mut depth = 0;
-        let mut line_number = 1;
-        let mut true_line_number = 0;
+        let mut line_number = 0;
+        let mut true_line_number = 1;
         let mut key = None;
+        
+        if y > element.height() { return None }
         
         while y > 0 {
             if let Some(region) = element.as_region() && region.is_grid_layout() && let Some(x) = &mut x {
@@ -98,9 +95,11 @@ impl<'a> TraversalInformationMut<'a> {
     pub fn from(mut element: &'a mut NbtElement, mut y: usize, mut x: Option<usize>) -> Option<Self> {
         let mut indices = OwnedIndices::new();
         let mut depth = 0;
-        let mut line_number = 1;
-        let mut true_line_number = 0;
+        let mut line_number = 0;
+        let mut true_line_number = 1;
         let mut key = None;
+
+        if y > element.height() { return None }
 
         while y > 0 {
             if let Some(region) = element.as_region_mut() && region.is_grid_layout() && let Some(x) = &mut x {

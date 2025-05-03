@@ -110,8 +110,8 @@ pub struct NavigationInformation<'a> {
 impl<'a> NavigationInformation<'a> {
     #[must_use]
     pub fn from(mut element: &'a NbtElement, indices: &Indices) -> Option<Self> {
-        let mut line_number = 1;
-        let mut true_line_number = 0;
+        let mut line_number = 0;
+        let mut true_line_number = 1;
         let mut key = None;
 
         for idx in indices {
@@ -149,8 +149,8 @@ pub struct NavigationInformationMut<'a> {
 impl<'a> NavigationInformationMut<'a> {
     #[must_use]
     pub fn from(mut element: &'a mut NbtElement, indices: &Indices) -> Option<Self> {
-        let mut line_number = 1;
-        let mut true_line_number = 0;
+        let mut line_number = 0;
+        let mut true_line_number = 1;
         let mut key = None;
 
         for idx in indices {
@@ -191,8 +191,8 @@ impl<'nbt, 'indices> ParentNavigationInformation<'nbt, 'indices> {
     pub fn from(mut parent: &'nbt NbtElement, indices: &'indices Indices) -> Option<Self> {
         let (last, parent_indices) = indices.split_last()?;
 
-        let mut line_number = 1;
-        let mut true_line_number = 0;
+        let mut line_number = 0;
+        let mut true_line_number = 1;
 
         for idx in parent_indices {
             line_number += 1;
@@ -239,8 +239,8 @@ impl<'nbt, 'indices> ParentNavigationInformationMut<'nbt, 'indices> {
     pub fn from(mut parent: &'nbt mut NbtElement, indices: &'indices Indices) -> Option<Self> {
         let (last, parent_indices) = indices.split_last()?;
 
-        let mut line_number = 1;
-        let mut true_line_number = 0;
+        let mut line_number = 0;
+        let mut true_line_number = 1;
 
         for idx in parent_indices {
             line_number += 1;
