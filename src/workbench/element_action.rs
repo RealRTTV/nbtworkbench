@@ -2,18 +2,16 @@ use std::cmp::Ordering;
 #[cfg(not(target_arch = "wasm32"))]
 use std::{fs::OpenOptions, process::Command};
 
-use compact_str::CompactString;
 #[cfg(not(target_arch = "wasm32"))]
 use notify::{EventKind, PollWatcher, RecursiveMode, Watcher};
-use uuid::Uuid;
 
 use crate::assets::{ACTION_WHEEL_Z, COPY_FORMATTED_UV, COPY_RAW_UV, INSERT_FROM_CLIPBOARD_UV, SORT_COMPOUND_BY_NAME_UV, SORT_COMPOUND_BY_TYPE_UV};
 use crate::elements::{NbtByte, NbtByteArray, NbtChunk, NbtCompound, NbtDouble, NbtElement, NbtFloat, NbtInt, NbtIntArray, NbtList, NbtLong, NbtLongArray, NbtShort, NbtString};
 use crate::render::{TextColor, VertexBufferBuilder};
+use crate::tree::{add_element, MutableIndices, OwnedIndices};
 use crate::util::{get_clipboard, now, set_clipboard, StrExt};
 use crate::widget::Alert;
 use crate::workbench::{FileUpdateSubscription, FileUpdateSubscriptionType, MarkedLines, WorkbenchAction};
-use crate::tree::{add_element, MutableIndices, OwnedIndices};
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::assets::{OPEN_ARRAY_IN_HEX_UV, OPEN_IN_TXT_UV};
@@ -339,7 +337,7 @@ impl ElementAction {
 						alerts.push(Alert::new("Error!", TextColor::Red, "Failed to get clipboard"));
 						return None;
 					};
-					let (key, value) = match NbtElement::from_str(&clipboard) {
+					let kv = match NbtElement::from_str(&clipboard) {
 						Ok((key, value)) => (key, value),
 						Err(idx) => {
 							alerts.push(Alert::new("Error!", TextColor::Red, format!("Could not parse clipboard as SNBT (failed at index {idx})")));
@@ -347,7 +345,7 @@ impl ElementAction {
 						}
 					};
 					indices.push(0);
-					match add_element(element, key, value, OwnedIndices::from(&[0]), bookmarks, mutable_indices) {
+					match add_element(element, kv, OwnedIndices::from(&[0]), bookmarks, mutable_indices) {
 						Some(action) => Some(action.into_action()),
 						None => {
 							alerts.push(Alert::new("Error!", TextColor::Red, "Failed to insert from clipboard"));

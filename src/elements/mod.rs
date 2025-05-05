@@ -16,3 +16,5 @@ pub use null::*;
 pub use primitive::*;
 pub use string::*;
 pub type NbtElementAndKey = (Option<compact_str::CompactString>, NbtElement);
+
+pub type NbtElementAndKeyRef<'a> = (Option<&'a str>, &'a NbtElement);

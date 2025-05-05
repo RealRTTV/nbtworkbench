@@ -7,5 +7,5 @@ mod workbench;
 pub use element_action::*;
 pub use marked_line::*;
 pub use tab::*;
-pub use workbench_action::*;
 pub use workbench::*;
+pub use workbench_action::*;

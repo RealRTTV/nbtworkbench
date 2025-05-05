@@ -1,8 +1,7 @@
+use super::MutableIndices;
 use crate::elements::NbtElement;
 use crate::tree::{Indices, NavigationInformation, NavigationInformationMut, OwnedIndices};
-use crate::util::encompasses;
 use crate::workbench::{MarkedLineSlice, MarkedLines, WorkbenchAction};
-use super::{recache_along_indices, line_number_at, MutableIndices, Navigate};
 
 /// Properly swaps two elements under their specified indices (requires them to be at the same depth), updating the following relevant data
 /// - Mutable Indices
@@ -63,7 +62,8 @@ pub fn swap_element_same_depth<'m1, 'm2: 'm1>(root: &mut NbtElement, parent_indi
         }
     });
 
-    parent.swap(a, b);
+    // SAFETY: we have updated all the relevant data
+    unsafe { parent.swap(a, b); }
 
     root.recache_along_indices(&parent_indices);
 
@@ -76,21 +76,13 @@ pub fn swap_element_same_depth<'m1, 'm2: 'm1>(root: &mut NbtElement, parent_indi
 
 #[derive(Clone)]
 pub struct SwapElementResultSameDepth {
-    parent: OwnedIndices,
-    a: usize,
-    b: usize,
+    pub parent: OwnedIndices,
+    pub a: usize,
+    pub b: usize,
 }
 
 #[allow(dead_code)]
 impl SwapElementResultSameDepth {
-    #[must_use]
-    pub fn as_raw(&self) -> (&Indices, usize, usize) { (&self.parent, self.a, self.b) }
-
-    #[must_use]
-    pub fn into_raw(self) -> (OwnedIndices, usize, usize) {
-        (self.parent, self.a, self.b)
-    }
-
     #[must_use]
     pub fn into_action(self) -> WorkbenchAction {
         WorkbenchAction::Swap {

@@ -6,7 +6,7 @@ use std::ops::Deref;
 #[cfg(not(target_arch = "wasm32"))]
 use std::thread::Scope;
 
-use compact_str::{format_compact, CompactString, ToCompactString};
+use compact_str::{format_compact, CompactString};
 use hashbrown::hash_table::Entry::*;
 use hashbrown::hash_table::HashTable;
 
@@ -15,9 +15,7 @@ use crate::elements::{NbtChunk, NbtElement, NbtElementAndKey};
 use crate::render::{RenderContext, TextColor, VertexBufferBuilder};
 use crate::serialization::{Decoder, PrettyFormatter, UncheckedBufWriter};
 use crate::util::{width_ascii, StrExt};
-use crate::workbench::{DropResult, MarkedLineSlice};
 use crate::{config, hash};
-use crate::tree::OwnedIndices;
 
 #[allow(clippy::module_name_repetitions)]
 #[repr(C)]
@@ -198,8 +196,8 @@ impl NbtCompound {
 	pub const fn true_height(&self) -> usize { self.true_height as usize }
 
 	pub fn toggle(&mut self) {
-		self.open = !self.open && !self.entries.is_empty();
-		if !self.open {
+		self.open = !self.open && !self.is_empty();
+		if !self.open && !self.is_empty() {
 			self.shut();
 		}
 	}

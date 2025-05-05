@@ -9,13 +9,11 @@ use std::thread::Scope;
 
 use compact_str::{CompactString, ToCompactString};
 use hashbrown::HashTable;
-use polonius_the_crab::{polonius, polonius_return};
 
 use crate::assets::ZOffset;
-use crate::elements::{CompoundMap, CompoundMapIter, CompoundMapIterMut, Entry, NbtByte, NbtByteArray, NbtChunk, NbtCompound, NbtDouble, NbtElementAndKey, NbtFloat, NbtInt, NbtIntArray, NbtList, NbtLong, NbtLongArray, NbtNull, NbtRegion, NbtShort, NbtString};
+use crate::elements::{CompoundMap, CompoundMapIter, CompoundMapIterMut, Entry, NbtByte, NbtByteArray, NbtChunk, NbtCompound, NbtDouble, NbtElementAndKey, NbtElementAndKeyRef, NbtFloat, NbtInt, NbtIntArray, NbtList, NbtLong, NbtLongArray, NbtNull, NbtRegion, NbtShort, NbtString};
 use crate::render::{RenderContext, TextColor, VertexBufferBuilder};
 use crate::serialization::{BigEndianDecoder, Decoder, LittleEndianDecoder, PrettyFormatter, UncheckedBufWriter};
-use crate::tree;
 use crate::tree::{Indices, NavigationInformation, NavigationInformationMut, OwnedIndices, ParentNavigationInformation, ParentNavigationInformationMut, TraversalInformation, TraversalInformationMut};
 use crate::util::{now, width_ascii, StrExt};
 use crate::workbench::{DropResult, ElementAction, FileFormat, MarkedLines};
@@ -29,21 +27,21 @@ pub struct NbtElementId {
 
 #[repr(C)]
 pub union NbtElement {
-	chunk: ManuallyDrop<NbtChunk>,
-	region: ManuallyDrop<NbtRegion>,
-	byte: ManuallyDrop<NbtByte>,
-	short: ManuallyDrop<NbtShort>,
-	int: ManuallyDrop<NbtInt>,
-	long: ManuallyDrop<NbtLong>,
-	float: ManuallyDrop<NbtFloat>,
-	double: ManuallyDrop<NbtDouble>,
-	byte_array: ManuallyDrop<NbtByteArray>,
-	string: ManuallyDrop<NbtString>,
-	list: ManuallyDrop<NbtList>,
-	compound: ManuallyDrop<NbtCompound>,
-	int_array: ManuallyDrop<NbtIntArray>,
-	long_array: ManuallyDrop<NbtLongArray>,
-	null: ManuallyDrop<NbtNull>,
+	pub(super) chunk: ManuallyDrop<NbtChunk>,
+	pub(super) region: ManuallyDrop<NbtRegion>,
+	pub(super) byte: ManuallyDrop<NbtByte>,
+	pub(super) short: ManuallyDrop<NbtShort>,
+	pub(super) int: ManuallyDrop<NbtInt>,
+	pub(super) long: ManuallyDrop<NbtLong>,
+	pub(super) float: ManuallyDrop<NbtFloat>,
+	pub(super) double: ManuallyDrop<NbtDouble>,
+	pub(super) byte_array: ManuallyDrop<NbtByteArray>,
+	pub(super) string: ManuallyDrop<NbtString>,
+	pub(super) list: ManuallyDrop<NbtList>,
+	pub(super) compound: ManuallyDrop<NbtCompound>,
+	pub(super) int_array: ManuallyDrop<NbtIntArray>,
+	pub(super) long_array: ManuallyDrop<NbtLongArray>,
+	pub(super) null: ManuallyDrop<NbtNull>,
 	id: NbtElementId,
 }
 
@@ -1048,6 +1046,20 @@ impl NbtElement {
 	}
 
 	#[must_use]
+	pub fn key_value_at(&self, indices: &Indices) -> Option<NbtElementAndKeyRef> {
+		let mut key = None;
+		let mut value = self;
+
+		for idx in indices {
+			let (k, v) = value.get(idx)?;
+			key = k;
+			value = v;
+		}
+
+		Some((key, value))
+	}
+
+	#[must_use]
 	pub fn as_nonnull(&self) -> Option<&Self> {
 		if self.is_null() {
 			None
@@ -1122,10 +1134,9 @@ impl NbtElement {
 	}
 
 	#[inline]
-	#[must_use]
-	pub fn toggle(&mut self) -> Option<()> {
+	pub fn toggle(&mut self) -> bool {
 		unsafe {
-			Some(match self.id() {
+			match self.id() {
 				NbtByteArray::ID => self.byte_array.toggle(),
 				NbtIntArray::ID => self.int_array.toggle(),
 				NbtLongArray::ID => self.long_array.toggle(),
@@ -1133,8 +1144,9 @@ impl NbtElement {
 				NbtCompound::ID => self.compound.toggle(),
 				NbtRegion::ID => self.region.toggle(),
 				NbtChunk::ID => self.chunk.toggle(),
-				_ => return None,
-			})
+				_ => return false,
+			}
+			true
 		}
 	}
 
@@ -1343,24 +1355,23 @@ impl NbtElement {
 	}
 
 	#[must_use]
-	pub fn create_drop_indices(&self, key: Option<&str>, value: &Self, mut y: usize, x: usize) -> Option<OwnedIndices> {
+	pub fn create_drop_indices(&self, kv: NbtElementAndKeyRef, mut y: usize, x: usize) -> Option<OwnedIndices> {
 		let mut indices = OwnedIndices::new();
-		match self.create_drop_indices0(key, value, &mut y, x, 0, &mut indices) {
+		match self.create_drop_indices0(kv, &mut y, x, 0, &mut indices) {
 			DropResult::Dropped => Some(indices),
-			DropResult::Missed => None,
-			DropResult::Failed => None,
+			DropResult::Missed | DropResult::Failed => None,
 		}
 	}
 
 	#[must_use]
-	pub(super) fn create_drop_indices0(&self, key: Option<&str>, value: &Self, y: &mut usize, current_depth: usize, x: usize, indices: &mut OwnedIndices) -> DropResult {
+	pub(super) fn create_drop_indices0(&self, kv: NbtElementAndKeyRef, y: &mut usize, current_depth: usize, x: usize, indices: &mut OwnedIndices) -> DropResult {
 		let height_px = self.height() * 16;
 		if *y >= height_px + 8 {
 			*y -= height_px;
 			return DropResult::Missed
 		}
 		if let Some(iter) = self.values() {
-			let can_insert = self.can_insert(&value);
+			let can_insert = self.can_insert(kv.1);
 			let is_open = self.is_open();
 			let len = self.len().unwrap_or(0);
 
@@ -1392,7 +1403,7 @@ impl NbtElement {
 						return DropResult::Dropped;
 					}
 
-					match child.create_drop_indices0(key, value, y, current_depth + 1, x, indices) {
+					match child.create_drop_indices0(kv, y, current_depth + 1, x, indices) {
 						DropResult::Missed => (),
 						x @ (DropResult::Dropped | DropResult::Failed) => return x,
 					}
@@ -1406,6 +1417,8 @@ impl NbtElement {
 		}
 	}
 
+
+	// todo: add wasm32 and non-wasm32 editions for scope expands on region files
 	#[inline]
 	pub fn shut(&mut self) {
 		unsafe {
@@ -1454,6 +1467,28 @@ impl NbtElement {
 				_ => {}
 			}
 		}
+	}
+
+	pub fn expand_to_indices(&mut self, indices: &Indices) {
+		fn inner(mut element: &mut NbtElement, indices: &Indices) {
+			for idx in indices {
+				if element.is_complex() && !element.is_open() {
+					element.toggle();
+				}
+				element = &mut element[idx];
+			}
+		}
+
+		inner(self, indices);
+
+		self.recache_along_indices(indices);
+	}
+
+	pub fn expand_through_indices(&mut self, indices: &Indices) {
+		if self.is_complex() && !self.is_open() {
+			self.toggle();
+		}
+		self.expand_to_indices(indices);
 	}
 
 	/// # Safety
@@ -1517,7 +1552,7 @@ impl NbtElement {
 	}
 
 	#[inline]
-	pub fn swap(&mut self, a: usize, b: usize) {
+	pub unsafe fn swap(&mut self, a: usize, b: usize) {
 		unsafe {
 			match self.id() {
 				NbtByteArray::ID => self.byte_array.values.swap(a, b),
@@ -1534,7 +1569,7 @@ impl NbtElement {
 
 	#[inline]
 	#[must_use]
-	pub fn get(&self, idx: usize) -> Option<(Option<&str>, &Self)> {
+	pub fn get(&self, idx: usize) -> Option<NbtElementAndKeyRef> {
 		unsafe {
 			match self.id() {
 				NbtByteArray::ID => self.byte_array.get(idx).map(|x| (None, x)),
@@ -1962,7 +1997,7 @@ impl Index<usize> for NbtElement {
 
 	fn index(&self, idx: usize) -> &Self::Output {
 		self.get(idx)
-			.map(|(a, b)| b)
+			.map(|(_, b)| b)
 			.unwrap_or(Self::NULL_REF)
 	}
 }
@@ -1972,7 +2007,7 @@ impl IndexMut<usize> for NbtElement {
 		pub static mut NULL_MUT: NbtElement = NbtElement::NULL;
 
 		self.get_mut(idx)
-			.map(|(a, b)| b)
+			.map(|(_, b)| b)
 			.unwrap_or_else(|| {
 			unsafe { NULL_MUT = NbtElement::NULL; }
 			unsafe { &mut NULL_MUT }
@@ -2037,7 +2072,7 @@ impl<'a> Iterator for NbtElementValues<'a> {
 	fn next(&mut self) -> Option<Self::Item> {
 		match self {
 			Self::Iter(iter) => iter.next(),
-			Self::CompoundMapIter(iter) => iter.next().map(|(a, b)| b),
+			Self::CompoundMapIter(iter) => iter.next().map(|(_, b)| b),
 		}
 	}
 }

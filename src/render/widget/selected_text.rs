@@ -7,9 +7,9 @@ use crate::assets::{BASE_TEXT_Z, HEADER_SIZE, SELECTED_TEXT_SELECTION_Z, SELECTE
 use crate::elements::NbtElement;
 use crate::flags;
 use crate::render::{TextColor, VertexBufferBuilder};
-use crate::util::{CharExt, StrExt};
-use crate::widget::{Cachelike, SelectedTextKeyResult, SelectedTextKeyResult::{Down, ForceClose, ForceOpen, Keyfix, ShiftDown, ShiftUp, Up, Valuefix}, Text};
 use crate::tree::{line_number_at, OwnedIndices};
+use crate::util::{CharExt, StrExt};
+use crate::widget::{Cachelike, SelectedTextKeyResult, SelectedTextKeyResult::{Down, ForceClose, ForceOpen, MoveToKeyfix, ShiftDown, ShiftUp, Up, MoveToValuefix}, Text};
 
 #[derive(Clone, Debug)]
 #[allow(clippy::module_name_repetitions)] // yeah no, it's better like this
@@ -287,12 +287,12 @@ impl SelectedText {
 		}
 
 		if key == KeyCode::ArrowLeft {
-			if flags & !flags!(Ctrl) == 0 && self.selection.is_none() && self.cursor == 0 && self.keyfix.is_some() { return Keyfix }
+			if flags & !flags!(Ctrl) == 0 && self.selection.is_none() && self.cursor == 0 && self.keyfix.is_some() { return MoveToKeyfix }
 			if flags & !flags!(Shift) == flags!(Alt) { return ForceClose }
 		}
 
 		if key == KeyCode::ArrowRight {
-			if flags & !flags!(Ctrl) == 0 && self.selection.is_none() && self.cursor == self.value.len() && self.valuefix.is_some() { return Valuefix }
+			if flags & !flags!(Ctrl) == 0 && self.selection.is_none() && self.cursor == self.value.len() && self.valuefix.is_some() { return MoveToValuefix }
 			if (flags) & !flags!(Shift) == flags!(Alt) { return ForceOpen }
 		}
 

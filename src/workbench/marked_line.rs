@@ -76,8 +76,8 @@ impl MarkedLine {
     #[must_use]
     pub const fn offset(self, offset: isize, true_offset: isize) -> Self {
         Self {
-            true_line_number: (self.true_line_number + true_offset) as usize,
-            line_number: (self.line_number + offset) as usize,
+            true_line_number: self.true_line_number.wrapping_add_signed(true_offset),
+            line_number: self.line_number.wrapping_add_signed(offset),
             uv: self.uv,
         }
     }

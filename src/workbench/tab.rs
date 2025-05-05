@@ -1,26 +1,24 @@
-use std::cell::SyncUnsafeCell;
 use std::ffi::OsStr;
 use std::fmt::Display;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::time::Duration;
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, ensure, Context, Result};
 use flate2::Compression;
 use uuid::Uuid;
 use zune_inflate::DeflateDecoder;
 
 use super::{HeldEntry, MarkedLines, WorkbenchAction};
-use crate::tree::{rename_element, OwnedIndices};
 use crate::assets::{ZOffset, BASE_Z, BYTE_ARRAY_GHOST_UV, BYTE_ARRAY_UV, BYTE_GRAYSCALE_UV, BYTE_UV, CHUNK_GHOST_UV, CHUNK_UV, COMPOUND_GHOST_UV, COMPOUND_ROOT_UV, COMPOUND_UV, DIM_LIGHTBULB_UV, DISABLED_REFRESH_UV, DOUBLE_GRAYSCALE_UV, DOUBLE_UV, ENABLED_FREEHAND_MODE_UV, FLOAT_GRAYSCALE_UV, FLOAT_UV, FREEHAND_MODE_UV, GZIP_FILE_TYPE_UV, HEADER_SIZE, HELD_SCROLLBAR_UV, HOVERED_WIDGET_UV, INT_ARRAY_GHOST_UV, INT_ARRAY_UV, INT_GRAYSCALE_UV, INT_UV, JUST_OVERLAPPING_BASE_Z, LIGHTBULB_UV, LINE_NUMBER_SEPARATOR_UV, LIST_GHOST_UV, LIST_UV, LITTLE_ENDIAN_HEADER_NBT_FILE_TYPE_UV, LITTLE_ENDIAN_NBT_FILE_TYPE_UV, LONG_ARRAY_GHOST_UV, LONG_ARRAY_UV, LONG_GRAYSCALE_UV, LONG_UV, MCA_FILE_TYPE_UV, NBT_FILE_TYPE_UV, REFRESH_UV, REGION_UV, SCROLLBAR_Z, SELECTED_WIDGET_UV, SHORT_GRAYSCALE_UV, SHORT_UV, SNBT_FILE_TYPE_UV, STEAL_ANIMATION_OVERLAY_UV, STRING_GHOST_UV, STRING_UV, UNHELD_SCROLLBAR_UV, UNKNOWN_NBT_GHOST_UV, UNKNOWN_NBT_UV, UNSELECTED_WIDGET_UV, ZLIB_FILE_TYPE_UV};
 use crate::elements::{NbtCompound, NbtElement, NbtList, NbtRegion};
 use crate::render::{RenderContext, TextColor, Vec2u, VertexBufferBuilder, WindowProperties};
+use crate::tree::rename_element;
 use crate::util::{drop_on_separate_thread, now, LinkedQueue, StrExt};
 use crate::widget::{get_cursor_left_jump_idx, get_cursor_right_jump_idx, SelectedText, SelectedTextAdditional, Text, TEXT_DOUBLE_CLICK_INTERVAL};
 
 pub struct Tab {
-	pub(super) value: Box<NbtElement>,
+	pub value: Box<NbtElement>,
 	pub(super) name: Box<str>,
 	pub(super) path: Option<PathBuf>,
 	pub(super) format: FileFormat,
@@ -39,9 +37,7 @@ pub struct Tab {
 	pub(super) last_selected_text_interaction: (usize, usize, Duration),
 	pub(super) last_interaction: Duration,
 	pub(super) last_double_click_interaction: (usize, Duration),
-	pub(super) held_entry: HeldEntry,
-	// this took me two days -- still broken
-	pub(super) from_indices_arc: Option<Arc<SyncUnsafeCell<OwnedIndices>>>,
+	pub(super) held_entry: Option<HeldEntry>,
 	pub(super) cache_cursor_x: Option<usize>,
 }
 
@@ -59,7 +55,7 @@ impl Tab {
 	pub const AUTOSAVE_MAXIMUM_LINES: usize = 1_000_000;
 
 	pub fn new(nbt: NbtElement, path: &Path, format: FileFormat, window_height: usize, window_width: usize) -> Result<Self> {
-		if !(nbt.id() == NbtCompound::ID || nbt.id() == NbtRegion::ID || nbt.id() == NbtList::ID) { return Err(anyhow!("Parsed NBT was not a Compound, Region, or List")) }
+		ensure!(!(nbt.id() == NbtCompound::ID || nbt.id() == NbtRegion::ID || nbt.id() == NbtList::ID), "Parsed NBT was not a Compound, Region, or List");
 
 		Ok(Self {
 			value: Box::new(nbt),
@@ -81,8 +77,7 @@ impl Tab {
 			last_selected_text_interaction: (0, 0, Duration::ZERO),
 			last_interaction: now(),
 			last_double_click_interaction: (0, Duration::ZERO),
-			held_entry: HeldEntry::Empty,
-			from_indices_arc: None,
+			held_entry: None,
 			cache_cursor_x: None,
 		})
 	}
@@ -347,20 +342,10 @@ impl Tab {
 	}
 
 	#[must_use]
-	pub fn value(&self) -> &NbtElement {
-		&self.value
-	}
-
-	#[must_use]
-	pub fn value_mut(&mut self) -> &mut NbtElement {
-		&mut self.value
-	}
-
-	#[must_use]
 	pub fn format(&self) -> FileFormat {
 		self.format
 	}
-	
+
 	pub fn modify_scroll(&mut self, f: impl FnOnce(usize) -> usize) {
 		self.scroll = f(self.scroll);
 		self.scroll = self.scroll();
@@ -373,7 +358,7 @@ impl Tab {
 		let max = (height + HEADER_SIZE).saturating_sub(self.window_height);
 		scroll.min(max) & !15
 	}
-	
+
 	pub fn modify_horizontal_scroll(&mut self, f: impl FnOnce(usize) -> usize) {
 		self.horizontal_scroll = f(self.horizontal_scroll);
 		self.horizontal_scroll = self.horizontal_scroll();
@@ -410,7 +395,7 @@ impl Tab {
 	}
 
 	#[must_use]
-	pub fn left_margin(&self) -> usize { ((self.value.true_height() + self.held_entry.element().map_or(0, NbtElement::true_height)).ilog10() as usize + 1) * 8 + 4 + 8 }
+	pub fn left_margin(&self) -> usize { ((self.value.true_height() + self.held_entry.as_ref().map_or(0, |held_entry| held_entry.kv.1.true_height())).ilog10() as usize + 1) * 8 + 4 + 8 }
 
 	pub fn on_scroll(&mut self, scroll: f32) {
 		#[cfg(target_os = "macos")]

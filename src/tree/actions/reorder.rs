@@ -1,5 +1,4 @@
-use std::mem::MaybeUninit;
-use crate::elements::{CompoundMap, Entry, NbtElement, NbtPatternMut};
+use crate::elements::{CompoundMap, NbtElement, NbtPatternMut};
 use crate::hash;
 use crate::tree::{MutableIndices, NavigationInformationMut, OwnedIndices};
 use crate::workbench::{MarkedLines, WorkbenchAction};
@@ -74,8 +73,8 @@ pub fn reorder_element<'m1, 'm2: 'm1>(root: &mut NbtElement, indices: OwnedIndic
 }
 
 pub struct ReorderElementResult {
-    indices: OwnedIndices,
-    mapping: Box<[usize]>,
+    pub indices: OwnedIndices,
+    pub mapping: Box<[usize]>,
 }
 
 impl ReorderElementResult {

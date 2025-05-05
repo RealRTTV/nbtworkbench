@@ -11,8 +11,6 @@ use crate::assets::{ZOffset, BASE_Z, CONNECTION_UV, JUST_OVERLAPPING_BASE_TEXT_Z
 use crate::elements::{id_to_string_name, NbtChunk, NbtCompound, NbtElement};
 use crate::render::{RenderContext, TextColor, VertexBufferBuilder};
 use crate::serialization::{Decoder, PrettyFormatter, UncheckedBufWriter};
-use crate::tree::OwnedIndices;
-use crate::workbench::DropResult;
 
 #[allow(clippy::module_name_repetitions)]
 #[repr(C)]
@@ -214,7 +212,7 @@ impl NbtList {
 
 	pub fn toggle(&mut self) {
 		self.open = !self.open && !self.is_empty();
-		if !self.open {
+		if !self.open && !self.is_empty() {
 			self.shut();
 		}
 	}

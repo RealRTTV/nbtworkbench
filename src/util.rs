@@ -1,6 +1,7 @@
 use compact_str::{CompactString, ToCompactString};
 use regex::{Regex, RegexBuilder};
 use std::cmp::Ordering;
+use std::fmt::{Debug, Formatter};
 use std::mem::MaybeUninit;
 
 use crate::render::VertexBufferBuilder;
@@ -190,6 +191,25 @@ pub fn combined_two_sorted<T: Ord>(a: Box<[T]>, b: Box<[T]>) -> Vec<T> {
 pub struct LinkedQueue<T> {
 	tail: Option<Box<SinglyLinkedNode<T>>>,
 	len: usize,
+}
+
+impl<'a, T> IntoIterator for &'a LinkedQueue<T> {
+	type Item = &'a T;
+	type IntoIter = LinkedQueueIter<'a, T>;
+
+	fn into_iter(self) -> Self::IntoIter {
+		self.iter()
+	}
+}
+
+impl<T: Debug> Debug for LinkedQueue<T> {
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+		write!(f, "LinkedQueue [")?;
+		for element in self {
+			write!(f, "{element:?}")?;
+		}
+		write!(f, "]")
+	}
 }
 
 // perf enhancement

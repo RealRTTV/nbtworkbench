@@ -87,7 +87,7 @@ pub struct TraversalInformationMut<'a> {
     pub true_line_number: usize,
     pub depth: usize,
     pub key: Option<&'a str>,
-    pub element: &'a NbtElement,
+    pub element: &'a mut NbtElement,
 }
 
 impl<'a> TraversalInformationMut<'a> {

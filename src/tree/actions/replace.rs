@@ -1,8 +1,7 @@
+use super::MutableIndices;
 use crate::elements::{NbtElement, NbtElementAndKey};
 use crate::tree::{OwnedIndices, ParentNavigationInformationMut};
-use crate::util::encompasses_or_equal;
 use crate::workbench::{MarkedLines, WorkbenchAction};
-use super::{recache_along_indices, MutableIndices, Navigate};
 
 /// Properly replaces an element under the specified indices, updating the following relevant data
 /// - Mutable Indices
@@ -35,7 +34,6 @@ pub fn replace_element<'m1, 'm2: 'm1>(root: &mut NbtElement, value: NbtElementAn
             Some(ReplaceElementResult {
                 indices,
                 kv: (None, core::mem::replace(root, value.1)),
-                replaces: true,
             })
         } else {
             None
@@ -67,16 +65,11 @@ pub fn replace_element<'m1, 'm2: 'm1>(root: &mut NbtElement, value: NbtElementAn
 
 #[derive(Clone)]
 pub struct ReplaceElementResult {
-    indices: OwnedIndices,
-    kv: NbtElementAndKey,
+    pub indices: OwnedIndices,
+    pub kv: NbtElementAndKey,
 }
 
 impl ReplaceElementResult {
-    #[must_use]
-    pub fn into_raw(self) -> (OwnedIndices, NbtElementAndKey) {
-        (self.indices, self.kv)
-    }
-
     #[must_use]
     pub fn into_action(self) -> WorkbenchAction {
         WorkbenchAction::Replace {

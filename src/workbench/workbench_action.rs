@@ -1,22 +1,20 @@
-use std::cell::SyncUnsafeCell;
-use std::path::PathBuf;
-use std::sync::Arc;
-
 use crate::elements::{NbtElement, NbtElementAndKey};
 use crate::render::WindowProperties;
-use crate::tree::{add_element, remove_element, rename_element, reorder_element, replace_element, swap_element_same_depth, MutableIndices, OwnedIndices};
+use crate::tree::{add_element, remove_element, rename_element, reorder_element, replace_element, swap_element_same_depth, AddElementResult, MutableIndices, OwnedIndices, RemoveElementResult, ReplaceElementResult};
 use crate::workbench::{HeldEntry, MarkedLines};
+use std::path::PathBuf;
 
-use anyhow::{anyhow, ensure, Context, Result};
-use compact_str::CompactString;
+use crate::util::LinkedQueue;
+use anyhow::{ensure, Context, Result};
+use compact_str::{CompactString, ToCompactString};
 
 #[derive(Debug)]
 pub enum WorkbenchAction {
-	Remove {
-		element: NbtElementAndKey,
+	Add {
 		indices: OwnedIndices,
 	},
-	Add {
+	Remove {
+		kv: NbtElementAndKey,
 		indices: OwnedIndices,
 	},
 	Rename {
@@ -37,28 +35,25 @@ pub enum WorkbenchAction {
 		indices: OwnedIndices,
 		mapping: Box<[usize]>,
 	},
-	HeldEntrySwap {
+	RemoveToHeldEntry {
+		/// The [Indices](OwnedIndices) for the addition to the [tab](super::Tab)'s value
 		indices: OwnedIndices,
-		original_key: Option<CompactString>,
+
+		/// The held entry's indices history
+		indices_history: LinkedQueue<OwnedIndices>,
+
+		/// The key of the [held entry](HeldEntry) before it was added to the [tab](super::Tab)'s value
+		old_key: Option<CompactString>,
+
+		/// The value of the 
+		old_value: Option<NbtElement>,
 	},
-	HeldEntryDrop {
-		from_indices: Option<Arc<SyncUnsafeCell<OwnedIndices>>>,
-		indices: OwnedIndices,
-		original_key: Option<CompactString>,
-		original_value: Option<NbtElement>,
-	},
-	HeldEntrySteal {
-		from_indices: Option<Arc<SyncUnsafeCell<OwnedIndices>>>,
-		original_key: Option<CompactString>,
-	},
-	HeldEntryStealFromAether {
-		indices: OwnedIndices,
-		original_key: Option<CompactString>,
+	/// Uses the [held entry](HeldEntry)'s history to get the indices to insert at
+	AddFromHeldEntry,
+	DiscardHeldEntry {
+		held_entry: HeldEntry
 	},
 	CreateHeldEntry,
-	DeleteHeldEntry {
-		held_entry: HeldEntry,
-	},
 	Bulk {
 		actions: Box<[Self]>,
 	}
@@ -73,12 +68,10 @@ impl WorkbenchAction {
 			Self::Swap { parent, .. } => parent.shrink_to_fit(),
 			Self::Replace { indices, .. } => indices.shrink_to_fit(),
 			Self::Reorder { indices, .. } => indices.shrink_to_fit(),
-			Self::HeldEntrySwap { indices, .. } => indices.shrink_to_fit(),
-			Self::HeldEntryDrop { indices, .. } => indices.shrink_to_fit(),
-			Self::HeldEntrySteal { .. } => (),
-			Self::HeldEntryStealFromAether { indices, .. } => indices.shrink_to_fit(),
+			Self::RemoveToHeldEntry { indices, .. } => indices.shrink_to_fit(),
+			Self::AddFromHeldEntry => (),
+			Self::DiscardHeldEntry { .. } => (),
 			Self::CreateHeldEntry => (),
-			Self::DeleteHeldEntry { .. } => (),
 			Self::Bulk { actions } => for action in actions { action.shrink_to_fit(); },
 		}
 	}
@@ -89,69 +82,59 @@ impl WorkbenchAction {
 		clippy::too_many_lines,
 		clippy::cognitive_complexity
 	)]
-	fn undo<'m1, 'm2: 'm1>(self, root: &mut NbtElement, bookmarks: &mut MarkedLines, mutable_indices: &'m1 mut MutableIndices<'m2>, path: &mut Option<PathBuf>, name: &mut Box<str>, held_entry: &mut HeldEntry, window_properties: &mut WindowProperties) -> Result<Self> {
+	pub fn undo<'m1, 'm2: 'm1>(self, root: &mut NbtElement, bookmarks: &mut MarkedLines, mutable_indices: &'m1 mut MutableIndices<'m2>, path: &mut Option<PathBuf>, name: &mut Box<str>, held_entry: &mut Option<HeldEntry>, window_properties: &mut WindowProperties) -> Result<Self> {
 		Ok(match self {
-			Self::Remove { element: (key, value), indices, } => add_element(root, key, value, indices, bookmarks, mutable_indices).context("Couldn't add element")?,
 			Self::Add { indices } => remove_element(root, indices, bookmarks, mutable_indices).context("Could remove element")?.into_action(),
+			Self::Remove { kv, indices, } => add_element(root, kv, indices, bookmarks, mutable_indices).context("Couldn't add element")?.into_action(),
 			Self::Replace { indices, value, } => replace_element(root, value, indices, bookmarks, mutable_indices).context("Could not replace element")?.into_action(),
 			Self::Rename { indices, key, value } => rename_element(root, indices, key, value, path, name, window_properties).context("Could not rename element")?.into_action(),
 			Self::Swap { parent, a, b, } => swap_element_same_depth(root, parent, a, b, bookmarks, mutable_indices).context("Could not swap elements")?.into_action(),
 			Self::Reorder { indices, mapping } => reorder_element(root, indices, mapping, bookmarks, mutable_indices).context("Could not reorder element")?.into_action(),
-			Self::HeldEntrySwap { indices, original_key } => {
-				let ((new_key, value), known_data) = match held_entry.take() {
-					HeldEntry::Empty => return Err(anyhow!("this shouldnt.. happen")),
-					HeldEntry::FromAether(value) => (value, None),
-					HeldEntry::FromKnown(value, indices, is_swap) => (value, Some((indices, is_swap))),
-				};
-				let (indices, kv, _) = replace_element(root, (original_key, value), indices, bookmarks, mutable_indices).expect("Could replace element").into_raw();
-				*held_entry = if let Some((held_entry_indices, is_swap)) = known_data { HeldEntry::FromKnown(kv, held_entry_indices, is_swap) } else { HeldEntry::FromAether(kv) };
-				Self::HeldEntrySwap { indices, original_key: new_key }
-			},
-			Self::HeldEntryDrop { mut from_indices, indices, original_key, original_value: original_value } => {
-				let (indices, (new_key, value), _) = if let Some(original_value) = original_value {
-					replace_element(root, (original_key, original_value), indices, bookmarks, mutable_indices).context("Able to replace element")?.into_raw()
+			Self::RemoveToHeldEntry { indices, mut indices_history, old_key, old_value } => {
+				ensure!(held_entry.is_none(), "To remove an element and make a held entry out of it, one cannot have an pre-existing held entry.");
+
+				let (indices, kv) = if let Some(old_value) = old_value {
+					let ReplaceElementResult { indices, kv } = replace_element(root, (old_key, old_value), indices, bookmarks, mutable_indices).context("Could not remove element")?;
+					(indices, kv)
+
 				} else {
-					remove_element(root, indices, bookmarks, mutable_indices).context("Able to remove element")?.into_raw()
+					let RemoveElementResult { indices, kv, replaces } = remove_element(root, indices, bookmarks, mutable_indices).context("Could not remove element")?;
+					ensure!(!replaces, "If the indices had replacement for this value, then we would have the old value to swap it out with");
+					(indices, kv)
 				};
-				if let Some(from_indices_arc) = &mut from_indices {
-					*held_entry = HeldEntry::FromKnown((original_key, value), OwnedIndices::clone(from_indices_arc.get_mut()), false);
-					Self::HeldEntrySteal { from_indices, original_key: new_key }
+				indices_history.push(indices);
+				*held_entry = Some(HeldEntry { kv, indices_history });
+				Self::AddFromHeldEntry
+			}
+			Self::AddFromHeldEntry => {
+				let HeldEntry { kv, mut indices_history } = held_entry.take().context("Expected a held entry to add to the tab")?;
+				if let Some(indices) = indices_history.pop() {
+					let AddElementResult { indices, old_value } = add_element(root, kv, indices, bookmarks, mutable_indices).context("Couldn't add element from held entry")?;
+					let old_kv = root.key_value_at(&indices).context("We just added an element to these indices, it for sure is valid")?;
+					let old_key = old_kv.0.map(|key| key.to_compact_string());
+					Self::RemoveToHeldEntry { indices, indices_history, old_key, old_value }
 				} else {
-					*held_entry = HeldEntry::FromAether((original_key, value));
-					Self::HeldEntryStealFromAether { indices, original_key: new_key }
+					Self::DiscardHeldEntry { held_entry: HeldEntry::from_aether(kv) }
 				}
 			}
-			Self::HeldEntrySteal { from_indices, original_key } => {
-				let HeldEntry::FromKnown((new_key, value), indices, _) = held_entry.take() else { return Err(anyhow!("impossible!")) };
-				let (indices, old_value) = add_element(root, original_key, value, indices, bookmarks, mutable_indices).context("Expected ability to add element")?.into_raw() else { return Err(anyhow!("impossible!")) };
-				Self::HeldEntryDrop { from_indices, indices, original_key: new_key, original_value: old_value }
-
-			},
-			Self::HeldEntryStealFromAether { indices, original_key } => {
-				let HeldEntry::FromAether((new_key, value)) = held_entry.take() else { return Err(anyhow!("Had no held entry to steal from")) };
-				let Self::Add { indices } = add_element(root, original_key, value, indices, bookmarks, mutable_indices).context("Expected ability to add element")? else { return Err(anyhow!("impossible!")) };
-				Self::HeldEntryDrop {
-					from_indices: None,
-					indices,
-					original_key: new_key,
-				}
+			Self::DiscardHeldEntry { held_entry: new_held_entry } => {
+				ensure!(held_entry.is_none(), "To create a held entry out of the aether, one cannot have an pre-existing held entry.");
+				*held_entry = Some(new_held_entry);
+				Self::AddFromHeldEntry
 			}
 			Self::CreateHeldEntry => {
-				Self::DeleteHeldEntry { held_entry: held_entry.take() }
-			},
-			Self::DeleteHeldEntry { held_entry: new_held_entry } => {
-				*held_entry = new_held_entry;
-				Self::CreateHeldEntry
-			},
+				let held_entry = held_entry.take().context("Expected a held entry that was created")?;
+				Self::DiscardHeldEntry { held_entry }
+			}
 			Self::Bulk { actions } => {
-				let mut new_actions = Vec::with_capacity(actions.len());
-
-				for action in actions.into_vec().into_iter().rev() {
-					new_actions.push(action.undo(root, bookmarks, mutable_indices, path, name, held_entry, window_properties)?);
-				}
-
 				Self::Bulk {
-					actions: new_actions.into_boxed_slice()
+					actions: actions
+						.into_vec()
+						.into_iter()
+						.rev()
+						.map(|action| action.undo(root, bookmarks, mutable_indices, path, name, held_entry, window_properties))
+						.collect::<Result<Vec<_>>>()?
+						.into_boxed_slice()
 				}
 			}
 		})

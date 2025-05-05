@@ -15,9 +15,8 @@ use crate::assets::{ZOffset, BASE_Z, CHUNK_GHOST_UV, CHUNK_UV, CONNECTION_UV, HE
 use crate::elements::{NbtCompound, NbtElement};
 use crate::render::{RenderContext, TextColor, VertexBufferBuilder};
 use crate::serialization::{PrettyFormatter, UncheckedBufWriter};
-use crate::tree::OwnedIndices;
 use crate::util::StrExt;
-use crate::workbench::{DropResult, FileFormat, MarkedLines};
+use crate::workbench::{FileFormat, MarkedLines};
 
 #[repr(C)]
 pub struct NbtRegion {
@@ -277,7 +276,7 @@ impl NbtRegion {
 	pub fn toggle(&mut self) {
 		let open = !self.is_open() && !self.is_empty();
 		self.set_open(open);
-		if !open {
+		if !open && !self.is_empty() {
 			self.shut();
 		}
 	}
@@ -299,7 +298,9 @@ impl NbtRegion {
 			for (idx, chunk) in self.children_mut().enumerate() {
 				chunk.shut();
 				// skip the head because that shouldn't be hidden
-				bookmarks[true_line_number + 1..=true_line_number + chunk.true_height()].iter_mut().for_each(|bookmark| *bookmark = bookmark.hidden(idx + 1));
+				for bookmark in &mut bookmarks[true_line_number + 1..=true_line_number + chunk.true_height()] {
+					*bookmark = bookmark.hidden(idx + 1);
+				}
 				true_line_number += chunk.true_height();
 			}
 		} else {

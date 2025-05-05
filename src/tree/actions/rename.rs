@@ -1,11 +1,10 @@
-use std::ffi::OsStr;
-use std::path::PathBuf;
-use compact_str::{CompactString, ToCompactString};
 use crate::elements::NbtElement;
 use crate::render::WindowProperties;
 use crate::tree::{OwnedIndices, ParentNavigationInformationMut};
 use crate::workbench::WorkbenchAction;
-use super::Navigate;
+use compact_str::{CompactString, ToCompactString};
+use std::ffi::OsStr;
+use std::path::PathBuf;
 
 /// Properly renames an element under its specified indices, keeping these caches correct:
 /// - Mutable Indices
@@ -92,18 +91,13 @@ pub fn rename_element(root: &mut NbtElement, indices: OwnedIndices, key: Option<
 
 #[derive(Clone)]
 pub struct RenameElementResult {
-    indices: OwnedIndices,
-    key: Option<CompactString>,
-    value: Option<CompactString>
+    pub indices: OwnedIndices,
+    pub key: Option<CompactString>,
+    pub value: Option<CompactString>
 }
 
 #[allow(dead_code)]
 impl RenameElementResult {
-    #[must_use]
-    pub fn into_raw(self) -> (OwnedIndices, Option<CompactString>, Option<CompactString>) {
-        (self.indices, self.key, self.value)
-    }
-
     #[must_use]
     pub fn into_action(self) -> WorkbenchAction {
         WorkbenchAction::Rename {

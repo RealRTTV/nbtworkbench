@@ -8,13 +8,13 @@ use winit::keyboard::KeyCode;
 use winit::window::Theme;
 
 use crate::assets::{BASE_Z, BOOKMARK_UV, DARK_STRIPE_UV, EXACT_MATCH_OFF_UV, EXACT_MATCH_ON_UV, HIDDEN_BOOKMARK_UV, HOVERED_WIDGET_UV, REGEX_SEARCH_MODE_UV, SEARCH_APPEND_BOOKMARKS_UV, SEARCH_BOOKMARKS_UV, SEARCH_BOX_SELECTION_Z, SEARCH_BOX_Z, SEARCH_KEYS_AND_VALUES_UV, SEARCH_KEYS_UV, SEARCH_VALUES_UV, SELECTED_WIDGET_UV, SNBT_SEARCH_MODE_UV, STRING_SEARCH_MODE_UV, UNSELECTED_WIDGET_UV};
-use crate::elements::{NbtElement, NbtElementAndKey};
+use crate::elements::{NbtElement, NbtElementAndKey, NbtElementAndKeyRef};
+use crate::render::widget::text::get_cursor_idx;
 use crate::render::{TextColor, Vec2u, VertexBufferBuilder};
 use crate::util::{create_regex, now, StrExt};
 use crate::widget::{Cachelike, Notification, NotificationKind, SearchBoxKeyResult, Text};
 use crate::workbench::{MarkedLine, MarkedLines, SortAlgorithm};
 use crate::{config, flags};
-use crate::render::widget::text::get_cursor_idx;
 
 pub const SEARCH_BOX_START_X: usize = 332;
 pub const SEARCH_BOX_END_X: usize = 2;
@@ -160,26 +160,26 @@ impl SearchPredicate {
         })
     }
 
-    fn matches(&self, key: Option<&str>, value: &NbtElement) -> bool {
+    fn matches(&self, kv: NbtElementAndKeyRef) -> bool {
         let flags = self.search_flags as u8 + 1;
         match &self.inner {
             SearchPredicateInner::String(matcher) => {
-                let (value, color) = value.value();
-                ((flags & 0b01) > 0 && color != TextColor::TreeKey && value.contains(matcher)) || ((flags & 0b10) > 0 && key.is_some_and(|k| k.contains(matcher)))
+                let (value, color) = kv.1.value();
+                ((flags & 0b01) > 0 && color != TextColor::TreeKey && value.contains(matcher)) || ((flags & 0b10) > 0 && kv.0.is_some_and(|k| k.contains(matcher)))
             }
             SearchPredicateInner::StringCaseInsensitive(matcher) => {
-                let (value, color) = value.value();
-                ((flags & 0b01) > 0 && color != TextColor::TreeKey && value.contains_ignore_ascii_case(matcher)) || ((flags & 0b10) > 0 && key.is_some_and(|k| k.contains_ignore_ascii_case(matcher)))
+                let (value, color) = kv.1.value();
+                ((flags & 0b01) > 0 && color != TextColor::TreeKey && value.contains_ignore_ascii_case(matcher)) || ((flags & 0b10) > 0 && kv.0.is_some_and(|k| k.contains_ignore_ascii_case(matcher)))
             }
             SearchPredicateInner::Regex(regex) => {
-                let (value, color) = value.value();
-                ((flags & 0b01) > 0 && color != TextColor::TreeKey && regex.is_match(&value)) || ((flags & 0b10) > 0 && key.is_some_and(|k| regex.is_match(k)))
+                let (value, color) = kv.1.value();
+                ((flags & 0b01) > 0 && color != TextColor::TreeKey && regex.is_match(&value)) || ((flags & 0b10) > 0 && kv.0.is_some_and(|k| regex.is_match(k)))
             }
             SearchPredicateInner::Snbt((k, element)) => {
-                ((flags & 0b01) == 0 || element.matches(value)) && ((flags & 0b10) == 0 || k.as_ref().map(|k| k.as_str()) == key)
+                ((flags & 0b01) == 0 || element.matches(kv.1)) && ((flags & 0b10) == 0 || k.as_ref().map(|k| k.as_str()) == kv.0)
             }
             SearchPredicateInner::SnbtExactMatch((k, element)) => {
-                ((flags & 0b01) == 0 || element.eq(value)) && ((flags & 0b10) == 0 || k.as_ref().map(|k| k.as_str()) == key)
+                ((flags & 0b01) == 0 || element.eq(kv.1)) && ((flags & 0b10) == 0 || k.as_ref().map(|k| k.as_str()) == kv.0)
             }
         }
     }
@@ -426,20 +426,20 @@ impl SearchBox {
     pub fn search0(root: &NbtElement, predicate: &SearchPredicate) -> MarkedLines {
         let mut new_bookmarks = Vec::new();
         let mut queue = Vec::new();
-        queue.push((None, &*root, true));
+        queue.push(((None, &*root), true));
         let mut true_line_number = 1;
         let mut line_number = 0;
-        while let Some((key, element, parent_open)) = queue.pop() {
-            if predicate.matches(key, element) {
+        while let Some(((key, value), parent_open)) = queue.pop() {
+            if predicate.matches((key, value)) {
                 new_bookmarks.push(MarkedLine::with_uv(true_line_number, line_number, if parent_open { BOOKMARK_UV } else { HIDDEN_BOOKMARK_UV }));
             }
 
-            match element.children() {
+            match value.children() {
                 Some(Ok(iter)) => for value in iter.rev() {
-                    queue.push((None, value, element.is_open()))
+                    queue.push(((None, value), value.is_open()))
                 }
                 Some(Err(iter)) => for (key, value) in iter.rev() {
-                    queue.push((Some(key), value, element.is_open()))
+                    queue.push(((Some(key), value), value.is_open()))
                 }
                 None => {}
             }

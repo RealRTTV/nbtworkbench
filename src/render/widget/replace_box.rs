@@ -1,19 +1,19 @@
+use regex::Regex;
 use std::ops::{Deref, DerefMut};
 use std::time::Duration;
-use regex::Regex;
 use winit::event::MouseButton;
 use winit::keyboard::KeyCode;
 use winit::window::Theme;
 
 use crate::assets::{DARK_STRIPE_UV, REPLACE_BOX_SELECTION_Z, REPLACE_BOX_Z};
-use crate::{config, flags};
-use crate::elements::{NbtElement, NbtElementAndKey};
-use crate::render::{TextColor, Vec2u, VertexBufferBuilder, WindowProperties};
+use crate::elements::{NbtElement, NbtElementAndKey, NbtElementAndKeyRef};
 use crate::render::widget::text::get_cursor_idx;
+use crate::render::{TextColor, Vec2u, VertexBufferBuilder, WindowProperties};
+use crate::tree::{rename_element, replace_element, Indices, MutableIndices, OwnedIndices, RenameElementResult, ReplaceElementResult};
 use crate::util::{create_regex, now, StrExt};
 use crate::widget::{Cachelike, Notification, NotificationKind, ReplaceBoxKeyResult, SearchBox, SearchFlags, SearchMode, Text, SEARCH_BOX_END_X, SEARCH_BOX_START_X};
 use crate::workbench::{MarkedLines, SortAlgorithm, WorkbenchAction};
-use crate::tree::{rename_element, replace_element, RenameElementResult, ReplaceElementResult, MutableIndices, Indices, OwnedIndices};
+use crate::{config, flags};
 
 pub struct ReplaceBox(Text<ReplaceBoxAdditional, ReplaceBoxCache>);
 
@@ -222,7 +222,7 @@ impl ReplaceBox {
 
         while let Some((key, element)) = queue.pop() {
             let mut element_replaced = false;
-            if replacement.matches(key, element) {
+            if replacement.matches((key, element)) {
                 let key_str = if replacement.needs_key() { key.map(|s| s.to_owned()) } else { None };
                 let element_str = if replacement.needs_element_snbt() { Some((element.to_string(), TextColor::White)) } else if replacement.needs_element_value() { Some(element.value()).map(|(a, b)| (a.into_string(), b)) } else { None };
                 if let (Some(action), replaced) = replacement.replace(alternative_root, key_str, element_str.filter(|&(_, color)| color != TextColor::TreeKey).map(|(x, _)| x), bookmarks, mutable_indices, &current_indices) {
@@ -319,28 +319,28 @@ impl SearchReplacement {
         })
     }
 
-    pub fn matches(&self, key: Option<&str>, value: &NbtElement) -> bool {
+    pub fn matches(&self, kv: NbtElementAndKeyRef) -> bool {
         let flags = self.search_flags as u8 + 1;
         let value_flag = (flags & 0b01) > 0;
         let key_flag = (flags & 0b10) > 0;
         match &self.inner {
             SearchReplacementInner::Substring { find, case_sensitive, .. } => {
-                let (value, color) = value.value();
+                let (value, color) = kv.1.value();
                 if *case_sensitive {
-                    (value_flag && color != TextColor::TreeKey && value.contains(find)) || (key_flag && key.is_some_and(|k| k.contains(find)))
+                    (value_flag && color != TextColor::TreeKey && value.contains(find)) || (key_flag && kv.0.is_some_and(|k| k.contains(find)))
                 } else {
-                    (value_flag && color != TextColor::TreeKey && value.contains_ignore_ascii_case(find)) || (key_flag && key.is_some_and(|k| k.contains_ignore_ascii_case(find)))
+                    (value_flag && color != TextColor::TreeKey && value.contains_ignore_ascii_case(find)) || (key_flag && kv.0.is_some_and(|k| k.contains_ignore_ascii_case(find)))
                 }
             }
             SearchReplacementInner::Regex { regex, .. } => {
-                let (value, color) = value.value();
-                (value_flag && color != TextColor::TreeKey && regex.is_match(&value)) || (key_flag && key.is_some_and(|k| regex.is_match(k)))
+                let (value, color) = kv.1.value();
+                (value_flag && color != TextColor::TreeKey && regex.is_match(&value)) || (key_flag && kv.0.is_some_and(|k| regex.is_match(k)))
             }
             SearchReplacementInner::Snbt { find: (find_key, find_value), exact_match, .. } => {
                 if *exact_match {
-                    (!value_flag || value.eq(find_value)) && (!key_flag || key == find_key.as_ref().map(|k| k.as_str()))
+                    (!value_flag || kv.1.eq(find_value)) && (!key_flag || kv.0 == find_key.as_ref().map(|k| k.as_str()))
                 } else {
-                    (!value_flag || value.matches(find_value)) && (!key_flag || key == find_key.as_ref().map(|k| k.as_str()))
+                    (!value_flag || kv.1.matches(find_value)) && (!key_flag || kv.0 == find_key.as_ref().map(|k| k.as_str()))
                 }
             }
         }

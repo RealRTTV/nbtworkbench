@@ -14,9 +14,9 @@ pub struct Alert {
 }
 
 impl Alert {
-	pub fn new(title: impl Into<String>, title_color: TextColor, message: impl Into<String>) -> Self {
-		let title = title.into();
-		let lines = split_lines::<256>(message.into());
+	pub fn new(title: impl ToString, title_color: TextColor, message: impl ToString) -> Self {
+		let title = title.to_string();
+		let lines = split_lines::<256>(message.to_string());
 		Self {
 			timestamp: None,
 			title_color: title_color.to_raw(),

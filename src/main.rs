@@ -19,7 +19,6 @@
     iter_next_chunk,
     optimize_attribute,
     stmt_expr_attributes,
-	generic_associated_types,
 )]
 #![feature(ptr_as_ref_unchecked)]
 #![windows_subsystem = "windows"]
@@ -139,11 +138,14 @@ pub static mut WINDOW_PROPERTIES: render::WindowProperties = render::WindowPrope
 /// * add [`Indices`](workbench::tree_travel::Indices)
 /// * refactor drop to return indices - and potentially use it for drop rendering code
 /// * rename line_number and true_line_number to y and line_number respectively
+/// * make button widgets on the screen coded better
 /// # Long-Term Goals
 /// * smart screen
 /// * [chunk](elements::chunk::NbtChunk) section rendering
 /// # Minor Features
 /// * [`last_modified`](elements::chunk::NbtChunk) field actually gets the ability to be set
+/// * add set intersection operations for line number searching (+ dedicated negate button)
+/// * add option for [ReplaceBox](render::widget::ReplaceBox) to use existing highlighted line numbers or hits for search box
 /// # Major Features
 /// * macros
 #[cfg(not(target_arch = "wasm32"))]

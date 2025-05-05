@@ -387,9 +387,7 @@ use crate::assets::{ZOffset, BASE_Z, BYTE_ARRAY_UV, BYTE_UV, CONNECTION_UV, INT_
 use crate::elements::{id_to_string_name, NbtElement};
 use crate::render::{RenderContext, TextColor, VertexBufferBuilder};
 use crate::serialization::{Decoder, PrettyFormatter, UncheckedBufWriter};
-use crate::tree::OwnedIndices;
 use crate::util::StrExt;
-use crate::workbench::DropResult;
 
 array!(byte, NbtByteArray, i8, 7, 1, 'B', BYTE_ARRAY_UV, BYTE_UV, parse_byte, array_try_into_byte);
 array!(int, NbtIntArray, i32, 11, 3, 'I', INT_ARRAY_UV, INT_UV, parse_int, array_try_into_int);

@@ -4,16 +4,15 @@ mod traverse;
 mod indices;
 
 pub use actions::*;
+pub use indices::*;
 pub use navigate::*;
 pub use traverse::*;
-pub use indices::*;
 
 use crate::elements::NbtElement;
 use crate::widget::SelectedText;
 use crate::workbench::FileUpdateSubscription;
 
 #[must_use]
-#[deprecated = "deprecated in favor of NbtElement::navigate"]
 pub fn line_number_at(indices: &Indices, mut root: &NbtElement) -> usize {
     let mut total = 0;
     for idx in indices {
@@ -24,15 +23,6 @@ pub fn line_number_at(indices: &Indices, mut root: &NbtElement) -> usize {
         root = &root[idx];
     }
     total
-}
-
-#[deprecated = "deprecated in favor of NbtElement::recache_along_indices"]
-pub fn recache_along_indices(indices: &Indices, mut root: &mut NbtElement) {
-    root.recache();
-    for idx in indices {
-        root = &mut root[idx];
-        root.recache();
-    }
 }
 
 pub struct MutableIndices<'m2> {

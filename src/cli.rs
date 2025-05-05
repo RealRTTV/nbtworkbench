@@ -165,7 +165,7 @@ pub fn find() -> ! {
                 }
 
                 let tab = workbench.tabs.remove(0);
-                let bookmarks = SearchBox::search0(tab.value(), &predicate);
+                let bookmarks = SearchBox::search0(&tab.value, &predicate);
                 drop_on_separate_thread(tab);
                 increment_progress_bar(&completed, len, total_size, "Searching");
                 if !bookmarks.is_empty() {
@@ -267,7 +267,7 @@ pub fn reformat() -> ! {
                     error!("Tab had invalid file format {}", tab.format().to_string());
                 }
 
-                let out = format.encode(tab.value());
+                let out = format.encode(&tab.value);
                 drop_on_separate_thread(tab);
 
                 let name = path.file_stem().expect("File must have stem").to_string_lossy().into_owned() + "." + &extension;

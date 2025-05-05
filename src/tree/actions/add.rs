@@ -1,9 +1,6 @@
-use compact_str::CompactString;
-use crate::elements::NbtElement;
-use crate::tree::{Indices, OwnedIndices, ParentNavigationInformationMut};
-use crate::util::encompasses_or_equal;
+use crate::elements::{NbtElement, NbtElementAndKey};
+use crate::tree::{MutableIndices, OwnedIndices, ParentNavigationInformationMut};
 use crate::workbench::{MarkedLines, WorkbenchAction};
-use super::super::{recache_along_indices, MutableIndices, Navigate};
 
 /// Properly adds an element under the specified indices, updating the following relevant data
 /// - Mutable Indices
@@ -29,11 +26,11 @@ use super::super::{recache_along_indices, MutableIndices, Navigate};
 /// tab.append_to_history(action);
 /// ```
 #[must_use]
-pub fn add_element<'m1, 'm2: 'm1>(root: &mut NbtElement, key: Option<CompactString>, value: NbtElement, indices: OwnedIndices, bookmarks: &mut MarkedLines, mutable_indices: &'m1 mut MutableIndices<'m2>) -> Option<AddElementResult> {
+pub fn add_element<'m1, 'm2: 'm1>(root: &mut NbtElement, kv: NbtElementAndKey, indices: OwnedIndices, bookmarks: &mut MarkedLines, mutable_indices: &'m1 mut MutableIndices<'m2>) -> Option<AddElementResult> {
     let ParentNavigationInformationMut { true_line_number, parent, idx, parent_indices, .. } = root.navigate_parent_mut(&indices)?;
     let (old_parent_height, old_parent_true_height) = (parent.height(), parent.true_height());
     // SAFETY: we have updated all the relevant data
-    let old_value = match unsafe { parent.insert(idx, (key, value)) } {
+    let old_value = match unsafe { parent.insert(idx, kv) } {
         Ok(Some(old)) => Some(old),
         Ok(None) => None,
         Err(_) => return None,
@@ -46,7 +43,7 @@ pub fn add_element<'m1, 'm2: 'm1>(root: &mut NbtElement, key: Option<CompactStri
     bookmarks.remove(true_line_number..true_line_number + old_true_height.unwrap_or(0));
     bookmarks[true_line_number..].increment(diff, true_diff);
 
-    mutable_indices.apply(|indices, ci| {
+    mutable_indices.apply(|indices, _ci| {
         if parent_indices.encompasses_or_equal(indices) {
             if indices[parent_indices.len()] <= idx && !been_replaced {
                 indices[parent_indices.len()] += 1;
@@ -63,15 +60,11 @@ pub fn add_element<'m1, 'm2: 'm1>(root: &mut NbtElement, key: Option<CompactStri
 }
 
 pub struct AddElementResult {
-    indices: OwnedIndices,
-    old_value: Option<NbtElement>
+    pub indices: OwnedIndices,
+    pub old_value: Option<NbtElement>
 }
 
 impl AddElementResult {
-    pub fn into_raw(self) -> (OwnedIndices, Option<NbtElement>) {
-        (self.indices, self.old_value)
-    }
-
     pub fn into_action(self) -> WorkbenchAction {
         let Self { indices, old_value } = self;
         if let Some(old_value) = old_value {

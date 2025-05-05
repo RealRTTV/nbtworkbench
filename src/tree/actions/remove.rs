@@ -1,8 +1,6 @@
 use crate::elements::{NbtElement, NbtElementAndKey};
-use crate::tree::{OwnedIndices, ParentNavigationInformationMut};
-use crate::util::{encompasses, encompasses_or_equal};
+use crate::tree::{MutableIndices, OwnedIndices, ParentNavigationInformationMut};
 use crate::workbench::{MarkedLines, WorkbenchAction};
-use super::{recache_along_indices, MutableIndices, Navigate};
 
 
 /// Properly removes an element under the specified indices, updating the following relevant data
@@ -59,17 +57,12 @@ pub fn remove_element<'m1, 'm2: 'm1>(root: &mut NbtElement, indices: OwnedIndice
 
 #[derive(Clone)]
 pub struct RemoveElementResult {
-    indices: OwnedIndices,
-    kv: NbtElementAndKey,
-    replaces: bool,
+    pub indices: OwnedIndices,
+    pub kv: NbtElementAndKey,
+    pub replaces: bool,
 }
 
 impl RemoveElementResult {
-    #[must_use]
-    pub fn into_raw(self) -> (OwnedIndices, NbtElementAndKey, bool) {
-        (self.indices, self.kv, self.replaces)
-    }
-
     #[must_use]
     pub fn into_action(self) -> WorkbenchAction {
         if self.replaces {
@@ -79,7 +72,7 @@ impl RemoveElementResult {
             }
         } else {
             WorkbenchAction::Remove {
-                element: self.kv,
+                kv: self.kv,
                 indices: self.indices,
             }
         }

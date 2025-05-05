@@ -408,7 +408,7 @@ impl<'a> RenderContext<'a> {
 		let mut hidden_bookmark_y = 0;
 		let mut bookmarks_at_y = 0_usize;
 		let mut bookmark_y = 0;
-		for bookmark in bookmarks.iter() {
+		for bookmark in bookmarks {
 			let y = HEADER_SIZE + (bookmark.line_number() * (builder.window_height() - HEADER_SIZE)) / height;
 			if bookmark.uv() == BOOKMARK_UV {
 				if bookmarks_at_y < 5 {

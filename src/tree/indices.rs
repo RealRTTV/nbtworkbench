@@ -1,22 +1,22 @@
+use crate::elements::NbtElement;
+use crate::util;
 use std::borrow::{Borrow, BorrowMut};
 use std::fmt::{Debug, Formatter};
 use std::iter::Copied;
 use std::ops::{Deref, DerefMut, Index, IndexMut};
 use std::slice;
-use crate::elements::NbtElement;
-use crate::util;
 
 #[repr(transparent)]
 pub struct Indices([usize]);
 
 impl Indices {
     #[must_use]
-    pub fn from_slice<'a>(slice: &'a [usize]) -> &'a Self {
+    pub const fn from_slice<'a>(slice: &'a [usize]) -> &'a Self {
         unsafe { core::mem::transmute::<&'a [usize], &'a Self>(slice) }
     }
 
     #[must_use]
-    pub fn from_slice_mut<'a>(slice: &'a mut [usize]) -> &'a mut Self {
+    pub const fn from_slice_mut<'a>(slice: &'a mut [usize]) -> &'a mut Self {
         unsafe { core::mem::transmute::<&'a mut [usize], &'a mut Self>(slice) }
     }
 }
@@ -56,14 +56,6 @@ impl OwnedIndices {
     pub fn shrink_to_fit(&mut self) {
         self.0.shrink_to_fit();
     }
-    
-    pub unsafe fn as_inner(&self) -> &Vec<usize> {
-        &self.0
-    }
-    
-    pub unsafe fn as_inner_mut(&mut self) -> &mut Vec<usize> {
-        &mut self.0
-    }
 }
 
 impl Default for OwnedIndices {
@@ -74,6 +66,8 @@ impl Default for OwnedIndices {
 }
 
 impl Indices {
+    pub const EMPTY: &'static Indices = Indices::from_slice(&[]);
+    
     #[must_use]
     pub fn iter(&self) -> Copied<slice::Iter<usize>> {
         self.0.iter().copied()
