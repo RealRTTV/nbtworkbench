@@ -78,7 +78,6 @@ pub struct SelectedTextAdditional  {
 }
 
 impl SelectedText {
-	#[inline]
 	#[must_use]
 	#[allow(clippy::too_many_lines)]
 	pub fn new(target_x: usize, mouse_x: usize, y: usize, key: Option<(Box<str>, TextColor, bool)>, value: Option<(Box<str>, TextColor, bool)>, indices: OwnedIndices) -> Option<Self> {
@@ -299,7 +298,6 @@ impl SelectedText {
 		self.0.on_key_press(key, char, flags).into()
 	}
 
-	#[inline]
 	pub fn post_input(&mut self) {
 		self.0.post_input()
 	}
@@ -314,7 +312,6 @@ impl SelectedText {
 		self.recache_y(root);
 	}
 
-	#[inline]
 	pub fn render(&self, builder: &mut VertexBufferBuilder, left_margin: usize) {
 		let x = self.indices.len() * 16 + 32 + 4 + left_margin;
 		let y = if builder.scroll() > self.y { return; } else { self.y - builder.scroll() };

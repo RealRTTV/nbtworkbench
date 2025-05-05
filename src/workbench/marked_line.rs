@@ -84,19 +84,16 @@ impl MarkedLine {
 }
 
 impl PartialEq for MarkedLine {
-    #[inline]
-    fn eq(&self, other: &Self) -> bool { self.true_line_number == other.true_line_number }
+       fn eq(&self, other: &Self) -> bool { self.true_line_number == other.true_line_number }
 }
 
 impl Eq for MarkedLine {}
 
 impl PartialOrd<Self> for MarkedLine {
-    #[inline]
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> { Some(self.cmp(other)) }
+       fn partial_cmp(&self, other: &Self) -> Option<Ordering> { Some(self.cmp(other)) }
 }
 impl Ord for MarkedLine {
-    #[inline]
-    fn cmp(&self, other: &Self) -> Ordering { self.true_line_number.cmp(&other.true_line_number) }
+       fn cmp(&self, other: &Self) -> Ordering { self.true_line_number.cmp(&other.true_line_number) }
 }
 
 pub struct MarkedLines {
@@ -104,8 +101,7 @@ pub struct MarkedLines {
 }
 
 impl Default for MarkedLines {
-    #[inline]
-    fn default() -> Self {
+       fn default() -> Self {
         Self {
             inner: vec![],
         }
@@ -182,8 +178,7 @@ impl MarkedLines {
 }
 
 impl From<MarkedLines> for Vec<MarkedLine> {
-    #[inline]
-    fn from(lines: MarkedLines) -> Vec<MarkedLine> {
+       fn from(lines: MarkedLines) -> Vec<MarkedLine> {
         lines.inner
     }
 }
@@ -248,15 +243,13 @@ impl MarkedLineSlice {
 impl Deref for MarkedLines {
     type Target = MarkedLineSlice;
 
-    #[inline]
-    fn deref(&self) -> &Self::Target {
+       fn deref(&self) -> &Self::Target {
         unsafe { core::mem::transmute(self.inner.as_slice()) }
     }
 }
 
 impl DerefMut for MarkedLines {
-    #[inline]
-    fn deref_mut(&mut self) -> &mut Self::Target {
+       fn deref_mut(&mut self) -> &mut Self::Target {
         unsafe { core::mem::transmute(self.inner.as_mut_slice()) }
     }
 }
@@ -264,15 +257,13 @@ impl DerefMut for MarkedLines {
 impl Deref for MarkedLineSlice {
     type Target = [MarkedLine];
 
-    #[inline]
-    fn deref(&self) -> &Self::Target {
+       fn deref(&self) -> &Self::Target {
         &self.0
     }
 }
 
 impl DerefMut for MarkedLineSlice {
-    #[inline]
-    fn deref_mut(&mut self) -> &mut Self::Target {
+       fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
 }
@@ -280,8 +271,7 @@ impl DerefMut for MarkedLineSlice {
 impl<R: RangeBounds<usize>> Index<R> for MarkedLineSlice {
     type Output = MarkedLineSlice;
 
-    #[inline]
-    fn index(&self, index: R) -> &Self::Output {
+       fn index(&self, index: R) -> &Self::Output {
         match (index.start_bound().map(|&x| MarkedLine::new(x, 0)), index.end_bound().map(|&x| MarkedLine::new(x, 0))) {
             (Bound::Unbounded, Bound::Unbounded) => self,
             (Bound::Unbounded, Bound::Included(ref end)) => { let end = self.binary_search(end).unwrap_or_else(identity); if end >= self.len() { slice!([]) } else { slice!(self.0[..=end]) } },
@@ -297,8 +287,7 @@ impl<R: RangeBounds<usize>> Index<R> for MarkedLineSlice {
 }
 
 impl<R: RangeBounds<usize>> IndexMut<R> for MarkedLineSlice {
-    #[inline]
-    fn index_mut(&mut self, index: R) -> &mut Self::Output {
+       fn index_mut(&mut self, index: R) -> &mut Self::Output {
         match (index.start_bound().map(|&x| MarkedLine::new(x, 0)), index.end_bound().map(|&x| MarkedLine::new(x, 0))) {
             (Bound::Unbounded, Bound::Unbounded) => self,
             (Bound::Unbounded, Bound::Included(ref end)) => { let end = self.binary_search(end).unwrap_or_else(identity); if end >= self.len() { slice_mut!([]) } else { slice_mut!(self.0[..=end]) } },
@@ -317,8 +306,7 @@ impl<'a> IntoIterator for &'a MarkedLineSlice {
     type Item = &'a MarkedLine;
     type IntoIter = Iter<'a>;
 
-    #[inline]
-    fn into_iter(self) -> Self::IntoIter {
+       fn into_iter(self) -> Self::IntoIter {
         self.iter()
     }
 }
@@ -327,8 +315,7 @@ impl<'a> IntoIterator for &'a mut MarkedLineSlice {
     type Item = &'a mut MarkedLine;
     type IntoIter = IterMut<'a>;
 
-    #[inline]
-    fn into_iter(self) -> Self::IntoIter {
+       fn into_iter(self) -> Self::IntoIter {
         self.iter_mut()
     }
 }
@@ -338,8 +325,7 @@ pub struct Iter<'a>(&'a [MarkedLine]);
 impl<'a> Iterator for Iter<'a> {
 	type Item = &'a MarkedLine;
 
-    #[inline]
-	fn next(&mut self) -> Option<Self::Item> {
+   	fn next(&mut self) -> Option<Self::Item> {
 		if let Some((item, rest)) = self.0.split_first() {
 			self.0 = rest;
 			Some(item)
@@ -354,8 +340,7 @@ pub struct IterMut<'a>(&'a mut [MarkedLine]);
 impl<'a> Iterator for IterMut<'a> {
 	type Item = &'a mut MarkedLine;
 
-    #[inline]
-	fn next(&mut self) -> Option<Self::Item> {
+   	fn next(&mut self) -> Option<Self::Item> {
 		if self.0.is_empty() {
 			None
 		} else {

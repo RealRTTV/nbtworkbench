@@ -110,7 +110,7 @@ impl WorkbenchAction {
 				let HeldEntry { kv, mut indices_history } = held_entry.take().context("Expected a held entry to add to the tab")?;
 				if let Some(indices) = indices_history.pop() {
 					let AddElementResult { indices, old_value } = add_element(root, kv, indices, bookmarks, mutable_indices).context("Couldn't add element from held entry")?;
-					let old_kv = root.key_value_at(&indices).context("We just added an element to these indices, it for sure is valid")?;
+					let old_kv = root.get_kv(&indices).context("We just added an element to these indices, it for sure is valid")?;
 					let old_key = old_kv.0.map(|key| key.to_compact_string());
 					Self::RemoveToHeldEntry { indices, indices_history, old_key, old_value }
 				} else {

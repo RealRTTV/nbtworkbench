@@ -37,7 +37,6 @@ impl NbtString {
 		))
 	}
 
-	#[inline]
 	pub fn from_bytes<'a, D: Decoder<'a>>(decoder: &mut D) -> Option<Self> {
 		unsafe {
 			decoder.assert_len(2)?;
@@ -47,15 +46,12 @@ impl NbtString {
 		}
 	}
 
-	#[inline]
 	pub fn to_be_bytes(&self, writer: &mut UncheckedBufWriter) { writer.write_be_str(self.str.as_str()); }
 
-	#[inline]
 	pub fn to_le_bytes(&self, writer: &mut UncheckedBufWriter) { writer.write_le_str(self.str.as_str()); }
 }
 
 impl NbtString {
-	#[inline]
 	#[must_use]
 	pub fn new(str: CompactString) -> Self {
 		Self {
@@ -79,7 +75,6 @@ impl NbtString {
 }
 
 impl NbtString {
-	#[inline]
 	pub fn render(&self, builder: &mut VertexBufferBuilder, name: Option<&str>, ctx: &mut RenderContext) {
 		use std::fmt::Write as _;
 
@@ -100,7 +95,6 @@ impl NbtString {
 		ctx.offset_pos(0, 16);
 	}
 
-	#[inline]
 	pub fn render_icon(&self, pos: impl Into<(usize, usize)>, z: ZOffset, builder: &mut VertexBufferBuilder) { builder.draw_texture_z(pos, z, STRING_UV, (16, 16)); }
 }
 

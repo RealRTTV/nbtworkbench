@@ -12,11 +12,9 @@ macro_rules! primitive {
 		impl $name {
 			pub const ID: u8 = $id;
 
-			#[inline]
-			pub fn to_be_bytes(&self, writer: &mut UncheckedBufWriter) { writer.write(self.value.to_be_bytes().as_ref()); }
+					pub fn to_be_bytes(&self, writer: &mut UncheckedBufWriter) { writer.write(self.value.to_be_bytes().as_ref()); }
 
-			#[inline]
-			pub fn from_bytes<'a, D: Decoder<'a>>(decoder: &mut D) -> Option<Self> {
+					pub fn from_bytes<'a, D: Decoder<'a>>(decoder: &mut D) -> Option<Self> {
 				unsafe {
 					decoder.assert_len(core::mem::size_of::<$t>())?;
 					Some(Self {
@@ -25,11 +23,9 @@ macro_rules! primitive {
 				}
 			}
 
-			#[inline]
-			pub fn to_le_bytes(&self, writer: &mut UncheckedBufWriter) { writer.write(self.value.to_le_bytes().as_ref()); }
+					pub fn to_le_bytes(&self, writer: &mut UncheckedBufWriter) { writer.write(self.value.to_le_bytes().as_ref()); }
 
-			#[inline]
-			pub fn render(&self, builder: &mut VertexBufferBuilder, name: Option<&str>, ctx: &mut RenderContext) {
+					pub fn render(&self, builder: &mut VertexBufferBuilder, name: Option<&str>, ctx: &mut RenderContext) {
 				ctx.line_number();
 				self.render_icon(ctx.pos(), BASE_Z, builder);
 				ctx.check_for_invalid_value(|value| value.parse::<$t>().is_err());
@@ -49,11 +45,9 @@ macro_rules! primitive {
 				ctx.offset_pos(0, 16);
 			}
 
-			#[inline]
-			pub fn render_icon(&self, pos: impl Into<(usize, usize)>, z: ZOffset, builder: &mut VertexBufferBuilder) { builder.draw_texture_z(pos, z, $uv, (16, 16)); }
+					pub fn render_icon(&self, pos: impl Into<(usize, usize)>, z: ZOffset, builder: &mut VertexBufferBuilder) { builder.draw_texture_z(pos, z, $uv, (16, 16)); }
 
-			#[inline]
-			pub fn value(&self) -> CompactString { $compact_format(self.value) }
+					pub fn value(&self) -> CompactString { $compact_format(self.value) }
 		}
 
 		impl Display for $name {

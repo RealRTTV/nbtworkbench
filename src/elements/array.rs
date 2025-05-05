@@ -31,7 +31,6 @@ macro_rules! array {
 
 		impl Clone for $name {
 			#[allow(clippy::cast_ptr_alignment)]
-			#[inline]
 			fn clone(&self) -> Self {
 				unsafe {
 					let len = self.values.len();
@@ -60,7 +59,6 @@ macro_rules! array {
 
 			pub const ID: u8 = $my_id;
 
-			#[inline]
 			pub(in $crate::elements) fn from_str0(mut s: &str) -> Result<(&str, Self), usize> {
 				s = s
 					.strip_prefix('[').ok_or(s.len())?
@@ -84,7 +82,6 @@ macro_rules! array {
 				Ok((s.strip_prefix(']').ok_or(s.len())?, array))
 			}
 
-			#[inline]
 			pub fn from_bytes<'a, D: Decoder<'a>>(decoder: &mut D) -> Option<Self> {
 				unsafe {
 					decoder.assert_len(4)?;
@@ -109,7 +106,6 @@ macro_rules! array {
 				}
 			}
 
-			#[inline]
 			pub fn to_be_bytes(&self, writer: &mut UncheckedBufWriter) {
 				writer.write(&(self.len() as u32).to_be_bytes());
 				for entry in self.values.iter() {
@@ -117,7 +113,6 @@ macro_rules! array {
 				}
 			}
 
-			#[inline]
 			pub fn to_le_bytes(&self, writer: &mut UncheckedBufWriter) {
 				writer.write(&(self.len() as u32).to_le_bytes());
 				for entry in self.values.iter() {
@@ -175,7 +170,6 @@ macro_rules! array {
 				}
 			}
 
-			#[inline]
 			pub fn remove(&mut self, idx: usize) -> NbtElement {
 				let removed = self.values.remove(idx);
 				self.decrement(removed.height(), removed.true_height());
@@ -183,7 +177,6 @@ macro_rules! array {
 				removed
 			}
 
-			#[inline]
 			pub fn replace(&mut self, idx: usize, value: NbtElement) -> Option<NbtElement> {
 				if !self.can_insert(&value) || idx >= self.len() { return None; }
 				self.increment(value.height(), value.true_height());
@@ -192,7 +185,6 @@ macro_rules! array {
 				Some(old)
 			}
 
-			#[inline]
 			pub fn render(&self, builder: &mut VertexBufferBuilder, key: Option<&str>, remaining_scroll: &mut usize, tail: bool, ctx: &mut RenderContext) {
 				'head: {
 					if *remaining_scroll > 0 {
@@ -277,15 +269,12 @@ macro_rules! array {
 				}
 			}
 
-			#[inline]
 			#[must_use]
 			pub fn get(&self, idx: usize) -> Option<&NbtElement> { self.values.get(idx) }
 
-			#[inline]
 			#[must_use]
 			pub fn get_mut(&mut self, idx: usize) -> Option<&mut NbtElement> { self.values.get_mut(idx) }
 
-			#[inline]
 			#[must_use]
 			pub fn value(&self) -> CompactString {
 				let (single, multiple) = id_to_string_name($id);
@@ -296,19 +285,16 @@ macro_rules! array {
 				)
 			}
 
-			#[inline] // ret type is #[must_use]
+			// ret type is #[must_use]
 			pub fn children(&self) -> Iter<'_, NbtElement> { self.values.iter() }
 
-			#[inline] // ret type is #[must_use]
+			// ret type is #[must_use]
 			pub fn children_mut(&mut self) -> IterMut<'_, NbtElement> { self.values.iter_mut() }
 
-			#[inline]
 			pub fn shut(&mut self) { self.open = false; }
 
-			#[inline]
 			pub fn expand(&mut self) { self.open = !self.is_empty(); }
 
-			#[inline]
 			pub fn recache(&mut self) {
 				let mut max_depth = 0;
 				if self.open() {
@@ -319,17 +305,13 @@ macro_rules! array {
 				self.max_depth = max_depth as u32;
 			}
 
-			#[inline]
 			#[must_use]
 			pub const fn max_depth(&self) -> usize { self.max_depth as usize }
 
-			#[inline]
 			pub fn render_icon(&self, pos: impl Into<(usize, usize)>, z: ZOffset, builder: &mut VertexBufferBuilder) { builder.draw_texture_z(pos, z, $uv, (16, 16)); }
 
-			#[inline]
 			pub fn render_element_icon(pos: impl Into<(usize, usize)>, builder: &mut VertexBufferBuilder) { builder.draw_texture(pos, $element_uv, (16, 16)); }
 			
-			#[inline]
 			#[must_use]
             pub fn can_insert(&self, value: &NbtElement) -> bool {
 				value.id() == $id

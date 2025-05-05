@@ -55,8 +55,7 @@ impl<'a> BigEndianDecoder<'a> {
 }
 
 impl<'a> Decoder<'a> for BigEndianDecoder<'a> {
-    #[inline]
-    #[optimize(speed)]
+       #[optimize(speed)]
     fn new(data: &'a [u8]) -> Self {
         Self {
             end: unsafe { data.as_ptr().add(data.len()) },
@@ -75,8 +74,7 @@ impl<'a> Decoder<'a> for BigEndianDecoder<'a> {
         }
     }
 
-    #[inline]
-    fn sort(&self, map: &mut CompoundMap) {
+       fn sort(&self, map: &mut CompoundMap) {
         // SAFETY: we can only call this on init of the compound
         unsafe { config::get_sort_algorithm().sort(map) }
     }
@@ -149,14 +147,12 @@ impl<'a> LittleEndianDecoder<'a> {
         array
     }
 
-    #[inline]
-    #[must_use]
+       #[must_use]
     fn remaining_len(&self) -> usize {
         self.end as usize - self.data as usize
     }
 
-    #[inline]
-    #[must_use]
+       #[must_use]
     pub fn header(&self) -> bool {
         self.header
     }
@@ -164,8 +160,7 @@ impl<'a> LittleEndianDecoder<'a> {
 
 #[allow(improper_ctypes_definitions)]
 impl<'a> Decoder<'a> for LittleEndianDecoder<'a> {
-    #[inline]
-    #[optimize(speed)]
+       #[optimize(speed)]
     fn new(data: &'a [u8]) -> Self {
         let mut this = Self {
             end: unsafe { data.as_ptr().add(data.len()) },
@@ -194,8 +189,7 @@ impl<'a> Decoder<'a> for LittleEndianDecoder<'a> {
         }
     }
 
-    #[inline]
-    fn sort(&self, map: &mut CompoundMap) {
+       fn sort(&self, map: &mut CompoundMap) {
         // SAFETY: we can only call this on init of the compound
         unsafe { config::get_sort_algorithm().sort(map) }
     }

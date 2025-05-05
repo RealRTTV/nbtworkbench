@@ -63,44 +63,34 @@ impl<'a> RenderContext<'a> {
 		}
 	}
 
-	#[inline]
 	#[must_use]
 	pub const fn pos(&self) -> Vec2u { Vec2u::new(self.x_offset, self.y_offset) }
 
-	#[inline]
 	pub fn offset_pos(&mut self, x: isize, y: isize) {
 		self.x_offset = self.x_offset.wrapping_add(x as usize);
 		self.y_offset = self.y_offset.wrapping_add(y as usize);
 	}
 	
-	#[inline]
 	#[must_use]
 	pub fn selected_text_y(&self) -> Option<usize> { self.selected_text_y }
 	
-	#[inline]
 	#[must_use]
 	pub const fn mouse_pos(&self) -> Vec2u { Vec2u::new(self.mouse_x, self.mouse_y) }
 	
-	#[inline]
 	#[must_use]
 	pub const fn left_margin(&self) -> usize { self.left_margin }
 	
-	#[inline]
 	#[must_use]
 	pub const fn has_invalid_key_error(&self) -> bool { self.invalid_key_error }
 
-	#[inline]
 	#[must_use]
 	pub const fn has_invalid_value_error(&self) -> bool { self.invalid_value_error }
 
-	#[inline]
 	#[must_use]
 	pub const fn has_duplicate_key_error(&self) -> bool { self.key_duplicate_error }
 	
-	#[inline]
 	pub const fn set_red_line_number(&mut self, y: usize, idx: usize) { self.red_line_numbers[idx] = y; }
 
-	#[inline]
 	pub fn check_for_key_duplicate<F: FnOnce(&str, Option<&str>) -> bool>(&mut self, f: F, extend: bool) {
 		if let Some(selected_key) = self.selected_key.as_ref()
 			&& self.selecting_key
@@ -110,7 +100,6 @@ impl<'a> RenderContext<'a> {
 		}
 	}
 
-	#[inline]
 	pub fn check_for_invalid_key<F: FnOnce(&str) -> bool>(&mut self, f: F) {
 		let (_, y) = self.pos().into();
 		if let Some(selected_key) = self.selected_key.as_ref()
@@ -120,7 +109,6 @@ impl<'a> RenderContext<'a> {
 		}
 	}
 
-	#[inline]
 	pub fn check_for_invalid_value<F: FnOnce(&str) -> bool>(&mut self, f: F) {
 		let (_, y) = self.pos().into();
 		if let Some(selected_value) = self.selected_value.as_ref()
@@ -131,7 +119,6 @@ impl<'a> RenderContext<'a> {
 		}
 	}
 
-	#[inline]
 	pub fn draw_toggle(&self, pos: impl Into<(usize, usize)>, open: bool, builder: &mut VertexBufferBuilder) {
 		let pos = pos.into();
 		let x = (pos.0 - self.left_margin) / 16;
@@ -150,7 +137,6 @@ impl<'a> RenderContext<'a> {
 		builder.draw_texture_z(Vec2u::from(pos) + (3, 5), TOGGLE_Z, uv, (8, 8));
 	}
 
-	#[inline]
 	#[must_use]
 	pub fn forbid(&self, pos: impl Into<(usize, usize)>) -> bool {
 		let (_, y) = pos.into();
@@ -161,7 +147,6 @@ impl<'a> RenderContext<'a> {
 		}
 	}
 
-	#[inline]
 	pub fn render_errors(&mut self, pos: impl Into<(usize, usize)>, builder: &mut VertexBufferBuilder) {
 		let (x, y) = pos.into();
 		if let Some(selected_text_y) = self.selected_text_y && (self.key_duplicate_error | self.invalid_key_error | self.invalid_value_error) && y == selected_text_y {
@@ -170,7 +155,6 @@ impl<'a> RenderContext<'a> {
 		}
 	}
 
-	#[inline]
 	pub fn draw_error_underline_width(&self, x: usize, y: usize, overridden_width: usize, builder: &mut VertexBufferBuilder) {
 		let horizontal_scroll_before = core::mem::replace(&mut builder.horizontal_scroll, 0);
 		builder.draw_texture_region_z(
@@ -190,7 +174,6 @@ impl<'a> RenderContext<'a> {
 		);
 	}
 
-	#[inline]
 	pub fn draw_error_underline(&self, x: usize, y: usize, builder: &mut VertexBufferBuilder) {
 		let key_width = self.selected_key.as_deref().map(str::width).unwrap_or(0);
 		let value_width = self.selected_value.as_deref().map(str::width).unwrap_or(0);
@@ -208,16 +191,13 @@ impl<'a> RenderContext<'a> {
 		self.draw_error_underline_width(x + x_shift, y, overridden_width, builder);
 	}
 
-	#[inline]
 	pub fn skip_line_numbers(&mut self, n: usize) { self.line_number = self.line_number.wrapping_add(n); }
 
-	#[inline]
 	pub fn line_number(&mut self) {
 		self.line_numbers.push(self.line_number);
 		self.line_number += 1;
 	}
 
-	#[inline]
 	pub fn render_line_numbers(&self, builder: &mut VertexBufferBuilder, mut bookmarks: &MarkedLineSlice) {
 		use std::fmt::Write as _;
 		
@@ -293,7 +273,6 @@ impl<'a> RenderContext<'a> {
 		}
 	}
 
-	#[inline]
 	pub fn render_grid_line_numbers(&self, builder: &mut VertexBufferBuilder, mut bookmarks: &MarkedLineSlice) {
 		use std::fmt::Write as _;
 		
@@ -376,7 +355,6 @@ impl<'a> RenderContext<'a> {
 		}
 	}
 
-	#[inline]
 	pub fn render_key_value_errors(&mut self, builder: &mut VertexBufferBuilder) {
 		if self.mouse_y < HEADER_SIZE { return }
 		let y = ((self.mouse_y - HEADER_SIZE) & !15) + HEADER_SIZE;
@@ -401,7 +379,6 @@ impl<'a> RenderContext<'a> {
 		}
 	}
 
-	#[inline]
 	pub fn render_scrollbar_bookmarks(&self, builder: &mut VertexBufferBuilder, bookmarks: &MarkedLineSlice, root: &NbtElement) {
 		let height = root.height();
 		let mut hidden_bookmarks_at_y = 0_usize;

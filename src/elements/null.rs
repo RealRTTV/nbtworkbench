@@ -10,15 +10,12 @@ pub struct NbtNull;
 impl NbtNull {
     pub const ID: u8 = 0;
 
-    #[inline]
-    pub fn to_be_bytes(&self, _: &mut UncheckedBufWriter) {}
+       pub fn to_be_bytes(&self, _: &mut UncheckedBufWriter) {}
 
 
-    #[inline]
-    pub fn to_le_bytes(&self, _: &mut UncheckedBufWriter) {}
+       pub fn to_le_bytes(&self, _: &mut UncheckedBufWriter) {}
 
-    #[inline]
-    pub fn render(&self, builder: &mut VertexBufferBuilder, name: Option<&str>, ctx: &mut RenderContext) {
+       pub fn render(&self, builder: &mut VertexBufferBuilder, name: Option<&str>, ctx: &mut RenderContext) {
         ctx.line_number();
         self.render_icon(ctx.pos(), BASE_Z, builder);
         ctx.render_errors(ctx.pos(), builder);
@@ -36,8 +33,7 @@ impl NbtNull {
         ctx.offset_pos(0, 16);
     }
 
-    #[inline]
-    pub fn render_icon(&self, pos: impl Into<(usize, usize)>, z: ZOffset, builder: &mut VertexBufferBuilder) { builder.draw_texture_z(pos, z, (240, 240), (16, 16)); }
+       pub fn render_icon(&self, pos: impl Into<(usize, usize)>, z: ZOffset, builder: &mut VertexBufferBuilder) { builder.draw_texture_z(pos, z, (240, 240), (16, 16)); }
 }
 
 impl Display for NbtNull {

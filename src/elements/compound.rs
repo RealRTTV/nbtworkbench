@@ -3,8 +3,6 @@ use std::cmp::Ordering;
 use std::fmt::{Display, Formatter, Write};
 use std::intrinsics::likely;
 use std::ops::Deref;
-#[cfg(not(target_arch = "wasm32"))]
-use std::thread::Scope;
 
 use compact_str::{format_compact, CompactString};
 use hashbrown::hash_table::Entry::*;
@@ -122,7 +120,6 @@ impl NbtCompound {
 }
 
 impl Default for NbtCompound {
-	#[inline]
 	fn default() -> Self {
 		Self {
 			height: 1,
@@ -555,21 +552,12 @@ impl NbtCompound {
 		self.height = self.len() as u32 + 1;
 	}
 
-	#[cfg(not(target_arch = "wasm32"))]
-	pub fn expand<'a, 'b>(&'b mut self, scope: &'a Scope<'a, 'b>) {
-		self.open = !self.is_empty();
-		self.height = self.true_height;
-		for (_, element) in self.children_mut() {
-			element.expand(scope);
-		}
-	}
 
-	#[cfg(target_arch = "wasm32")]
-	pub fn expand(&mut self) {
+	pub fn expand<'a, 'b>(&'b mut self, #[cfg(not(target_arch = "wasm32"))] scope: &'a std::thread::Scope<'a, 'b>) {
 		self.open = !self.is_empty();
 		self.height = self.true_height;
 		for (_, element) in self.children_mut() {
-			element.expand();
+			element.expand(#[cfg(not(target_arch = "wasm32"))] scope);
 		}
 	}
 
@@ -846,21 +834,18 @@ pub struct CompoundMapIter<'a>(core::slice::Iter<'a, Entry>);
 impl<'a> Iterator for CompoundMapIter<'a> {
 	type Item = (&'a str, &'a NbtElement);
 
-	#[inline]
 	fn next(&mut self) -> Option<Self::Item> {
 		self.0.next().map(|Entry { key, value, .. }| (key.as_ref(), value))
 	}
 }
 
 impl<'a> DoubleEndedIterator for CompoundMapIter<'a> {
-	#[inline]
 	fn next_back(&mut self) -> Option<Self::Item> {
 		self.0.next_back().map(|Entry { key, value, .. }| (key.as_ref(), value))
 	}
 }
 
 impl<'a> ExactSizeIterator for CompoundMapIter<'a> {
-	#[inline]
 	fn len(&self) -> usize { self.0.len() }
 }
 
@@ -870,20 +855,17 @@ pub struct CompoundMapIterMut<'a>(core::slice::IterMut<'a, Entry>);
 impl<'a> Iterator for CompoundMapIterMut<'a> {
 	type Item = (&'a str, &'a mut NbtElement);
 
-	#[inline]
 	fn next(&mut self) -> Option<Self::Item> {
 		self.0.next().map(|entry| (entry.key.as_str(), &mut entry.value))
 	}
 }
 
 impl<'a> DoubleEndedIterator for CompoundMapIterMut<'a> {
-	#[inline]
 	fn next_back(&mut self) -> Option<Self::Item> {
 		self.0.next_back().map(|entry| (entry.key.as_str(), &mut entry.value))
 	}
 }
 
 impl<'a> ExactSizeIterator for CompoundMapIterMut<'a> {
-	#[inline]
 	fn len(&self) -> usize { self.0.len() }
 }

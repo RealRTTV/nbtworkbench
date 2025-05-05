@@ -59,8 +59,7 @@ impl OwnedIndices {
 }
 
 impl Default for OwnedIndices {
-    #[inline]
-    fn default() -> Self {
+       fn default() -> Self {
         Self::new()
     }
 }
@@ -152,8 +151,7 @@ impl Indices {
 }
 
 impl<T: Into<Vec<usize>>> From<T> for OwnedIndices {
-    #[inline]
-    fn from(value: T) -> Self {
+       fn from(value: T) -> Self {
         let mut inner = value.into();
         inner.shrink_to_fit();
         Self(inner)
@@ -164,8 +162,7 @@ impl<'a> IntoIterator for &'a Indices {
     type Item = usize;
     type IntoIter = Copied<slice::Iter<'a, usize>>;
 
-    #[inline]
-    fn into_iter(self) -> Self::IntoIter {
+       fn into_iter(self) -> Self::IntoIter {
         self.iter()
     }
 }
@@ -174,8 +171,7 @@ impl<'a> IntoIterator for &'a mut Indices {
     type Item = &'a mut usize;
     type IntoIter = slice::IterMut<'a, usize>;
 
-    #[inline]
-    fn into_iter(self) -> Self::IntoIter {
+       fn into_iter(self) -> Self::IntoIter {
         self.iter_mut()
     }
 }
@@ -183,8 +179,7 @@ impl<'a> IntoIterator for &'a mut Indices {
 impl<'a> Index<&'a Indices> for NbtElement {
     type Output = Self;
 
-    #[inline]
-    fn index(&self, indices: &'a Indices) -> &Self::Output {
+       fn index(&self, indices: &'a Indices) -> &Self::Output {
         indices
             .iter()
             .fold(self, |nbt, idx| &nbt[idx])
@@ -192,8 +187,7 @@ impl<'a> Index<&'a Indices> for NbtElement {
 }
 
 impl<'a> IndexMut<&'a Indices> for NbtElement {
-    #[inline]
-    fn index_mut(&mut self, indices: &'a Indices) -> &mut Self::Output {
+       fn index_mut(&mut self, indices: &'a Indices) -> &mut Self::Output {
         indices
             .iter()
             .fold(self, |nbt, idx| &mut nbt[idx])
@@ -203,22 +197,19 @@ impl<'a> IndexMut<&'a Indices> for NbtElement {
 impl Index<usize> for Indices {
     type Output = usize;
 
-    #[inline]
-    fn index(&self, index: usize) -> &Self::Output {
+       fn index(&self, index: usize) -> &Self::Output {
         &self.0[index]
     }
 }
 
 impl IndexMut<usize> for Indices {
-    #[inline]
-    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+       fn index_mut(&mut self, index: usize) -> &mut Self::Output {
         &mut self.0[index]
     }
 }
 
 impl Borrow<Indices> for OwnedIndices {
-    #[inline]
-    fn borrow(&self) -> &Indices {
+       fn borrow(&self) -> &Indices {
         Indices::from_slice(self.0.as_slice())
     }
 }
@@ -232,8 +223,7 @@ impl BorrowMut<Indices> for OwnedIndices {
 impl ToOwned for Indices {
     type Owned = OwnedIndices;
 
-    #[inline]
-    fn to_owned(&self) -> Self::Owned {
+       fn to_owned(&self) -> Self::Owned {
         OwnedIndices::from(&self.0)
     }
 }
@@ -241,15 +231,13 @@ impl ToOwned for Indices {
 impl Deref for OwnedIndices {
     type Target = Indices;
 
-    #[inline]
-    fn deref(&self) -> &Self::Target {
+       fn deref(&self) -> &Self::Target {
         self.borrow()
     }
 }
 
 impl DerefMut for OwnedIndices {
-    #[inline]
-    fn deref_mut(&mut self) -> &mut Self::Target {
+       fn deref_mut(&mut self) -> &mut Self::Target {
         self.borrow_mut()
     }
 }

@@ -362,8 +362,7 @@ impl SearchReplacement {
     }
 
     pub fn replace<'m1, 'm2: 'm1>(&self, root: &mut NbtElement, key: Option<String>, value: Option<String>, bookmarks: &mut MarkedLines, mutable_indices: &'m1 mut MutableIndices<'m2>, indices: &Indices) -> (Option<WorkbenchAction>, bool) {
-        #[inline]
-        #[must_use]
+               #[must_use]
         fn replace_case_sensitivity(value: &str, find: &str, replacement: &str, case_sensitive: bool) -> String {
             if case_sensitive {
                 value.replace(find, replacement)

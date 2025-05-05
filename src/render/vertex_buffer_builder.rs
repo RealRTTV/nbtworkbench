@@ -78,17 +78,14 @@ impl VertexBufferBuilder {
 		}
 	}
 
-	#[inline]
 	pub const fn scroll(&self) -> usize { self.scroll }
 
-	#[inline]
 	pub fn settings(&mut self, pos: impl Into<(usize, usize)>, dropshadow: bool, z: ZOffset) {
 		self.text_coords = pos.into();
 		self.dropshadow = dropshadow;
 		self.text_z = z;
 	}
 
-	#[inline]
 	#[rustfmt::skip]
 	fn draw_char(&mut self, c: u16, x: usize, y: usize, z: ZOffset) -> usize {
 		if self.dropshadow {
@@ -117,7 +114,6 @@ impl VertexBufferBuilder {
 		Self::CHAR_WIDTH[c as usize] as usize
 	}
 
-	#[inline]
 	pub fn draw_tooltip(&mut self, text: &[&str], pos: impl Into<(usize, usize)>, force_draw_right: bool) {
 		let color = self.color;
 		self.tooltips.push((text.iter().map(|s| s.to_string()).collect::<Vec<_>>().into_boxed_slice(), Vec2u::from(pos.into()), force_draw_right, color));
@@ -138,7 +134,6 @@ impl VertexBufferBuilder {
 		self.tooltips = vec![];
 	}
 
-	#[inline]
 	pub fn draw_tooltips(&mut self) {
 		use core::fmt::Write;
 
@@ -214,7 +209,6 @@ impl VertexBufferBuilder {
 		}
 	}
 
-	#[inline]
 	pub fn draw_unicode_z_color(&mut self, x: usize, y: usize, z: ZOffset, char: u16, color: u32) {
 		unsafe {
 			if unlikely(self.text_vertices.capacity() - self.text_vertices.len() < 16) {
@@ -283,19 +277,14 @@ impl VertexBufferBuilder {
 		self.text_indices.reserve_exact(36864);
 	}
 
-	#[inline]
 	pub fn window_height(&self) -> usize { (self.window_height / self.scale) as usize }
 
-	#[inline]
 	pub fn window_width(&self) -> usize { (self.window_width / self.scale) as usize }
 
-	#[inline]
 	pub fn vertices(&self) -> &[u8] { unsafe { core::slice::from_raw_parts(self.vertices.as_ptr().cast::<u8>(), self.vertices.len() * 4) } }
 
-	#[inline]
 	pub fn indices(&self) -> &[u8] { unsafe { core::slice::from_raw_parts(self.indices.as_ptr().cast::<u8>(), self.indices.len() * 4) } }
 
-	#[inline]
 	pub fn text_vertices(&self) -> &[u8] {
 		unsafe {
 			core::slice::from_raw_parts(
@@ -305,7 +294,6 @@ impl VertexBufferBuilder {
 		}
 	}
 
-	#[inline]
 	pub fn text_indices(&self) -> &[u8] {
 		unsafe {
 			core::slice::from_raw_parts(
@@ -315,16 +303,12 @@ impl VertexBufferBuilder {
 		}
 	}
 
-	#[inline]
 	pub fn indices_len(&self) -> u32 { self.indices.len() as u32 }
 
-	#[inline]
 	pub fn text_indices_len(&self) -> u32 { self.text_indices.len() as u32 }
 
-	#[inline]
 	pub fn draw_texture(&mut self, pos: impl Into<(usize, usize)>, uv: impl Into<(usize, usize)>, dims: impl Into<(usize, usize)>) { self.draw_texture_z(pos, BASE_Z, uv, dims); }
 
-	#[inline]
 	pub fn draw_texture_z(&mut self, pos: impl Into<(usize, usize)>, z: ZOffset, uv: impl Into<(usize, usize)>, dims: impl Into<(usize, usize)>) {
 		let dims = dims.into();
 		self.draw_texture_region_z(pos, z, uv, dims, dims);

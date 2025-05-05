@@ -2,8 +2,6 @@ use std::alloc::{alloc, Layout};
 use std::fmt::{Display, Formatter, Write};
 use std::intrinsics::likely;
 use std::slice::{Iter, IterMut};
-#[cfg(not(target_arch = "wasm32"))]
-use std::thread::Scope;
 
 use compact_str::{format_compact, CompactString};
 
@@ -41,7 +39,6 @@ impl PartialEq for NbtList {
 
 impl Clone for NbtList {
 	#[allow(clippy::cast_ptr_alignment)]
-	#[inline]
 	fn clone(&self) -> Self {
 		unsafe {
 			let len = self.elements.len();
@@ -70,7 +67,7 @@ impl NbtList {
 		let mut list = Self::new(vec![]);
 		while !s.starts_with(']') {
 			let (s2, mut element) = NbtElement::from_str0(s, NbtElement::parse_int)?;
-			element = element.try_into_inner().unwrap_or_else(|element| element);
+			element = element.try_compound_singleton_into_inner().unwrap_or_else(|element| element);
 			list.insert(list.len(), element).map_err(|_| s.len())?;
 			s = s2.trim_start();
 			if let Some(s2) = s.strip_prefix(',') {
@@ -95,7 +92,7 @@ impl NbtList {
 			let mut extracted_inner_element = false;
 			for n in 0..len {
 				let mut element = NbtElement::from_bytes(element, decoder)?;
-				element = match element.try_into_inner() {
+				element = match element.try_compound_singleton_into_inner() {
 					Ok(inner) => {
 						extracted_inner_element = true;
 						inner
@@ -278,7 +275,6 @@ impl NbtList {
 }
 
 impl Display for NbtList {
-	#[inline]
 	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
 		let heterogeneous = self.is_heterogeneous();
 		write!(f, "[")?;
@@ -508,21 +504,11 @@ impl NbtList {
 		self.height = self.len() as u32 + 1;
 	}
 
-	#[cfg(not(target_arch = "wasm32"))]
-	pub fn expand<'a, 'b>(&'b mut self, scope: &'a Scope<'a, 'b>) {
+	pub fn expand<'a, 'b>(&'b mut self, #[cfg(not(target_arch = "wasm32"))] scope: &'a std::thread::Scope<'a, 'b>) {
 		self.open = !self.is_empty();
 		self.height = self.true_height;
 		for element in self.children_mut() {
-			element.expand(scope);
-		}
-	}
-
-	#[cfg(target_arch = "wasm32")]
-	pub fn expand(&mut self) {
-		self.open = !self.is_empty();
-		self.height = self.true_height;
-		for element in self.children_mut() {
-			element.expand();
+			element.expand(#[cfg(not(target_arch = "wasm32"))] scope);
 		}
 	}
 

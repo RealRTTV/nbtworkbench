@@ -318,7 +318,6 @@ pub trait StrExt {
 
 impl StrExt for str {
 
-	#[inline]
 	#[optimize(speed)]
 	#[allow(clippy::too_many_lines)]
 	fn snbt_string_read(mut self: &Self) -> Result<(CompactString, &Self), usize> {
@@ -546,15 +545,12 @@ impl StrExt for str {
 		}
 	}
 
-	#[inline]
 	fn needs_escape(&self) -> bool { self.as_bytes().first().copied().is_some_and(valid_starting_char) || !self.bytes().all(valid_unescaped_char) }
 
-	#[inline]
 	fn width(&self) -> usize {
 		self.chars().map(CharExt::width).sum()
 	}
 
-	#[inline]
 	fn contains_ignore_ascii_case(&self, other: &Self) -> bool {
 		let haystack = self.as_bytes();
 		let needle = other.as_bytes();
@@ -573,7 +569,6 @@ impl StrExt for str {
 		false
 	}
 
-	#[inline]
 	fn replace_ignore_ascii_case(&self, from: &Self, to: &Self) -> String {
 		let haystack = self.as_bytes();
 		let needle = from.as_bytes();
@@ -607,7 +602,6 @@ pub trait CharExt {
 }
 
 impl CharExt for char {
-	#[inline]
 	fn width(self) -> usize {
 		if (self as u32) < 56832 {
 			VertexBufferBuilder::CHAR_WIDTH[self as usize] as usize

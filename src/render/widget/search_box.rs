@@ -94,8 +94,7 @@ impl Display for SearchMode {
 }
 
 impl SearchMode {
-    #[inline]
-    pub fn cycle(self) -> Self {
+       pub fn cycle(self) -> Self {
         match self {
             Self::String => Self::Regex,
             Self::Regex => Self::Snbt,
@@ -103,8 +102,7 @@ impl SearchMode {
         }
     }
 
-    #[inline]
-    pub fn rev_cycle(self) -> Self {
+       pub fn rev_cycle(self) -> Self {
         match self {
             Self::String => Self::Snbt,
             Self::Regex => Self::String,
@@ -112,8 +110,7 @@ impl SearchMode {
         }
     }
 
-    #[inline]
-    pub fn uv(self) -> Vec2u {
+       pub fn uv(self) -> Vec2u {
         match self {
             Self::String => STRING_SEARCH_MODE_UV,
             Self::Regex => REGEX_SEARCH_MODE_UV,
@@ -121,21 +118,18 @@ impl SearchMode {
         }
     }
 
-    #[inline]
-    pub fn has_exact_match_mode(&self) -> bool {
+       pub fn has_exact_match_mode(&self) -> bool {
         matches!(self, Self::String | Self::Regex | Self::Snbt)
     }
 
-    #[inline]
-    pub fn get_exact_search_on_name(&self) -> &str {
+       pub fn get_exact_search_on_name(&self) -> &str {
         match self {
             Self::String | Self::Regex => "Case Sensitive Mode",
             Self::Snbt => "Exact Match Mode",
         }
     }
 
-    #[inline]
-    pub fn get_exact_search_off_name(&self) -> &str {
+       pub fn get_exact_search_off_name(&self) -> &str {
         match self {
             Self::String | Self::Regex => "Case Insensitive Mode",
             Self::Snbt => "Contains Mode",

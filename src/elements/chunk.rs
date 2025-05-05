@@ -5,8 +5,6 @@ use std::intrinsics::likely;
 use std::mem::ManuallyDrop;
 use std::ops::{Deref, DerefMut};
 use std::slice::{Iter, IterMut};
-#[cfg(not(target_arch = "wasm32"))]
-use std::thread::Scope;
 
 use compact_str::{format_compact, CompactString};
 use zune_inflate::{DeflateDecoder, DeflateOptions};
@@ -557,8 +555,7 @@ impl NbtRegion {
 		self.height = if self.is_grid_layout() { 33 } else { 1025 };
 	}
 
-	#[cfg(not(target_arch = "wasm32"))]
-	pub fn expand<'a, 'b>(&'b mut self, scope: &'a Scope<'a, 'b>) {
+	pub fn expand<'a, 'b>(&'b mut self, #[cfg(not(target_arch = "wasm32"))] scope: &'a std::thread::Scope<'a, 'b>) {
 		self.set_open(!self.is_empty());
 		if !self.is_grid_layout() {
 			self.height = self.true_height;
@@ -566,6 +563,11 @@ impl NbtRegion {
 				.children_mut()
 				.array_chunks::<{ Self::CHUNK_BANDWIDTH }>();
 			for elements in iter.by_ref() {
+				#[cfg(target_arch = "wasm32")]
+				for element in elements {
+					element.expand();
+				}
+				#[cfg(not(target_arch = "wasm32"))]
 				scope.spawn(|| {
 					for element in elements {
 						element.expand(scope);
@@ -573,6 +575,11 @@ impl NbtRegion {
 				});
 			}
 			if let Some(rem) = iter.into_remainder() {
+				#[cfg(target_arch = "wasm32")]
+				for element in rem {
+					element.expand();
+				}
+				#[cfg(not(target_arch = "wasm32"))]
 				scope.spawn(|| {
 					for element in rem {
 						element.expand(scope);
@@ -889,12 +896,10 @@ impl NbtChunk {
 impl Deref for NbtChunk {
 	type Target = NbtCompound;
 
-	#[inline]
 	fn deref(&self) -> &Self::Target { &self.inner }
 }
 
 impl DerefMut for NbtChunk {
-	#[inline]
 	fn deref_mut(&mut self) -> &mut Self::Target { &mut self.inner }
 }
 

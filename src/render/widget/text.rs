@@ -222,8 +222,7 @@ impl<Additional: Clone, Cache: Cachelike<Additional>> Text<Additional, Cache> {
         self.drag_selectable = drag_selectable;
     }
 
-    #[inline]
-    pub fn interact(&mut self) {
+       pub fn interact(&mut self) {
         self.last_interaction = now();
     }
 
@@ -596,18 +595,15 @@ impl<Additional: Clone, Cache: Cachelike<Additional>> Text<Additional, Cache> {
         }
     }
 
-    #[inline]
-    pub fn save_state_in_history(&mut self) {
+       pub fn save_state_in_history(&mut self) {
         self.undos.push(Cache::new(&self));
     }
 
-    #[inline]
-    pub fn post_input(&mut self) {
+       pub fn post_input(&mut self) {
         self.cache();
     }
 
-    #[inline]
-    pub fn cache(&mut self) {
+       pub fn cache(&mut self) {
         let current = Cache::new(self);
 
         let should_cache = core::mem::replace(&mut self.last_interaction, now()).as_millis() >= 1_500;
@@ -624,8 +620,7 @@ impl<Additional: Clone, Cache: Cachelike<Additional>> Text<Additional, Cache> {
         }
     }
 
-    #[inline]
-    pub fn clear(&mut self) {
+       pub fn clear(&mut self) {
         self.value.clear();
         self.cursor = 0;
         self.redos.clear();
