@@ -1,12 +1,11 @@
-use std::fmt::{Debug, Formatter};
-use std::intrinsics::unlikely;
+use std::hint::unlikely;
 use std::ops::BitAnd;
 
 use winit::dpi::PhysicalSize;
 
 use crate::assets::{ZOffset, BASE_TEXT_Z, BASE_Z, TOOLTIP_UV, TOOLTIP_Z};
 use crate::render::TextColor;
-use crate::util::StrExt;
+use crate::util::{StrExt, Vec2u};
 
 pub struct VertexBufferBuilder {
 	vertices: Vec<f32>,
@@ -392,93 +391,5 @@ impl VertexBufferBuilder {
 
 			self.vertices_len += 4;
 		}
-	}
-}
-
-#[derive(Copy, Clone, Eq)]
-pub struct Vec2u {
-	pub x: usize,
-	pub y: usize,
-}
-
-impl Debug for Vec2u {
-	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-		write!(f, "({x},{y})", x = self.x, y = self.y)
-	}
-}
-
-impl Vec2u {
-	pub const fn new(x: usize, y: usize) -> Self { Self { x, y } }
-
-	pub const fn wrapping_sub(self, rhs: Self) -> Self {
-		Self {
-			x: self.x.wrapping_sub(rhs.x),
-			y: self.y.wrapping_sub(rhs.y),
-		}
-	}
-
-	pub const fn saturating_sub(self, rhs: Self) -> Self {
-		Self {
-			x: self.x.saturating_sub(rhs.x),
-			y: self.y.saturating_sub(rhs.y),
-		}
-	}
-}
-
-impl<T: Into<(usize, usize)> + Clone> PartialEq<T> for Vec2u {
-	fn eq(&self, other: &T) -> bool {
-		let (x, y) = other.clone().into();
-		(self.x == x) & (self.y == y)
-	}
-}
-
-impl From<(usize, usize)> for Vec2u {
-	fn from(value: (usize, usize)) -> Self {
-		let (x, y) = value;
-		Self::new(x, y)
-	}
-}
-
-impl From<Vec2u> for (usize, usize) {
-	fn from(val: Vec2u) -> Self { (val.x, val.y) }
-}
-
-impl<T: Into<(usize, usize)>> std::ops::Add<T> for Vec2u {
-	type Output = Self;
-
-	fn add(self, rhs: T) -> Self::Output {
-		let (x, y) = rhs.into();
-		Self {
-			x: self.x + x,
-			y: self.y + y,
-		}
-	}
-}
-
-impl<T: Into<(usize, usize)>> std::ops::AddAssign<T> for Vec2u {
-	fn add_assign(&mut self, rhs: T) {
-		let (x, y) = rhs.into();
-		self.x += x;
-		self.y += y;
-	}
-}
-
-impl<T: Into<(usize, usize)>> std::ops::Sub<T> for Vec2u {
-	type Output = Self;
-
-	fn sub(self, rhs: T) -> Self::Output {
-		let (x, y) = rhs.into();
-		Self {
-			x: self.x - x,
-			y: self.y - y,
-		}
-	}
-}
-
-impl<T: Into<(usize, usize)>> std::ops::SubAssign<T> for Vec2u {
-	fn sub_assign(&mut self, rhs: T) {
-		let (x, y) = rhs.into();
-		self.x = self.x.wrapping_sub(x);
-		self.y = self.x.wrapping_sub(y);
 	}
 }

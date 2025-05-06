@@ -1,12 +1,13 @@
 use std::alloc::{alloc, Layout};
 use std::fmt::{Display, Formatter, Write};
-use std::intrinsics::likely;
+use std::hint::likely;
 use std::slice::{Iter, IterMut};
 
 use compact_str::{format_compact, CompactString};
 
 use crate::assets::{ZOffset, BASE_Z, CONNECTION_UV, JUST_OVERLAPPING_BASE_TEXT_Z, LIST_UV};
 use crate::elements::{id_to_string_name, NbtChunk, NbtCompound, NbtElement};
+use crate::elements::nbt_parse_result::NbtParseResult;
 use crate::render::{RenderContext, TextColor, VertexBufferBuilder};
 use crate::serialization::{Decoder, PrettyFormatter, UncheckedBufWriter};
 
@@ -82,7 +83,9 @@ impl NbtList {
 		Ok((s, list))
 	}
 	#[allow(clippy::cast_ptr_alignment)]
-	pub fn from_bytes<'a, D: Decoder<'a>>(decoder: &mut D) -> Option<Self> {
+	pub fn from_bytes<'a, D: Decoder<'a>>(decoder: &mut D) -> NbtParseResult<Self> {
+		use super::nbt_parse_result::*;
+		
 		unsafe {
 			decoder.assert_len(5)?;
 			let element = decoder.u8();
@@ -115,7 +118,7 @@ impl NbtList {
 			if extracted_inner_element {
 				list.recache_elements_bitset();
 			}
-			Some(list)
+			ok(list)
 		}
 	}
 

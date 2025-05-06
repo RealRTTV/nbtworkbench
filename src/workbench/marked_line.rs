@@ -5,8 +5,7 @@ use std::ops::{Deref, DerefMut, Index, IndexMut, RangeBounds};
 
 use crate::assets::{BOOKMARK_UV, HIDDEN_BOOKMARK_UV};
 use crate::elements::NbtElement;
-use crate::render::Vec2u;
-use crate::util::combined_two_sorted;
+use crate::util::{combined_two_sorted, Vec2u};
 
 macro_rules! slice {
     ($($t:tt)*) => {

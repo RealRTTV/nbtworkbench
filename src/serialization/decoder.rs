@@ -1,13 +1,14 @@
 use crate::config;
 use crate::elements::CompoundMap;
 use compact_str::CompactString;
-use std::intrinsics::likely;
+use std::hint::likely;
 use std::marker::PhantomData;
+use crate::elements::nbt_parse_result::NbtParseResult;
 
 pub trait Decoder<'a> {
     fn new(data: &'a [u8]) -> Self where Self: Sized;
     
-    fn assert_len(&self, remaining_len: usize) -> Option<()>;
+    fn assert_len(&self, remaining_len: usize) -> NbtParseResult<()>;
 
     fn sort(&self, map: &mut CompoundMap);
 
@@ -35,7 +36,7 @@ pub trait Decoder<'a> {
     
     unsafe fn skip(&mut self, amount: usize);
     
-    unsafe fn string(&mut self) -> Option<CompactString>;
+    unsafe fn string(&mut self) -> NbtParseResult<CompactString>;
 }
 
 pub struct BigEndianDecoder<'a> {
@@ -55,7 +56,7 @@ impl<'a> BigEndianDecoder<'a> {
 }
 
 impl<'a> Decoder<'a> for BigEndianDecoder<'a> {
-       #[optimize(speed)]
+    #[optimize(speed)]
     fn new(data: &'a [u8]) -> Self {
         Self {
             end: unsafe { data.as_ptr().add(data.len()) },
@@ -65,12 +66,14 @@ impl<'a> Decoder<'a> for BigEndianDecoder<'a> {
     }
 
     #[optimize(speed)]
-    fn assert_len(&self, remaining_len: usize) -> Option<()> {
+    fn assert_len(&self, remaining_len: usize) -> NbtParseResult<()> {
+        use crate::elements::nbt_parse_result::*;
+        
         // <= end because it will read *until* that byte
         if unsafe { likely((self.data.add(remaining_len) as usize) <= self.end as usize) } {
-            Some(())
+            ok(())
         } else {
-            None
+            err("Out of bounds")
         }
     }
 
@@ -122,13 +125,15 @@ impl<'a> Decoder<'a> for BigEndianDecoder<'a> {
     unsafe fn skip(&mut self, amount: usize) { self.data = self.data.add(amount); }
 
     #[optimize(speed)]
-    unsafe fn string(&mut self) -> Option<CompactString> {
+    unsafe fn string(&mut self) -> NbtParseResult<CompactString> {
+        use crate::elements::nbt_parse_result::*;
+        
         let len = self.u16() as usize;
         self.assert_len(len)?;
 
         let out = CompactString::from_utf8_lossy(core::slice::from_raw_parts(self.data, len));
         self.data = self.data.add(len);
-        Some(out)
+        ok(out)
     }
 }
 
@@ -160,8 +165,10 @@ impl<'a> LittleEndianDecoder<'a> {
 
 #[allow(improper_ctypes_definitions)]
 impl<'a> Decoder<'a> for LittleEndianDecoder<'a> {
-       #[optimize(speed)]
+    #[optimize(speed)]
     fn new(data: &'a [u8]) -> Self {
+        use crate::elements::nbt_parse_result::*;   
+           
         let mut this = Self {
             end: unsafe { data.as_ptr().add(data.len()) },
             data: data.as_ptr(),
@@ -169,7 +176,7 @@ impl<'a> Decoder<'a> for LittleEndianDecoder<'a> {
             header: false,
         };
         unsafe {
-            if this.assert_len(8).is_some() && this.data.add(4).cast::<u32>().read_unaligned() as usize == this.remaining_len() - 8 {
+            if is_ok(&this.assert_len(8)) && this.data.add(4).cast::<u32>().read_unaligned() as usize == this.remaining_len() - 8 {
                 // what the hell is this version for
                 let _version = this.u32();
                 let _remaining_length = this.u32() as usize;
@@ -180,12 +187,14 @@ impl<'a> Decoder<'a> for LittleEndianDecoder<'a> {
     }
 
     #[optimize(speed)]
-    fn assert_len(&self, remaining_len: usize) -> Option<()> {
+    fn assert_len(&self, remaining_len: usize) -> NbtParseResult<()> {
+        use crate::elements::nbt_parse_result::*;
+        
         // <= end because it will read *until* that byte
         if unsafe { likely((self.data.add(remaining_len) as usize) <= self.end as usize) } {
-            Some(())
+            ok(())
         } else {
-            None
+            err("Out of bounds")
         }
     }
 
@@ -237,12 +246,14 @@ impl<'a> Decoder<'a> for LittleEndianDecoder<'a> {
     unsafe fn skip(&mut self, amount: usize) { self.data = self.data.add(amount); }
 
     #[optimize(speed)]
-    unsafe fn string(&mut self) -> Option<CompactString> {
+    unsafe fn string(&mut self) -> NbtParseResult<CompactString> {
+        use crate::elements::nbt_parse_result::*;
+        
         let len = self.u16() as usize;
         self.assert_len(len)?;
 
         let out = CompactString::from_utf8_lossy(core::slice::from_raw_parts(self.data, len));
         self.data = self.data.add(len);
-        Some(out)
+        ok(out)
     }
 }

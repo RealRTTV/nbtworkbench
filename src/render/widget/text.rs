@@ -1,4 +1,4 @@
-use std::intrinsics::{likely, unlikely};
+use std::hint::{likely, unlikely};
 use std::ops::{Deref, DerefMut};
 use std::time::Duration;
 
@@ -6,8 +6,8 @@ use winit::keyboard::KeyCode;
 
 use crate::assets::{ZOffset, SELECTION_UV};
 use crate::flags;
-use crate::render::{TextColor, Vec2u, VertexBufferBuilder};
-use crate::util::{get_clipboard, is_jump_char_boundary, is_utf8_char_boundary, now, set_clipboard, CharExt, LinkedQueue, StrExt};
+use crate::render::{TextColor, VertexBufferBuilder};
+use crate::util::{get_clipboard, is_jump_char_boundary, is_utf8_char_boundary, now, set_clipboard, CharExt, LinkedQueue, StrExt, Vec2u};
 use crate::widget::KeyResult::{Escape, Failed, Finish, NothingSpecial};
 
 pub const TEXT_DOUBLE_CLICK_INTERVAL: Duration = Duration::from_millis(250);

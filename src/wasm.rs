@@ -57,7 +57,7 @@ pub fn open_file(name: String, bytes: Vec<u8>) {
     let workbench = unsafe { &mut WORKBENCH };
 
     if let Err(e) = workbench.on_open_file(name.as_str().as_ref(), bytes, unsafe { &mut WINDOW_PROPERTIES }) {
-        workbench.alert(Alert::new("Error!", TextColor::Red, e));
+        workbench.alert(e.into());
     }
 }
 

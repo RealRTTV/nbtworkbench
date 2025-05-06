@@ -81,8 +81,10 @@ macro_rules! array {
 				array.values.shrink_to_fit();
 				Ok((s.strip_prefix(']').ok_or(s.len())?, array))
 			}
-
-			pub fn from_bytes<'a, D: Decoder<'a>>(decoder: &mut D) -> Option<Self> {
+			
+			pub fn from_bytes<'a, D: Decoder<'a>>(decoder: &mut D) -> NbtParseResult<Self> {
+				use super::nbt_parse_result::*;
+				
 				unsafe {
 					decoder.assert_len(4)?;
 					let len = decoder.u32() as usize;
@@ -95,10 +97,9 @@ macro_rules! array {
 						element.set_id($id);
 						vec.add(idx).write(element);
 					}
-					decoder.skip(len * core::mem::size_of::<$t>());
 					let boxx = alloc(Layout::new::<Vec<NbtElement>>()).cast::<Vec<NbtElement>>();
 					boxx.write(Vec::from_raw_parts(vec, len, len));
-					Some(Self {
+					ok(Self {
 						values: Box::from_raw(boxx),
 						open: false,
 						max_depth: 0,
@@ -360,13 +361,14 @@ macro_rules! array {
 use std::alloc::{alloc, Layout};
 use std::fmt;
 use std::fmt::{Display, Write};
-use std::intrinsics::likely;
+use std::hint::likely;
 use std::slice::{Iter, IterMut};
 
 use compact_str::{format_compact, CompactString, ToCompactString};
 
 use crate::assets::{ZOffset, BASE_Z, BYTE_ARRAY_UV, BYTE_UV, CONNECTION_UV, INT_ARRAY_UV, INT_UV, JUST_OVERLAPPING_BASE_TEXT_Z, LONG_ARRAY_UV, LONG_UV};
 use crate::elements::{id_to_string_name, NbtElement};
+use crate::elements::nbt_parse_result::NbtParseResult;
 use crate::render::{RenderContext, TextColor, VertexBufferBuilder};
 use crate::serialization::{Decoder, PrettyFormatter, UncheckedBufWriter};
 use crate::util::StrExt;

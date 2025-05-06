@@ -7,7 +7,7 @@ use notify::{EventKind, PollWatcher, RecursiveMode, Watcher};
 use uuid::Uuid;
 use crate::assets::{ACTION_WHEEL_Z, COPY_FORMATTED_UV, COPY_RAW_UV, INSERT_FROM_CLIPBOARD_UV, SORT_COMPOUND_BY_NAME_UV, SORT_COMPOUND_BY_TYPE_UV};
 use crate::elements::{NbtByte, NbtByteArray, NbtChunk, NbtCompound, NbtDouble, NbtElement, NbtFloat, NbtInt, NbtIntArray, NbtList, NbtLong, NbtLongArray, NbtPattern, NbtShort, NbtString};
-use crate::render::{TextColor, VertexBufferBuilder};
+use crate::render::VertexBufferBuilder;
 use crate::tree::{add_element, reorder_element, MutableIndices, NavigationInformation, OwnedIndices, ReorderElementResult};
 use crate::util::{get_clipboard, now, set_clipboard, StrExt};
 use crate::widget::Alert;
@@ -240,13 +240,13 @@ impl ElementAction {
 			}
 			Self::InsertFromClipboard => {
 				let Some(clipboard) = get_clipboard() else {
-					alerts.push(Alert::new("Error!", TextColor::Red, "Failed to get clipboard"));
+					alerts.push(Alert::error("Failed to get clipboard"));
 					return None;
 				};
 				let kv = match NbtElement::from_str(&clipboard) {
 					Ok((key, value)) => (key, value),
 					Err(idx) => {
-						alerts.push(Alert::new("Error!", TextColor::Red, format!("Could not parse clipboard as SNBT (failed at index {idx})")));
+						alerts.push(Alert::error(format!("Could not parse clipboard as SNBT (failed at index {idx})")));
 						return None;
 					}
 				};
@@ -254,7 +254,7 @@ impl ElementAction {
 				match add_element(root, kv, indices, bookmarks, mutable_indices) {
 					Some(action) => Some(action.into_action()),
 					None => {
-						alerts.push(Alert::new("Error!", TextColor::Red, "Failed to insert from clipboard"));
+						alerts.push(Alert::error("Failed to insert from clipboard"));
 						None
 					}
 				}

@@ -1,7 +1,7 @@
 use std::alloc::{alloc, Layout};
 use std::array;
 use std::fmt::{Display, Formatter};
-use std::intrinsics::likely;
+use std::hint::likely;
 use std::mem::ManuallyDrop;
 use std::ops::{Deref, DerefMut};
 use std::slice::{Iter, IterMut};
@@ -11,6 +11,7 @@ use zune_inflate::{DeflateDecoder, DeflateOptions};
 
 use crate::assets::{ZOffset, BASE_Z, CHUNK_GHOST_UV, CHUNK_UV, CONNECTION_UV, HEADER_SIZE, JUST_OVERLAPPING_BASE_TEXT_Z, JUST_OVERLAPPING_BOOKMARK_Z, LINE_NUMBER_CONNECTOR_Z, LINE_NUMBER_SEPARATOR_UV, REGION_GRID_UV, REGION_UV};
 use crate::elements::{NbtCompound, NbtElement};
+use crate::elements::nbt_parse_result::NbtParseResult;
 use crate::render::{RenderContext, TextColor, VertexBufferBuilder};
 use crate::serialization::{PrettyFormatter, UncheckedBufWriter};
 use crate::util::StrExt;
@@ -87,55 +88,53 @@ impl NbtRegion {
 	pub fn new() -> Self { Self::default() }
 
 	#[must_use]
-	pub fn from_be_bytes(bytes: &[u8]) -> Option<Self> {
-		fn parse(raw: u32, bytes: &[u8]) -> Option<(FileFormat, Option<NbtCompound>)> {
-			if raw < 512 { return Some((FileFormat::Zlib, None)) }
+	pub fn from_be_bytes(bytes: &[u8]) -> NbtParseResult<Self> {
+		use super::nbt_parse_result::*;
+		
+		fn parse(raw: u32, bytes: &[u8]) -> NbtParseResult<(FileFormat, NbtParseResult<NbtCompound>)> {
+			if raw < 512 { return ok((FileFormat::Zlib, err("Offset was within header"))) }
 
 			let len = (raw as usize & 0xFF) * 4096;
 			let offset = ((raw >> 8) - 2) as usize * 4096;
-			if bytes.len() < offset + len { return None }
+			if bytes.len() < offset + len { return err("Offset goes outside bytes") }
 			let data = &bytes[offset..(offset + len)];
 
 			if let &[a, b, c, d, compression, ref data @ ..] = data {
-				let chunk_len = (u32::from_be_bytes([a, b, c, d]) as usize).checked_sub(1)?;
-				if data.len() < chunk_len { return None }
+				let chunk_len = from_opt((u32::from_be_bytes([a, b, c, d]) as usize).checked_sub(1), "Chunk was inside header.")?;
+				if data.len() < chunk_len { return err("Offset is invalid") }
 				let data = &data[..chunk_len];
 				let (compression, element) = match compression {
 					1 => (
 						FileFormat::Gzip,
 						NbtElement::from_be_file(
-							&DeflateDecoder::new_with_options(data, DeflateOptions::default().set_confirm_checksum(false))
-								.decode_gzip()
-								.ok()?,
+							&from_result(DeflateDecoder::new_with_options(data, DeflateOptions::default().set_confirm_checksum(false)).decode_gzip())?,
 						)?,
 					),
 					2 => (
 						FileFormat::Zlib,
 						NbtElement::from_be_file(
-							&DeflateDecoder::new_with_options(data, DeflateOptions::default().set_confirm_checksum(false))
-								.decode_zlib()
-								.ok()?,
+							&from_result(DeflateDecoder::new_with_options(data, DeflateOptions::default().set_confirm_checksum(false)).decode_zlib())?,
 						)?,
 					),
 					3 => (FileFormat::Nbt, NbtElement::from_be_file(data)?),
-					4 => (FileFormat::Lz4, NbtElement::from_be_file(&lz4_flex::decompress(data, data.len()).ok()?)?),
-					_ => return None,
+					4 => (FileFormat::Lz4, NbtElement::from_be_file(&from_result(lz4_flex::decompress(data, data.len()))?)?),
+					_ => return err("Unknown compression format"),
 				};
 				if let Some(element) = element.into_compound() {
-					return Some((compression, Some(element)));
+					return ok((compression, ok(element)));
 				}
 			}
-			None
+			err("Invalid chunk data")
 		}
 
-		if bytes.len() < 8192 { return None }
+		if bytes.len() < 8192 { return err("header didn't exist") }
 
 		#[cfg(not(target_arch = "wasm32"))]
 		return std::thread::scope(|s| {
 			let mut region = Self::new();
 
-			let (&offsets, bytes) = bytes.split_first_chunk::<4096>()?;
-			let (&timestamps, bytes) = bytes.split_first_chunk::<4096>()?;
+			let (&offsets, bytes) = from_opt(bytes.split_first_chunk::<4096>(), "header didn't exist")?;
+			let (&timestamps, bytes) = from_opt(bytes.split_first_chunk::<4096>(), "header didn't exist")?;
 			let mut threads = Vec::with_capacity(1024);
 
 
@@ -150,20 +149,15 @@ impl NbtRegion {
 
 			let mut pos = 0;
 			for (timestamp, thread) in threads {
-				let (format, element) = thread.join().ok()??;
-				if let Some(element) = element {
-					unsafe {
-						region.replace_overwrite(
-							NbtElement::Chunk(NbtChunk::from_compound(element, ((pos >> 5) as u8 & 31, pos as u8 & 31), format, timestamp)),
-						);
-					}
-				}
+				let (format, element) = from_opt(thread.join().ok(), "Thread panicked")??;
+				let element = element?;
+				unsafe { region.replace_overwrite(NbtElement::Chunk(NbtChunk::from_compound(element, ((pos >> 5) as u8 & 31, pos as u8 & 31), format, timestamp)), ); }
 				pos += 1;
 			}
 
 			region.recache();
 
-			Some(region)
+			ok(region)
 		});
 
 		#[cfg(target_arch = "wasm32")]
@@ -187,16 +181,11 @@ impl NbtRegion {
 
 			for (pos, (timestamp, thread)) in threads.into_iter().enumerate() {
 				let (format, element) = thread?;
-				if let Some(element) = element {
-					unsafe {
-						region.replace_overwrite(
-							NbtElement::Chunk(NbtChunk::from_compound(element, ((pos >> 5) as u8 & 31, pos as u8 & 31), format, timestamp)),
-						);
-					}
-				}
+				let element = element?;
+				unsafe { region.replace_overwrite(NbtElement::Chunk(NbtChunk::from_compound(element, ((pos >> 5) as u8 & 31, pos as u8 & 31), format, timestamp)), ); }
 			}
 
-			Some(region)
+			ok(region)
 		};
 	}
 	pub fn to_be_bytes(&self, writer: &mut UncheckedBufWriter) {

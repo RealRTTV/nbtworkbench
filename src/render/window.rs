@@ -22,9 +22,9 @@ use wasm_bindgen::JsValue;
 
 use crate::assets::{atlas, icon, ATLAS_HEIGHT, ATLAS_WIDTH, HEADER_SIZE, ICON_HEIGHT, ICON_WIDTH, UNICODE_LEN};
 use crate::config::get_theme;
-use crate::render::{TextColor, VertexBufferBuilder};
+use crate::render::VertexBufferBuilder;
 use crate::util::now;
-use crate::widget::{Alert, SEARCH_BOX_END_X, SEARCH_BOX_START_X};
+use crate::widget::{SEARCH_BOX_END_X, SEARCH_BOX_START_X};
 use crate::workbench::Workbench;
 use crate::{error, WINDOW_PROPERTIES, WORKBENCH};
 
@@ -510,7 +510,7 @@ impl<'window> State<'window> {
 			WindowEvent::Destroyed => false,
 			WindowEvent::DroppedFile(file) => {
 				if let Err(e) = workbench.on_open_file(file, std::fs::read(file).unwrap_or(vec![]), window_properties) {
-					workbench.alert(Alert::new("Error!", TextColor::Red, e))
+					workbench.alert(e.into())
 				}
 				true
 			}
@@ -557,7 +557,7 @@ impl<'window> State<'window> {
 			self.last_tick = now();
 		}
 		if let Err(e) = workbench.try_subscription() {
-			workbench.alert(Alert::new("Error!", TextColor::Red, e))
+			workbench.alert(e.into())
 		}
 		
 		if self.previous_theme != get_theme() {

@@ -10,11 +10,12 @@ use uuid::Uuid;
 use zune_inflate::DeflateDecoder;
 
 use super::{HeldEntry, MarkedLines, WorkbenchAction};
-use crate::assets::{ZOffset, BASE_Z, BYTE_ARRAY_GHOST_UV, BYTE_ARRAY_UV, BYTE_GRAYSCALE_UV, BYTE_UV, CHUNK_GHOST_UV, CHUNK_UV, COMPOUND_GHOST_UV, COMPOUND_ROOT_UV, COMPOUND_UV, DIM_LIGHTBULB_UV, DISABLED_REFRESH_UV, DOUBLE_GRAYSCALE_UV, DOUBLE_UV, ENABLED_FREEHAND_MODE_UV, FLOAT_GRAYSCALE_UV, FLOAT_UV, FREEHAND_MODE_UV, GZIP_FILE_TYPE_UV, HEADER_SIZE, HELD_SCROLLBAR_UV, HOVERED_WIDGET_UV, INT_ARRAY_GHOST_UV, INT_ARRAY_UV, INT_GRAYSCALE_UV, INT_UV, JUST_OVERLAPPING_BASE_Z, LIGHTBULB_UV, LINE_NUMBER_SEPARATOR_UV, LIST_GHOST_UV, LIST_UV, LITTLE_ENDIAN_HEADER_NBT_FILE_TYPE_UV, LITTLE_ENDIAN_NBT_FILE_TYPE_UV, LONG_ARRAY_GHOST_UV, LONG_ARRAY_UV, LONG_GRAYSCALE_UV, LONG_UV, MCA_FILE_TYPE_UV, NBT_FILE_TYPE_UV, REFRESH_UV, REGION_UV, SCROLLBAR_Z, SELECTED_WIDGET_UV, SHORT_GRAYSCALE_UV, SHORT_UV, SNBT_FILE_TYPE_UV, STEAL_ANIMATION_OVERLAY_UV, STRING_GHOST_UV, STRING_UV, UNHELD_SCROLLBAR_UV, UNKNOWN_NBT_GHOST_UV, UNKNOWN_NBT_UV, UNSELECTED_WIDGET_UV, ZLIB_FILE_TYPE_UV};
+use crate::assets::{ZOffset, BASE_Z, BYTE_ARRAY_GHOST_UV, BYTE_ARRAY_UV, BYTE_GRAYSCALE_UV, BYTE_UV, CHUNK_GHOST_UV, CHUNK_UV, COMPOUND_GHOST_UV, COMPOUND_ROOT_UV, COMPOUND_UV, DOUBLE_GRAYSCALE_UV, DOUBLE_UV, FLOAT_GRAYSCALE_UV, FLOAT_UV, GZIP_FILE_TYPE_UV, HEADER_SIZE, HELD_SCROLLBAR_UV, INT_ARRAY_GHOST_UV, INT_ARRAY_UV, INT_GRAYSCALE_UV, INT_UV, JUST_OVERLAPPING_BASE_Z, LINE_NUMBER_SEPARATOR_UV, LIST_GHOST_UV, LIST_UV, LITTLE_ENDIAN_HEADER_NBT_FILE_TYPE_UV, LITTLE_ENDIAN_NBT_FILE_TYPE_UV, LONG_ARRAY_GHOST_UV, LONG_ARRAY_UV, LONG_GRAYSCALE_UV, LONG_UV, MCA_FILE_TYPE_UV, NBT_FILE_TYPE_UV, REGION_UV, SCROLLBAR_Z, SHORT_GRAYSCALE_UV, SHORT_UV, SNBT_FILE_TYPE_UV, STEAL_ANIMATION_OVERLAY_UV, STRING_GHOST_UV, STRING_UV, UNHELD_SCROLLBAR_UV, UNKNOWN_NBT_GHOST_UV, UNKNOWN_NBT_UV, ZLIB_FILE_TYPE_UV};
 use crate::elements::{NbtCompound, NbtElement, NbtList, NbtRegion};
-use crate::render::{RenderContext, TextColor, Vec2u, VertexBufferBuilder, WindowProperties};
+use crate::error;
+use crate::render::{RenderContext, TextColor, VertexBufferBuilder, WindowProperties};
 use crate::tree::rename_element;
-use crate::util::{drop_on_separate_thread, now, LinkedQueue, StrExt};
+use crate::util::{drop_on_separate_thread, now, LinkedQueue, StrExt, Vec2u};
 use crate::widget::{get_cursor_left_jump_idx, get_cursor_right_jump_idx, SelectedText, SelectedTextAdditional, Text, TEXT_DOUBLE_CLICK_INTERVAL};
 
 pub struct Tab {
@@ -29,9 +30,9 @@ pub struct Tab {
 	pub(super) horizontal_scroll: usize,
 	pub(super) window_height: usize,
 	pub(super) window_width: usize,
-	pub(super) bookmarks: MarkedLines,
+	pub bookmarks: MarkedLines,
 	pub(super) uuid: Uuid,
-	pub(super) freehand_mode: bool,
+	pub freehand_mode: bool,
 	pub(super) selected_text: Option<SelectedText>,
 	pub(super) last_close_attempt: Duration,
 	pub(super) last_selected_text_interaction: (usize, usize, Duration),
@@ -55,7 +56,7 @@ impl Tab {
 	pub const AUTOSAVE_MAXIMUM_LINES: usize = 1_000_000;
 
 	pub fn new(nbt: NbtElement, path: &Path, format: FileFormat, window_height: usize, window_width: usize) -> Result<Self> {
-		ensure!(!(nbt.id() == NbtCompound::ID || nbt.id() == NbtRegion::ID || nbt.id() == NbtList::ID), "Parsed NBT was not a Compound, Region, or List");
+		ensure!(nbt.id() == NbtCompound::ID || nbt.id() == NbtRegion::ID || nbt.id() == NbtList::ID, "Parsed NBT was not a Compound, Region, or List");
 
 		Ok(Self {
 			value: Box::new(nbt),
@@ -186,58 +187,15 @@ impl Tab {
 		if self.value.as_region().is_none_or(|region| !region.is_grid_layout()) {
 			ctx.render_scrollbar_bookmarks(builder, &self.bookmarks, &self.value);
 		}
-
-		{
-			// shifted one left to center between clipboard and freehand
-			builder.draw_texture_region_z(
-				(260, 22),
-				BASE_Z,
-				LINE_NUMBER_SEPARATOR_UV,
-				(2, 23),
-				(2, 16),
-			);
-			let freehand_uv = {
-				let hovering = (264..280).contains(&mouse_x) && (26..42).contains(&mouse_y);
-				if hovering {
-					builder.draw_tooltip(&["Freehand Mode (Ctrl + Shift + F)"], (mouse_x, mouse_y), false);
-				}
-
-				if self.freehand_mode || hovering {
-					ENABLED_FREEHAND_MODE_UV
-				} else {
-					FREEHAND_MODE_UV
-				}
-			};
-			builder.draw_texture((264, 26), freehand_uv, (16, 16));
-		}
-
-		{
-			let enabled = self.path.as_deref().is_some_and(|path| path.exists()) && !cfg!(target_arch = "wasm32");
-			let widget_uv = if enabled {
-				let (mouse_x, mouse_y) = ctx.mouse_pos().into();
-				if (296..312).contains(&mouse_x) && (26..42).contains(&mouse_y) {
-					#[cfg(target_arch = "wasm32")]
-					builder.draw_tooltip(&["Refresh Tab (Disabled on WebAssembly version)"], ctx.mouse_pos(), false);
-					#[cfg(not(target_arch = "wasm32"))]
-					builder.draw_tooltip(&["Refresh Tab (Ctrl + R)"], ctx.mouse_pos(), false);
-					HOVERED_WIDGET_UV
-				} else {
-					SELECTED_WIDGET_UV
-				}
-			} else {
-				UNSELECTED_WIDGET_UV
-			};
-
-			builder.draw_texture((296, 26), widget_uv, (16, 16));
-			builder.draw_texture((296, 26), if enabled { REFRESH_UV } else { DISABLED_REFRESH_UV }, (16, 16));
-		}
-		{
-			let hovering = (312..328).contains(&mouse_x) && (26..42).contains(&mouse_y);
-			if hovering {
-				builder.draw_tooltip(&["Change Theme (Ctrl + Alt + T)"], (mouse_x, mouse_y), false);
-			}
-			builder.draw_texture((312, 26), if hovering { DIM_LIGHTBULB_UV } else { LIGHTBULB_UV }, (16, 16));
-		}
+		
+		// shifted one left to center between clipboard and freehand
+		builder.draw_texture_region_z(
+			(260, 22),
+			BASE_Z,
+			LINE_NUMBER_SEPARATOR_UV,
+			(2, 23),
+			(2, 16),
+		);
 
 		{
 			let mx = if (24..46).contains(&mouse_y) && mouse_x >= 16 + 16 + 4 {
@@ -393,6 +351,11 @@ impl Tab {
 		self.window_height = window_height;
 		self.refresh_scrolls();
 	}
+	
+	#[must_use]
+	pub fn path(&self) -> Option<&Path> {
+		self.path.as_deref()
+	}
 
 	#[must_use]
 	pub fn left_margin(&self) -> usize { ((self.value.true_height() + self.held_entry.as_ref().map_or(0, |held_entry| held_entry.kv.1.true_height())).ilog10() as usize + 1) * 8 + 4 + 8 }
@@ -474,9 +437,21 @@ impl Tab {
 					.context("Failed to parse NBT")?,
 				FileFormat::Zlib,
 			)
-		} else if let Some(nbt) = NbtElement::from_be_file(buf.as_slice()) {
+		} else if let result = NbtElement::from_be_file(buf.as_slice()).context("Tried to parse uncompressed NBT") && {
+			#[cfg(debug_assertions)]
+			if result.is_err() {
+				error!("{result:?}");
+			}
+			true
+		} && let Ok(nbt) = result {
 			(nbt, FileFormat::Nbt)
-		} else if let Some((nbt, header)) = NbtElement::from_le_file(buf.as_slice()) {
+		} else if let result = NbtElement::from_le_file(buf.as_slice()).context("Tried to parse uncompressed little-endian NBT") && {
+			#[cfg(debug_assertions)]
+			if result.is_err() {
+				error!("{result:?}");
+			}
+			true
+		} && let Ok((nbt, header)) = result {
 			(nbt, if header { FileFormat::LittleEndianHeaderNbt } else { FileFormat::LittleEndianNbt })
 		} else {
 			(

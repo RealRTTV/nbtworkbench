@@ -1,7 +1,7 @@
 use std::alloc::{alloc, Layout};
 use std::cmp::Ordering;
 use std::fmt::{Display, Formatter, Write};
-use std::intrinsics::likely;
+use std::hint::likely;
 use std::ops::Deref;
 
 use compact_str::{format_compact, CompactString};
@@ -14,6 +14,7 @@ use crate::render::{RenderContext, TextColor, VertexBufferBuilder};
 use crate::serialization::{Decoder, PrettyFormatter, UncheckedBufWriter};
 use crate::util::{width_ascii, StrExt};
 use crate::{config, hash};
+use crate::elements::nbt_parse_result::NbtParseResult;
 
 #[allow(clippy::module_name_repetitions)]
 #[repr(C)]
@@ -79,7 +80,9 @@ impl NbtCompound {
 	}
 	
 	#[must_use]
-	pub fn from_bytes<'a, D: Decoder<'a>>(decoder: &mut D) -> Option<Self> {
+	pub fn from_bytes<'a, D: Decoder<'a>>(decoder: &mut D) -> NbtParseResult<Self> {
+		use super::nbt_parse_result::*;
+		
 		let mut compound = Self::new();
 		unsafe {
 			decoder.assert_len(1)?;
@@ -89,14 +92,13 @@ impl NbtCompound {
 				let key = decoder.string()?;
 				let value = NbtElement::from_bytes(current_element, decoder)?;
 				compound.insert_replacing(key, value);
-				match decoder.assert_len(1) {
-					Some(()) => {}
-					None => break, // wow mojang, saving one byte, so cool of you
+				if is_err(&decoder.assert_len(1)) {
+					break // wow mojang, saving one byte, so cool of you
 				};
 				current_element = decoder.u8();
 			}
 			decoder.sort(&mut compound.entries);
-			Some(compound)
+			ok(compound)
 		}
 	}
 

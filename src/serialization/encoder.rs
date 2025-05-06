@@ -1,5 +1,5 @@
 use std::alloc::{alloc, dealloc, realloc, Layout};
-use std::intrinsics::likely;
+use std::hint::likely;
 use std::io::Write;
 use std::mem::MaybeUninit;
 

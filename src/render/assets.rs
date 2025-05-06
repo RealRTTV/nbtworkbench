@@ -5,8 +5,7 @@ use zune_png::zune_core::options::DecoderOptions;
 
 pub use ZOffset::*;
 
-use crate::render::Vec2u;
-use crate::util::now;
+use crate::util::{now, Vec2u};
 
 pub const HEADER_SIZE: usize = 48;
 

@@ -5,13 +5,13 @@ use std::str::FromStr;
 use std::sync::mpsc::TryRecvError;
 use std::time::Duration;
 
-use crate::assets::{ZOffset, ACTION_WHEEL_Z, BASE_TEXT_Z, BASE_Z, CLOSED_WIDGET_UV, DARK_STRIPE_UV, HEADER_SIZE, HELD_ENTRY_Z, HORIZONTAL_SEPARATOR_UV, HOVERED_STRIPE_UV, HOVERED_WIDGET_UV, JUST_OVERLAPPING_BASE_TEXT_Z, LIGHT_STRIPE_UV, LINE_NUMBER_SEPARATOR_UV, NEW_FILE_UV, OPEN_FOLDER_UV, REPLACE_BOX_Z, SAVE_GRAYSCALE_UV, SAVE_UV, SELECTED_ACTION_WHEEL, SELECTED_WIDGET_UV, SELECTION_UV, SORT_COMPOUND_BY_NAME_UV, SORT_COMPOUND_BY_NOTHING_UV, SORT_COMPOUND_BY_TYPE_UV, TRAY_UV, UNSELECTED_ACTION_WHEEL, UNSELECTED_WIDGET_UV};
+use crate::assets::{ZOffset, ACTION_WHEEL_Z, BASE_TEXT_Z, BASE_Z, CLOSED_WIDGET_UV, DARK_STRIPE_UV, HEADER_SIZE, HELD_ENTRY_Z, HORIZONTAL_SEPARATOR_UV, HOVERED_STRIPE_UV, HOVERED_WIDGET_UV, JUST_OVERLAPPING_BASE_TEXT_Z, LIGHT_STRIPE_UV, LINE_NUMBER_SEPARATOR_UV, NEW_FILE_UV, OPEN_FOLDER_UV, REPLACE_BOX_Z, SAVE_GRAYSCALE_UV, SAVE_UV, SELECTED_ACTION_WHEEL, SELECTED_WIDGET_UV, SELECTION_UV, TRAY_UV, UNSELECTED_ACTION_WHEEL, UNSELECTED_WIDGET_UV};
 use crate::elements::{CompoundMap, NbtByte, NbtByteArray, NbtChunk, NbtCompound, NbtDouble, NbtElement, NbtElementAndKey, NbtFloat, NbtInt, NbtIntArray, NbtList, NbtLong, NbtLongArray, NbtRegion, NbtShort, NbtString};
-use crate::render::{RenderContext, TextColor, Vec2u, VertexBufferBuilder, WindowProperties, MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH, WINDOW_HEIGHT, WINDOW_WIDTH};
+use crate::render::{RenderContext, TextColor, VertexBufferBuilder, WindowProperties, MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH, WINDOW_HEIGHT, WINDOW_WIDTH};
 use crate::serialization::{BigEndianDecoder, Decoder, UncheckedBufWriter};
 use crate::tree::{add_element, close_element, expand_element, open_element, remove_element, replace_element, swap_element_same_depth, Indices, MutableIndices, NavigationInformation, OwnedIndices, ParentNavigationInformationMut, RemoveElementResult, TraversalInformation, TraversalInformationMut};
-use crate::util::{drop_on_separate_thread, get_clipboard, now, nth, set_clipboard, LinkedQueue, StrExt};
-use crate::widget::{get_cursor_idx, get_cursor_left_jump_idx, get_cursor_right_jump_idx, Alert, Notification, NotificationKind, ReplaceBox, ReplaceBoxKeyResult, SearchBox, SearchBoxKeyResult, SelectedText, SelectedTextAdditional, SelectedTextKeyResult, Text, SEARCH_BOX_END_X, SEARCH_BOX_START_X, TEXT_DOUBLE_CLICK_INTERVAL};
+use crate::util::{drop_on_separate_thread, get_clipboard, now, nth, set_clipboard, LinkedQueue, StrExt, Vec2u};
+use crate::widget::{get_cursor_idx, get_cursor_left_jump_idx, get_cursor_right_jump_idx, Alert, BookmarkLinesButton, ButtonWidget, ButtonWidgetContext, ButtonWidgetContextMut, ExactMatchButton, FreehandModeButton, Notification, NotificationKind, RefreshButton, ReplaceBox, ReplaceBoxKeyResult, SearchBox, SearchBoxKeyResult, SearchFlagsButton, SearchModeButton, SelectedText, SelectedTextAdditional, SelectedTextKeyResult, SortAlgorithmButton, Text, ThemeButton, SEARCH_BOX_END_X, SEARCH_BOX_START_X, TEXT_DOUBLE_CLICK_INTERVAL};
 use crate::{config, mutable_indices};
 use crate::{flags, get_interaction_information, hash, tab, tab_mut};
 
@@ -60,9 +60,19 @@ pub struct Workbench {
     replace_box: ReplaceBox,
     ignore_event_end: Duration,
     debug_menu: bool,
+
+    bookmark_lines_button: BookmarkLinesButton,
+    search_flags_button: SearchFlagsButton,
+    search_mode_button: SearchModeButton,
+    exact_match_button: ExactMatchButton,
+    sort_algorithm_button: SortAlgorithmButton,
+    theme_button: ThemeButton,
+    freehand_mode_button: FreehandModeButton,
+    refresh_button: RefreshButton,
 }
 
 impl Workbench {
+    // todo, use ..unsafe { core::mem::zeroed() }
     #[must_use]
     pub const unsafe fn uninit() -> Self {
         Self {
@@ -100,6 +110,15 @@ impl Workbench {
             replace_box: ReplaceBox::uninit(),
             ignore_event_end: Duration::ZERO,
             debug_menu: false,
+
+            bookmark_lines_button: unsafe { core::mem::zeroed() },
+            search_flags_button: unsafe { core::mem::zeroed() },
+            search_mode_button: unsafe { core::mem::zeroed() },
+            exact_match_button: unsafe { core::mem::zeroed() },
+            sort_algorithm_button: unsafe { core::mem::zeroed() },
+            theme_button: unsafe { core::mem::zeroed() },
+            freehand_mode_button: unsafe { core::mem::zeroed() },
+            refresh_button: unsafe { core::mem::zeroed() },
         }
     }
 
@@ -140,6 +159,15 @@ impl Workbench {
             replace_box: ReplaceBox::new(),
             ignore_event_end: Duration::ZERO,
             debug_menu: false,
+
+            bookmark_lines_button: ButtonWidget::new(),
+            exact_match_button: ButtonWidget::new(),
+            freehand_mode_button: ButtonWidget::new(),
+            search_flags_button: ButtonWidget::new(),
+            search_mode_button: ButtonWidget::new(),
+            sort_algorithm_button: ButtonWidget::new(),
+            theme_button: ButtonWidget::new(),
+            refresh_button: RefreshButton::new(),
         };
         if let Some(window_dims) = window_dims {
             workbench.raw_window_width = window_dims.width as usize;
@@ -159,7 +187,7 @@ impl Workbench {
                 .and_then(|x| PathBuf::from_str(&x).ok())
             {
                 if let Err(e) = workbench.on_open_file(path, std::fs::read(path).unwrap_or(vec![]), window_properties) {
-                    workbench.alert(Alert::new("Error!", TextColor::Red, e))
+                    workbench.alert(e.into())
                 } else {
                     break 'create_tab;
                 }
@@ -262,6 +290,16 @@ impl Workbench {
 
     #[allow(clippy::collapsible_if)]
     pub fn on_mouse_input(&mut self, state: ElementState, button: MouseButton, window_properties: &mut WindowProperties) -> bool {
+        macro_rules! try_click_widget {
+            ($workbench:ident, $field:ident, $t:ty, $state:ident, $button:ident, $ctx:expr, $label:lifetime) => {
+                if $workbench.$field.is_clickable() && <$t>::bounds(($workbench.window_width, $workbench.window_height).into()).contains(($workbench.mouse_x, $workbench.mouse_y).into()) {
+                    if $workbench.$field.on_mouse_input($state, $button, $ctx) {
+                        break $label;
+                    }
+                }
+            };
+        }
+
         tab_mut!(self).last_interaction = now();
         let left_margin = self.left_margin();
         let horizontal_scroll = self.horizontal_scroll();
@@ -269,6 +307,31 @@ impl Workbench {
         let x = self.mouse_x;
         let y = self.mouse_y;
         self.last_mouse_state = state;
+
+        'buttons: {
+            let shift = self.shift();
+            let mut ctx = ButtonWidgetContextMut::new(tab_mut!(self), &mut self.search_box, &mut self.replace_box, shift);
+
+            try_click_widget!(self, bookmark_lines_button, BookmarkLinesButton, state, button, &mut ctx, 'buttons);
+            try_click_widget!(self, search_mode_button, SearchModeButton, state, button, &mut ctx, 'buttons);
+            try_click_widget!(self, search_flags_button, SearchFlagsButton, state, button, &mut ctx, 'buttons);
+            try_click_widget!(self, exact_match_button, ExactMatchButton, state, button, &mut ctx, 'buttons);
+            try_click_widget!(self, sort_algorithm_button, SortAlgorithmButton, state, button, &mut ctx, 'buttons);
+            try_click_widget!(self, theme_button, ThemeButton, state, button, &mut ctx, 'buttons);
+            try_click_widget!(self, freehand_mode_button, FreehandModeButton, state, button, &mut ctx, 'buttons);
+            try_click_widget!(self, refresh_button, RefreshButton, state, button, &mut ctx, 'buttons);
+
+            let (notifications, alerts) = ctx.into_notifications_and_alerts();
+
+            for notification in notifications {
+                self.notify(notification);
+            }
+
+            for alert in alerts {
+                self.alert(alert);
+            }
+        }
+        
         match state {
             ElementState::Pressed => {
                 {
@@ -287,42 +350,12 @@ impl Workbench {
                     }
                 }
 
-                if let MouseButton::Left | MouseButton::Right = button {
-                    let shift = (self.shift()) ^ (button == MouseButton::Right);
-
-                    if (self.window_width - SEARCH_BOX_END_X - 17 - 16 - 16 - 16..self.window_width - SEARCH_BOX_END_X - 1 - 16 - 16 - 16).contains(&self.mouse_x) & &(26..42).contains(&self.mouse_y) {
-                        let tab = tab_mut!( self );
-                        let notification = self.search_box.on_bookmark_widget(shift, &mut tab.bookmarks, &mut tab.value);
-                        self.notify(notification);
-                        return true;
-                    }
-
-                    if (self.window_width - SEARCH_BOX_END_X - 17 - 16 - 16..self.window_width - SEARCH_BOX_END_X - 1 - 16 - 16).contains(&self.mouse_x) & &(26..42).contains(&self.mouse_y) {
-                        self.search_box.on_search_widget(shift);
-                        return true;
-                    }
-
-                    if (self.window_width - SEARCH_BOX_END_X - 17 - 16..self.window_width - SEARCH_BOX_END_X - 1 - 16).contains(&self.mouse_x) & &(26..42).contains(&self.mouse_y) {
-                        self.search_box.on_mode_widget(shift);
-                        return true;
-                    }
-
-                    if (self.window_width - SEARCH_BOX_END_X - 17..self.window_width - SEARCH_BOX_END_X - 1).contains(&self.mouse_x) & &(26..42).contains(&self.mouse_y) {
-                        self.search_box.on_exact_match_widget(shift);
-                        return true;
-                    }
-                }
-
                 if y < 19 && x > 2 && y > 3 {
                     self.click_tab(button, window_properties);
                 } else if y < 42 && y > 26 && x < 16 {
                     self.open_file(window_properties);
                 } else if y < 42 && y > 26 && x < 32 {
                     self.new_tab(window_properties, shift);
-                } else if y < 42 && y > 26 && x >= 296 && x < 312 {
-                    if let Err(e) = tab_mut!(self).refresh() {
-                        self.alert(Alert::new("Error!", TextColor::Red, e))
-                    }
                 }
 
                 'a: {
@@ -395,25 +428,8 @@ impl Workbench {
                         if !tab!(self).freehand_mode && tab!(self).held_entry.is_none() && (24..46).contains(&y) && button == MouseButton::Left {
                             match self.hold_entry(button) {
                                 Ok(true) => break 'a,
-                                Err(e) => self.alert(Alert::new("Error!", TextColor::Red, e)),
+                                Err(e) => self.alert(e.into()),
                                 _ => {}
-                            }
-                        }
-
-                        if let MouseButton::Left | MouseButton::Right = button {
-                            if (264..280).contains(&x) && (26..42).contains(&y) {
-                                let tab = tab_mut!(self);
-                                tab.freehand_mode = !tab.freehand_mode;
-                                break 'a;
-                            }
-                            if (280..296).contains(&x) && (26..42).contains(&y) {
-                                let sort_algorithm = config::get_sort_algorithm();
-                                config::set_sort_algorithm(if (button == MouseButton::Right) ^ shift { sort_algorithm.rev_cycle() } else { sort_algorithm.cycle() });
-                                break 'a;
-                            }
-                            if (312..328).contains(&x) && (26..42).contains(&y) {
-                                config::set_theme(match config::get_theme() { Theme::Light => Theme::Dark, Theme::Dark => Theme::Light });
-                                break 'a;
                             }
                         }
                     }
@@ -605,7 +621,7 @@ impl Workbench {
             let RemoveElementResult { indices, kv: (key, mut value), replaces: _ } = match remove_element(&mut tab.value, indices, &mut tab.bookmarks, mutable_indices!(self, tab)) {
                 Some(result) => result,
                 None => {
-                    self.alert(Alert::new("Error!", TextColor::Red, "Failed to remove element"));
+                    self.alert(Alert::error("Failed to remove element"));
                     return false
                 }
             };
@@ -652,7 +668,7 @@ impl Workbench {
             let action = match add_element(&mut tab.value, (key, duplicate), indices, &mut tab.bookmarks, mutable_indices!(self, tab)) {
                 Some(action) => action.into_action(),
                 None => {
-                    self.alert(Alert::new("Error!", TextColor::Red, "Failed to duplicate element"));
+                    self.alert(Alert::error("Failed to duplicate element"));
                     return false
                 }
             };
@@ -723,7 +739,7 @@ impl Workbench {
             let result = match remove_element(&mut tab.value, indices, &mut tab.bookmarks, mutable_indices!(self, tab)) {
                 Some(result) => result,
                 None => {
-                    self.alert(Alert::new("Error!", TextColor::Red, "Failed to remove element"));
+                    self.alert(Alert::error("Failed to remove element"));
                     return false
                 }
             };
@@ -753,7 +769,7 @@ impl Workbench {
                     true
                 },
                 None => {
-                    self.alert(Alert::new("Error!", TextColor::Red, "Failed to drop held entry"));
+                    self.alert(Alert::error("Failed to drop held entry"));
                     false
                 }
             }
@@ -835,7 +851,7 @@ impl Workbench {
                         }
                     } else if idx == self.tab && x + 1 >= width - 32 && x < width - 16 {
                         if let Err(e) = tab.save(shift, window_properties) {
-                            self.alert(Alert::new("Error!", TextColor::Red, e));
+                            self.alert(e.into());
                         }
                     } else if button == MouseButton::Left {
                         self.set_tab(idx, window_properties);
@@ -916,13 +932,13 @@ impl Workbench {
         let dialog_result = Tab::FILE_TYPE_FILTERS.iter().fold(native_dialog::FileDialog::new().set_location("~/Downloads"), |builder, filter| builder.add_filter(filter.0, filter.1)).show_open_single_file();
         self.ignore_event_end = now() + Duration::from_millis(50);
         match dialog_result {
-            Err(e) => self.alert(Alert::new("Error!", TextColor::Red, e)),
+            Err(e) => self.alert(e.into()),
             Ok(None) => {},
             Ok(Some(path)) => match std::fs::read(&path) {
                 Ok(bytes) => if let Err(e) = self.on_open_file(&path, bytes, window_properties) {
-                    self.alert(Alert::new("Error!", TextColor::Red, e))
+                    self.alert(e.into())
                 },
-                Err(e) => self.alert(Alert::new("Error!", TextColor::Red, e)),
+                Err(e) => self.alert(e.into()),
             }
         }
     }
@@ -1004,7 +1020,7 @@ impl Workbench {
                 }
             };
             if let None = result {
-                self.alert(Alert::new("Error!", TextColor::Red, "Failed to toggle hovered element"))
+                self.alert(Alert::error("Failed to toggle hovered element"))
             }
             true
         } else {
@@ -1175,7 +1191,7 @@ impl Workbench {
         let result = match swap_element_same_depth(&mut tab.value, parent_indices.to_owned(), a_idx, b_idx, &mut tab.bookmarks, mutable_indices!(self, tab)) {
             Some(action) => action,
             None => {
-                self.alert(Alert::new("Error!", TextColor::Red, "Failed to swap elements"));
+                self.alert(Alert::error("Failed to swap elements"));
                 return None
             }
         };
@@ -1249,7 +1265,7 @@ impl Workbench {
         let tab = tab_mut!(self);
         let Some(SelectedText(Text { additional: SelectedTextAdditional { indices, .. }, .. })) = tab.selected_text.as_ref() else { return };
         let alert = if let None = close_element(&mut tab.value, indices, &mut tab.bookmarks) {
-            Some(Alert::new("Error!", TextColor::Red, "Failed to close selected element"))
+            Some(Alert::error("Failed to close selected element"))
         } else {
             None
         };
@@ -1269,7 +1285,7 @@ impl Workbench {
             open_element(&mut tab.value, indices, &mut tab.bookmarks)
         };
         let alert = if let None = result {
-            Some(Alert::new("Error!", TextColor::Red, "Failed to open selected element"))
+            Some(Alert::error("Failed to open selected element"))
         } else {
             None
         };
@@ -1512,7 +1528,7 @@ impl Workbench {
                 }
                 if key == KeyCode::KeyR && flags == flags!(Ctrl) {
                     if let Err(e) = tab.refresh() {
-                        self.alert(Alert::new("Error!", TextColor::Red, e))
+                        self.alert(e.into())
                     }
                     return true;
                 }
@@ -1534,7 +1550,7 @@ impl Workbench {
                 }
                 if key == KeyCode::KeyS && flags & (!flags!(Shift)) == flags!(Ctrl) {
                     return if let Err(e) = tab.save((flags & flags!(Shift)) > 0, window_properties) {
-                        self.alert(Alert::new("Error!", TextColor::Red, e));
+                        self.alert(e.into());
                         false
                     } else {
                         true
@@ -1548,7 +1564,7 @@ impl Workbench {
                     if let Some(action) = tab.undos.pop() {
                         match action.undo(&mut tab.value, &mut tab.bookmarks, mutable_indices!(self, tab), &mut tab.path, &mut tab.name, &mut tab.held_entry, window_properties).context("Failed undo") {
                             Ok(action) => tab.redos.push(action),
-                            Err(e) => self.alert(Alert::new("Error!", TextColor::Red, e)),
+                            Err(e) => self.alert(e.into()),
                         }
                         return true;
                     }
@@ -1557,7 +1573,7 @@ impl Workbench {
                     if let Some(action) = tab.redos.pop() {
                         match action.undo(&mut tab.value, &mut tab.bookmarks, mutable_indices!(self, tab), &mut tab.path, &mut tab.name, &mut tab.held_entry, window_properties).context("Failed redo") {
                             Ok(action) => tab.undos.push(action),
-                            Err(e) => self.alert(Alert::new("Error!", TextColor::Red, e)),
+                            Err(e) => self.alert(e.into()),
                         }
                         return true;
                     }
@@ -1612,13 +1628,13 @@ impl Workbench {
                         (None, NbtElement::from_id(NbtChunk::ID))
                     } else if key == KeyCode::KeyV {
                         let Some(clipboard) = get_clipboard() else {
-                            self.alert(Alert::new("Error!", TextColor::Red, "Failed to get clipboard"));
+                            self.alert(Alert::error("Failed to get clipboard"));
                             return true;
                         };
                         match NbtElement::from_str(&clipboard) {
                             Ok((key, value)) => (key, value),
                             Err(idx) => {
-                                self.alert(Alert::new("Error!", TextColor::Red, format!("Could not parse clipboard as SNBT (failed at index {idx})")));
+                                self.alert(Alert::error(format!("Could not parse clipboard as SNBT (failed at index {idx})")));
                                 return true;
                             }
                         }
@@ -1735,6 +1751,7 @@ impl Workbench {
         window_properties.window_title(format!("{} - NBT Workbench", tab!(self).name).as_str());
     }
 
+    // todo: replace commented std::time::Instant::now() with debug pie for ms to complete and pct
     pub fn render(&mut self, builder: &mut VertexBufferBuilder) {
         if self.raw_window_width < MIN_WINDOW_WIDTH || self.raw_window_height < MIN_WINDOW_HEIGHT { return; }
 
@@ -1863,32 +1880,59 @@ impl Workbench {
                 (2, 16),
             );
         }
-        // let start = std::time::Instant::now();
-        tab.render(
-            builder,
-            &mut ctx,
-            self.scrollbar_offset.is_some(),
-            self.action_wheel.is_some(),
-            self.steal_animation_data.as_ref().map(|x| (now() - x.0).min(LINE_DOUBLE_CLICK_INTERVAL).as_millis() as f32 / LINE_DOUBLE_CLICK_INTERVAL.as_millis_f32()).unwrap_or(0.0)
-        );
-        // println!("Active Tab: {}ms", start.elapsed().as_millis_f64());
-        config::get_sort_algorithm().render(builder, &mut ctx);
-        if let Some(selected_text) = &tab.selected_text {
-            builder.horizontal_scroll = horizontal_scroll;
-            selected_text.render(builder, left_margin);
-            builder.horizontal_scroll = 0;
+        {
+            // let start = std::time::Instant::now();
+            tab.render(
+                builder,
+                &mut ctx,
+                self.scrollbar_offset.is_some(),
+                self.action_wheel.is_some(),
+                self.steal_animation_data.as_ref().map(|x| (now() - x.0).min(LINE_DOUBLE_CLICK_INTERVAL).as_millis() as f32 / LINE_DOUBLE_CLICK_INTERVAL.as_millis_f32()).unwrap_or(0.0)
+            );
+            // println!("Active Tab: {}ms", start.elapsed().as_millis_f64());
         }
-        // let start = std::time::Instant::now();
-        self.render_action_wheel(builder);
-        self.render_held_entry(builder);
-        self.render_notifications_and_alerts(builder);
-        self.render_debug_menu(builder);
-        // println!("Misc: {}ms", start.elapsed().as_millis_f64());
+        {
+            // let start = std::time::Instant::now();
+            if let Some(selected_text) = &tab.selected_text {
+                builder.horizontal_scroll = horizontal_scroll;
+                selected_text.render(builder, left_margin);
+                builder.horizontal_scroll = 0;
+            }
+            // println!("Selected Text: {}ms", start.elapsed().as_millis_f64());
+        }
+        {
+            macro_rules! render_button {
+                ($workbench:ident, $field:ident, $builder:ident, $ctx:expr) => {
+                    $workbench.$field.render($builder, ($workbench.mouse_x, $workbench.mouse_y).into(), ($workbench.window_width, $workbench.window_height).into(), &$ctx, &$workbench.held_mouse_keys);
+                };
+            }
+
+            // let start = std::time::Instant::now();
+            let ctx = ButtonWidgetContext::new(tab, &self.search_box, &self.replace_box, shift);
+            render_button!(self, bookmark_lines_button, builder, &ctx);
+            render_button!(self, search_flags_button, builder, &ctx);
+            render_button!(self, search_mode_button, builder, &ctx);
+            render_button!(self, exact_match_button, builder, &ctx);
+            render_button!(self, sort_algorithm_button, builder, &ctx);
+            render_button!(self, theme_button, builder, &ctx);
+            render_button!(self, freehand_mode_button, builder, &ctx);
+            render_button!(self, refresh_button, builder, &ctx);
+            // println!("Buttons: {}ms", start.elapsed().as_millis_f64());
+        }
+
+        {
+            // let start = std::time::Instant::now();
+            self.render_action_wheel(builder);
+            self.render_held_entry(builder);
+            self.render_notifications_and_alerts(builder);
+            self.render_debug_menu(builder);
+            // println!("Misc: {}ms", start.elapsed().as_millis_f64());
+        }
         builder.draw_tooltips();
     }
 
     pub fn render_search_boxes(&self, builder: &mut VertexBufferBuilder) {
-        self.search_box.render(builder, self.shift(), (self.mouse_x, self.mouse_y));
+        self.search_box.render(builder);
         if ReplaceBox::is_visible(&self.search_box, &self.replace_box) {
             self.replace_box.render(builder);
         }
@@ -1901,7 +1945,7 @@ impl Workbench {
             for (idx, tab) in self.tabs.iter_mut().enumerate() {
                 if let Some(path) = tab.path.as_deref() && path.is_absolute() && (now() - tab.last_interaction >= Tab::AUTOSAVE_INTERVAL) && tab.unsaved_changes && tab.value.true_height() <= Tab::AUTOSAVE_MAXIMUM_LINES {
                     if let Err(e) = tab.save(false, window_properties) {
-                        alerts.push(Alert::new("Error!", TextColor::Red, e.context(format!("Failed to autosave {nth} tab", nth = nth(idx + 1))).to_string()));
+                        alerts.push(e.context(format!("Failed to autosave {nth} tab", nth = nth(idx + 1))).into());
                     }
                 }
             }
@@ -1935,7 +1979,7 @@ impl Workbench {
         }
 
         if failed_tabs > 0 {
-            self.alert(Alert::new("Are you sure you want to exit?", TextColor::Yellow, format!("You have {failed_tabs} unsaved tabs.")));
+            self.alert(Alert::new("Are you sure you want to exit?", TextColor::Yellow, format!("You have {failed_tabs} unsaved tab{tab_suffix}.", tab_suffix = if failed_tabs == 1 { "" } else { "s" })));
         }
         failed_tabs
     }
@@ -2327,25 +2371,6 @@ pub enum SortAlgorithm {
 }
 
 impl SortAlgorithm {
-    pub fn render(self, builder: &mut VertexBufferBuilder, ctx: &mut RenderContext) {
-        let uv = match self {
-            Self::None => SORT_COMPOUND_BY_NOTHING_UV,
-            Self::Name => SORT_COMPOUND_BY_NAME_UV,
-            Self::Type => SORT_COMPOUND_BY_TYPE_UV,
-        };
-
-        let (mouse_x, mouse_y) = ctx.mouse_pos().into();
-
-        let widget_uv = if (280..296).contains(&mouse_x) && (26..42).contains(&mouse_y) {
-            builder.draw_tooltip(&[&format!("Compound Sorting Algorithm ({self})")], ctx.mouse_pos(), false);
-            HOVERED_WIDGET_UV
-        } else {
-            SELECTED_WIDGET_UV
-        };
-        builder.draw_texture((280, 26), widget_uv, (16, 16));
-        builder.draw_texture((283, 29), uv, (10, 10));
-    }
-
     #[must_use]
     pub fn cycle(self) -> Self {
         match self {

@@ -21,6 +21,7 @@
     stmt_expr_attributes,
 )]
 #![feature(ptr_as_ref_unchecked)]
+#![feature(likely_unlikely)]
 #![windows_subsystem = "windows"]
 
 extern crate core;

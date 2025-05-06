@@ -1,8 +1,8 @@
 use std::time::Duration;
-
 use crate::assets::{ALERT_UV, NOTIFICATION_BAR_BACKDROP_UV, NOTIFICATION_BAR_UV, NOTIFICATION_TEXT_Z, NOTIFICATION_Z};
-use crate::render::{TextColor, Vec2u, VertexBufferBuilder};
-use crate::util::{now, smoothstep64, split_lines, StrExt};
+use crate::error;
+use crate::render::{TextColor, VertexBufferBuilder};
+use crate::util::{now, smoothstep64, split_lines, StrExt, Vec2u};
 
 pub struct Alert {
 	timestamp: Option<Duration>,
@@ -14,6 +14,7 @@ pub struct Alert {
 }
 
 impl Alert {
+	#[must_use]
 	pub fn new(title: impl ToString, title_color: TextColor, message: impl ToString) -> Self {
 		let title = title.to_string();
 		let lines = split_lines::<256>(message.to_string());
@@ -25,6 +26,11 @@ impl Alert {
 			title,
 			lines: lines.into_boxed_slice(),
 		}
+	}
+	
+	#[must_use]
+	pub fn error(error: impl ToString) -> Self {
+		Self::new("Error!", TextColor::Red, error)
 	}
 
 	pub fn render(&mut self, builder: &mut VertexBufferBuilder, y: usize) {
@@ -157,5 +163,26 @@ impl Alert {
 
 	pub fn height(&mut self) -> usize {
 		30 + self.lines.len() * 16
+	}
+}
+
+impl From<anyhow::Error> for Alert {
+	fn from(value: anyhow::Error) -> Self {
+		error!("{value:?}");
+		Self::error(value)
+	}
+}
+
+impl From<native_dialog::Error> for Alert {
+	fn from(value: native_dialog::Error) -> Self {
+		error!("{value:?}");
+		Self::error(value)
+	}
+}
+
+impl From<std::io::Error> for Alert {
+	fn from(value: std::io::Error) -> Self {
+		error!("{value:?}");
+		Self::error(value)
 	}
 }

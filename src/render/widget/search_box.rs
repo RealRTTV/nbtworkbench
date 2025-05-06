@@ -7,11 +7,11 @@ use winit::event::MouseButton;
 use winit::keyboard::KeyCode;
 use winit::window::Theme;
 
-use crate::assets::{BASE_Z, BOOKMARK_UV, DARK_STRIPE_UV, EXACT_MATCH_OFF_UV, EXACT_MATCH_ON_UV, HIDDEN_BOOKMARK_UV, HOVERED_WIDGET_UV, REGEX_SEARCH_MODE_UV, SEARCH_APPEND_BOOKMARKS_UV, SEARCH_BOOKMARKS_UV, SEARCH_BOX_SELECTION_Z, SEARCH_BOX_Z, SEARCH_KEYS_AND_VALUES_UV, SEARCH_KEYS_UV, SEARCH_VALUES_UV, SELECTED_WIDGET_UV, SNBT_SEARCH_MODE_UV, STRING_SEARCH_MODE_UV, UNSELECTED_WIDGET_UV};
+use crate::assets::{BOOKMARK_UV, DARK_STRIPE_UV, HIDDEN_BOOKMARK_UV, REGEX_SEARCH_MODE_UV, SEARCH_BOX_SELECTION_Z, SEARCH_BOX_Z, SEARCH_KEYS_AND_VALUES_UV, SEARCH_KEYS_UV, SEARCH_VALUES_UV, SNBT_SEARCH_MODE_UV, STRING_SEARCH_MODE_UV};
 use crate::elements::{NbtElement, NbtElementAndKey, NbtElementAndKeyRef};
 use crate::render::widget::text::get_cursor_idx;
-use crate::render::{TextColor, Vec2u, VertexBufferBuilder};
-use crate::util::{create_regex, now, StrExt};
+use crate::render::{TextColor, VertexBufferBuilder};
+use crate::util::{create_regex, now, StrExt, Vec2u};
 use crate::widget::{Cachelike, Notification, NotificationKind, SearchBoxKeyResult, Text};
 use crate::workbench::{MarkedLine, MarkedLines, SortAlgorithm};
 use crate::{config, flags};
@@ -246,12 +246,11 @@ impl SearchBox {
         Self(Text::uninit())
     }
 
-    pub fn render(&self, builder: &mut VertexBufferBuilder, shift: bool, mouse: (usize, usize)) {
+    pub fn render(&self, builder: &mut VertexBufferBuilder) {
         use std::fmt::Write;
 
         let search_mode = config::get_search_mode();
         let pos = Vec2u::new(SEARCH_BOX_START_X, 23);
-        let (mouse_x, mouse_y) = mouse;
 
         builder.draw_texture_region_z(
             pos,
@@ -285,67 +284,6 @@ impl SearchBox {
         }
 
         builder.horizontal_scroll = 0;
-
-        {
-            let bookmark_uv = if shift { SEARCH_APPEND_BOOKMARKS_UV } else { SEARCH_BOOKMARKS_UV };
-            let widget_uv = if (builder.window_width() - SEARCH_BOX_END_X - 17 - 16 - 16 - 16..builder.window_width() - SEARCH_BOX_END_X - 1 - 16 - 16 - 16).contains(&mouse_x) && (26..42).contains(&mouse_y) {
-                builder.draw_tooltip(&[if shift { "Append to search (Shift + Enter)" } else { "Search (Enter)" }], mouse, false);
-                HOVERED_WIDGET_UV
-            } else {
-                SELECTED_WIDGET_UV
-            };
-
-            builder.draw_texture_z((builder.window_width() - SEARCH_BOX_END_X - 17 - 16 - 16 - 16, 26), BASE_Z, widget_uv, (16, 16));
-            builder.draw_texture_z((builder.window_width() - SEARCH_BOX_END_X - 17 - 16 - 16 - 16, 26), BASE_Z, bookmark_uv, (16, 16));
-        }
-
-        {
-            let search_uv = config::get_search_flags().uv();
-            let widget_uv = if (builder.window_width() - SEARCH_BOX_END_X - 17 - 16 - 16..builder.window_width() - SEARCH_BOX_END_X - 1 - 16 - 16).contains(&mouse_x) && (26..42).contains(&mouse_y) {
-                builder.draw_tooltip(&[&config::get_search_flags().to_string()], mouse, false);
-                HOVERED_WIDGET_UV
-            } else {
-                SELECTED_WIDGET_UV
-            };
-
-            builder.draw_texture_z((builder.window_width() - SEARCH_BOX_END_X - 17 - 16 - 16, 26), BASE_Z, widget_uv, (16, 16));
-            builder.draw_texture_z((builder.window_width() - SEARCH_BOX_END_X - 17 - 16 - 16, 26), BASE_Z, search_uv, (16, 16));
-        }
-
-        {
-            let mode_uv = search_mode.uv();
-            let widget_uv = if (builder.window_width() - SEARCH_BOX_END_X - 17 - 16..builder.window_width() - SEARCH_BOX_END_X - 1 - 16).contains(&mouse_x) && (26..42).contains(&mouse_y) {
-                builder.draw_tooltip(&[&format!("{search_mode} Mode")], mouse, false);
-                HOVERED_WIDGET_UV
-            } else {
-                SELECTED_WIDGET_UV
-            };
-
-            builder.draw_texture_z((builder.window_width() - SEARCH_BOX_END_X - 17 - 16, 26), BASE_Z, widget_uv, (16, 16));
-            builder.draw_texture_z((builder.window_width() - SEARCH_BOX_END_X - 17 - 16, 26), BASE_Z, mode_uv, (16, 16));
-        }
-
-        {
-            let has_exact_search = search_mode.has_exact_match_mode();
-            let within_widget_bounds = (builder.window_width() - SEARCH_BOX_END_X - 17..builder.window_width() - SEARCH_BOX_END_X - 1).contains(&mouse_x) && (26..42).contains(&mouse_y);
-            let exact_match = config::get_search_exact_match();
-            let exact_match_uv = if exact_match || !has_exact_search { EXACT_MATCH_ON_UV } else { EXACT_MATCH_OFF_UV };
-            if within_widget_bounds {
-                builder.draw_tooltip(&[if exact_match || !has_exact_search { search_mode.get_exact_search_on_name() } else { search_mode.get_exact_search_off_name() }], mouse, false);
-            }
-            let widget_uv = if has_exact_search {
-                if within_widget_bounds {
-                    HOVERED_WIDGET_UV
-                } else {
-                    SELECTED_WIDGET_UV
-                }
-            } else {
-                UNSELECTED_WIDGET_UV
-            };
-
-            builder.draw_texture_z((builder.window_width() - SEARCH_BOX_END_X - 17, 26), BASE_Z, widget_uv, (16, 16));
-            builder.draw_texture_z((builder.window_width() - SEARCH_BOX_END_X - 17, 26), BASE_Z, exact_match_uv, (16, 16));
-        }
     }
 
     #[must_use]
@@ -378,30 +316,7 @@ impl SearchBox {
     }
 
     #[must_use]
-    pub fn on_bookmark_widget(&mut self, shift: bool, bookmarks: &mut MarkedLines, root: &mut NbtElement) -> Notification {
-        if !shift {
-            bookmarks.clear();
-        }
-
-        self.search(bookmarks, root, false)
-    }
-
-    pub fn on_search_widget(&mut self, shift: bool) {
-        config::set_search_flags(if shift { config::get_search_flags().rev_cycle() } else { config::get_search_flags().cycle() });
-    }
-
-    pub fn on_mode_widget(&mut self, shift: bool) {
-        config::set_search_mode(if shift { config::get_search_mode().rev_cycle() } else { config::get_search_mode().cycle() });
-    }
-
-    pub fn on_exact_match_widget(&mut self, _shift: bool) {
-        if config::get_search_mode().has_exact_match_mode() {
-            config::set_search_exact_match(!config::get_search_exact_match());
-        }
-    }
-
-    #[must_use]
-    pub fn search(&mut self, bookmarks: &mut MarkedLines, root: &NbtElement, count_only: bool) -> Notification {
+    pub fn search(&self, bookmarks: &mut MarkedLines, root: &NbtElement, count_only: bool) -> Notification {
         if self.value.is_empty() {
             return Notification::new("0 hits for \"\" (0ms)", TextColor::White, NotificationKind::Find);
         }

@@ -2,6 +2,7 @@ use compact_str::{CompactString, ToCompactString};
 use regex::{Regex, RegexBuilder};
 use std::cmp::Ordering;
 use std::fmt::{Debug, Formatter};
+use std::hint::likely;
 use std::mem::MaybeUninit;
 use clipboard::ClipboardProvider;
 use crate::render::VertexBufferBuilder;
@@ -631,4 +632,127 @@ pub fn drop_on_separate_thread<T: 'static + Send>(t: T) {
 	std::thread::Builder::new().stack_size(1_048_576 * 64 /*64MiB*/).spawn(move || drop(t)).expect("Failed to spawn thread");
 	#[cfg(target_arch = "wasm32")]
 	drop(t)
+}
+
+#[derive(Copy, Clone, Eq)]
+pub struct Vec2u {
+	pub x: usize,
+	pub y: usize,
+}
+
+impl Debug for Vec2u {
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+		write!(f, "({x},{y})", x = self.x, y = self.y)
+	}
+}
+
+impl Vec2u {
+	pub const fn new(x: usize, y: usize) -> Self { Self { x, y } }
+
+	pub const fn wrapping_sub(self, rhs: Self) -> Self {
+		Self {
+			x: self.x.wrapping_sub(rhs.x),
+			y: self.y.wrapping_sub(rhs.y),
+		}
+	}
+
+	pub const fn saturating_sub(self, rhs: Self) -> Self {
+		Self {
+			x: self.x.saturating_sub(rhs.x),
+			y: self.y.saturating_sub(rhs.y),
+		}
+	}
+}
+
+impl<T: Into<(usize, usize)> + Clone> PartialEq<T> for Vec2u {
+	fn eq(&self, other: &T) -> bool {
+		let (x, y) = other.clone().into();
+		(self.x == x) & (self.y == y)
+	}
+}
+
+impl From<(usize, usize)> for Vec2u {
+	fn from(value: (usize, usize)) -> Self {
+		let (x, y) = value;
+		Self::new(x, y)
+	}
+}
+
+impl From<Vec2u> for (usize, usize) {
+	fn from(val: Vec2u) -> Self { (val.x, val.y) }
+}
+
+impl<T: Into<(usize, usize)>> std::ops::Add<T> for Vec2u {
+	type Output = Self;
+
+	fn add(self, rhs: T) -> Self::Output {
+		let (x, y) = rhs.into();
+		Self {
+			x: self.x + x,
+			y: self.y + y,
+		}
+	}
+}
+
+impl<T: Into<(usize, usize)>> std::ops::AddAssign<T> for Vec2u {
+	fn add_assign(&mut self, rhs: T) {
+		let (x, y) = rhs.into();
+		self.x += x;
+		self.y += y;
+	}
+}
+
+impl<T: Into<(usize, usize)>> std::ops::Sub<T> for Vec2u {
+	type Output = Self;
+
+	fn sub(self, rhs: T) -> Self::Output {
+		let (x, y) = rhs.into();
+		Self {
+			x: self.x - x,
+			y: self.y - y,
+		}
+	}
+}
+
+impl<T: Into<(usize, usize)>> std::ops::SubAssign<T> for Vec2u {
+	fn sub_assign(&mut self, rhs: T) {
+		let (x, y) = rhs.into();
+		self.x = self.x.wrapping_sub(x);
+		self.y = self.x.wrapping_sub(y);
+	}
+}
+
+#[derive(Copy, Clone)]
+pub struct AxisAlignedBoundingBox {
+	low: Vec2u,
+	high: Vec2u,
+}
+
+impl AxisAlignedBoundingBox {
+	#[must_use]
+	pub fn new(x0: usize, x1: usize, y0: usize, y1: usize) -> Self {
+		let (x0, x1) = if likely(x0 < x1) { (x0, x1) } else { (x1, x0) };
+		let (y0, y1) = if likely(y0 < y1) { (y0, y1) } else { (y1, y0) };
+		Self {
+			low: Vec2u::new(x0, y0),
+			high: Vec2u::new(x1, y1),
+		}
+	}
+	
+	#[must_use]
+	pub fn contains(self, point: Vec2u) -> bool {
+		let Self { low: Vec2u { x: x0, y: y0 }, high: Vec2u { x: x1, y: y1 } } = self;
+		let Vec2u { x, y } = point;
+		x0 <= x && x <= x1 && y0 <= y && y <= y1
+	}
+	
+	#[must_use]
+	pub fn low(self) -> Vec2u {
+		self.low
+	}
+
+	#[must_use]
+	pub fn high(self) -> Vec2u {
+		self.high
+	}
 }

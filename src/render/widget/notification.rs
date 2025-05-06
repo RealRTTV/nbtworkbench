@@ -3,8 +3,8 @@ use std::time::Duration;
 use enum_map::Enum;
 
 use crate::assets::{NOTIFICATION_BAR_BACKDROP_UV, NOTIFICATION_BAR_UV, NOTIFICATION_TEXT_Z, NOTIFICATION_UV, NOTIFICATION_Z};
-use crate::render::{TextColor, Vec2u, VertexBufferBuilder};
-use crate::util::{now, smoothstep64, split_lines, StrExt};
+use crate::render::{TextColor, VertexBufferBuilder};
+use crate::util::{now, smoothstep64, split_lines, StrExt, Vec2u};
 
 #[derive(Copy, Clone, Enum)]
 pub enum NotificationKind {

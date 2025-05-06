@@ -9,6 +9,7 @@ use hashbrown::HashTable;
 
 use crate::assets::ZOffset;
 use crate::elements::{CompoundMap, CompoundMapIter, CompoundMapIterMut, Entry, NbtByte, NbtByteArray, NbtChunk, NbtCompound, NbtDouble, NbtElementAndKey, NbtElementAndKeyRef, NbtFloat, NbtInt, NbtIntArray, NbtList, NbtLong, NbtLongArray, NbtNull, NbtRegion, NbtShort, NbtString};
+use crate::elements::nbt_parse_result::NbtParseResult;
 use crate::render::{RenderContext, TextColor, VertexBufferBuilder};
 use crate::serialization::{BigEndianDecoder, Decoder, LittleEndianDecoder, PrettyFormatter, UncheckedBufWriter};
 use crate::tree::{Indices, NavigationInformation, NavigationInformationMut, OwnedIndices, ParentNavigationInformation, ParentNavigationInformationMut, TraversalInformation, TraversalInformationMut};
@@ -561,8 +562,10 @@ impl NbtElement {
 
 /// From Bytes
 impl NbtElement {
-	pub fn from_bytes<'a, D: Decoder<'a>>(element: u8, decoder: &mut D) -> Option<Self> {
-		Some(match element {
+	pub fn from_bytes<'a, D: Decoder<'a>>(element: u8, decoder: &mut D) -> NbtParseResult<Self> {
+		use super::nbt_parse_result::*;
+
+		ok(match element {
 			NbtByte::ID => Self::Byte(NbtByte::from_bytes(decoder)?),
 			NbtShort::ID => Self::Short(NbtShort::from_bytes(decoder)?),
 			NbtInt::ID => Self::Int(NbtInt::from_bytes(decoder)?),
@@ -575,7 +578,7 @@ impl NbtElement {
 			NbtCompound::ID => Self::Compound(NbtCompound::from_bytes(decoder)?),
 			NbtIntArray::ID => Self::IntArray(NbtIntArray::from_bytes(decoder)?),
 			NbtLongArray::ID => Self::LongArray(NbtLongArray::from_bytes(decoder)?),
-			_ => return None,
+			_ => return err("Invalid NBT type"),
 		})
 	}
 
@@ -605,30 +608,34 @@ impl NbtElement {
 	}
 
 	#[must_use]
-	pub fn from_be_file(bytes: &[u8]) -> Option<Self> {
+	pub fn from_be_file(bytes: &[u8]) -> NbtParseResult<Self> {
+		use super::nbt_parse_result::*;
+
 		let mut decoder = BigEndianDecoder::new(bytes);
 		decoder.assert_len(1)?;
 		unsafe {
-			if decoder.u8() != NbtCompound::ID { return None }
+			if decoder.u8() != NbtCompound::ID { return err("Big-endian NBT file didn't start with Compound") }
 			// fix for >= 1.20.2 protocol since they removed the empty field
-			if decoder.assert_len(2).is_some() && decoder.u16() != 0_u16.to_be() {
+			if is_ok(&decoder.assert_len(2)) && decoder.u16() != 0_u16.to_be() {
 				decoder.skip(-2_isize as usize);
 			}
 		}
 		let nbt = Self::Compound(NbtCompound::from_bytes(&mut decoder)?);
-		if decoder.assert_len(1).is_some() {
-			return None;
-		}
-		Some(nbt)
+		// if is_ok(&decoder.assert_len(1)) {
+		// 	return err("Compound should end with null-byte");
+		// }
+		ok(nbt)
 	}
 
 	#[must_use]
-	pub fn from_be_mca(bytes: &[u8]) -> Option<Self> {
+	pub fn from_be_mca(bytes: &[u8]) -> NbtParseResult<Self> {
 		NbtRegion::from_be_bytes(bytes).map(Self::Region)
 	}
 
 	#[must_use]
-	pub fn from_le_file(bytes: &[u8]) -> Option<(Self, bool)> {
+	pub fn from_le_file(bytes: &[u8]) -> NbtParseResult<(Self, bool)> {
+		use super::nbt_parse_result::*;
+
 		let mut decoder = LittleEndianDecoder::new(bytes);
 		unsafe {
 			decoder.assert_len(1)?;
@@ -638,19 +645,19 @@ impl NbtElement {
 					decoder.assert_len(2)?;
 					let skip = decoder.u16() as usize;
 					decoder.skip(skip);
-					Some((Self::Compound(NbtCompound::from_bytes(&mut decoder)?), decoder.header()))
+					ok((Self::Compound(NbtCompound::from_bytes(&mut decoder)?), decoder.header()))
 				},
 				NbtList::ID => {
 					decoder.assert_len(2)?;
 					let skip = decoder.u16() as usize;
 					decoder.skip(skip);
-					Some((Self::List(NbtList::from_bytes(&mut decoder)?), decoder.header()))
+					ok((Self::List(NbtList::from_bytes(&mut decoder)?), decoder.header()))
 				},
-				_ => None,
+				_ => err("Little-endian should start with either Compound or List"),
 			};
-			if decoder.assert_len(1).is_some() {
-				return None;
-			}
+			// if is_ok(&decoder.assert_len(1)) {
+			// 	return err("Little-endian should have a null byte at the end");
+			// }
 			result
 		}
 	}
