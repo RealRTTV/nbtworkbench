@@ -1854,6 +1854,7 @@ impl<'a> IndexMut<&'a str> for NbtElement {
 
 		result.unwrap_or_else(|| {
 			unsafe { NULL_MUT = Self::NULL; }
+			#[allow(static_mut_refs)]
 			unsafe { &mut NULL_MUT }
 		})
 	}
@@ -1877,6 +1878,7 @@ impl IndexMut<usize> for NbtElement {
 			.map(|(_, b)| b)
 			.unwrap_or_else(|| {
 			unsafe { NULL_MUT = NbtElement::NULL; }
+			#[allow(static_mut_refs)]
 			unsafe { &mut NULL_MUT }
 		})
 	}

@@ -113,7 +113,7 @@ impl ElementAction {
 		ORDERING[a_nbt.id() as usize].cmp(&ORDERING[b_nbt.id() as usize]).then_with(|| a_str.cmp(b_str))
 	}
 
-	// todo: add more alerts for errors (potentially have anyhow::Reesult)
+	// todo: add more alerts for errors (potentially have anyhow::Result)
 	#[allow(clippy::too_many_lines)]
 	pub fn apply<'m1, 'm2: 'm1>(self, root: &mut NbtElement, mut indices: OwnedIndices, bookmarks: &mut MarkedLines, mutable_indices: &'m1 mut MutableIndices<'m2>, alerts: &mut Vec<Alert>, tab_uuid: Uuid) -> Option<WorkbenchAction> {
 		#[must_use]

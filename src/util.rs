@@ -626,15 +626,9 @@ pub const fn width_ascii(s: &str) -> usize {
 	width
 }
 
-pub fn drop_on_separate_thread<T: 'static>(mut t: T) {
+pub fn drop_on_separate_thread<T: 'static + Send>(t: T) {
 	#[cfg(not(target_arch = "wasm32"))]
-	{
-		let ptr = &mut t as *mut T as usize;
-		std::mem::forget(t);
-		std::thread::Builder::new().stack_size(1_048_576 * 64 /*64MiB*/).spawn(move || unsafe { drop(std::ptr::read(ptr as *mut T)) }).expect("Failed to spawn thread");
-	}
+	std::thread::Builder::new().stack_size(1_048_576 * 64 /*64MiB*/).spawn(move || drop(t)).expect("Failed to spawn thread");
 	#[cfg(target_arch = "wasm32")]
-	{
-		drop(t)
-	}
+	drop(t)
 }

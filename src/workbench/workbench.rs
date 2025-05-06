@@ -326,7 +326,7 @@ impl Workbench {
                 }
 
                 'a: {
-                    if button == MouseButton::Left && y >= HEADER_SIZE {
+                    if button == MouseButton::Left && y >= HEADER_SIZE && tab!(self).held_entry.is_some() {
                         self.drop_held_entry();
                         break 'a;
                     }
@@ -447,8 +447,7 @@ impl Workbench {
         if (cy as isize - self.mouse_y as isize).pow(2) as usize + (cx as isize - self.mouse_x as isize).pow(2) as usize <= 8_usize.pow(2) { return true }
         let highlight_idx = ((f64::atan2(cy as f64 - self.mouse_y as f64, cx as f64 - self.mouse_x as f64) + PI - FRAC_PI_8).rem_euclid(TAU) / PI) as usize;
         let Some(TraversalInformation { indices, element, .. }) = tab.value.traverse((cy - (HEADER_SIZE + 7) + scroll) / 16, Some((cx - left_margin) / 16)) else { return true };
-        if let Some(action) = element.actions().get(highlight_idx).copied()
-            && let Some(action) = action.apply(&mut tab.value, indices, &mut tab.bookmarks, mutable_indices!(self, tab), &mut self.alerts, tab.uuid) {
+        if let Some(action) = element.actions().get(highlight_idx).copied() && let Some(action) = action.apply(&mut tab.value, indices, &mut tab.bookmarks, mutable_indices!(self, tab), &mut self.alerts, tab.uuid) {
             tab.append_to_history(action);
         }
         true
@@ -471,7 +470,7 @@ impl Workbench {
             Ok(())
         }
 
-        fn write_array(subscription: &FileUpdateSubscription, tab: &mut Tab, new_value: NbtElement) -> Result<()> {
+        fn read_array(subscription: &FileUpdateSubscription, tab: &mut Tab, new_value: NbtElement) -> Result<()> {
             let NavigationInformation { key, .. } = tab.value.navigate(&subscription.indices).context("Failed to navigate subscription indices")?;
             let key = key.map(CompactString::from);
             let action = replace_element(&mut tab.value, (key, new_value), subscription.indices.clone(), &mut tab.bookmarks, MutableIndices::empty()).context("Failed to replace element")?.into_action();
@@ -493,7 +492,7 @@ impl Workbench {
                 match subscription.rx.try_recv() {
                     Ok(data) => match subscription.r#type {
                         FileUpdateSubscriptionType::Snbt => read_snbt(subscription, &data, tab)?,
-                        kind @ (FileUpdateSubscriptionType::ByteArray | FileUpdateSubscriptionType::IntArray | FileUpdateSubscriptionType::LongArray | FileUpdateSubscriptionType::ByteList | FileUpdateSubscriptionType::ShortList | FileUpdateSubscriptionType::IntList | FileUpdateSubscriptionType::LongList) => write_array(subscription, tab, {
+                        kind @ (FileUpdateSubscriptionType::ByteArray | FileUpdateSubscriptionType::IntArray | FileUpdateSubscriptionType::LongArray | FileUpdateSubscriptionType::ByteList | FileUpdateSubscriptionType::ShortList | FileUpdateSubscriptionType::IntList | FileUpdateSubscriptionType::LongList) => read_array(subscription, tab, {
                             let mut buf = UncheckedBufWriter::new();
                             let id = match kind {
                                 FileUpdateSubscriptionType::ByteArray if data.len() % 1 == 0 => {

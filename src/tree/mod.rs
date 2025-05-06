@@ -45,12 +45,14 @@ impl<'m1, 'm2: 'm1> MutableIndices<'m2> {
     pub fn empty() -> &'static mut Self {
         static mut EMPTY_SUBSCRIPTION: Option<FileUpdateSubscription> = None;
         static mut EMPTY_SELECTED_TEXT: Option<SelectedText> = None;
+        #[allow(static_mut_refs)]
         static mut EMPTY: MutableIndices<'static> = MutableIndices {
             is_empty: true,
             subscription: unsafe { &mut EMPTY_SUBSCRIPTION },
             selected_text: unsafe { &mut EMPTY_SELECTED_TEXT },
         };
 
+        #[allow(static_mut_refs)]
         unsafe { &mut EMPTY }
     }
 

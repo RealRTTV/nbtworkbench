@@ -101,27 +101,29 @@ impl<'a> TraversalInformationMut<'a> {
 
         if y > element.height() { return None }
 
-        if y > 0 && let Some(region) = element.as_region_mut() && region.is_grid_layout() && let Some(x) = &mut x {
-            if (2..=31 + 2).contains(x) {
-                *x -= 2;
-                y -= 1;
-                let idx = y * 16 + *x;
-                depth += *x;
-                for child in (0..idx).filter_map(|idx| region.get(idx)) {
-                    let (height, true_height) = (child.height(), child.true_height());
-                    line_number += height;
-                    true_line_number += true_height;
+        while y > 0 {
+            if let Some(region) = element.as_region() && region.is_grid_layout() && let Some(x) = &mut x {
+                let region = element.as_region_mut()?;
+                if (2..=31 + 2).contains(x) {
+                    *x -= 2;
+                    y -= 1;
+                    let idx = y * 16 + *x;
+                    depth += *x;
+                    for child in (0..idx).filter_map(|idx| region.get(idx)) {
+                        let (height, true_height) = (child.height(), child.true_height());
+                        line_number += height;
+                        true_line_number += true_height;
+                    }
+                    let child = region.get_mut(idx)?;
+                    line_number += 1;
+                    true_line_number += 1;
+                    indices.push(idx);
+                    element = child;
+                    break;
+                } else {
+                    return None;
                 }
-                let child = region.get_mut(idx)?;
-                line_number += 1;
-                true_line_number += 1;
-                indices.push(idx);
-                element = child;
             } else {
-                return None;
-            }
-        } else {
-            while y > 0 {
                 let idx = find_traversal_child_idx(element, &mut y, &mut line_number, &mut true_line_number)?;
                 y -= 1;
                 line_number += 1;
