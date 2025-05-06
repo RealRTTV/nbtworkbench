@@ -1,5 +1,6 @@
 use std::alloc::{alloc, dealloc, realloc, Layout};
 use std::intrinsics::likely;
+use std::io::Write;
 use std::mem::MaybeUninit;
 
 const WIDTH: usize = 1 << 24;
@@ -30,6 +31,18 @@ impl Drop for UncheckedBufWriter {
 				Layout::array::<u8>(WIDTH).unwrap_unchecked(),
 			);
 		}
+	}
+}
+
+impl Write for UncheckedBufWriter {
+	fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+		UncheckedBufWriter::write(self, buf);
+		Ok(buf.len())
+	}
+
+	fn flush(&mut self) -> std::io::Result<()> {
+		UncheckedBufWriter::flush(self);
+		Ok(())
 	}
 }
 
@@ -87,7 +100,9 @@ impl UncheckedBufWriter {
 		self.buf_len = 0;
 	}
 
-	pub fn finish(mut self) -> Vec<u8> {
+	pub fn flush(&mut self) {
+		if self.buf_len == 0 { return }
+		
 		unsafe {
 			let malloc_size = (self.inner_len + WIDTH - 1) & !(WIDTH - 1);
 			self.inner = if self.inner.is_null() {
@@ -103,7 +118,11 @@ impl UncheckedBufWriter {
 				.add(self.inner_len)
 				.copy_from_nonoverlapping(self.buf.cast::<u8>(), self.buf_len);
 			self.inner_len += self.buf_len;
-			Vec::from_raw_parts(self.inner, self.inner_len, self.inner_len)
 		}
+	}
+
+	#[must_use]
+	pub fn finish(self) -> Vec<u8> {
+		unsafe { Vec::from_raw_parts(self.inner, self.inner_len, self.inner_len) }
 	}
 }

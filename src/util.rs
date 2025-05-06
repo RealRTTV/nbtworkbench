@@ -3,7 +3,7 @@ use regex::{Regex, RegexBuilder};
 use std::cmp::Ordering;
 use std::fmt::{Debug, Formatter};
 use std::mem::MaybeUninit;
-
+use clipboard::ClipboardProvider;
 use crate::render::VertexBufferBuilder;
 
 #[cfg(target_arch = "wasm32")]
@@ -12,12 +12,14 @@ pub use crate::wasm::{get_clipboard, now, set_clipboard};
 #[must_use]
 #[cfg(not(target_arch = "wasm32"))]
 pub fn get_clipboard() -> Option<String> {
-    cli_clipboard::get_contents().ok()
+    let mut ctx = clipboard::ClipboardContext::new().ok()?;
+	ctx.get_contents().ok()
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn set_clipboard(value: String) -> bool {
-    cli_clipboard::set_contents(value).is_ok()
+	let Ok(mut ctx) = clipboard::ClipboardContext::new() else { return false };
+	ctx.set_contents(value).is_ok()
 }
 
 #[must_use]

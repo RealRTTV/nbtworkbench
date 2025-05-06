@@ -900,9 +900,9 @@ impl NbtElement {
 /// Immutable "getter" operations
 impl NbtElement {
 	#[must_use]
-	const fn id(&self) -> u8 { unsafe { self.id.id } }
+	pub const fn id(&self) -> u8 { unsafe { self.id.id } }
 
-	fn set_id(&mut self, id: u8) {
+	pub(super) fn set_id(&mut self, id: u8) {
 		unsafe { core::ptr::write(core::ptr::addr_of_mut!(self.id.id), id); }
 	}
 

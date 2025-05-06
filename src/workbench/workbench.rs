@@ -448,7 +448,7 @@ impl Workbench {
         let highlight_idx = ((f64::atan2(cy as f64 - self.mouse_y as f64, cx as f64 - self.mouse_x as f64) + PI - FRAC_PI_8).rem_euclid(TAU) / PI) as usize;
         let Some(TraversalInformation { indices, element, .. }) = tab.value.traverse((cy - (HEADER_SIZE + 7) + scroll) / 16, Some((cx - left_margin) / 16)) else { return true };
         if let Some(action) = element.actions().get(highlight_idx).copied()
-            && let Some(action) = action.apply(&mut tab.value, indices, &mut tab.bookmarks, mutable_indices!(self, tab), &mut self.alerts) {
+            && let Some(action) = action.apply(&mut tab.value, indices, &mut tab.bookmarks, mutable_indices!(self, tab), &mut self.alerts, tab.uuid) {
             tab.append_to_history(action);
         }
         true
@@ -491,7 +491,7 @@ impl Workbench {
                     return Err(e);
                 };
                 match subscription.rx.try_recv() {
-                    Ok(data) => match subscription.subscription_type {
+                    Ok(data) => match subscription.r#type {
                         FileUpdateSubscriptionType::Snbt => read_snbt(subscription, &data, tab)?,
                         kind @ (FileUpdateSubscriptionType::ByteArray | FileUpdateSubscriptionType::IntArray | FileUpdateSubscriptionType::LongArray | FileUpdateSubscriptionType::ByteList | FileUpdateSubscriptionType::ShortList | FileUpdateSubscriptionType::IntList | FileUpdateSubscriptionType::LongList) => write_array(subscription, tab, {
                             let mut buf = UncheckedBufWriter::new();
@@ -2400,11 +2400,24 @@ impl Display for SortAlgorithm {
 }
 
 pub struct FileUpdateSubscription {
-    subscription_type: FileUpdateSubscriptionType,
+    r#type: FileUpdateSubscriptionType,
     pub indices: OwnedIndices,
     rx: std::sync::mpsc::Receiver<Vec<u8>>,
     watcher: notify::PollWatcher,
     tab_uuid: Uuid,
+}
+
+impl FileUpdateSubscription {
+    #[must_use]
+    pub fn new(r#type: FileUpdateSubscriptionType, indices: OwnedIndices, rx: std::sync::mpsc::Receiver<Vec<u8>>, watcher: notify::PollWatcher, tab_uuid: Uuid) -> Self {
+        Self {
+            r#type,
+            indices,
+            rx,
+            watcher,
+            tab_uuid,
+        }
+    }
 }
 
 #[derive(Copy, Clone)]
