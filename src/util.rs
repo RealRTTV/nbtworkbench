@@ -12,7 +12,7 @@ pub use crate::wasm::{get_clipboard, now, set_clipboard};
 #[must_use]
 #[cfg(not(target_arch = "wasm32"))]
 pub fn get_clipboard() -> Option<String> {
-	cli_clipboard::get_clipboard().ok()
+	cli_clipboard::get_contents().ok()
 }
 
 #[cfg(not(target_arch = "wasm32"))]
