@@ -74,7 +74,7 @@ itertools = "0.14.0"
 winapi = { version = "0.3.9", features = ["wincon"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-x11-clipboard = "=0.9.3"
+xcb = "=1.5.0"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 clipboard = "0.5.0"
