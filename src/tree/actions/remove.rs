@@ -2,26 +2,6 @@ use crate::elements::{NbtElement, NbtElementAndKey};
 use crate::tree::{MutableIndices, OwnedIndices, ParentNavigationInformationMut};
 use crate::workbench::{MarkedLines, WorkbenchAction};
 
-
-/// Properly removes an element under the specified indices, updating the following relevant data
-/// - Mutable Indices
-/// - Bookmarked Lines
-/// - Heights and True Heights
-/// - Workbench Actions
-/// - Horizontal Scroll
-///
-/// # Examples
-/// ```rust
-/// let workbench = ...;
-/// let tab = tab_mut!(workbench);
-/// let result = remove_element(
-///     &mut tab.value,
-///     Indices::from_slice(&[0]).to_owned(),
-///     &mut tab.bookmarks,
-///     &mut workbench.subscription
-/// )?;
-/// tab.append_to_history(result.into_action());
-/// ```
 #[must_use]
 pub fn remove_element<'m1, 'm2: 'm1>(root: &mut NbtElement, indices: OwnedIndices, bookmarks: &mut MarkedLines, mutable_indices: &'m1 mut MutableIndices<'m2>) -> Option<RemoveElementResult> {
     let ParentNavigationInformationMut { true_line_number, parent, idx, parent_indices, .. } = root.navigate_parent_mut(&indices)?;
@@ -30,10 +10,10 @@ pub fn remove_element<'m1, 'm2: 'm1>(root: &mut NbtElement, indices: OwnedIndice
     let (key, value) = unsafe { parent.remove(idx) }?;
     let (height, true_height) = (value.height(), value.true_height());
     let (parent_height, parent_true_height) = (parent.height(), parent.true_height());
-    let (diff, true_diff) = (parent_height.wrapping_sub(old_parent_height), parent_true_height.wrapping_sub(old_parent_true_height));
+    let (diff, true_diff) = (old_parent_height.wrapping_sub(parent_height), old_parent_true_height.wrapping_sub(parent_true_height));
     // exists because of regions
     let been_replaced = !(height == diff && true_height == true_diff);
-    bookmarks.remove(true_line_number..true_line_number);
+    bookmarks.remove(true_line_number..true_line_number + true_height);
     bookmarks[true_line_number..].decrement(diff, true_diff);
 
     mutable_indices.apply(|mutable_indices, ci| {

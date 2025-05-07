@@ -219,6 +219,17 @@ impl MarkedLineSlice {
         }
     }
 
+    pub fn offset(&mut self, value: isize, true_value: isize) {
+        if value == 0 && true_value == 0 {
+            return;
+        }
+
+        for marked_line in &mut self.0 {
+            marked_line.line_number = marked_line.line_number.wrapping_add_signed(value);
+            marked_line.true_line_number = marked_line.true_line_number.wrapping_add_signed(true_value);
+        }
+    }
+
     #[must_use]
     pub fn split_first(&self) -> Option<(MarkedLine, &MarkedLineSlice)> {
         if let [head, rest @ ..] = &self.0 {

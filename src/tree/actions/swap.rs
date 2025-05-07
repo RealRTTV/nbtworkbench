@@ -3,28 +3,6 @@ use crate::elements::NbtElement;
 use crate::tree::{Indices, NavigationInformation, NavigationInformationMut, OwnedIndices};
 use crate::workbench::{MarkedLineSlice, MarkedLines, WorkbenchAction};
 
-/// Properly swaps two elements under their specified indices (requires them to be at the same depth), updating the following relevant data
-/// - Mutable Indices
-/// - Bookmarked Lines
-/// - Heights and True Heights
-/// - User Actions
-/// - Horizontal Scroll
-///
-/// # Examples
-/// ```rust
-/// let workbench = ...;
-/// let tab = tab_mut!(workbench);
-/// let action = swap_element(
-///     &mut tab.value,
-///     None,
-///     Indices::from_slice(&[]).to_owned(),
-///     0,
-///     1,
-///     &mut tab.bookmarks,
-///     &mut self.subscription
-/// ).into_action();
-/// tab.append_to_history(action);
-/// ```
 #[must_use]
 pub fn swap_element_same_depth<'m1, 'm2: 'm1>(root: &mut NbtElement, parent_indices: OwnedIndices, a: usize, b: usize, bookmarks: &mut MarkedLines, mutable_indices: &'m1 mut MutableIndices<'m2>) -> Option<SwapElementResultSameDepth> {
     let (a, b) = if a <= b { (a, b) } else { (b, a) };

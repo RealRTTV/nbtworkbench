@@ -8,10 +8,11 @@ use glob::glob;
 use crate::elements::NbtElement;
 use crate::render::WindowProperties;
 use crate::util::{create_regex, drop_on_separate_thread};
-use crate::widget::{SearchBox, SearchFlags, SearchPredicate, SearchPredicateInner};
-use crate::workbench::FileFormat;
+use crate::widget::{ReplaceBox, SearchBox, SearchFlags, SearchMode, SearchPredicate, SearchPredicateInner, SearchReplacement};
+use crate::workbench::{FileFormat, MarkedLines};
 use crate::workbench::Workbench;
-use crate::{error, log};
+use crate::{config, error, log};
+use crate::tree::MutableIndices;
 
 struct SearchResult {
     path: PathBuf,
@@ -55,7 +56,7 @@ fn get_paths(mut args: Vec<String>) -> (PathBuf, Vec<PathBuf>) {
 }
 
 #[must_use]
-fn get_predicate(args: &mut Vec<String>) -> SearchPredicate {
+fn get_search_predicate(args: &mut Vec<String>) -> SearchPredicate {
     let Some(query) = args.pop() else {
         error!("Could not find <query>");
         std::process::exit(0)
@@ -105,6 +106,55 @@ fn get_predicate(args: &mut Vec<String>) -> SearchPredicate {
 }
 
 #[must_use]
+fn get_search_replacement(args: &mut Vec<String>) -> SearchReplacement {
+    config::DISABLE_FILE_WRITES.store(true, Ordering::Relaxed);
+    
+    let Some(replacement) = args.pop() else {
+        error!("Could not find <replace>");
+        std::process::exit(0)
+    };
+
+    let Some(find) = args.pop() else {
+        error!("Could not find <find>");
+        std::process::exit(0)
+    };
+
+    let search_flags = match get_argument_any(&["--search", "-s"], args).as_deref() {
+        Some("key") => SearchFlags::Keys,
+        Some("value") => SearchFlags::Values,
+        Some("any") | None => SearchFlags::KeysValues,
+        Some(x) => {
+            error!("Invalid search kind '{x}', valid ones are: `key`, `value`, and `any`.");
+            std::process::exit(1);
+        }
+    };
+
+    let exact_match = get_argument_any(&["-em", "--exact-match"], args).is_some();
+
+    let search_mode = match get_argument_any(&["--mode", "-m"], args).as_deref() {
+        Some("normal") | None => SearchMode::String,
+        Some("regex") => SearchMode::Regex,
+        Some("snbt") => SearchMode::Snbt,
+        Some(x) => {
+            error!("Invalid mode '{x}', valid ones are: `normal', `regex`, and `snbt`.");
+            std::process::exit(1);
+        }
+    };
+
+    config::set_search_flags(search_flags);
+    config::set_search_exact_match(exact_match);
+    config::set_search_mode(search_mode);
+    
+    match SearchReplacement::new(find, replacement) {
+        Some(replacement) => replacement,
+        None => {
+            error!("Invalid search replacement (your find value was likely invalid)");
+            std::process::exit(1);
+        }
+    }
+}
+
+#[must_use]
 fn file_size(path: impl AsRef<Path>) -> Option<u64> {
     File::open(path).ok().and_then(|file| file.metadata().ok()).map(|metadata| metadata.len())
 }
@@ -130,7 +180,7 @@ pub fn find() -> ! {
     // one for the exe, one for the `find`
     args.drain(..2).for_each(|_| ());
 
-    let predicate = get_predicate(&mut args);
+    let predicate = get_search_predicate(&mut args);
     let (root, paths) = get_paths(args);
 
     let completed = AtomicU64::new(0);
@@ -143,7 +193,7 @@ pub fn find() -> ! {
         for p in paths {
             let mut path = root.clone();
             path.push(p);
-            results.push(s.spawn(|| 'a: {
+            results.push(s.spawn(|| {
                 let mut workbench = Workbench::new(&mut WindowProperties::Fake, None);
                 workbench.tabs.clear();
 
@@ -152,7 +202,7 @@ pub fn find() -> ! {
                     Err(e) => {
                         error!("File read error: {e}");
                         increment_progress_bar(&completed, file_size(&path).unwrap_or(0), total_size, "Searching");
-                        break 'a None;
+                        return None;
                     }
                 };
 
@@ -161,13 +211,14 @@ pub fn find() -> ! {
                 if let Err(e) = workbench.on_open_file(&path, bytes, &mut WindowProperties::Fake) {
                     error!("File parse error: {e}");
                     increment_progress_bar(&completed, len, total_size, "Searching");
-                    break 'a None;
+                    return None;
                 }
 
                 let tab = workbench.tabs.remove(0);
                 let bookmarks = SearchBox::search0(&tab.value, &predicate);
-                drop_on_separate_thread(tab);
+                
                 increment_progress_bar(&completed, len, total_size, "Searching");
+                drop(tab);
                 if !bookmarks.is_empty() {
                     Some(SearchResult {
                         path,
@@ -193,6 +244,75 @@ pub fn find() -> ! {
     }
 
     std::process::exit(0);
+}
+
+pub fn replace() -> ! {
+    let mut args = std::env::args().collect::<Vec<_>>();
+    args.drain(..2).for_each(|_| ());
+    
+    let replacement = get_search_replacement(&mut args);
+    let (root, paths) = get_paths(args);
+    
+    let completed = AtomicU64::new(0);
+    let total_size = paths.iter().filter_map(file_size).sum::<u64>();
+    
+    print!("Replacing... (0 / {total_size} bytes) (0.0% complete)");
+    let _ = std::io::Write::flush(&mut std::io::stdout());
+    let results = std::thread::scope(|s| {
+        let mut results = vec![];
+        for p in paths {
+            let mut path = root.clone();
+            path.push(p);
+            results.push(s.spawn(|| {
+                let mut workbench = Workbench::new(&mut WindowProperties::Fake, None);
+                workbench.tabs.clear();
+                
+                let bytes = match read(&path) {
+                    Ok(bytes) => bytes,
+                    Err(e) => {
+                        error!("File read error: {e}");
+                        increment_progress_bar(&completed, file_size(&path).unwrap_or(0), total_size, "Replacing");
+                        return None;
+                    }
+                };
+                
+                let len = bytes.len() as u64;
+                
+                if let Err(e) = workbench.on_open_file(&path, bytes, &mut WindowProperties::Fake) {
+                    error!("File parse error: {e}");
+                    increment_progress_bar(&completed, len, total_size, "Replacing");
+                    return None;
+                }
+                
+                let mut tab = workbench.tabs.remove(0);
+                let (bulk, actions) = ReplaceBox::replace0(&mut MarkedLines::new(), &mut MutableIndices::new(&mut None, &mut None), &mut tab.value, &replacement);
+                
+                if let Err(e) = tab.save(false, &mut WindowProperties::Fake) {
+                    error!("File write error: {e}");
+                }
+
+                increment_progress_bar(&completed, len, total_size, "Replacing");
+                
+                drop(bulk);
+                drop(tab);
+                
+                Some((path, actions))
+            }));
+        }
+        results.into_iter().filter_map(|x| x.join().ok()).filter_map(std::convert::identity).collect::<Vec<_>>()
+    });
+
+    log!("\rReplacing ({total_size} / {total_size} bytes) (100.0% complete)");
+
+    if results.is_empty() {
+        log!("No changes made.")
+    }
+
+    for (path, replacements) in results {
+        log!("{path_str} had {replacements} replacement{replacement_suffix}", replacement_suffix = if replacements == 1 { "" } else { "s" }, path_str = path.to_string_lossy());
+    }
+    
+    std::process::exit(0)
 }
 
 pub fn reformat() -> ! {
@@ -268,8 +388,7 @@ pub fn reformat() -> ! {
                 }
 
                 let out = format.encode(&tab.value);
-                drop_on_separate_thread(tab);
-
+                
                 let name = path.file_stem().expect("File must have stem").to_string_lossy().into_owned() + "." + &extension;
 
                 let mut new_path = if let Some(out_dir) = out_dir.as_deref() {
@@ -288,6 +407,8 @@ pub fn reformat() -> ! {
                 }
 
                 increment_progress_bar(&completed, len, total_size, "Reformatting");
+                
+                drop(tab);
             });
         }
     });
@@ -304,6 +425,7 @@ Usage:
   nbtworkbench -?|-h|--help|/?
   nbtworkbench find <path> [(--mode|-m)=(normal|regex|snbt)] [(--search|-s)=(key|value|any)] [--exact-match|-em] <query>
   nbtworkbench reformat (--format|-f)=<format> [(--out-dir|-d)=<out-dir>] [(--out-ext|-e)=<out-ext>] <path>
+  nbtworkbench replace <path> [(--mode|-m)=(normal|regex|snbt)] [(--search|-s)=(key|value|any)] [--exact-match|-em] <find> "<replace>"
 
 Options:
   --version, -v       Displays the version of nbtworkbench you're running.

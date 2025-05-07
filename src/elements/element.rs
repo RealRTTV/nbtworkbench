@@ -621,9 +621,9 @@ impl NbtElement {
 			}
 		}
 		let nbt = Self::Compound(NbtCompound::from_bytes(&mut decoder)?);
-		// if is_ok(&decoder.assert_len(1)) {
-		// 	return err("Compound should end with null-byte");
-		// }
+		if is_ok(&decoder.assert_len(1)) {
+			return err("Format should take all the bytes");
+		}
 		ok(nbt)
 	}
 
@@ -655,9 +655,9 @@ impl NbtElement {
 				},
 				_ => err("Little-endian should start with either Compound or List"),
 			};
-			// if is_ok(&decoder.assert_len(1)) {
-			// 	return err("Little-endian should have a null byte at the end");
-			// }
+			if is_ok(&decoder.assert_len(1)) {
+				return err("Format should take all the bytes");
+			}
 			result
 		}
 	}
@@ -1884,10 +1884,10 @@ impl IndexMut<usize> for NbtElement {
 		self.get_mut(idx)
 			.map(|(_, b)| b)
 			.unwrap_or_else(|| {
-			unsafe { NULL_MUT = NbtElement::NULL; }
-			#[allow(static_mut_refs)]
-			unsafe { &mut NULL_MUT }
-		})
+				unsafe { NULL_MUT = NbtElement::NULL; }
+				#[allow(static_mut_refs)]
+				unsafe { &mut NULL_MUT }
+			})
 	}
 }
 

@@ -6,28 +6,6 @@ use compact_str::{CompactString, ToCompactString};
 use std::ffi::OsStr;
 use std::path::PathBuf;
 
-/// Properly renames an element under its specified indices, keeping these caches correct:
-/// - Mutable Indices
-/// - Bookmarked Lines
-/// - Heights and True Heights
-/// - Workbench Actions
-/// - Horizontal Scroll
-///
-/// # Examples
-/// ```rust
-/// let workbench = ...;
-/// let tab = tab_mut!(workbench);
-/// let action = rename_element(
-///     &mut tab.value,
-///     Indices::from_slice(&[0, 0, 0]).to_owned(),
-///     Some("id".to_compact_string()),
-///     Some("minecraft:stone".to_compact_string()),
-///     &mut tab.path,
-///     &mut tab.name,
-///     window_properties,
-/// )?.into_action();
-/// tab.append_to_history(action);
-/// ```
 #[must_use]
 pub fn rename_element(root: &mut NbtElement, indices: OwnedIndices, key: Option<CompactString>, value: Option<CompactString>, path: &mut Option<PathBuf>, name: &mut Box<str>, window_properties: &mut WindowProperties) -> Option<RenameElementResult> {
     if key.is_none() && value.is_none() {

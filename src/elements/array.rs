@@ -81,10 +81,10 @@ macro_rules! array {
 				array.values.shrink_to_fit();
 				Ok((s.strip_prefix(']').ok_or(s.len())?, array))
 			}
-			
+
 			pub fn from_bytes<'a, D: Decoder<'a>>(decoder: &mut D) -> NbtParseResult<Self> {
 				use super::nbt_parse_result::*;
-				
+
 				unsafe {
 					decoder.assert_len(4)?;
 					let len = decoder.u32() as usize;

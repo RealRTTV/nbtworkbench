@@ -22,6 +22,7 @@
 )]
 #![feature(ptr_as_ref_unchecked)]
 #![feature(likely_unlikely)]
+#![feature(allocator_api)]
 #![windows_subsystem = "windows"]
 
 extern crate core;
@@ -36,7 +37,7 @@ pub mod workbench;
 #[cfg(target_arch = "wasm32")]
 pub mod wasm;
 pub mod util;
-mod tree;
+pub mod tree;
 
 pub use render::assets;
 pub use render::widget;
@@ -159,6 +160,8 @@ pub fn main() -> ! {
 	let first_arg = std::env::args().nth(1);
 	if let Some("find") = first_arg.as_deref() {
 		cli::find()
+	} else if let Some("replace") = first_arg.as_deref() {
+		cli::replace()
 	} else if let Some("reformat") = first_arg.as_deref() {
 		cli::reformat()
 	} else if let Some("--version" | "-v") = first_arg.as_deref() {

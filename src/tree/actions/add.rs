@@ -2,29 +2,6 @@ use crate::elements::{NbtElement, NbtElementAndKey};
 use crate::tree::{MutableIndices, OwnedIndices, ParentNavigationInformationMut};
 use crate::workbench::{MarkedLines, WorkbenchAction};
 
-/// Properly adds an element under the specified indices, updating the following relevant data
-/// - Mutable Indices
-/// - Bookmarked Lines
-/// - Heights and True Heights
-/// - Workbench Actions
-/// - Horizontal Scroll
-///
-/// # Examples
-/// ```rust
-/// let workbench = ...;
-/// let tab = tab_mut!(workbench);
-/// let action = add_element(
-///     &mut tab.value,
-///     None,
-///     NbtElement::from_str(
-///         r#"{"registry":"minecraft:item","value":"minecraft:stone"}"#
-///     ).unwrap().1,
-///     Indices::from_slice(&[0]).to_owned(),
-///     &mut tab.bookmarks,
-///     &mut self.subscription
-/// )?;
-/// tab.append_to_history(action);
-/// ```
 #[must_use]
 pub fn add_element<'m1, 'm2: 'm1>(root: &mut NbtElement, kv: NbtElementAndKey, indices: OwnedIndices, bookmarks: &mut MarkedLines, mutable_indices: &'m1 mut MutableIndices<'m2>) -> Option<AddElementResult> {
     let ParentNavigationInformationMut { true_line_number, parent, idx, parent_indices, .. } = root.navigate_parent_mut(&indices)?;

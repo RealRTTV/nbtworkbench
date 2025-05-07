@@ -13,7 +13,7 @@ NBT Workbench is written completely from scratch in [Rust](https://www.rust-lang
 * ☆ [Web Version](https://rttv.ca/main)
 * Java NBT files (`level.dat` / `hotbar.nbt`)
   * ☆ Supports the new 2025 SNBT format
-  * ☆ Supports heterogeneous lists
+    * ☆ Supports 2025 heterogeneous lists
 * Java region files (`.mca` / `.mcr`)
   * ☆ Supports the new 1.21 LZ4 compression format
   * ☆ Supports the 1.20.2 NBT packet format
@@ -42,8 +42,9 @@ NBT Workbench is written completely from scratch in [Rust](https://www.rust-lang
 * ☆ Colored Text
 * ☆ Remastered NBT Explorer Art
 * ☆ CLI Mode `nbtworkbench -?`
-  * ☆ `nbtworkbench find` to search across multiple files
-  * ☆ `nbtworkbench reformat` to reformat the extensions of multiple files
+  * ☆ `nbtworkbench find` to search across multiple files or directories
+  * ☆ `nbtworkbench replace` to find and replace across multiple files or directories
+  * ☆ `nbtworkbench reformat` to reformat the extensions of multiple files or directories
 * ☆ Tabs
 * ☆ The fastest NBT read / write around
 

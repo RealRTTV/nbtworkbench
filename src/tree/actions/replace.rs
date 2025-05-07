@@ -3,28 +3,6 @@ use crate::elements::{NbtElement, NbtElementAndKey};
 use crate::tree::{OwnedIndices, ParentNavigationInformationMut};
 use crate::workbench::{MarkedLines, WorkbenchAction};
 
-/// Properly replaces an element under the specified indices, updating the following relevant data
-/// - Mutable Indices
-/// - Bookmarked Lines
-/// - Heights and True Heights
-/// - Workbench Actions
-/// - Horizontal Scroll
-///
-/// # Examples
-/// ```rust
-/// let workbench = ...;
-/// let tab = tab_mut!(workbench);
-/// let result = replace_element(
-///     &mut tab.value,
-///     NbtElement::from_str(
-///         r#"{"registry":"minecraft:item","value":"minecraft:stone"}"#
-///     ).unwrap(),
-///     Box::new([0]),
-///     &mut tab.bookmarks,
-///     &mut workbench.subscription
-/// )?;
-/// tab.append_to_history(result.into_action());
-/// ```
 #[must_use]
 pub fn replace_element<'m1, 'm2: 'm1>(root: &mut NbtElement, value: NbtElementAndKey, indices: OwnedIndices, bookmarks: &mut MarkedLines, mutable_indices: &'m1 mut MutableIndices<'m2>) -> Option<ReplaceElementResult> {
     let Some(ParentNavigationInformationMut { parent, true_line_number, idx, .. }) = root.navigate_parent_mut(&indices) else {

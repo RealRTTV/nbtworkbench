@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicBool, Ordering};
 use fxhash::FxHashMap;
 use parking_lot::RwLock;
 use winit::window::Theme;
@@ -13,6 +14,8 @@ struct Config {
     search_exact_match: bool,
     scale: Option<f32>,
 }
+
+pub static DISABLE_FILE_WRITES: AtomicBool = AtomicBool::new(false);
 
 static CONFIG: RwLock<Config> = RwLock::new(Config {
     theme: Theme::Dark,
@@ -67,6 +70,8 @@ fn read0(map: &FxHashMap<String, String>) {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn write() -> bool {
+    if DISABLE_FILE_WRITES.load(Ordering::Relaxed) { return true }
+    
     let Some(config_dir) = dirs::config_dir() else { return false };
     let _ = std::fs::create_dir(config_dir.join("nbtworkbench"));
     let path = config_dir.join("nbtworkbench/config.txt");
