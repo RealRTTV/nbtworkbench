@@ -7,7 +7,7 @@ use glob::glob;
 
 use crate::elements::NbtElement;
 use crate::render::WindowProperties;
-use crate::util::{create_regex, drop_on_separate_thread};
+use crate::util::create_regex;
 use crate::widget::{ReplaceBox, SearchBox, SearchFlags, SearchMode, SearchPredicate, SearchPredicateInner, SearchReplacement};
 use crate::workbench::{FileFormat, MarkedLines};
 use crate::workbench::Workbench;

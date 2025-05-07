@@ -27,7 +27,7 @@ pub mod nbt_parse_result {
     pub type NbtParseResult<T> = anyhow::Result<T>;
 
     #[cfg(not(debug_assertions))]
-    pub type NbtParseResult = Option<NbtElement>;
+    pub type NbtParseResult<T> = Option<T>;
 
     #[must_use]
     #[cfg_attr(not(debug_assertions), inline(always))]
