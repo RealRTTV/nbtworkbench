@@ -4,7 +4,6 @@ use std::cmp::Ordering;
 use std::fmt::{Debug, Formatter};
 use std::hint::likely;
 use std::mem::MaybeUninit;
-use clipboard::ClipboardProvider;
 use crate::render::VertexBufferBuilder;
 
 #[cfg(target_arch = "wasm32")]
@@ -13,14 +12,12 @@ pub use crate::wasm::{get_clipboard, now, set_clipboard};
 #[must_use]
 #[cfg(not(target_arch = "wasm32"))]
 pub fn get_clipboard() -> Option<String> {
-    let mut ctx = clipboard::ClipboardContext::new().ok()?;
-	ctx.get_contents().ok()
+	cli_clipboard::get_clipboard().ok()
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn set_clipboard(value: String) -> bool {
-	let Ok(mut ctx) = clipboard::ClipboardContext::new() else { return false };
-	ctx.set_contents(value).is_ok()
+	cli_clipboard::set_contents(value).is_ok()
 }
 
 #[must_use]
