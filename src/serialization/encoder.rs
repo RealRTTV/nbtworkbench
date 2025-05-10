@@ -39,7 +39,7 @@ impl Write for UncheckedBufWriter {
 	}
 
 	fn write_all(&mut self, buf: &[u8]) -> std::io::Result<()> {
-		UncheckedBufWriter::write_all(self, buf);
+		UncheckedBufWriter::write(self, buf);
 		Ok(())
 	}
 
