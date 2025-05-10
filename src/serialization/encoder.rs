@@ -3,8 +3,6 @@ use std::hint::likely;
 use std::io::Write;
 use std::mem::MaybeUninit;
 
-const WIDTH: usize = 1 << 24;
-
 pub struct UncheckedBufWriter {
 	buf: *mut MaybeUninit<u8>,
 	buf_len: usize,
@@ -15,7 +13,7 @@ pub struct UncheckedBufWriter {
 impl Default for UncheckedBufWriter {
 	fn default() -> Self {
 		Self {
-			buf: unsafe { alloc(Layout::array::<u8>(WIDTH).unwrap_unchecked()).cast::<MaybeUninit<u8>>() },
+			buf: unsafe { alloc(Layout::array::<u8>(Self::BUFFER_WIDTH).unwrap_unchecked()).cast::<MaybeUninit<u8>>() },
 			buf_len: 0,
 			inner: core::ptr::null_mut(),
 			inner_len: 0,
@@ -28,7 +26,7 @@ impl Drop for UncheckedBufWriter {
 		unsafe {
 			dealloc(
 				self.buf.cast::<u8>(),
-				Layout::array::<u8>(WIDTH).unwrap_unchecked(),
+				Layout::array::<u8>(Self::BUFFER_WIDTH).unwrap_unchecked(),
 			);
 		}
 	}
@@ -40,6 +38,11 @@ impl Write for UncheckedBufWriter {
 		Ok(buf.len())
 	}
 
+	fn write_all(&mut self, buf: &[u8]) -> std::io::Result<()> {
+		UncheckedBufWriter::write_all(self, buf);
+		Ok(())
+	}
+
 	fn flush(&mut self) -> std::io::Result<()> {
 		UncheckedBufWriter::flush(self);
 		Ok(())
@@ -47,9 +50,11 @@ impl Write for UncheckedBufWriter {
 }
 
 impl UncheckedBufWriter {
+	const BUFFER_WIDTH: usize = 1 << 24;
+	
 	pub fn new() -> Self { Self::default() }
 
-	pub const fn remaining(&self) -> usize { WIDTH - 1 - self.buf_len }
+	pub const fn remaining(&self) -> usize { Self::BUFFER_WIDTH - 1 - self.buf_len }
 
 	pub fn write(&mut self, bytes: &[u8]) {
 		unsafe {
@@ -78,8 +83,8 @@ impl UncheckedBufWriter {
 	#[cold]
 	#[inline(never)]
 	unsafe fn write_pushing_cold(&mut self, bytes: &[u8]) {
-		let malloc_size = (self.inner_len + WIDTH - 1) & !(WIDTH - 1);
-		let new_size = (self.inner_len + bytes.len() + self.buf_len + WIDTH - 1) & !(WIDTH - 1);
+		let malloc_size = (self.inner_len + Self::BUFFER_WIDTH - 1) & !(Self::BUFFER_WIDTH - 1);
+		let new_size = (self.inner_len + bytes.len() + self.buf_len + Self::BUFFER_WIDTH - 1) & !(Self::BUFFER_WIDTH - 1);
 		self.inner = if self.inner.is_null() {
 			alloc(Layout::array::<u8>(new_size).unwrap_unchecked())
 		} else {
@@ -104,7 +109,7 @@ impl UncheckedBufWriter {
 		if self.buf_len == 0 { return }
 		
 		unsafe {
-			let malloc_size = (self.inner_len + WIDTH - 1) & !(WIDTH - 1);
+			let malloc_size = (self.inner_len + Self::BUFFER_WIDTH - 1) & !(Self::BUFFER_WIDTH - 1);
 			self.inner = if self.inner.is_null() {
 				alloc(Layout::array::<u8>(self.inner_len + self.buf_len).unwrap_unchecked())
 			} else {
@@ -122,7 +127,8 @@ impl UncheckedBufWriter {
 	}
 
 	#[must_use]
-	pub fn finish(self) -> Vec<u8> {
+	pub fn finish(mut self) -> Vec<u8> {
+		self.flush();
 		unsafe { Vec::from_raw_parts(self.inner, self.inner_len, self.inner_len) }
 	}
 }

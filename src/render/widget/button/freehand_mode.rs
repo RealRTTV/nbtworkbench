@@ -1,7 +1,7 @@
 use fxhash::FxHashSet;
 use winit::event::MouseButton;
 use crate::assets::{ENABLED_FREEHAND_MODE_UV, FREEHAND_MODE_UV};
-use crate::render::VertexBufferBuilder;
+use crate::render::{TextColor, VertexBufferBuilder};
 use crate::util::{AxisAlignedBoundingBox, Vec2u};
 use crate::widget::{ButtonWidget, ButtonWidgetContext, ButtonWidgetContextMut};
 
@@ -41,6 +41,7 @@ impl ButtonWidget for FreehandModeButton {
         let freehand_mode = ctx.tab.freehand_mode;
         let uv = if freehand_mode || is_within_bounds { ENABLED_FREEHAND_MODE_UV } else { FREEHAND_MODE_UV };
         if is_within_bounds {
+            builder.color = TextColor::White.to_raw();
             builder.draw_tooltip(&["Freehand Mode (Ctrl + Shift + F)"], mouse, false);
         }
         builder.draw_texture(aabb.low(), uv, (16, 16));

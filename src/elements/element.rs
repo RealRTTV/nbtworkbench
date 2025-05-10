@@ -1184,14 +1184,14 @@ impl NbtElement {
 	#[must_use]
 	pub fn create_drop_indices(&self, kv: NbtElementAndKeyRef, mut y: usize, x: usize) -> Option<OwnedIndices> {
 		let mut indices = OwnedIndices::new();
-		match self.create_drop_indices0(kv, &mut y, x, 0, &mut indices) {
+		match self.create_drop_indices0(kv, &mut y, 0, x, &mut indices) {
 			DropResult::Dropped => Some(indices),
 			DropResult::Missed | DropResult::Failed => None,
 		}
 	}
 
 	#[must_use]
-	pub(super) fn create_drop_indices0(&self, kv: NbtElementAndKeyRef, y: &mut usize, current_depth: usize, x: usize, indices: &mut OwnedIndices) -> DropResult {
+	pub(super) fn create_drop_indices0(&self, kv: NbtElementAndKeyRef, y: &mut usize, mut current_depth: usize, x: usize, indices: &mut OwnedIndices) -> DropResult {
 		let height_px = self.height() * 16;
 		if *y >= height_px + 8 {
 			*y -= height_px;
@@ -1219,6 +1219,7 @@ impl NbtElement {
 			}
 
 			if is_open && !self.is_empty() {
+				current_depth += 1;
 				indices.push(0);
 				let ptr_idx = indices.len() - 1;
 				for (idx, child) in iter.enumerate() {
@@ -1230,7 +1231,7 @@ impl NbtElement {
 						return DropResult::Dropped;
 					}
 
-					match child.create_drop_indices0(kv, y, current_depth + 1, x, indices) {
+					match child.create_drop_indices0(kv, y, current_depth, x, indices) {
 						DropResult::Missed => (),
 						x @ (DropResult::Dropped | DropResult::Failed) => return x,
 					}
@@ -1438,7 +1439,7 @@ impl NbtElement {
 		}
 	}
 
-	// todo: add wasm32 and non-wasm32 editions for scope expands on region files
+	// todo: add wasm32 and non-wasm32 editions for scope expands on region-files
 	pub fn shut(&mut self) {
 		unsafe {
 			match self.id() {

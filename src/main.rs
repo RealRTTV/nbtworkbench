@@ -137,12 +137,10 @@ pub static mut WINDOW_PROPERTIES: render::WindowProperties = render::WindowPrope
 /// # Refactor
 /// * render trees using [`RenderLine`](RenderLine) struct/enum
 /// * rendering code is duplicated af
-/// * add [`Indices`](workbench::tree_travel::Indices)
-/// * refactor drop to return indices - and potentially use it for drop rendering code
 /// * rename line_number and true_line_number to y and line_number respectively
-/// * make button widgets on the screen coded better
 /// # Long-Term Goals
 /// * smart screen
+/// * add multi-cursor
 /// * [chunk](elements::chunk::NbtChunk) section rendering
 /// # Minor Features
 /// * [`last_modified`](elements::chunk::NbtChunk) field actually gets the ability to be set

@@ -2,7 +2,7 @@ use fxhash::FxHashSet;
 use winit::event::MouseButton;
 use crate::assets::{BASE_Z, HOVERED_WIDGET_UV, SORT_COMPOUND_BY_NAME_UV, SORT_COMPOUND_BY_NOTHING_UV, SORT_COMPOUND_BY_TYPE_UV};
 use crate::config;
-use crate::render::VertexBufferBuilder;
+use crate::render::{TextColor, VertexBufferBuilder};
 use crate::util::{AxisAlignedBoundingBox, Vec2u};
 use crate::widget::{ButtonWidget, ButtonWidgetContext, ButtonWidgetContextMut};
 use crate::workbench::SortAlgorithm;
@@ -50,6 +50,7 @@ impl ButtonWidget for SortAlgorithmButton {
         };
 
         if widget_uv == HOVERED_WIDGET_UV {
+            builder.color = TextColor::White.to_raw();
             builder.draw_tooltip(&[&format!("Compound Sorting Algorithm ({sort_algorithm})")], mouse, false);
         }
 

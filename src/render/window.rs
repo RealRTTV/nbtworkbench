@@ -769,7 +769,7 @@ impl WindowProperties {
 		Self::Real(window)
 	}
 
-	pub fn window_title(&mut self, title: &str) -> &mut Self {
+	pub fn set_window_title(&self, title: &str) -> &Self {
 		if let Self::Real(window) = self {
 			window.set_title(title);
 			#[cfg(target_arch = "wasm32")]
@@ -778,12 +778,5 @@ impl WindowProperties {
 			}
 		}
 		self
-	}
-
-	pub fn get_window_size(&self) -> Option<PhysicalSize<u32>> {
-		match self {
-			Self::Real(window) => Some(window.inner_size()),
-			Self::Fake => None,
-		}
 	}
 }

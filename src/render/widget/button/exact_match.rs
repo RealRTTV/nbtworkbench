@@ -2,7 +2,7 @@ use fxhash::FxHashSet;
 use winit::event::MouseButton;
 use crate::assets::{BASE_Z, EXACT_MATCH_OFF_UV, EXACT_MATCH_ON_UV, HOVERED_WIDGET_UV};
 use crate::config;
-use crate::render::VertexBufferBuilder;
+use crate::render::{TextColor, VertexBufferBuilder};
 use crate::util::{AxisAlignedBoundingBox, Vec2u};
 use crate::widget::{ButtonWidget, ButtonWidgetContext, ButtonWidgetContextMut, SEARCH_BOX_END_X};
 
@@ -44,6 +44,7 @@ impl ButtonWidget for ExactMatchButton {
         let uv = if exact_match || !has_exact_match { EXACT_MATCH_ON_UV } else { EXACT_MATCH_OFF_UV };
 
         if widget_uv == HOVERED_WIDGET_UV {
+            builder.color = TextColor::White.to_raw();            
             builder.draw_tooltip(&[if exact_match || !has_exact_match { search_mode.get_exact_search_on_name() } else { search_mode.get_exact_search_off_name() }], mouse, false);
         }
 

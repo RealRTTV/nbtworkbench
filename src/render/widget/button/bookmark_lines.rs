@@ -1,7 +1,7 @@
 use fxhash::FxHashSet;
 use winit::event::MouseButton;
 use crate::assets::{BASE_Z, HOVERED_WIDGET_UV, SEARCH_APPEND_BOOKMARKS_UV, SEARCH_BOOKMARKS_UV};
-use crate::render::VertexBufferBuilder;
+use crate::render::{TextColor, VertexBufferBuilder};
 use crate::util::{AxisAlignedBoundingBox, Vec2u};
 use crate::widget::{ButtonWidget, ButtonWidgetContext, ButtonWidgetContextMut, SEARCH_BOX_END_X};
 
@@ -46,6 +46,7 @@ impl ButtonWidget for BookmarkLinesButton {
         let uv = if ctx.shift { SEARCH_APPEND_BOOKMARKS_UV } else { SEARCH_BOOKMARKS_UV };
         
         if widget_uv == HOVERED_WIDGET_UV {
+            builder.color = TextColor::White.to_raw();
             builder.draw_tooltip(&[if ctx.shift { "Append to search (Shift + Enter)" } else { "Search (Enter)" }], mouse, false);
         }
 

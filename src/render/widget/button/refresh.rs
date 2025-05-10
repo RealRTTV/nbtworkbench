@@ -1,5 +1,5 @@
 use crate::assets::{DISABLED_REFRESH_UV, REFRESH_UV, UNSELECTED_WIDGET_UV};
-use crate::render::VertexBufferBuilder;
+use crate::render::{TextColor, VertexBufferBuilder};
 use crate::util::{AxisAlignedBoundingBox, Vec2u};
 use crate::widget::{Alert, ButtonWidget, ButtonWidgetContext, ButtonWidgetContextMut};
 
@@ -55,6 +55,7 @@ impl ButtonWidget for RefreshButton {
         };
 
         if is_within_bounds {
+            builder.color = TextColor::White.to_raw();
             #[cfg(target_arch = "wasm32")]
             builder.draw_tooltip(&["Refresh Tab (Disabled on WebAssembly version)"], mouse, false);
             #[cfg(not(target_arch = "wasm32"))]

@@ -2,7 +2,7 @@ use fxhash::FxHashSet;
 use winit::event::MouseButton;
 use crate::assets::{BASE_Z, HOVERED_WIDGET_UV};
 use crate::config;
-use crate::render::VertexBufferBuilder;
+use crate::render::{TextColor, VertexBufferBuilder};
 use crate::util::{AxisAlignedBoundingBox, Vec2u};
 use crate::widget::{ButtonWidget, ButtonWidgetContext, ButtonWidgetContextMut, SEARCH_BOX_END_X};
 
@@ -39,6 +39,7 @@ impl ButtonWidget for SearchModeButton {
         let uv = search_mode.uv();
 
         if widget_uv == HOVERED_WIDGET_UV {
+            builder.color = TextColor::White.to_raw();
             builder.draw_tooltip(&[&format!("{search_mode} Mode")], mouse, false);
         }
 

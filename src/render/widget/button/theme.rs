@@ -3,7 +3,7 @@ use winit::event::MouseButton;
 use winit::window::Theme;
 use crate::assets::{DIM_LIGHTBULB_UV, LIGHTBULB_UV};
 use crate::config;
-use crate::render::VertexBufferBuilder;
+use crate::render::{TextColor, VertexBufferBuilder};
 use crate::util::{AxisAlignedBoundingBox, Vec2u};
 use crate::widget::{ButtonWidget, ButtonWidgetContext, ButtonWidgetContextMut};
 
@@ -41,6 +41,7 @@ impl ButtonWidget for ThemeButton {
         let aabb = Self::bounds(window_dims);
         let is_within_bounds = aabb.contains(mouse);
         if is_within_bounds {
+            builder.color = TextColor::White.to_raw();
             builder.draw_tooltip(&["Change Theme (Ctrl + Alt + T)"], mouse, false);
         }
         builder.draw_texture(aabb.low(), if is_within_bounds { DIM_LIGHTBULB_UV } else { LIGHTBULB_UV }, (16, 16));

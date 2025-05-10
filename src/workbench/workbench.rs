@@ -9,7 +9,7 @@ use crate::assets::{ZOffset, ACTION_WHEEL_Z, BASE_TEXT_Z, BASE_Z, CLOSED_WIDGET_
 use crate::elements::{CompoundMap, NbtByte, NbtByteArray, NbtChunk, NbtCompound, NbtDouble, NbtElement, NbtElementAndKey, NbtFloat, NbtInt, NbtIntArray, NbtList, NbtLong, NbtLongArray, NbtRegion, NbtShort, NbtString};
 use crate::render::{RenderContext, TextColor, VertexBufferBuilder, WindowProperties, MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH, WINDOW_HEIGHT, WINDOW_WIDTH};
 use crate::serialization::{BigEndianDecoder, Decoder, UncheckedBufWriter};
-use crate::tree::{add_element, close_element, expand_element, open_element, remove_element, replace_element, swap_element_same_depth, Indices, MutableIndices, NavigationInformation, OwnedIndices, ParentNavigationInformationMut, RemoveElementResult, TraversalInformation, TraversalInformationMut};
+use crate::tree::{add_element, close_element, expand_element, open_element, remove_element, replace_element, swap_element_same_depth, AddElementResult, Indices, MutableIndices, NavigationInformation, OwnedIndices, ParentNavigationInformationMut, RemoveElementResult, TraversalInformation, TraversalInformationMut};
 use crate::util::{drop_on_separate_thread, get_clipboard, now, nth, set_clipboard, LinkedQueue, StrExt, Vec2u};
 use crate::widget::{get_cursor_idx, get_cursor_left_jump_idx, get_cursor_right_jump_idx, Alert, BookmarkLinesButton, ButtonWidget, ButtonWidgetContext, ButtonWidgetContextMut, ExactMatchButton, FreehandModeButton, Notification, NotificationKind, RefreshButton, ReplaceBox, ReplaceBoxKeyResult, SearchBox, SearchBoxKeyResult, SearchFlagsButton, SearchModeButton, SelectedText, SelectedTextAdditional, SelectedTextKeyResult, SortAlgorithmButton, Text, ThemeButton, SEARCH_BOX_END_X, SEARCH_BOX_START_X, TEXT_DOUBLE_CLICK_INTERVAL};
 use crate::{config, mutable_indices};
@@ -72,7 +72,6 @@ pub struct Workbench {
 }
 
 impl Workbench {
-    // todo, use ..unsafe { core::mem::zeroed() }
     #[must_use]
     pub const unsafe fn uninit() -> Self {
         Self {
@@ -572,7 +571,7 @@ impl Workbench {
         let now = now();
         let shift = self.shift();
 
-        if tab!(self).held_entry.is_none() || tab!(self).freehand_mode || now - tab!(self).last_selected_text_interaction.2 <= LINE_DOUBLE_CLICK_INTERVAL { return false };
+        if tab!(self).held_entry.is_some() || tab!(self).freehand_mode || now - tab!(self).last_selected_text_interaction.2 <= LINE_DOUBLE_CLICK_INTERVAL { return false };
 
         if let InteractionInformation::Content { is_in_left_margin: false, y, .. } = get_interaction_information!(self) {
             let tab = tab_mut!(self);
@@ -595,7 +594,7 @@ impl Workbench {
     fn try_steal(&mut self, can_initialize: bool) -> bool {
         let now = now();
 
-        if tab!(self).held_entry.is_none() || tab!(self).freehand_mode { return false };
+        if tab!(self).held_entry.is_some() || tab!(self).freehand_mode { return false };
         let is_grid_layout = tab!(self).value.as_region().is_some_and(|region| region.is_grid_layout());
 
         if let InteractionInformation::Content { is_in_left_margin: false, depth, x, y, .. } = get_interaction_information!(self) {
@@ -627,7 +626,7 @@ impl Workbench {
             };
 
             value.shut();
-            tab.append_to_history(WorkbenchAction::AddFromHeldEntry);
+            tab.append_to_history(WorkbenchAction::RemoveToHeldEntry);
             tab.held_entry = Some(HeldEntry::from_indices((key, value), indices));
             true
         } else {
@@ -755,17 +754,19 @@ impl Workbench {
         let left_margin = self.left_margin();
 
         if self.mouse_y <= HEADER_SIZE { return false }
-        if self.mouse_x + horizontal_scroll < left_margin { return false }
+        if self.mouse_x + horizontal_scroll + 16 < left_margin { return false }
         let y = self.mouse_y - HEADER_SIZE + self.scroll();
-        let x = (self.mouse_x + horizontal_scroll - left_margin) / 16;
+        let x = (self.mouse_x + horizontal_scroll - left_margin) / 16 - 1;
         let tab = tab_mut!(self);
         let Some(HeldEntry { kv, indices_history }) = tab.held_entry.take() else { return false };
 
         if let Some(indices) = tab.value.create_drop_indices((kv.0.as_deref(), &kv.1), y, x) {
             match add_element(&mut tab.value, kv, indices, &mut tab.bookmarks, mutable_indices!(self, tab)) {
-                Some(result) => {
-                    tab.value.expand_to_indices(&result.indices);
-                    tab.append_to_history(result.into_action());
+                Some(AddElementResult { indices, old_value }) => {
+                    tab.value.expand_to_indices(&indices);
+                    let Some(old_kv) = tab.value.get_kv(&indices) else { return false };
+                    let old_key = old_kv.0.map(|key| key.to_compact_string());
+                    tab.append_to_history(WorkbenchAction::AddFromHeldEntry { indices, old_key, old_value, indices_history });
                     true
                 },
                 None => {
@@ -1748,7 +1749,7 @@ impl Workbench {
         self.tab = idx.min(self.tabs.len() - 1);
         // on any tab switch this should be discarded.
         self.steal_animation_data = None;
-        window_properties.window_title(format!("{} - NBT Workbench", tab!(self).name).as_str());
+        window_properties.set_window_title(format!("{} - NBT Workbench", tab!(self).name).as_str());
     }
 
     // todo: replace commented std::time::Instant::now() with debug pie for ms to complete and pct

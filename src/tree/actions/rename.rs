@@ -46,7 +46,7 @@ pub fn rename_element(root: &mut NbtElement, indices: OwnedIndices, key: Option<
             .and_then(OsStr::to_str)
             .map(ToOwned::to_owned)
         {
-            window_properties.window_title(&format!("{new_name} - NBT Workbench"));
+            window_properties.set_window_title(&format!("{new_name} - NBT Workbench"));
             let old_name = core::mem::replace(name, new_name.into_boxed_str());
             Some(RenameElementResult {
                 indices: OwnedIndices::new(),
