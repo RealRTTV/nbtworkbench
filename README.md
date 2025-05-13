@@ -2,10 +2,11 @@
 
 ### [Downloads & Releases here!](https://github.com/RealRTTV/nbtworkbench/releases)
 
-NBT Workbench is an [NBT](https://wiki.vg/NBT) editing application,
+NBT Workbench is an [NBT](https://minecraft.wiki/w/NBT_format) editing application,
 the successor to [NBT Studio](https://github.com/tryashtar/nbt-studio),
 which is in turn the successor to [NBTExplorer](https://github.com/jaquadro/NBTExplorer).
-NBT Workbench is written completely from scratch in [Rust](https://www.rust-lang.org/) and designed to be as performant and efficient as possible.
+NBT Workbench is written completely from scratch in [Rust](https://www.rust-lang.org/) and designed to be as performant and efficient as possible.\
+<small>Please note that this is my first "big" project, so bug reporting really helps me out here!</small>
 
 ## <img src="icons/features.png" width=16> Features
 (Features marked with a ☆ are new and not available in NBT Studio or Explorer):
