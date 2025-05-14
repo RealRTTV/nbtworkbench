@@ -1,3 +1,4 @@
+use std::alloc::{Allocator, Layout};
 use compact_str::{CompactString, ToCompactString};
 use regex::{Regex, RegexBuilder};
 use std::cmp::Ordering;
@@ -138,53 +139,150 @@ pub const fn valid_unescaped_char(byte: u8) -> bool { matches!(byte, b'0'..=b'9'
 #[must_use]
 pub const fn valid_starting_char(byte: u8) -> bool { matches!(byte, b'A'..=b'Z' | b'a'..=b'z' | b'_') }
 
+
+/// # Safety
+/// `a` or `b` must not contain values repeated (such that `Ord::cmp()` returns Ordering::Equal) between elements within their own set
 #[must_use]
-pub fn combined_two_sorted<T: Ord>(a: Box<[T]>, b: Box<[T]>) -> Vec<T> {
-	let mut a = unsafe { core::mem::transmute::<_, Box<[MaybeUninit<T>]>>(a) };
-	let mut a_idx = 0;
-	let mut b = unsafe { core::mem::transmute::<_, Box<[MaybeUninit<T>]>>(b) };
-	let mut b_idx = 0;
-	let mut out = Vec::with_capacity(a.len() + b.len());
-	let spare = out.spare_capacity_mut();
-	let mut idx = 0;
+pub unsafe fn union_two_sorted_no_duplicates<T: Ord>(a: Vec<T>, b: Vec<T>) -> Vec<T> {
+	let (a_root_ptr, a_len, a_cap, a_alloc) = a.into_parts_with_alloc();
+	let mut a_ptr = a_root_ptr.as_ptr();
+	let a_end_ptr = a_ptr.add(a_len);
 
-	while a_idx < a.len() && b_idx < b.len() {
-		let a = &mut a[a_idx];
-		let b = &mut b[b_idx];
+	let (b_root_ptr, b_len, b_cap, b_alloc) = b.into_parts_with_alloc();
+	let mut b_ptr = b_root_ptr.as_ptr();
+	let b_end_ptr = b_ptr.add(b_len);
 
-		// SAFETY: the values are all initialized initially, once this is uninit memory, we go to the next `idx` so we never read it again
-		match unsafe { a.assume_init_ref().cmp(b.assume_init_ref()) } {
+	let mut out = Vec::with_capacity(a_len + b_len);
+
+	while a_ptr < a_end_ptr && b_ptr < b_end_ptr {
+		let a = a_ptr.as_mut_unchecked();
+		let b = b_ptr.as_mut_unchecked();
+
+		match Ord::cmp(a, b) {
 			Ordering::Less => {
-				spare[idx].write(unsafe { core::mem::replace(a, MaybeUninit::uninit()).assume_init() });
-				a_idx += 1;
-				idx += 1;
+				out.push(a_ptr.cast::<MaybeUninit<T>>().replace(MaybeUninit::uninit()).assume_init());
+				a_ptr = a_ptr.add(1);
 			}
 			Ordering::Equal => {
-				spare[idx].write(unsafe { core::mem::replace(a, MaybeUninit::uninit()).assume_init() });
-				drop(unsafe { core::mem::replace(b, MaybeUninit::uninit()).assume_init() });
-				a_idx += 1;
-				b_idx += 1;
-				idx += 1;
+				out.push(a_ptr.cast::<MaybeUninit<T>>().replace(MaybeUninit::uninit()).assume_init());
+				b_ptr.cast::<MaybeUninit<T>>().replace(MaybeUninit::uninit()).assume_init_drop();
+				a_ptr = a_ptr.add(1);
+				b_ptr = b_ptr.add(1);
 			}
 			Ordering::Greater => {
-				spare[idx].write(unsafe { core::mem::replace(b, MaybeUninit::uninit()).assume_init() });
-				b_idx += 1;
-				idx += 1;
+				out.push(b_ptr.cast::<MaybeUninit<T>>().replace(MaybeUninit::uninit()).assume_init());
+				b_ptr = b_ptr.add(1);
 			}
 		}
 	}
 
-	unsafe { spare.as_mut_ptr().add(idx).copy_from_nonoverlapping(a.as_ptr().add(a_idx), a.len() - a_idx) }
-	idx += a.len() - a_idx;
-	unsafe { spare.as_mut_ptr().add(idx).copy_from_nonoverlapping(b.as_ptr().add(b_idx), b.len() - b_idx) }
-	idx += b.len() - b_idx;
+	if a_ptr < a_end_ptr {
+		let remaining = a_end_ptr.offset_from_unsigned(a_ptr);
+		out.as_mut_ptr().copy_from_nonoverlapping(a_ptr, remaining);
+		out.set_len(out.len() + remaining);
+	} else {
+		let remaining = b_end_ptr.offset_from_unsigned(b_ptr);
+		out.as_mut_ptr().copy_from_nonoverlapping(b_ptr, remaining);
+		out.set_len(out.len() + remaining);
+	}
 
-	// SAFETY: all the values used have been copied over, all the unused values have been dropped.
-	drop(a);
-	drop(b);
+	a_alloc.deallocate(a_root_ptr.cast::<u8>(), Layout::array::<T>(a_cap).unwrap_unchecked());
+	b_alloc.deallocate(b_root_ptr.cast::<u8>(), Layout::array::<T>(b_cap).unwrap_unchecked());
 
-	// we have written `idx` times
-	unsafe { out.set_len(idx); }
+	out
+}
+
+/// # Safety
+/// `a` or `b` must not contain values repeated (such that `Ord::cmp()` returns Ordering::Equal) between elements within their own set
+#[must_use]
+pub unsafe fn intersection_two_sorted_no_duplicates<T: Ord>(a: Vec<T>, b: Vec<T>) -> Vec<T> {
+	let (a_root_ptr, a_len, a_cap, a_alloc) = a.into_parts_with_alloc();
+	let mut a_ptr = a_root_ptr.as_ptr();
+	let a_end_ptr = a_ptr.add(a_len);
+
+	let (b_root_ptr, b_len, b_cap, b_alloc) = b.into_parts_with_alloc();
+	let mut b_ptr = b_root_ptr.as_ptr();
+	let b_end_ptr = b_ptr.add(b_len);
+
+	let mut out = Vec::with_capacity(a_len + b_len);
+
+	while a_ptr < a_end_ptr && b_ptr < b_end_ptr {
+		let a = a_ptr.as_mut_unchecked();
+		let b = b_ptr.as_mut_unchecked();
+
+		match Ord::cmp(a, b) {
+			Ordering::Less => {
+				a_ptr.cast::<MaybeUninit<T>>().replace(MaybeUninit::uninit()).assume_init_drop();
+				a_ptr = a_ptr.add(1);
+			}
+			Ordering::Equal => {
+				out.push(a_ptr.cast::<MaybeUninit<T>>().replace(MaybeUninit::uninit()).assume_init());
+				b_ptr.cast::<MaybeUninit<T>>().replace(MaybeUninit::uninit()).assume_init_drop();
+				a_ptr = a_ptr.add(1);
+				b_ptr = b_ptr.add(1);
+			}
+			Ordering::Greater => {
+				b_ptr.cast::<MaybeUninit<T>>().replace(MaybeUninit::uninit()).assume_init_drop();
+				b_ptr = b_ptr.add(1);
+			}
+		}
+	}
+
+	a_alloc.deallocate(a_root_ptr.cast::<u8>(), Layout::array::<T>(a_cap).unwrap_unchecked());
+	b_alloc.deallocate(b_root_ptr.cast::<u8>(), Layout::array::<T>(b_cap).unwrap_unchecked());
+
+	out
+}
+
+/// # Safety
+/// `a` or `b` must not contain values repeated (such that `Ord::cmp()` returns Ordering::Equal) between elements within their own set
+#[must_use]
+pub unsafe fn symmetric_difference_two_sorted_no_duplicates<T: Ord>(a: Vec<T>, b: Vec<T>) -> Vec<T> {
+	let (a_root_ptr, a_len, a_cap, a_alloc) = a.into_parts_with_alloc();
+	let mut a_ptr = a_root_ptr.as_ptr();
+	let a_end_ptr = a_ptr.add(a_len);
+
+	let (b_root_ptr, b_len, b_cap, b_alloc) = b.into_parts_with_alloc();
+	let mut b_ptr = b_root_ptr.as_ptr();
+	let b_end_ptr = b_ptr.add(b_len);
+
+	let mut out = Vec::with_capacity(a_len + b_len);
+
+	while a_ptr < a_end_ptr && b_ptr < b_end_ptr {
+		let a = a_ptr.as_mut_unchecked();
+		let b = b_ptr.as_mut_unchecked();
+
+		match Ord::cmp(a, b) {
+			Ordering::Less => {
+				out.push(a_ptr.cast::<MaybeUninit<T>>().replace(MaybeUninit::uninit()).assume_init());
+				a_ptr = a_ptr.add(1);
+			}
+			Ordering::Equal => {
+				a_ptr.cast::<MaybeUninit<T>>().replace(MaybeUninit::uninit()).assume_init_drop();
+				b_ptr.cast::<MaybeUninit<T>>().replace(MaybeUninit::uninit()).assume_init_drop();
+				a_ptr = a_ptr.add(1);
+				b_ptr = b_ptr.add(1);
+			}
+			Ordering::Greater => {
+				out.push(b_ptr.cast::<MaybeUninit<T>>().replace(MaybeUninit::uninit()).assume_init());
+				b_ptr = b_ptr.add(1);
+			}
+		}
+	}
+
+	if a_ptr < a_end_ptr {
+		let remaining = a_end_ptr.offset_from_unsigned(a_ptr);
+		out.as_mut_ptr().copy_from_nonoverlapping(a_ptr, remaining);
+		out.set_len(out.len() + remaining);
+	} else {
+		let remaining = b_end_ptr.offset_from_unsigned(b_ptr);
+		out.as_mut_ptr().copy_from_nonoverlapping(b_ptr, remaining);
+		out.set_len(out.len() + remaining);
+	}
+
+	a_alloc.deallocate(a_root_ptr.cast::<u8>(), Layout::array::<T>(a_cap).unwrap_unchecked());
+	b_alloc.deallocate(b_root_ptr.cast::<u8>(), Layout::array::<T>(b_cap).unwrap_unchecked());
+
 	out
 }
 
@@ -319,8 +417,7 @@ pub trait StrExt {
 impl StrExt for str {
 
 	#[optimize(speed)]
-	#[allow(clippy::too_many_lines)]
-	fn snbt_string_read(mut self: &Self) -> Result<(CompactString, &Self), usize> {
+		fn snbt_string_read(mut self: &Self) -> Result<(CompactString, &Self), usize> {
 		const MAPPING: [Option<u8>; 256] = {
 			let mut initial = [Option::<u8>::None; 256];
 			initial[b'0' as usize] = Some(0);

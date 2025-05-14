@@ -1,4 +1,3 @@
-mod bookmark_lines;
 mod search_flags;
 mod search_mode;
 mod exact_match;
@@ -6,15 +5,22 @@ mod sort_algorithm;
 mod theme;
 mod freehand_mode;
 mod refresh;
+mod search_operation;
+mod new_tab;
+mod open_file;
+mod replace_by;
 
-pub use bookmark_lines::*;
 pub use search_flags::*;
+pub use search_operation::*;
 pub use search_mode::*;
 pub use exact_match::*;
 pub use sort_algorithm::*;
 pub use theme::*;
 pub use freehand_mode::*;
 pub use refresh::*;
+pub use new_tab::*;
+pub use open_file::*;
+pub use replace_by::*;
 
 use crate::assets::{HOVERED_WIDGET_UV, SELECTED_WIDGET_UV, UNSELECTED_WIDGET_UV};
 use crate::render::VertexBufferBuilder;
@@ -30,7 +36,7 @@ pub trait ButtonWidget {
     fn new() -> Self where Self: Sized;
 
     #[must_use]
-    fn bounds(window_dims: Vec2u) -> AxisAlignedBoundingBox;
+    fn bounds(&self, window_dims: Vec2u) -> AxisAlignedBoundingBox;
 
     #[must_use]
     fn on_mouse_input(&mut self, state: ElementState, button: MouseButton, ctx: &mut ButtonWidgetContextMut) -> bool {
@@ -51,20 +57,27 @@ pub trait ButtonWidget {
     #[must_use]
     fn on_mouse_down(&mut self, button: MouseButton, ctx: &mut ButtonWidgetContextMut) -> bool;
 
+    #[allow(unused_variables)]
     #[must_use]
-    fn is_clickable(&self) -> bool {
+    fn is_clickable(&self, ctx: &ButtonWidgetContext) -> bool {
+        true
+    }
+
+    #[allow(unused_variables)]
+    #[must_use]
+    fn is_visible(&self, ctx: &ButtonWidgetContext) -> bool {
         true
     }
 
     #[must_use]
-    fn is_within_bounds(mouse: Vec2u, window_dims: Vec2u) -> bool {
-        let aabb = Self::bounds(window_dims);
+    fn is_within_bounds(&self, mouse: Vec2u, window_dims: Vec2u) -> bool {
+        let aabb = self.bounds(window_dims);
         aabb.contains(mouse)
     }
 
     #[must_use]
     fn get_widget_uv(&self, mouse: Vec2u, window_dims: Vec2u, held_mouse_keys: &FxHashSet<MouseButton>) -> Vec2u {
-        let is_within_bounds = Self::is_within_bounds(mouse, window_dims);
+        let is_within_bounds = self.is_within_bounds(mouse, window_dims);
         let is_mouse_down = held_mouse_keys.iter().copied().any(|button| Self::is_valid_mouse_button(button));
         match (is_within_bounds, is_mouse_down) {
             (false, false) => UNSELECTED_WIDGET_UV,
@@ -97,14 +110,22 @@ impl<'a> ButtonWidgetContext<'a> {
     }
 }
 
+#[must_use]
+#[derive(Default)]
+pub struct ButtonWidgetAccumulatedResult {
+    pub open_file_requests: usize,
+    pub notifications: Vec<Notification>,
+    pub alerts: Vec<Alert>,
+    pub tabs: Vec<Tab>,
+}
+
 #[allow(dead_code)]
 pub struct ButtonWidgetContextMut<'a> {
     tab: &'a mut Tab,
     search_box: &'a mut SearchBox,
     replace_box: &'a mut ReplaceBox,
     shift: bool,
-    notifications: Vec<Notification>,
-    alerts: Vec<Alert>,
+    accumulated: ButtonWidgetAccumulatedResult,
 }
 
 impl<'a> ButtonWidgetContextMut<'a> {
@@ -115,21 +136,38 @@ impl<'a> ButtonWidgetContextMut<'a> {
             search_box,
             replace_box,
             shift,
-            notifications: vec![],
-            alerts: vec![],
+            accumulated: ButtonWidgetAccumulatedResult::default(),
         }
     }
 
     pub fn notify(&mut self, notification: Notification) {
-        self.notifications.push(notification);
+        self.accumulated.notifications.push(notification);
     }
 
     pub fn alert(&mut self, alert: Alert) {
-        self.alerts.push(alert);
+        self.accumulated.alerts.push(alert);
+    }
+
+    pub fn tab(&mut self, tab: Tab) {
+        self.accumulated.tabs.push(tab);
+    }
+    
+    pub fn open_file_request(&mut self) {
+        self.accumulated.open_file_requests += 1;
     }
 
     #[must_use]
-    pub fn into_notifications_and_alerts(self) -> (Vec<Notification>, Vec<Alert>) {
-        (self.notifications, self.alerts)
+    pub fn take_accumulated(&mut self) -> ButtonWidgetAccumulatedResult {
+        core::mem::take(&mut self.accumulated)
+    }
+    
+    #[must_use]
+    pub fn as_ref(&'a self) -> ButtonWidgetContext<'a> {
+        ButtonWidgetContext {
+            tab: &self.tab,
+            search_box: &self.search_box,
+            replace_box: &self.replace_box,
+            shift: self.shift,
+        }
     }
 }

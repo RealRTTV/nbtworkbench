@@ -134,8 +134,6 @@ pub const NOTIFICATION_UV: Vec2u = Vec2u::new(112, 184);
 pub const NOTIFICATION_BAR_UV: Vec2u = Vec2u::new(112, 204);
 pub const NOTIFICATION_BAR_BACKDROP_UV: Vec2u = Vec2u::new(112, 205);
 pub const BACKDROP_UV: Vec2u = Vec2u::new(32, 160);
-pub const SEARCH_BOOKMARKS_UV: Vec2u = Vec2u::new(48, 160);
-pub const SEARCH_APPEND_BOOKMARKS_UV: Vec2u = Vec2u::new(64, 160);
 pub const SEARCH_KEYS_UV: Vec2u = Vec2u::new(80, 160);
 pub const SEARCH_VALUES_UV: Vec2u = Vec2u::new(80, 176);
 pub const SEARCH_KEYS_AND_VALUES_UV: Vec2u = Vec2u::new(80, 192);
@@ -149,6 +147,13 @@ pub const LIGHTBULB_UV: Vec2u = Vec2u::new(32, 144);
 pub const DIM_LIGHTBULB_UV: Vec2u = Vec2u::new(48, 144);
 pub const EXACT_MATCH_ON_UV: Vec2u = Vec2u::new(64, 176);
 pub const EXACT_MATCH_OFF_UV: Vec2u = Vec2u::new(64, 192);
+pub const AND_SELECTION_OPERATION_UV: Vec2u = Vec2u::new(48, 176);
+pub const OR_SELECTION_OPERATION_UV: Vec2u = Vec2u::new(32, 176);
+pub const XOR_SELECTION_OPERATION_UV: Vec2u = Vec2u::new(16, 176);
+pub const INVERT_BOOKMARKS_UV: Vec2u = Vec2u::new(51, 163);
+pub const REPLACE_SELECTION_OPERATION_UV: Vec2u = Vec2u::new(64, 160);
+pub const REPLACE_BY_BOOKMARKED_LINES: Vec2u = Vec2u::new(0, 176);
+pub const REPLACE_BY_SEARCH_HITS: Vec2u = Vec2u::new(0, 192);
 
 #[repr(u8)]
 #[allow(non_camel_case_types)]
@@ -193,7 +198,6 @@ pub fn atlas(theme: Theme) -> &'static [u8] {
 	}
 }
 
-#[allow(clippy::cast_ptr_alignment)]
 pub fn icon() -> Vec<u8> {
 	let original = match (now().as_millis() & 7) as u8 {
 		// it's a good random only because its used once

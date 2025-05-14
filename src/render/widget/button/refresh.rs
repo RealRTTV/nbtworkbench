@@ -16,7 +16,7 @@ impl ButtonWidget for RefreshButton {
         Self
     }
 
-    fn bounds(_window_dims: Vec2u) -> AxisAlignedBoundingBox {
+    fn bounds(&self, _window_dims: Vec2u) -> AxisAlignedBoundingBox {
         AxisAlignedBoundingBox::new(
             296,
             312,
@@ -38,17 +38,17 @@ impl ButtonWidget for RefreshButton {
         true
     }
 
-    fn is_clickable(&self) -> bool {
+    fn is_clickable(&self, _ctx: &ButtonWidgetContext) -> bool {
         !cfg!(target_arch = "wasm32")
     }
 
     fn render(&self, builder: &mut VertexBufferBuilder, mouse: Vec2u, window_dims: Vec2u, ctx: &ButtonWidgetContext, held_mouse_keys: &FxHashSet<MouseButton>) {
         let has_path = ctx.tab.path().is_some_and(|path| path.exists());
-        let aabb = Self::bounds(window_dims);
-        let widget_uv = if !has_path || !self.is_clickable() { UNSELECTED_WIDGET_UV } else { self.get_widget_uv(mouse, window_dims, held_mouse_keys) };
+        let aabb = self.bounds(window_dims);
+        let widget_uv = if !has_path || !self.is_clickable(ctx) { UNSELECTED_WIDGET_UV } else { self.get_widget_uv(mouse, window_dims, held_mouse_keys) };
         let is_within_bounds = aabb.contains(mouse);
 
-        let uv = if has_path && self.is_clickable() {
+        let uv = if has_path && self.is_clickable(ctx) {
             REFRESH_UV
         } else {
             DISABLED_REFRESH_UV

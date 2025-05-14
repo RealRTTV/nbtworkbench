@@ -133,8 +133,7 @@ impl Alert {
 		);
 	}
 
-	#[allow(clippy::wrong_self_convention)]
-	pub fn is_invisible(&mut self) -> bool {
+		pub fn is_invisible(&mut self) -> bool {
 		let ms = now().saturating_sub(*self.timestamp.get_or_insert(now())).as_millis() as usize;
 		let display_time = (self.message_len + self.title.len()) * 60 + 3000;
 		ms > 500 + display_time

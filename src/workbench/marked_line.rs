@@ -1,11 +1,11 @@
 use std::cmp::Ordering;
 use std::collections::Bound;
 use std::convert::identity;
-use std::ops::{Deref, DerefMut, Index, IndexMut, RangeBounds};
+use std::ops::{BitAndAssign, BitOrAssign, BitXorAssign, Deref, DerefMut, Index, IndexMut, RangeBounds};
 
 use crate::assets::{BOOKMARK_UV, HIDDEN_BOOKMARK_UV};
 use crate::elements::NbtElement;
-use crate::util::{combined_two_sorted, Vec2u};
+use crate::util::{union_two_sorted_no_duplicates, intersection_two_sorted_no_duplicates, symmetric_difference_two_sorted_no_duplicates, Vec2u};
 
 macro_rules! slice {
     ($($t:tt)*) => {
@@ -112,6 +112,9 @@ impl MarkedLines {
     pub fn new() -> Self {
         Self::default()
     }
+
+    #[must_use]
+    pub fn with_capacity(capacity: usize) -> Self { Self { inner: Vec::with_capacity(capacity) } }
     
     pub fn toggle(&mut self, marked_line: MarkedLine) -> Result<(), MarkedLine> {
         match self.inner.binary_search(&marked_line) {
@@ -121,12 +124,6 @@ impl MarkedLines {
                 Ok(())
             }
         }
-    }
-
-    pub fn add_bookmarks(&mut self, other: impl Into<Vec<MarkedLine>>) {
-        let this = core::mem::replace(self, Self::new()).into_raw();
-        let that = other.into().into_boxed_slice();
-        self.inner = combined_two_sorted(this, that);
     }
 
     pub fn clear(&mut self) {
@@ -156,8 +153,9 @@ impl MarkedLines {
         self.inner.into_boxed_slice()
     }
     
-    pub fn remove<R: RangeBounds<usize>>(&mut self, range: R) -> Vec<MarkedLine> {
-        match (range.start_bound().map(|&x| MarkedLine::new(x, 0)), range.end_bound().map(|&x| MarkedLine::new(x, 0))) {
+    pub fn remove<R: RangeBounds<usize>>(&mut self, range: R) -> MarkedLines {
+        // SAFETY: was a slice from self
+        unsafe { Self::from_unchecked(match (range.start_bound().map(|&x| MarkedLine::new(x, 0)), range.end_bound().map(|&x| MarkedLine::new(x, 0))) {
             (Bound::Unbounded, Bound::Unbounded) => self.inner.drain(..),
             (Bound::Unbounded, Bound::Included(ref end)) => self.inner.drain(..=self.binary_search(end).unwrap_or_else(identity)),
             (Bound::Unbounded, Bound::Excluded(ref end)) => self.inner.drain(..self.binary_search(end).unwrap_or_else(identity)),
@@ -167,7 +165,7 @@ impl MarkedLines {
             (Bound::Excluded(ref start), Bound::Unbounded) => self.inner.drain(self.binary_search(start).map_or_else(identity, |x| x + 1)..),
             (Bound::Excluded(ref start), Bound::Included(ref end)) => self.inner.drain(self.binary_search(start).map_or_else(identity, |x| x + 1)..=self.binary_search(end).unwrap_or_else(identity)),
             (Bound::Excluded(ref start), Bound::Excluded(ref end)) => self.inner.drain(self.binary_search(start).map_or_else(identity, |x| x + 1)..self.binary_search(end).unwrap_or_else(identity)),
-        }.collect()
+        }.collect()) }
     }
     
     #[must_use]
@@ -179,6 +177,27 @@ impl MarkedLines {
 impl From<MarkedLines> for Vec<MarkedLine> {
        fn from(lines: MarkedLines) -> Vec<MarkedLine> {
         lines.inner
+    }
+}
+
+impl BitOrAssign for MarkedLines {
+    fn bitor_assign(&mut self, rhs: Self) {
+        // SAFETY: marked lines never contain duplicate true line numbers as marked
+        unsafe { self.inner = union_two_sorted_no_duplicates(core::mem::replace(&mut self.inner, Vec::new()), rhs.inner); }
+    }
+}
+
+impl BitAndAssign for MarkedLines {
+    fn bitand_assign(&mut self, rhs: Self) {
+        // SAFETY: marked lines never contain duplicate true line numbers as marked
+        unsafe { self.inner = intersection_two_sorted_no_duplicates(core::mem::replace(&mut self.inner, Vec::new()), rhs.inner); }
+    }
+}
+
+impl BitXorAssign for MarkedLines {
+    fn bitxor_assign(&mut self, rhs: Self) {
+        // SAFETY: marked lines never contain duplicate true line numbers as marked
+        unsafe { self.inner = symmetric_difference_two_sorted_no_duplicates(core::mem::replace(&mut self.inner, Vec::new()), rhs.inner); }
     }
 }
 
@@ -240,13 +259,13 @@ impl MarkedLineSlice {
     }
 
     #[must_use]
-    pub fn iter(&self) -> Iter<'_> {
-        Iter(&self.0)
+    pub fn iter(&self) -> std::slice::Iter<'_, MarkedLine> {
+        self.0.iter()
     }
 
     #[must_use]
-    pub fn iter_mut(&mut self) -> IterMut<'_> {
-        IterMut(&mut self.0)
+    pub fn iter_mut(&mut self) -> std::slice::IterMut<'_, MarkedLine> {
+        self.0.iter_mut()
     }
 }
 
@@ -314,52 +333,18 @@ impl<R: RangeBounds<usize>> IndexMut<R> for MarkedLineSlice {
 
 impl<'a> IntoIterator for &'a MarkedLineSlice {
     type Item = &'a MarkedLine;
-    type IntoIter = Iter<'a>;
-
-       fn into_iter(self) -> Self::IntoIter {
+    type IntoIter = std::slice::Iter<'a, MarkedLine>;
+    
+    fn into_iter(self) -> Self::IntoIter {
         self.iter()
     }
 }
 
 impl<'a> IntoIterator for &'a mut MarkedLineSlice {
     type Item = &'a mut MarkedLine;
-    type IntoIter = IterMut<'a>;
+    type IntoIter = std::slice::IterMut<'a, MarkedLine>;
 
-       fn into_iter(self) -> Self::IntoIter {
+    fn into_iter(self) -> Self::IntoIter {
         self.iter_mut()
     }
-}
-
-pub struct Iter<'a>(&'a [MarkedLine]);
-
-impl<'a> Iterator for Iter<'a> {
-	type Item = &'a MarkedLine;
-
-   	fn next(&mut self) -> Option<Self::Item> {
-		if let Some((item, rest)) = self.0.split_first() {
-			self.0 = rest;
-			Some(item)
-		} else {
-			None
-		}
-	}
-}
-
-pub struct IterMut<'a>(&'a mut [MarkedLine]);
-
-impl<'a> Iterator for IterMut<'a> {
-	type Item = &'a mut MarkedLine;
-
-   	fn next(&mut self) -> Option<Self::Item> {
-		if self.0.is_empty() {
-			None
-		} else {
-			unsafe {
-				let ptr = self.0.as_mut_ptr();
-				let len = self.0.len();
-				self.0 = core::slice::from_raw_parts_mut(ptr.add(1), len - 1);
-				Some(&mut *ptr)
-			}
-		}
-	}
 }

@@ -8,6 +8,11 @@ use compact_str::{format_compact, CompactString};
 use hashbrown::hash_table::Entry::*;
 use hashbrown::hash_table::HashTable;
 
+#[cfg(not(target_arch = "wasm32"))]
+use std::thread::{Scope, scope};
+#[cfg(target_arch = "wasm32")]
+use crate::wasm::{FakeScope as Scope, fake_scope as scope};
+
 use crate::assets::{ZOffset, BASE_Z, COMPOUND_ROOT_UV, COMPOUND_UV, CONNECTION_UV, HEADER_SIZE, JUST_OVERLAPPING_BASE_TEXT_Z, LINE_NUMBER_CONNECTOR_Z, LINE_NUMBER_SEPARATOR_UV};
 use crate::elements::{NbtChunk, NbtElement, NbtElementAndKey};
 use crate::render::{RenderContext, TextColor, VertexBufferBuilder};
@@ -16,7 +21,6 @@ use crate::util::{width_ascii, StrExt};
 use crate::{config, hash};
 use crate::elements::nbt_parse_result::NbtParseResult;
 
-#[allow(clippy::module_name_repetitions)]
 #[repr(C)]
 pub struct NbtCompound {
 	pub entries: Box<CompoundMap>,
@@ -39,7 +43,6 @@ impl PartialEq for NbtCompound {
 }
 
 impl Clone for NbtCompound {
-	#[allow(clippy::cast_ptr_alignment)]
 	fn clone(&self) -> Self {
 		unsafe {
 			let box_ptr = alloc(Layout::new::<CompoundMap>()).cast::<CompoundMap>();
@@ -197,7 +200,7 @@ impl NbtCompound {
 	pub fn toggle(&mut self) {
 		self.open = !self.open && !self.is_empty();
 		if !self.open && !self.is_empty() {
-			self.shut();
+			scope(|scope| self.shut(scope));
 		}
 	}
 
@@ -225,8 +228,7 @@ impl NbtCompound {
 		)
 	}
 
-	#[allow(clippy::too_many_lines)]
-	pub fn render_root(&self, builder: &mut VertexBufferBuilder, str: &str, ctx: &mut RenderContext) {
+		pub fn render_root(&self, builder: &mut VertexBufferBuilder, str: &str, ctx: &mut RenderContext) {
 		let mut remaining_scroll = builder.scroll() / 16;
 		'head: {
 			if remaining_scroll > 0 {
@@ -415,8 +417,7 @@ impl NbtCompound {
 }
 
 impl NbtCompound {
-	#[allow(clippy::too_many_lines)]
-	pub fn render(&self, builder: &mut VertexBufferBuilder, name: Option<&str>, remaining_scroll: &mut usize, tail: bool, ctx: &mut RenderContext) {
+		pub fn render(&self, builder: &mut VertexBufferBuilder, name: Option<&str>, remaining_scroll: &mut usize, tail: bool, ctx: &mut RenderContext) {
 		let pos = ctx.pos();
 		let mut y_before = pos.y;
 
@@ -544,22 +545,22 @@ impl NbtCompound {
 	#[must_use]
 	pub fn children_mut(&mut self) -> CompoundMapIterMut<'_> { self.entries.iter_mut() }
 
-	pub fn shut(&mut self) {
-		for (_, element) in self.children_mut() {
-			if element.is_open() {
-				element.shut();
-			}
-		}
+	pub fn shut<'a, 'b>(&'b mut self, scope: &'a Scope<'a, 'b>) {
 		self.open = false;
 		self.height = self.len() as u32 + 1;
+		for (_, element) in self.children_mut() {
+			if element.is_open() {
+				element.shut(scope);
+			}
+		}
 	}
 
 
-	pub fn expand<'a, 'b>(&'b mut self, #[cfg(not(target_arch = "wasm32"))] scope: &'a std::thread::Scope<'a, 'b>) {
+	pub fn expand<'a, 'b>(&'b mut self, scope: &'a Scope<'a, 'b>) {
 		self.open = !self.is_empty();
 		self.height = self.true_height;
 		for (_, element) in self.children_mut() {
-			element.expand(#[cfg(not(target_arch = "wasm32"))] scope);
+			element.expand(scope);
 		}
 	}
 
@@ -567,7 +568,6 @@ impl NbtCompound {
 }
 
 // Based on indexmap, but they didn't let me clone with unchecked mem stuff
-#[allow(clippy::module_name_repetitions)]
 pub struct CompoundMap {
 	pub indices: HashTable<usize>,
 	pub entries: Vec<Entry>,
@@ -592,8 +592,7 @@ impl PartialEq for CompoundMap {
 }
 
 impl Clone for CompoundMap {
-	#[allow(clippy::cast_ptr_alignment)]
-	fn clone(&self) -> Self {
+		fn clone(&self) -> Self {
 		pub unsafe fn clone_entries(entries: &[Entry]) -> Vec<Entry> {
 			let len = entries.len();
 			let ptr = alloc(Layout::array::<Entry>(len).unwrap_unchecked()).cast::<Entry>();
@@ -830,7 +829,6 @@ impl CompoundMap {
 	pub fn iter_mut(&mut self) -> CompoundMapIterMut<'_> { CompoundMapIterMut(self.entries.iter_mut()) }
 }
 
-#[allow(clippy::module_name_repetitions)]
 pub struct CompoundMapIter<'a>(core::slice::Iter<'a, Entry>);
 
 impl<'a> Iterator for CompoundMapIter<'a> {
@@ -851,7 +849,6 @@ impl<'a> ExactSizeIterator for CompoundMapIter<'a> {
 	fn len(&self) -> usize { self.0.len() }
 }
 
-#[allow(clippy::module_name_repetitions)]
 pub struct CompoundMapIterMut<'a>(core::slice::IterMut<'a, Entry>);
 
 impl<'a> Iterator for CompoundMapIterMut<'a> {

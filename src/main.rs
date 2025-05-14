@@ -19,10 +19,13 @@
     iter_next_chunk,
     optimize_attribute,
     stmt_expr_attributes,
+	ptr_as_ref_unchecked,
+	likely_unlikely,
+	vec_into_raw_parts,
 )]
-#![feature(ptr_as_ref_unchecked)]
-#![feature(likely_unlikely)]
+#![feature(maybe_uninit_slice)]
 #![feature(allocator_api)]
+#![feature(cold_path)]
 #![windows_subsystem = "windows"]
 
 extern crate core;
@@ -138,6 +141,7 @@ pub static mut WINDOW_PROPERTIES: render::WindowProperties = render::WindowPrope
 /// * render trees using [`RenderLine`](RenderLine) struct/enum
 /// * rendering code is duplicated af
 /// * rename line_number and true_line_number to y and line_number respectively
+/// * add `get_unchecked` and `get_unchecked_mut` methods to [elements::NbtElement] to be used in [tree::indices_for_true]
 /// # Long-Term Goals
 /// * smart screen
 /// * add multi-cursor

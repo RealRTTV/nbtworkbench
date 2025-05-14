@@ -38,13 +38,13 @@ impl Write for UncheckedBufWriter {
 		Ok(buf.len())
 	}
 
-	fn write_all(&mut self, buf: &[u8]) -> std::io::Result<()> {
-		UncheckedBufWriter::write(self, buf);
+	fn flush(&mut self) -> std::io::Result<()> {
+		UncheckedBufWriter::flush(self);
 		Ok(())
 	}
 
-	fn flush(&mut self) -> std::io::Result<()> {
-		UncheckedBufWriter::flush(self);
+	fn write_all(&mut self, buf: &[u8]) -> std::io::Result<()> {
+		UncheckedBufWriter::write(self, buf);
 		Ok(())
 	}
 }

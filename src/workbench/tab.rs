@@ -82,10 +82,39 @@ impl Tab {
 			cache_cursor_x: None,
 		})
 	}
+	
+	#[must_use]
+	pub fn new_empty_tab(region: bool, window_dims: impl Into<Vec2u>) -> Self {
+		let window_dims = window_dims.into();
+		
+		Self {
+			value: Box::new(if region { NbtElement::Region(NbtRegion::new()) } else { NbtElement::Compound(NbtCompound::new()) }),
+			name: "new.nbt".into(),
+			path: None,
+			format: FileFormat::Nbt,
+			undos: LinkedQueue::new(),
+			redos: LinkedQueue::new(),
+			unsaved_changes: false,
+			scroll: 0,
+			horizontal_scroll: 0,
+			window_height: window_dims.x,
+			window_width: window_dims.y,
+			bookmarks: MarkedLines::new(),
+			uuid: Uuid::new_v4(),
+			freehand_mode: false,
+			selected_text: None,
+			last_close_attempt: Duration::ZERO,
+			last_selected_text_interaction: (0, 0, Duration::ZERO),
+			last_interaction: now(),
+			last_double_click_interaction: (0, Duration::ZERO),
+			held_entry: None,
+			cache_cursor_x: None,
+		}
+	}
 
 	#[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
 	pub fn save(&mut self, force_dialog: bool, window_properties: &mut WindowProperties) -> Result<()> {
-		let _ = self.write_selected_text(true, window_properties, false);
+		self.write_selected_text(true, window_properties, false, false);
 		if let Some(path) = self.path.as_deref() && path.is_absolute() && !force_dialog {
 			std::fs::write(path, self.format.encode(&self.value))?;
 			self.unsaved_changes = false;
@@ -113,15 +142,14 @@ impl Tab {
 
 	#[cfg(target_arch = "wasm32")]
 	pub fn save(&mut self, _: bool, window_properties: &mut WindowProperties) -> Result<()> {
-		let _ = self.write_selected_text(true, window_properties, false);
+		self.write_selected_text(true, window_properties, false, false);
 		let bytes = self.format.encode(&self.value);
 		crate::wasm::save(self.name.as_ref(), bytes);
 		self.unsaved_changes = false;
 		Ok(())
 	}
 
-	#[allow(clippy::too_many_lines)]
-	pub fn render(&self, builder: &mut VertexBufferBuilder, ctx: &mut RenderContext, held: bool, skip_tooltips: bool, steal_delta: f32) {
+		pub fn render(&self, builder: &mut VertexBufferBuilder, ctx: &mut RenderContext, held: bool, skip_tooltips: bool, steal_delta: f32) {
 		let (mouse_x, mouse_y) = ctx.mouse_pos().into();
 
 		let horizontal_scroll_before = core::mem::replace(
@@ -359,6 +387,11 @@ impl Tab {
 
 	#[must_use]
 	pub fn left_margin(&self) -> usize { ((self.value.true_height() + self.held_entry.as_ref().map_or(0, |held_entry| held_entry.kv.1.true_height())).ilog10() as usize + 1) * 8 + 4 + 8 }
+	
+	#[must_use]
+	pub fn window_dims(&self) -> Vec2u {
+		Vec2u::new(self.window_width, self.window_height)
+	}
 
 	pub fn on_scroll(&mut self, scroll: f32) {
 		#[cfg(target_os = "macos")]
@@ -392,23 +425,24 @@ impl Tab {
 		self.horizontal_scroll = self.horizontal_scroll();
 	}
 
-	#[must_use]
-	#[allow(clippy::too_many_lines)]
-	pub fn write_selected_text(&mut self, on_invalid_format: bool, window_properties: &mut WindowProperties, close_selected_text: bool) -> bool {
+	pub fn write_selected_text(&mut self, result_on_failure: bool, window_properties: &mut WindowProperties, close_selected_text_on_success: bool, close_selected_text_on_failure: bool) -> bool {
 		if let Some(SelectedText(Text { value, editable: true, additional: SelectedTextAdditional { indices, prefix, suffix, .. }, .. })) = self.selected_text.clone() {
 			let key = prefix.0.is_empty() && !suffix.0.is_empty();
 			let (key, value) = if key { (Some(value.into()), None) } else { (None, Some(value.into())) };
 			return if let Some(result) = rename_element(&mut self.value, indices, key, value, &mut self.path, &mut self.name, window_properties) {
-				if close_selected_text {
+				if close_selected_text_on_success {
 					self.selected_text = None;
 				}
 				self.append_to_history(result.into_action());
 				true
 			} else {
-				on_invalid_format
+				if close_selected_text_on_failure {
+					self.selected_text = None;
+				}
+				result_on_failure
 			}
 		}
-		true
+		false
 	}
 
 	pub fn parse_raw(path: &Path, buf: Vec<u8>) -> Result<(NbtElement, FileFormat)> {

@@ -5,13 +5,17 @@ use std::slice::{Iter, IterMut};
 
 use compact_str::{format_compact, CompactString};
 
+#[cfg(not(target_arch = "wasm32"))]
+use std::thread::{scope, Scope};
+#[cfg(target_arch = "wasm32")]
+use crate::wasm::{FakeScope as Scope, fake_scope as scope};
+
 use crate::assets::{ZOffset, BASE_Z, CONNECTION_UV, JUST_OVERLAPPING_BASE_TEXT_Z, LIST_UV};
 use crate::elements::{id_to_string_name, NbtChunk, NbtCompound, NbtElement};
 use crate::elements::nbt_parse_result::NbtParseResult;
 use crate::render::{RenderContext, TextColor, VertexBufferBuilder};
 use crate::serialization::{Decoder, PrettyFormatter, UncheckedBufWriter};
 
-#[allow(clippy::module_name_repetitions)]
 #[repr(C)]
 pub struct NbtList {
 	pub elements: Box<Vec<NbtElement>>,
@@ -39,8 +43,7 @@ impl PartialEq for NbtList {
 }
 
 impl Clone for NbtList {
-	#[allow(clippy::cast_ptr_alignment)]
-	fn clone(&self) -> Self {
+		fn clone(&self) -> Self {
 		unsafe {
 			let len = self.elements.len();
 			let ptr = alloc(Layout::array::<NbtElement>(len).unwrap_unchecked()).cast::<NbtElement>();
@@ -82,8 +85,7 @@ impl NbtList {
 		list.recache_elements_bitset();
 		Ok((s, list))
 	}
-	#[allow(clippy::cast_ptr_alignment)]
-	pub fn from_bytes<'a, D: Decoder<'a>>(decoder: &mut D) -> NbtParseResult<Self> {
+		pub fn from_bytes<'a, D: Decoder<'a>>(decoder: &mut D) -> NbtParseResult<Self> {
 		use super::nbt_parse_result::*;
 		
 		unsafe {
@@ -213,7 +215,7 @@ impl NbtList {
 	pub fn toggle(&mut self) {
 		self.open = !self.open && !self.is_empty();
 		if !self.open && !self.is_empty() {
-			self.shut();
+			scope(|scope| self.shut(scope));
 		}
 	}
 
@@ -497,21 +499,21 @@ impl NbtList {
 
 	pub fn children_mut(&mut self) -> IterMut<'_, NbtElement> { self.elements.iter_mut() }
 
-	pub fn shut(&mut self) {
-		for element in self.children_mut() {
-			if element.is_open() {
-				element.shut();
-			}
-		}
+	pub fn shut<'a, 'b>(&'b mut self, scope: &'a Scope<'a, 'b>) {
 		self.open = false;
 		self.height = self.len() as u32 + 1;
+		for element in self.children_mut() {
+			if element.is_open() {
+				element.shut(scope);
+			}
+		}
 	}
 
-	pub fn expand<'a, 'b>(&'b mut self, #[cfg(not(target_arch = "wasm32"))] scope: &'a std::thread::Scope<'a, 'b>) {
+	pub fn expand<'a, 'b>(&'b mut self, scope: &'a Scope<'a, 'b>) {
 		self.open = !self.is_empty();
 		self.height = self.true_height;
 		for element in self.children_mut() {
-			element.expand(#[cfg(not(target_arch = "wasm32"))] scope);
+			element.expand(scope);
 		}
 	}
 

@@ -9,6 +9,7 @@ use anyhow::{ensure, Context, Result};
 use compact_str::{CompactString, ToCompactString};
 
 #[derive(Debug)]
+#[must_use]
 pub enum WorkbenchAction {
 	Add {
 		indices: OwnedIndices,

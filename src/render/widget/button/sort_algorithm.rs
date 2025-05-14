@@ -17,7 +17,7 @@ impl ButtonWidget for SortAlgorithmButton {
         Self
     }
 
-    fn bounds(_window_dims: Vec2u) -> AxisAlignedBoundingBox {
+    fn bounds(&self, _window_dims: Vec2u) -> AxisAlignedBoundingBox {
         AxisAlignedBoundingBox::new(
             280,
             296,
@@ -40,7 +40,7 @@ impl ButtonWidget for SortAlgorithmButton {
     }
 
     fn render(&self, builder: &mut VertexBufferBuilder, mouse: Vec2u, window_dims: Vec2u, _ctx: &ButtonWidgetContext, held_mouse_keys: &FxHashSet<MouseButton>) {
-        let aabb = Self::bounds(window_dims);
+        let aabb = self.bounds(window_dims);
         let widget_uv = self.get_widget_uv(mouse, window_dims, held_mouse_keys);
         let sort_algorithm = config::get_sort_algorithm();
         let uv = match sort_algorithm {
@@ -55,6 +55,6 @@ impl ButtonWidget for SortAlgorithmButton {
         }
 
         builder.draw_texture_z(aabb.low(), BASE_Z, widget_uv, (16, 16));
-        builder.draw_texture_z(aabb.low() + (4, 4), BASE_Z, uv, (8, 8));
+        builder.draw_texture_z(aabb.low() + (3, 3), BASE_Z, uv, (10, 10));
     }
 }

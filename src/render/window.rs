@@ -3,11 +3,9 @@ use std::rc::Rc;
 use std::time::Duration;
 
 use wgpu::util::{BufferInitDescriptor, DeviceExt};
-#[allow(clippy::wildcard_imports)]
 use wgpu::*;
 use winit::application::ApplicationHandler;
 use winit::dpi::{PhysicalPosition, PhysicalSize};
-#[allow(clippy::wildcard_imports)]
 use winit::event::*;
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 #[cfg(target_arch = "wasm32")]

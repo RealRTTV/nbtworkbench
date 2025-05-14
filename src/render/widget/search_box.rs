@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::fmt::{Display, Formatter};
 use std::ops::{Deref, DerefMut};
 use std::time::Duration;
 
@@ -7,7 +7,7 @@ use winit::event::MouseButton;
 use winit::keyboard::KeyCode;
 use winit::window::Theme;
 
-use crate::assets::{BOOKMARK_UV, DARK_STRIPE_UV, HIDDEN_BOOKMARK_UV, REGEX_SEARCH_MODE_UV, SEARCH_BOX_SELECTION_Z, SEARCH_BOX_Z, SEARCH_KEYS_AND_VALUES_UV, SEARCH_KEYS_UV, SEARCH_VALUES_UV, SNBT_SEARCH_MODE_UV, STRING_SEARCH_MODE_UV};
+use crate::assets::{AND_SELECTION_OPERATION_UV, BOOKMARK_UV, DARK_STRIPE_UV, HIDDEN_BOOKMARK_UV, OR_SELECTION_OPERATION_UV, REGEX_SEARCH_MODE_UV, REPLACE_SELECTION_OPERATION_UV, SEARCH_BOX_SELECTION_Z, SEARCH_BOX_Z, SEARCH_KEYS_AND_VALUES_UV, SEARCH_KEYS_UV, SEARCH_VALUES_UV, SNBT_SEARCH_MODE_UV, STRING_SEARCH_MODE_UV, XOR_SELECTION_OPERATION_UV};
 use crate::elements::{NbtElement, NbtElementAndKey, NbtElementAndKeyRef};
 use crate::render::widget::text::get_cursor_idx;
 use crate::render::{TextColor, VertexBufferBuilder};
@@ -41,7 +41,7 @@ pub enum SearchFlags {
 }
 
 impl Display for SearchFlags {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", match self {
             Self::Values => "Values only",
             Self::Keys => "Keys only",
@@ -51,6 +51,7 @@ impl Display for SearchFlags {
 }
 
 impl SearchFlags {
+    #[must_use]
     pub fn cycle(self) -> Self {
         match self {
             Self::Values => Self::Keys,
@@ -59,6 +60,7 @@ impl SearchFlags {
         }
     }
 
+    #[must_use]
     pub fn rev_cycle(self) -> Self {
         match self {
             Self::Values => Self::KeysValues,
@@ -67,11 +69,83 @@ impl SearchFlags {
         }
     }
 
+    #[must_use]
     pub fn uv(self) -> Vec2u {
         match self {
             Self::Values => SEARCH_VALUES_UV,
             Self::Keys => SEARCH_KEYS_UV,
             Self::KeysValues => SEARCH_KEYS_AND_VALUES_UV
+        }
+    }
+    
+    #[must_use]
+    pub fn has_key(self) -> bool {
+        matches!(self, Self::Keys | Self::KeysValues)
+    }
+
+    #[must_use]
+    pub fn has_value(self) -> bool {
+        matches!(self, Self::Values | Self::KeysValues)
+    }
+}
+
+
+#[derive(Copy, Clone)]
+pub enum SearchOperation {
+    And,
+    Or,
+    Xor,
+    B,
+}
+
+impl Display for SearchOperation {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", match self {
+            Self::And => "And (intersection)",
+            Self::Or => "Or (union)",
+            Self::Xor => "Xor (symmetric difference)",
+            Self::B => "B (replace) [default behaviour]"
+        })
+    }
+}
+impl SearchOperation {
+    #[must_use]
+    pub fn cycle(self) -> Self {
+        match self {
+            Self::And => Self::Or,
+            Self::Or => Self::Xor,
+            Self::Xor => Self::B,
+            Self::B => Self::And,
+        }
+    }
+
+
+    #[must_use]
+    pub fn rev_cycle(self) -> Self {
+        match self {
+            Self::And => Self::B,
+            Self::Or => Self::And,
+            Self::Xor => Self::Or,
+            Self::B => Self::Xor,
+        }
+    }
+    
+    #[must_use]
+    pub fn uv(self) -> Vec2u {
+        match self {
+            Self::And => AND_SELECTION_OPERATION_UV,
+            Self::Or => OR_SELECTION_OPERATION_UV,
+            Self::Xor => XOR_SELECTION_OPERATION_UV,
+            Self::B => REPLACE_SELECTION_OPERATION_UV,
+        }
+    }
+    
+    pub fn apply(self, lhs: &mut MarkedLines, rhs: MarkedLines) {
+        match self {
+            Self::And => *lhs &= rhs,
+            Self::Or => *lhs |= rhs,
+            Self::Xor => *lhs ^= rhs,
+            Self::B => *lhs = rhs,
         }
     }
 }
@@ -84,7 +158,7 @@ pub enum SearchMode {
 }
 
 impl Display for SearchMode {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", match self {
             Self::String => "String",
             Self::Regex => "Regex",
@@ -94,7 +168,8 @@ impl Display for SearchMode {
 }
 
 impl SearchMode {
-       pub fn cycle(self) -> Self {
+    #[must_use]
+    pub fn cycle(self) -> Self {
         match self {
             Self::String => Self::Regex,
             Self::Regex => Self::Snbt,
@@ -102,7 +177,8 @@ impl SearchMode {
         }
     }
 
-       pub fn rev_cycle(self) -> Self {
+    #[must_use]
+    pub fn rev_cycle(self) -> Self {
         match self {
             Self::String => Self::Snbt,
             Self::Regex => Self::String,
@@ -110,7 +186,8 @@ impl SearchMode {
         }
     }
 
-       pub fn uv(self) -> Vec2u {
+    #[must_use]
+    pub fn uv(self) -> Vec2u {
         match self {
             Self::String => STRING_SEARCH_MODE_UV,
             Self::Regex => REGEX_SEARCH_MODE_UV,
@@ -118,18 +195,21 @@ impl SearchMode {
         }
     }
 
-       pub fn has_exact_match_mode(&self) -> bool {
+    #[must_use]
+    pub fn has_exact_match_mode(&self) -> bool {
         matches!(self, Self::String | Self::Regex | Self::Snbt)
     }
 
-       pub fn get_exact_search_on_name(&self) -> &str {
+    #[must_use]
+    pub fn get_exact_search_on_name(&self) -> &str {
         match self {
             Self::String | Self::Regex => "Case Sensitive Mode",
             Self::Snbt => "Exact Match Mode",
         }
     }
 
-       pub fn get_exact_search_off_name(&self) -> &str {
+    #[must_use]
+    pub fn get_exact_search_off_name(&self) -> &str {
         match self {
             Self::String | Self::Regex => "Case Insensitive Mode",
             Self::Snbt => "Contains Mode",
@@ -138,6 +218,7 @@ impl SearchMode {
 }
 
 impl SearchPredicate {
+    #[must_use]
     fn new(value: String) -> Option<Self> {
         let search_mode = config::get_search_mode();
         let search_flags = config::get_search_flags();
@@ -154,6 +235,7 @@ impl SearchPredicate {
         })
     }
 
+    #[must_use]
     fn matches(&self, kv: NbtElementAndKeyRef) -> bool {
         let flags = self.search_flags as u8 + 1;
         match &self.inner {
@@ -291,7 +373,7 @@ impl SearchBox {
         let (mouse_x, mouse_y) = mouse;
         let pos = Vec2u::new(SEARCH_BOX_START_X, 23);
 
-        (pos.x..window_width - SEARCH_BOX_END_X - 17 - 16 - 16).contains(&mouse_x) && (23..45).contains(&mouse_y)
+        (pos.x..window_width - SEARCH_BOX_END_X).contains(&mouse_x) && (23..45).contains(&mouse_y)
     }
 
     pub fn deselect(&mut self) {
@@ -317,19 +399,20 @@ impl SearchBox {
 
     #[must_use]
     pub fn search(&self, bookmarks: &mut MarkedLines, root: &NbtElement, count_only: bool) -> Notification {
-        if self.value.is_empty() {
-            return Notification::new("0 hits for \"\" (0ms)", TextColor::White, NotificationKind::Find);
-        }
-
         let start = now();
-        let Some(predicate) = SearchPredicate::new(self.value.clone()) else { return Notification::new(format!("Invalid search syntax ({})", self.value), TextColor::Red, NotificationKind::Find) };
-        let new_bookmarks = Self::search0(root, &predicate);
-        let hits = new_bookmarks.len();
+        let new_bookmarks = if self.value.is_empty() {
+            MarkedLines::new()
+        } else {
+            let Some(predicate) = SearchPredicate::new(self.value.clone()) else { return Notification::new(format!("Invalid search syntax ({})", self.value), TextColor::Red, NotificationKind::Find) };
+            Self::search0(root, &predicate)
+        };
         let ms = now() - start;
-        if !count_only && !new_bookmarks.is_empty() {
-            bookmarks.add_bookmarks(new_bookmarks);
+        
+        let hits = new_bookmarks.len();
+        if !count_only {
+            config::get_search_operation().apply(bookmarks, new_bookmarks);
         }
-        Notification::new(format!("{hits} hit{s} for \"{arg}\" ({ms}ms)", s = if hits == 1 { "" } else { "s" }, arg = self.value, ms = ms.as_millis()), TextColor::White, NotificationKind::Find)
+        Notification::new(format!("{hits} hit{s} for \"{arg}\" ({num_bookmarks} total bookmark{s2}) ({ms}ms)", s = if hits == 1 { "" } else { "s" }, arg = self.value, ms = ms.as_millis(), num_bookmarks = bookmarks.len(), s2 = if bookmarks.len() == 1 { "" } else { "s" }), TextColor::White, NotificationKind::Find)
     }
 
     pub fn search0(root: &NbtElement, predicate: &SearchPredicate) -> MarkedLines {
@@ -342,13 +425,13 @@ impl SearchBox {
             if predicate.matches((key, value)) {
                 new_bookmarks.push(MarkedLine::with_uv(true_line_number, line_number, if parent_open { BOOKMARK_UV } else { HIDDEN_BOOKMARK_UV }));
             }
-
+            
             match value.children() {
-                Some(Ok(iter)) => for value in iter.rev() {
-                    queue.push(((None, value), value.is_open()))
+                Some(Ok(iter)) => for child in iter.rev() {
+                    queue.push(((None, child), value.is_open()))
                 }
-                Some(Err(iter)) => for (key, value) in iter.rev() {
-                    queue.push(((Some(key), value), value.is_open()))
+                Some(Err(iter)) => for (key, child) in iter.rev() {
+                    queue.push(((Some(key), child), value.is_open()))
                 }
                 None => {}
             }
@@ -380,10 +463,6 @@ impl SearchBox {
     pub fn on_key_press(&mut self, key: KeyCode, char: Option<char>, flags: u8) -> SearchBoxKeyResult {
         if let KeyCode::ArrowDown | KeyCode::Tab = key && flags == flags!() {
             return SearchBoxKeyResult::MoveToReplaceBox;
-        }
-
-        if let KeyCode::Enter | KeyCode::NumpadEnter = key && flags == flags!() {
-            return SearchBoxKeyResult::ClearAndSearch;
         }
 
         if let KeyCode::Enter | KeyCode::NumpadEnter = key && flags == flags!(Shift) {

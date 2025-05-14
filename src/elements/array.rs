@@ -30,8 +30,7 @@ macro_rules! array {
 		}
 
 		impl Clone for $name {
-			#[allow(clippy::cast_ptr_alignment)]
-			fn clone(&self) -> Self {
+						fn clone(&self) -> Self {
 				unsafe {
 					let len = self.values.len();
 					let ptr = alloc(Layout::array::<NbtElement>(len).unwrap_unchecked()).cast::<NbtElement>();

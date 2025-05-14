@@ -39,7 +39,6 @@ pub enum SearchBoxKeyResult {
     MoveToReplaceBox,
     Search,
     SearchCountOnly,
-    ClearAndSearch,
 }
 
 #[derive(PartialEq, Eq)]

@@ -79,8 +79,7 @@ pub struct SelectedTextAdditional  {
 
 impl SelectedText {
 	#[must_use]
-	#[allow(clippy::too_many_lines)]
-	pub fn new(target_x: usize, mouse_x: usize, y: usize, key: Option<(Box<str>, TextColor, bool)>, value: Option<(Box<str>, TextColor, bool)>, indices: OwnedIndices) -> Option<Self> {
+		pub fn new(target_x: usize, mouse_x: usize, y: usize, key: Option<(Box<str>, TextColor, bool)>, value: Option<(Box<str>, TextColor, bool)>, indices: OwnedIndices) -> Option<Self> {
 		let key_width = if let Some((key, key_color, true)) = key.clone() {
 			let key_width = key.width();
 

@@ -6,6 +6,11 @@ use std::mem::ManuallyDrop;
 use std::ops::{Deref, DerefMut};
 use std::slice::{Iter, IterMut};
 
+#[cfg(target_arch = "wasm32")]
+use crate::wasm::{fake_scope as scope, FakeScope as Scope};
+#[cfg(not(target_arch = "wasm32"))]
+use std::thread::{scope, Scope};
+
 use compact_str::{format_compact, CompactString};
 use zune_inflate::{DeflateDecoder, DeflateOptions};
 
@@ -45,8 +50,7 @@ impl PartialEq for NbtRegion {
 }
 
 impl Clone for NbtRegion {
-	#[allow(clippy::cast_ptr_alignment)]
-	fn clone(&self) -> Self {
+		fn clone(&self) -> Self {
 		unsafe {
 			let box_ptr = alloc(Layout::new::<[NbtElement; 32 * 32]>()).cast::<[NbtElement; 32 * 32]>();
 			let chunks_ptr = alloc(Layout::array::<NbtElement>(32 * 32).unwrap_unchecked()).cast::<NbtElement>();
@@ -129,8 +133,7 @@ impl NbtRegion {
 
 		if bytes.len() < 8192 { return err("header didn't exist") }
 
-		#[cfg(not(target_arch = "wasm32"))]
-		return std::thread::scope(|s| {
+		scope(|s| {
 			let mut region = Self::new();
 
 			let (&offsets, bytes) = from_opt(bytes.split_first_chunk::<4096>(), "header didn't exist")?;
@@ -158,39 +161,12 @@ impl NbtRegion {
 			region.recache();
 
 			ok(region)
-		});
-
-		#[cfg(target_arch = "wasm32")]
-		return {
-			let mut region = Self::new();
-
-			let (&offsets, bytes) = bytes.split_first_chunk::<4096>()?;
-			let (&timestamps, bytes) = bytes.split_first_chunk::<4096>()?;
-			let mut threads = Vec::with_capacity(1024);
-
-
-			for (&offset, &timestamp) in offsets
-				.array_chunks::<4>()
-				.zip(timestamps.array_chunks::<4>())
-			{
-				let timestamp = u32::from_be_bytes(timestamp);
-				let offset = u32::from_be_bytes(offset);
-				threads.push((timestamp, parse(offset, bytes)));
-			}
-
-
-			for (pos, (timestamp, thread)) in threads.into_iter().enumerate() {
-				let (format, element) = thread?;
-				let element = element?;
-				unsafe { region.replace_overwrite(NbtElement::Chunk(NbtChunk::from_compound(element, ((pos >> 5) as u8 & 31, pos as u8 & 31), format, timestamp)), ); }
-			}
-
-			ok(region)
-		};
+		})
 	}
+
 	pub fn to_be_bytes(&self, writer: &mut UncheckedBufWriter) {
 		unsafe {
-			std::thread::scope(move |s| {
+			scope(move |s| {
 				let mut chunks = Vec::with_capacity(1024);
 				for chunk in self.chunks.iter() {
 					let chunk = chunk.as_chunk_unchecked();
@@ -264,7 +240,7 @@ impl NbtRegion {
 		let open = !self.is_open() && !self.is_empty();
 		self.set_open(open);
 		if !open && !self.is_empty() {
-			self.shut();
+			scope(|scope| self.shut(scope));
 		}
 	}
 
@@ -277,22 +253,25 @@ impl NbtRegion {
 	pub fn is_grid_layout(&self) -> bool { (self.flags & 0b10) > 0 }
 
 	pub fn toggle_grid_layout(&mut self, bookmarks: &mut MarkedLines) {
-		self.flags ^= 0b10;
-		if self.is_grid_layout() {
-			self.height = 32 + 1;
-			// one for the region + one for the chunk head
-			let mut true_line_number = 2_usize;
-			for (idx, chunk) in self.children_mut().enumerate() {
-				chunk.shut();
-				// skip the head because that shouldn't be hidden
-				for bookmark in &mut bookmarks[true_line_number + 1..=true_line_number + chunk.true_height()] {
-					*bookmark = bookmark.hidden(idx + 1);
+		scope(|scope| {
+			self.flags ^= 0b10;
+			if self.is_grid_layout() {
+				self.height = 32 + 1;
+				// one for the region + one for the chunk head
+				let mut true_line_number = 2_usize;
+				for (idx, chunk) in self.children_mut().enumerate() {
+					let true_height = chunk.true_height();
+					chunk.shut(scope);
+					// skip the head because that shouldn't be hidden
+					for bookmark in &mut bookmarks[true_line_number + 1..=true_line_number + true_height] {
+						*bookmark = bookmark.hidden(idx + 1);
+					}
+					true_line_number += true_height;
 				}
-				true_line_number += chunk.true_height();
+			} else {
+				self.height = 1024 + 1;
 			}
-		} else {
-			self.height = 1024 + 1;
-		}
+		});
 	}
 
 	#[must_use]
@@ -383,8 +362,7 @@ impl NbtRegion {
 		self.toggle_grid_layout(bookmarks);
 	}
 
-	#[allow(clippy::too_many_lines)]
-	pub fn render_root(&self, builder: &mut VertexBufferBuilder, str: &str, ctx: &mut RenderContext) {
+		pub fn render_root(&self, builder: &mut VertexBufferBuilder, str: &str, ctx: &mut RenderContext) {
 		use std::fmt::Write as _;
 
 		builder.draw_texture_z(
@@ -534,17 +512,34 @@ impl NbtRegion {
 		self.chunks.iter_mut()
 	}
 
-	pub fn shut(&mut self) {
-		for element in self.children_mut() {
-			if element.is_open() {
-				element.shut();
-			}
-		}
+	pub fn shut<'a, 'b>(&'b mut self, scope: &'a Scope<'a, 'b>) {
 		self.set_open(false);
 		self.height = if self.is_grid_layout() { 33 } else { 1025 };
+		
+		let mut iter = self
+			.children_mut()
+			.array_chunks::<{ Self::CHUNK_BANDWIDTH }>();
+		for elements in iter.by_ref() {
+			scope.spawn(|| {
+				for element in elements {
+					if element.is_open() {
+						element.shut(scope);
+					}
+				}
+			});
+		}
+		if let Some(rem) = iter.into_remainder() {
+			scope.spawn(|| {
+				for element in rem {
+					if element.is_open() {
+						element.shut(scope);
+					}
+				}
+			});
+		}
 	}
 
-	pub fn expand<'a, 'b>(&'b mut self, #[cfg(not(target_arch = "wasm32"))] scope: &'a std::thread::Scope<'a, 'b>) {
+	pub fn expand<'a, 'b>(&'b mut self, scope: &'a Scope<'a, 'b>) {
 		self.set_open(!self.is_empty());
 		if !self.is_grid_layout() {
 			self.height = self.true_height;
@@ -653,7 +648,6 @@ impl NbtRegion {
 }
 
 #[repr(C)]
-#[allow(clippy::module_name_repetitions)]
 pub struct NbtChunk {
 	inner: Box<NbtCompound>,
 	last_modified: u32,
@@ -676,8 +670,7 @@ impl PartialEq for NbtChunk {
 }
 
 impl Clone for NbtChunk {
-	#[allow(clippy::cast_ptr_alignment)]
-	fn clone(&self) -> Self {
+		fn clone(&self) -> Self {
 		unsafe {
 			let box_ptr = alloc(Layout::new::<NbtCompound>()).cast::<NbtCompound>();
 			box_ptr.write(self.inner.deref().clone());
@@ -763,8 +756,7 @@ impl NbtChunk {
 		!self.is_unloaded()
 	}
 
-	#[allow(clippy::too_many_lines)]
-	pub fn render(&self, builder: &mut VertexBufferBuilder, remaining_scroll: &mut usize, tail: bool, ctx: &mut RenderContext) {
+		pub fn render(&self, builder: &mut VertexBufferBuilder, remaining_scroll: &mut usize, tail: bool, ctx: &mut RenderContext) {
 		use std::fmt::Write as _;
 
 		let mut y_before = ctx.pos().y;
@@ -910,7 +902,6 @@ impl Display for NbtChunk {
 	}
 }
 
-#[allow(clippy::missing_fields_in_debug)]
 impl NbtChunk {
 	pub fn pretty_fmt(&self, f: &mut PrettyFormatter) {
 		f.write_str(&format!("{} | {} ", self.x, self.z));

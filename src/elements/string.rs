@@ -14,7 +14,6 @@ use crate::serialization::{Decoder, PrettyFormatter, UncheckedBufWriter};
 use crate::util::StrExt;
 
 #[repr(transparent)]
-#[allow(clippy::module_name_repetitions)]
 #[derive(Clone, PartialEq)]
 pub struct NbtString {
 	pub str: TwentyThree,

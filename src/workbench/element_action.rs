@@ -1,17 +1,16 @@
 use std::cmp::Ordering;
 #[cfg(not(target_arch = "wasm32"))]
 use std::{fs::OpenOptions, process::Command};
-
 #[cfg(not(target_arch = "wasm32"))]
 use notify::{EventKind, PollWatcher, RecursiveMode, Watcher};
 use uuid::Uuid;
-use crate::assets::{ACTION_WHEEL_Z, COPY_FORMATTED_UV, COPY_RAW_UV, INSERT_FROM_CLIPBOARD_UV, SORT_COMPOUND_BY_NAME_UV, SORT_COMPOUND_BY_TYPE_UV};
+use crate::assets::{ACTION_WHEEL_Z, COPY_FORMATTED_UV, COPY_RAW_UV, INSERT_FROM_CLIPBOARD_UV, INVERT_BOOKMARKS_UV, SORT_COMPOUND_BY_NAME_UV, SORT_COMPOUND_BY_TYPE_UV};
 use crate::elements::{NbtByte, NbtByteArray, NbtChunk, NbtCompound, NbtDouble, NbtElement, NbtFloat, NbtInt, NbtIntArray, NbtList, NbtLong, NbtLongArray, NbtPattern, NbtShort, NbtString};
 use crate::render::VertexBufferBuilder;
 use crate::tree::{add_element, reorder_element, MutableIndices, NavigationInformation, OwnedIndices, ReorderElementResult};
 use crate::util::{get_clipboard, now, set_clipboard, StrExt};
 use crate::widget::Alert;
-use crate::workbench::{FileUpdateSubscription, FileUpdateSubscriptionType, MarkedLines, WorkbenchAction};
+use crate::workbench::{FileUpdateSubscription, FileUpdateSubscriptionType, MarkedLine, MarkedLines, WorkbenchAction};
 
 #[cfg(not(target_arch = "wasm32"))]
 use crate::assets::{OPEN_ARRAY_IN_HEX_UV, OPEN_IN_TXT_UV};
@@ -28,6 +27,7 @@ pub enum ElementAction {
 	SortCompoundByName,
 	SortCompoundByType,
 	InsertFromClipboard,
+	InvertBookmarks,
 }
 
 impl ElementAction {
@@ -78,6 +78,12 @@ impl ElementAction {
 					builder.draw_tooltip(&["Insert from clipboard"], pos, false);
 				}
 			}
+			Self::InvertBookmarks => {
+				builder.draw_texture_z(pos, ACTION_WHEEL_Z, INVERT_BOOKMARKS_UV, (10, 10));
+				if hovered {
+					builder.draw_tooltip(&["Invert bookmarks"], pos, false);
+				}
+			}
 		}
 	}
 
@@ -114,8 +120,7 @@ impl ElementAction {
 	}
 
 	// todo: add more alerts for errors (potentially have anyhow::Result)
-	#[allow(clippy::too_many_lines)]
-	pub fn apply<'m1, 'm2: 'm1>(self, root: &mut NbtElement, mut indices: OwnedIndices, bookmarks: &mut MarkedLines, mutable_indices: &'m1 mut MutableIndices<'m2>, alerts: &mut Vec<Alert>, tab_uuid: Uuid) -> Option<WorkbenchAction> {
+		pub fn apply<'m1, 'm2: 'm1>(self, root: &mut NbtElement, mut indices: OwnedIndices, bookmarks: &mut MarkedLines, mutable_indices: &'m1 mut MutableIndices<'m2>, alerts: &mut Vec<Alert>, tab_uuid: Uuid) -> Option<WorkbenchAction> {
 		#[must_use]
 		#[cfg(not(target_arch = "wasm32"))]
 		fn open_file(str: &str) -> bool {
@@ -258,6 +263,27 @@ impl ElementAction {
 						None
 					}
 				}
+			},
+			Self::InvertBookmarks => {
+				let NavigationInformation { element, mut line_number, mut true_line_number, .. } = root.navigate(&indices)?;
+				let mut queue = Vec::new();
+				queue.push(element);
+				while let Some(element) = queue.pop() {
+					let _ = bookmarks.toggle(MarkedLine::new(true_line_number, line_number));
+
+					if element.is_open() {
+						if let Some(iter) = element.values() {
+							for child in iter.rev() {
+								queue.push(child);
+							}
+						}
+						true_line_number += 1;
+					} else {
+						true_line_number += element.true_height();
+					}
+					line_number += element.height();
+				}
+				None
 			}
 		}
 	}

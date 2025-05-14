@@ -179,8 +179,7 @@ impl Notification {
         );
     }
 
-    #[allow(clippy::wrong_self_convention)]
-    pub fn is_invisible(&mut self) -> bool {
+        pub fn is_invisible(&mut self) -> bool {
         let now = now();
         let ms = now.saturating_sub(*self.timestamp.get_or_insert(now)).as_millis() as usize;
         let display_time = self.message_len * 60 + 3000 + 500;

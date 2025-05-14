@@ -3,14 +3,17 @@ use fxhash::FxHashMap;
 use parking_lot::RwLock;
 use winit::window::Theme;
 
-use crate::widget::{SearchFlags, SearchMode};
+use crate::widget::{ReplaceBy, SearchFlags, SearchMode, SearchOperation};
 use crate::workbench::SortAlgorithm;
 
+// todo: use serde
 struct Config {
     theme: Theme,
     sort_algorithm: SortAlgorithm,
     search_mode: SearchMode,
     search_flags: SearchFlags,
+    search_operation: SearchOperation,
+    replace_by: ReplaceBy,
     search_exact_match: bool,
     scale: Option<f32>,
 }
@@ -22,6 +25,8 @@ static CONFIG: RwLock<Config> = RwLock::new(Config {
     sort_algorithm: SortAlgorithm::Type,
     search_mode: SearchMode::String,
     search_flags: SearchFlags::Values,
+    search_operation: SearchOperation::Or,
+    replace_by: ReplaceBy::SearchHits,
     search_exact_match: true,
     scale: None,
 });
@@ -60,6 +65,12 @@ fn read0(map: &FxHashMap<String, String>) {
     if let Some(search_flags) = map.get("search_flags").and_then(|s| match s.as_str() { "key" => Some(SearchFlags::Keys), "value" => Some(SearchFlags::Values), "all" => Some(SearchFlags::KeysValues), _ => None }) {
         set_search_flags(search_flags);
     }
+    if let Some(search_operation) = map.get("search_operation").and_then(|s| match s.as_str() { "and" => Some(SearchOperation::And), "or" => Some(SearchOperation::Or), "xor" => Some(SearchOperation::Xor), "b" => Some(SearchOperation::B), _ => None }) {
+        set_search_operation(search_operation);
+    }
+    if let Some(replace_by) = map.get("replace_by").and_then(|s| match s.as_str() { "search_hits" => Some(ReplaceBy::SearchHits), "bookmarked_lines" => Some(ReplaceBy::BookmarkedLines), _ => None }) {
+        set_replace_by(replace_by);
+    }
     if let Some(search_exact_match) = map.get("search_exact_match").and_then(|s| s.parse::<bool>().ok()) {
         set_search_exact_match(search_exact_match);
     }
@@ -95,7 +106,9 @@ fn write0() -> String {
     writeln!(&mut builder, "sort_algorithm={}", match get_sort_algorithm() { SortAlgorithm::None => "none", SortAlgorithm::Name => "name", SortAlgorithm::Type => "type" }).unwrap_or(());
     writeln!(&mut builder, "search_mode={}", match get_search_mode() { SearchMode::String => "string", SearchMode::Regex => "regex", SearchMode::Snbt => "snbt" }).unwrap_or(());
     writeln!(&mut builder, "search_flags={}", match get_search_flags() { SearchFlags::Keys => "key", SearchFlags::Values => "value", SearchFlags::KeysValues => "all" }).unwrap_or(());
+    writeln!(&mut builder, "search_operation={}", match get_search_operation() { SearchOperation::And => "and", SearchOperation::Or => "or", SearchOperation::Xor => "xor", SearchOperation::B => "b" }).unwrap_or(());
     writeln!(&mut builder, "search_exact_match={}", get_search_exact_match()).unwrap_or(());
+    writeln!(&mut builder, "replace_by={}", match get_replace_by() { ReplaceBy::SearchHits => "search_hits", ReplaceBy::BookmarkedLines => "bookmarked_lines" }).unwrap_or(());
     writeln!(&mut builder, "scale={:?}", get_scale()).unwrap_or(());
     builder
 }
@@ -143,6 +156,28 @@ pub fn set_search_flags(search_flags: SearchFlags) -> SearchFlags {
     let old_search_flags = core::mem::replace(&mut CONFIG.write().search_flags, search_flags);
     write();
     old_search_flags
+}
+
+#[must_use]
+pub fn get_search_operation() -> SearchOperation {
+    CONFIG.read().search_operation
+}
+
+pub fn set_search_operation(search_operation: SearchOperation) -> SearchOperation {
+    let old_search_operation = core::mem::replace(&mut CONFIG.write().search_operation, search_operation);
+    write();
+    old_search_operation
+}
+
+#[must_use]
+pub fn get_replace_by() -> ReplaceBy {
+    CONFIG.read().replace_by
+}
+
+pub fn set_replace_by(replace_by: ReplaceBy) -> ReplaceBy {
+    let old_replace_by = core::mem::replace(&mut CONFIG.write().replace_by, replace_by);
+    write();
+    old_replace_by
 }
 
 #[must_use]

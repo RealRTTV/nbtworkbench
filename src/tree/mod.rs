@@ -25,10 +25,38 @@ pub fn line_number_at(indices: &Indices, mut root: &NbtElement) -> usize {
     total
 }
 
+#[must_use]
+pub fn indices_for_true(true_line_number: usize, mut root: &NbtElement) -> Option<OwnedIndices> {
+    let mut true_line_number = true_line_number.checked_sub(1)?;
+    if true_line_number > root.true_height() { return None }
+
+    let mut indices = OwnedIndices::new();
+    
+    while true_line_number > 0 {
+        let mut idx = 0;
+        loop {
+            let child = &root[idx];
+            let true_height = child.true_height();
+            if true_line_number > true_height {
+                true_line_number -= true_height;
+                idx += 1;
+            } else {
+                root = child;
+                true_line_number -= 1;
+                indices.push(idx);
+                break
+            }
+        }
+    }
+    
+    Some(indices)
+}
+
 pub struct MutableIndices<'m2> {
     is_empty: bool,
     subscription: &'m2 mut Option<FileUpdateSubscription>,
     selected_text: &'m2 mut Option<SelectedText>,
+    pub temp: Vec<&'m2 mut Option<OwnedIndices>>,
 }
 
 impl<'m1, 'm2: 'm1> MutableIndices<'m2> {
@@ -38,6 +66,7 @@ impl<'m1, 'm2: 'm1> MutableIndices<'m2> {
             is_empty: false,
             subscription,
             selected_text,
+            temp: Vec::new(),
         }
     }
 
@@ -50,13 +79,14 @@ impl<'m1, 'm2: 'm1> MutableIndices<'m2> {
             is_empty: true,
             subscription: unsafe { &mut EMPTY_SUBSCRIPTION },
             selected_text: unsafe { &mut EMPTY_SELECTED_TEXT },
+            temp: Vec::new(),
         };
 
         #[allow(static_mut_refs)]
         unsafe { &mut EMPTY }
     }
 
-    pub fn apply<F: FnMut(&mut OwnedIndices, &mut CallbackInfo)>(&mut self, mut f: F) {
+    pub fn apply<F: FnMut(&mut OwnedIndices, &mut CallbackInfo)>(&'m1 mut self, mut f: F) {
         if self.is_empty {
             return;
         }
@@ -76,15 +106,30 @@ impl<'m1, 'm2: 'm1> MutableIndices<'m2> {
                 self.subscription.take();
             }
         }
+
+        for temp in &mut *self.temp {
+            if let Some(temp_inner) = temp {
+                let mut ci = CallbackInfo::new();
+                f(temp_inner, &mut ci);
+                if ci.removed() {
+                    **temp = None;
+                }
+            }
+        }
     }
 
     /// required to be here because it is the only mutable reference to `FileUpdateSubscription` available when *_element-ing
-    pub fn set_subscription(&mut self, subscription: Option<FileUpdateSubscription>) {
+    pub fn set_subscription(&'m1 mut self, subscription: Option<FileUpdateSubscription>) {
         if self.is_empty {
             return;
         }
 
         *self.subscription = subscription;
+    }
+
+    #[must_use]
+    pub fn as_inner_mut(&'m1 mut self) -> (&'m1 mut &'m2 mut Option<FileUpdateSubscription>, &'m1 mut &'m2 mut Option<SelectedText>, &'m1 mut Vec<&'m2 mut Option<OwnedIndices>>) {
+        (&mut self.subscription, &mut self.selected_text, &mut self.temp)
     }
 }
 

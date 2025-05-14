@@ -9,7 +9,7 @@ use crate::elements::NbtElement;
 use crate::render::WindowProperties;
 use crate::util::create_regex;
 use crate::widget::{ReplaceBox, SearchBox, SearchFlags, SearchMode, SearchPredicate, SearchPredicateInner, SearchReplacement};
-use crate::workbench::{FileFormat, MarkedLines};
+use crate::workbench::{FileFormat, MarkedLines, WorkbenchAction};
 use crate::workbench::Workbench;
 use crate::{config, error, log};
 use crate::tree::MutableIndices;
@@ -285,7 +285,8 @@ pub fn replace() -> ! {
                 }
                 
                 let mut tab = workbench.tabs.remove(0);
-                let (bulk, actions) = ReplaceBox::replace0(&mut MarkedLines::new(), &mut MutableIndices::new(&mut None, &mut None), &mut tab.value, &replacement);
+                let (bulk, _failures) = ReplaceBox::replace_by_search_box0(&mut MarkedLines::new(), MutableIndices::empty(), &mut tab.value, &replacement);
+                let actions = if let WorkbenchAction::Bulk { actions } = &bulk { actions.len() } else { 0 };
                 
                 if let Err(e) = tab.save(false, &mut WindowProperties::Fake) {
                     error!("File write error: {e}");

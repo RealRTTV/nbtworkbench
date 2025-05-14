@@ -26,8 +26,8 @@ pub fn swap_element_same_depth<'m1, 'm2: 'm1>(root: &mut NbtElement, parent_indi
 
     MarkedLineSlice::from_marked_lines_mut(&mut a_bookmarks).increment(b_line_number, b_true_line_number);
     MarkedLineSlice::from_marked_lines_mut(&mut b_bookmarks).increment(a_line_number, a_true_line_number);
-    bookmarks.add_bookmarks(a_bookmarks);
-    bookmarks.add_bookmarks(b_bookmarks);
+    *bookmarks |= a_bookmarks;
+    *bookmarks |= b_bookmarks;
 
     mutable_indices.apply(|indices, _ci| {
         if parent_indices.encompasses(indices) {

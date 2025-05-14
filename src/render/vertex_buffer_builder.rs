@@ -313,8 +313,7 @@ impl VertexBufferBuilder {
 		self.draw_texture_region_z(pos, z, uv, dims, dims);
 	}
 
-	#[allow(clippy::many_single_char_names)]
-	pub fn draw_texture_region_z(&mut self, pos: impl Into<(usize, usize)>, z: ZOffset, uv: impl Into<(usize, usize)>, dims: impl Into<(usize, usize)>, uv_dims: impl Into<(usize, usize)>) {
+		pub fn draw_texture_region_z(&mut self, pos: impl Into<(usize, usize)>, z: ZOffset, uv: impl Into<(usize, usize)>, dims: impl Into<(usize, usize)>, uv_dims: impl Into<(usize, usize)>) {
 		unsafe {
 			let pos = pos.into();
 			let uv = uv.into();

@@ -17,7 +17,7 @@ impl ButtonWidget for ThemeButton {
         Self
     }
 
-    fn bounds(_window_dims: Vec2u) -> AxisAlignedBoundingBox {
+    fn bounds(&self, _window_dims: Vec2u) -> AxisAlignedBoundingBox {
         AxisAlignedBoundingBox::new(
             312,
             328,
@@ -30,15 +30,15 @@ impl ButtonWidget for ThemeButton {
         matches!(button, MouseButton::Left | MouseButton::Right)
     }
 
-    fn on_mouse_up(&mut self, _button: MouseButton, _ctx: &mut ButtonWidgetContextMut) -> bool {
+    fn on_mouse_up(&mut self, _button: MouseButton, _ctx: &mut ButtonWidgetContextMut) -> bool { false }
+
+    fn on_mouse_down(&mut self, _button: MouseButton, _ctx: &mut ButtonWidgetContextMut) -> bool {
         config::set_theme(match config::get_theme() { Theme::Light => Theme::Dark, Theme::Dark => Theme::Light });
         true
     }
-
-    fn on_mouse_down(&mut self, _button: MouseButton, _ctx: &mut ButtonWidgetContextMut) -> bool { false }
-
+    
     fn render(&self, builder: &mut VertexBufferBuilder, mouse: Vec2u, window_dims: Vec2u, _ctx: &ButtonWidgetContext, _held_mouse_keys: &FxHashSet<MouseButton>) {
-        let aabb = Self::bounds(window_dims);
+        let aabb = self.bounds(window_dims);
         let is_within_bounds = aabb.contains(mouse);
         if is_within_bounds {
             builder.color = TextColor::White.to_raw();

@@ -74,3 +74,16 @@ pub fn set_clipboard(value: String) -> bool {
 pub fn now() -> Duration {
     Duration::from_millis(web_sys::js_sys::Date::now() as u64)
 }
+
+pub struct FakeScope<'a, 'b>;
+
+pub fn fake_scope<'env, T, F: for<'scope> FnOnce(&'scope FakeScope<'scope, 'env>) -> T>(f: F) -> T {
+    let scope = FakeScope;
+    f(&scope)
+}
+
+impl<'scope, 'env> FakeScope<'scope, 'env> {
+    pub fn spawn<T: Send + 'scope, F: FnOnce() -> T>(&'scope self, f: F) -> T {
+        f()
+    }
+}

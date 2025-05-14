@@ -7,6 +7,11 @@ use std::slice::{Iter, IterMut};
 use compact_str::{CompactString, ToCompactString};
 use hashbrown::HashTable;
 
+#[cfg(not(target_arch = "wasm32"))]
+use std::thread::Scope;
+#[cfg(target_arch = "wasm32")]
+use crate::wasm::FakeScope as Scope;
+
 use crate::assets::ZOffset;
 use crate::elements::{CompoundMap, CompoundMapIter, CompoundMapIterMut, Entry, NbtByte, NbtByteArray, NbtChunk, NbtCompound, NbtDouble, NbtElementAndKey, NbtElementAndKeyRef, NbtFloat, NbtInt, NbtIntArray, NbtList, NbtLong, NbtLongArray, NbtNull, NbtRegion, NbtShort, NbtString};
 use crate::elements::nbt_parse_result::NbtParseResult;
@@ -45,6 +50,7 @@ struct NbtElementId {
 
 /// Matches
 impl NbtElement {
+	#[must_use]
 	pub fn matches(&self, other: &Self) -> bool {
 		if self.id() != other.id() { return false }
 
@@ -287,8 +293,7 @@ impl NbtElement {
 		Ok((prefix, element))
 	}
 
-	#[allow(clippy::too_many_lines)]
-	pub(in crate::elements) fn from_str0<F: FnOnce(&str, bool, bool, u32, &str) -> Result<Self, usize>>(mut s: &str, parse_ambiguous_integer: F) -> Result<(&str, Self), usize> {
+		pub(in crate::elements) fn from_str0<F: FnOnce(&str, bool, bool, u32, &str) -> Result<Self, usize>>(mut s: &str, parse_ambiguous_integer: F) -> Result<(&str, Self), usize> {
 		if let Some(s2) = s.strip_prefix("false") { return Ok((s2, Self::Byte(NbtByte { value: 0 }))) }
 		if let Some(s2) = s.strip_prefix("true") { return Ok((s2, Self::Byte(NbtByte { value: 1 }))) }
 		if s.starts_with("[B;") { return NbtByteArray::from_str0(s).map(|(s, x)| (s, Self::ByteArray(x))) }
@@ -1013,9 +1018,16 @@ impl NbtElement {
 		let mut value = self;
 
 		for idx in indices {
-			let (k, v) = value.get(idx)?;
-			key = k;
-			value = v;
+			match value.get(idx) {
+				Some((k, v)) => {
+					key = k;
+					value = v;
+				}
+				None => {
+					std::hint::cold_path();
+					return None
+				},
+			}
 		}
 
 		Some((key, value))
@@ -1032,7 +1044,10 @@ impl NbtElement {
 				NbtCompound::ID => self.compound.get(idx).map(|(a, b)| (Some(a), b)),
 				NbtRegion::ID => self.region.get(idx).map(|x| (None, x)),
 				NbtChunk::ID => self.chunk.get(idx).map(|(a, b)| (Some(a), b)),
-				_ => None,
+				_ => {
+					std::hint::cold_path();
+					None
+				},
 			}
 		}
 	}
@@ -1262,8 +1277,7 @@ impl NbtElement {
 	}
 
 	#[must_use]
-	#[allow(clippy::match_same_arms)]
-	pub fn actions(&self) -> &[ElementAction] {
+		pub fn actions(&self) -> &[ElementAction] {
 		unsafe {
 			match self.id() {
 				NbtByte::ID => &[
@@ -1271,36 +1285,42 @@ impl NbtElement {
 					ElementAction::CopyFormatted,
 					#[cfg(not(target_arch = "wasm32"))]
 					ElementAction::OpenInTxt,
+					ElementAction::InvertBookmarks,
 				],
 				NbtShort::ID => &[
 					ElementAction::CopyRaw,
 					ElementAction::CopyFormatted,
 					#[cfg(not(target_arch = "wasm32"))]
 					ElementAction::OpenInTxt,
+					ElementAction::InvertBookmarks,
 				],
 				NbtInt::ID => &[
 					ElementAction::CopyRaw,
 					ElementAction::CopyFormatted,
 					#[cfg(not(target_arch = "wasm32"))]
 					ElementAction::OpenInTxt,
+					ElementAction::InvertBookmarks,
 				],
 				NbtLong::ID => &[
 					ElementAction::CopyRaw,
 					ElementAction::CopyFormatted,
 					#[cfg(not(target_arch = "wasm32"))]
 					ElementAction::OpenInTxt,
+					ElementAction::InvertBookmarks,
 				],
 				NbtFloat::ID => &[
 					ElementAction::CopyRaw,
 					ElementAction::CopyFormatted,
 					#[cfg(not(target_arch = "wasm32"))]
 					ElementAction::OpenInTxt,
+					ElementAction::InvertBookmarks,
 				],
 				NbtDouble::ID => &[
 					ElementAction::CopyRaw,
 					ElementAction::CopyFormatted,
 					#[cfg(not(target_arch = "wasm32"))]
 					ElementAction::OpenInTxt,
+					ElementAction::InvertBookmarks,
 				],
 				NbtByteArray::ID => &[
 					ElementAction::CopyRaw,
@@ -1309,6 +1329,7 @@ impl NbtElement {
 					ElementAction::OpenInTxt,
 					#[cfg(not(target_arch = "wasm32"))]
 					ElementAction::OpenArrayInHex,
+					ElementAction::InvertBookmarks,
 					ElementAction::InsertFromClipboard,
 				],
 				NbtString::ID => &[
@@ -1316,14 +1337,16 @@ impl NbtElement {
 					ElementAction::CopyFormatted,
 					#[cfg(not(target_arch = "wasm32"))]
 					ElementAction::OpenInTxt,
+					ElementAction::InvertBookmarks,
 				],
 				#[cfg(not(target_arch = "wasm32"))]
 				NbtList::ID => {
-					const FULL: [ElementAction; 5] = [
+					const FULL: [ElementAction; 6] = [
 						ElementAction::CopyRaw,
 						ElementAction::CopyFormatted,
 						ElementAction::OpenInTxt,
 						ElementAction::InsertFromClipboard,
+						ElementAction::InvertBookmarks,
 						ElementAction::OpenArrayInHex,
 					];
 					let id = self.as_list_unchecked().id();
@@ -1338,6 +1361,7 @@ impl NbtElement {
 					ElementAction::CopyRaw,
 					ElementAction::CopyFormatted,
 					ElementAction::InsertFromClipboard,
+					ElementAction::InvertBookmarks,
 				],
 				NbtCompound::ID => &[
 					ElementAction::CopyRaw,
@@ -1347,6 +1371,7 @@ impl NbtElement {
 					ElementAction::SortCompoundByName,
 					ElementAction::SortCompoundByType,
 					ElementAction::InsertFromClipboard,
+					ElementAction::InvertBookmarks,
 				],
 				NbtIntArray::ID => &[
 					ElementAction::CopyRaw,
@@ -1356,6 +1381,7 @@ impl NbtElement {
 					#[cfg(not(target_arch = "wasm32"))]
 					ElementAction::OpenArrayInHex,
 					ElementAction::InsertFromClipboard,
+					ElementAction::InvertBookmarks,
 				],
 				NbtLongArray::ID => &[
 					ElementAction::CopyRaw,
@@ -1365,6 +1391,7 @@ impl NbtElement {
 					#[cfg(not(target_arch = "wasm32"))]
 					ElementAction::OpenArrayInHex,
 					ElementAction::InsertFromClipboard,
+					ElementAction::InvertBookmarks,
 				],
 				NbtChunk::ID => &[
 					ElementAction::CopyRaw,
@@ -1374,12 +1401,14 @@ impl NbtElement {
 					ElementAction::SortCompoundByName,
 					ElementAction::SortCompoundByType,
 					ElementAction::InsertFromClipboard,
+					ElementAction::InvertBookmarks,
 				],
 				NbtRegion::ID => &[
 					ElementAction::CopyRaw,
 					ElementAction::CopyFormatted,
 					#[cfg(not(target_arch = "wasm32"))]
 					ElementAction::OpenInTxt,
+					ElementAction::InvertBookmarks,
 				],
 				NbtNull::ID => &[],
 				_ => core::hint::unreachable_unchecked(),
@@ -1440,31 +1469,31 @@ impl NbtElement {
 	}
 
 	// todo: add wasm32 and non-wasm32 editions for scope expands on region-files
-	pub fn shut(&mut self) {
+	pub fn shut<'a, 'b>(&'b mut self, scope: &'a Scope<'a, 'b>) {
 		unsafe {
 			match self.id() {
 				NbtByteArray::ID => self.byte_array.shut(),
 				NbtIntArray::ID => self.int_array.shut(),
 				NbtLongArray::ID => self.long_array.shut(),
-				NbtList::ID => self.list.shut(),
-				NbtCompound::ID => self.compound.shut(),
-				NbtChunk::ID => self.chunk.shut(),
-				NbtRegion::ID => self.region.shut(),
+				NbtList::ID => self.list.shut(scope),
+				NbtCompound::ID => self.compound.shut(scope),
+				NbtChunk::ID => self.chunk.shut(scope),
+				NbtRegion::ID => self.region.shut(scope),
 				_ => {}
 			}
 		}
 	}
 
-	pub fn expand<'a, 'b>(&'b mut self, #[cfg(not(target_arch = "wasm32"))] scope: &'a std::thread::Scope<'a, 'b>) {
+	pub fn expand<'a, 'b>(&'b mut self, scope: &'a Scope<'a, 'b>) {
 		unsafe {
 			match self.id() {
 				NbtByteArray::ID => self.byte_array.expand(),
 				NbtIntArray::ID => self.int_array.expand(),
 				NbtLongArray::ID => self.long_array.expand(),
-				NbtList::ID => self.list.expand(#[cfg(not(target_arch = "wasm32"))] scope),
-				NbtCompound::ID => self.compound.expand(#[cfg(not(target_arch = "wasm32"))] scope),
-				NbtChunk::ID => self.chunk.expand(#[cfg(not(target_arch = "wasm32"))] scope),
-				NbtRegion::ID => self.region.expand(#[cfg(not(target_arch = "wasm32"))] scope),
+				NbtList::ID => self.list.expand(scope),
+				NbtCompound::ID => self.compound.expand(scope),
+				NbtChunk::ID => self.chunk.expand(scope),
+				NbtRegion::ID => self.region.expand(scope),
 				_ => {}
 			}
 		}
@@ -1630,7 +1659,10 @@ impl NbtElement {
 				NbtCompound::ID => self.compound.get_mut(idx).map(|(a, b)| (Some(a), b)),
 				NbtRegion::ID => self.region.get_mut(idx).map(|x| (None, x)),
 				NbtChunk::ID => self.chunk.get_mut(idx).map(|(a, b)| (Some(a), b)),
-				_ => None,
+				_ => {
+					std::hint::cold_path();
+					None
+				},
 			}
 		}
 	}
@@ -1831,12 +1863,16 @@ impl<'a> Index<&'a str> for NbtElement {
 		let map = match self.as_pattern() {
 			NbtPattern::Compound(compound) => &*compound.entries,
 			NbtPattern::Chunk(chunk) => &*chunk.entries,
-			_ => return Self::NULL_REF,
+			_ => {
+				std::hint::cold_path();
+				return Self::NULL_REF
+			},
 		};
 
 		if let Some(idx) = map.idx_of(index) && let Some((_, value)) = map.get_idx(idx) {
 			value
 		} else {
+			std::hint::cold_path();
 			Self::NULL_REF
 		}
 	}
@@ -1850,17 +1886,22 @@ impl<'a> IndexMut<&'a str> for NbtElement {
 			let map = match self.as_pattern_mut() {
 				NbtPatternMut::Compound(compound) => &mut *compound.entries,
 				NbtPatternMut::Chunk(chunk) => &mut *chunk.entries,
-				_ => break 'a None,
+				_ => {
+					std::hint::cold_path();
+					break 'a None
+				},
 			};
 
 			if let Some(idx) = map.idx_of(index) && let Some((_, value)) = map.get_idx_mut(idx) {
 				Some(value)
 			} else {
+				std::hint::cold_path();
 				None
 			}
 		};
 
 		result.unwrap_or_else(|| {
+			std::hint::cold_path();
 			unsafe { NULL_MUT = Self::NULL; }
 			#[allow(static_mut_refs)]
 			unsafe { &mut NULL_MUT }
@@ -1872,9 +1913,13 @@ impl Index<usize> for NbtElement {
 	type Output = NbtElement;
 
 	fn index(&self, idx: usize) -> &Self::Output {
-		self.get(idx)
-			.map(|(_, b)| b)
-			.unwrap_or(Self::NULL_REF)
+		match self.get(idx) {
+			Some((_, b)) => b,
+			None => {
+				std::hint::cold_path();
+				Self::NULL_REF
+			}
+		}
 	}
 }
 
@@ -1885,6 +1930,7 @@ impl IndexMut<usize> for NbtElement {
 		self.get_mut(idx)
 			.map(|(_, b)| b)
 			.unwrap_or_else(|| {
+				std::hint::cold_path();
 				unsafe { NULL_MUT = NbtElement::NULL; }
 				#[allow(static_mut_refs)]
 				unsafe { &mut NULL_MUT }
@@ -1947,6 +1993,15 @@ impl<'a> Iterator for NbtElementValues<'a> {
 		match self {
 			Self::Iter(iter) => iter.next(),
 			Self::CompoundMapIter(iter) => iter.next().map(|(_, b)| b),
+		}
+	}
+}
+
+impl<'a> DoubleEndedIterator for NbtElementValues<'a> {
+	fn next_back(&mut self) -> Option<Self::Item> {
+		match self {
+			Self::Iter(iter) => iter.next_back(),
+			Self::CompoundMapIter(iter) => iter.next_back().map(|(_, b)| b),
 		}
 	}
 }
