@@ -35,6 +35,9 @@ NBT Workbench is written completely from scratch in [Rust](https://www.rust-lang
   * ☆ Insert directly from clipboard
 * ☆ Editing tag key/values in one click by simply being over-top the text.
 * ☆ Searching with substrings, regex and snbt matching.
+* ☆ Replacing substrings, regex, and snbt values.
+  * ☆ Replacing by hits from the search box, or replacing all bookmarked lines.
+* ☆ Set Intersections on search (Boolean logic to filter searches, very powerful)
 * ☆ Bookmarks (Click the line number to toggle bookmarking a line)
   * Grid Layout Region Files require the chunk to be double-clicked
 * ☆ Autosave
@@ -42,7 +45,7 @@ NBT Workbench is written completely from scratch in [Rust](https://www.rust-lang
 * ☆ Dark Mode
 * ☆ Colored Text
 * ☆ Remastered NBT Explorer Art
-* ☆ CLI Mode `nbtworkbench -?`
+* ☆ CLI Mode `nbtworkbench -?` (recommended to use for big file trees)
   * ☆ `nbtworkbench find` to search across multiple files or directories
   * ☆ `nbtworkbench replace` to find and replace across multiple files or directories
   * ☆ `nbtworkbench reformat` to reformat the extensions of multiple files or directories
