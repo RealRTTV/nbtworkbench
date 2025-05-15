@@ -40,6 +40,7 @@ pub mod nbt_parse_result {
 
     #[must_use]
     #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(not(debug_assertions), allow(unused_variables))]
     pub fn err<T>(msg: &'static str) -> NbtParseResult<T> {
         #[cfg(debug_assertions)]
         return Err(anyhow::Error::msg(msg));
@@ -68,6 +69,7 @@ pub mod nbt_parse_result {
 
     #[must_use]
     #[cfg_attr(not(debug_assertions), inline(always))]
+    #[cfg_attr(not(debug_assertions), allow(unused_variables))]
     pub fn from_opt<T>(opt: Option<T>, msg: &'static str) -> NbtParseResult<T> {
         #[cfg(debug_assertions)]
         return opt.ok_or(anyhow::Error::msg(msg));

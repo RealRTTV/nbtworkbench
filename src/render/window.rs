@@ -182,7 +182,10 @@ impl<'window> State<'window> {
 							..Limits::downlevel_webgl2_defaults()
 						}
 					} else {
-						Limits::default()
+						Limits {
+							max_compute_workgroups_per_dimension: 0,
+							..Limits::default()
+						}
 					},
 					label: None,
 					memory_hints: Default::default(),

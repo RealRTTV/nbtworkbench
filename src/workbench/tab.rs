@@ -12,7 +12,6 @@ use zune_inflate::DeflateDecoder;
 use super::{HeldEntry, MarkedLines, WorkbenchAction};
 use crate::assets::{ZOffset, BASE_Z, BYTE_ARRAY_GHOST_UV, BYTE_ARRAY_UV, BYTE_GRAYSCALE_UV, BYTE_UV, CHUNK_GHOST_UV, CHUNK_UV, COMPOUND_GHOST_UV, COMPOUND_ROOT_UV, COMPOUND_UV, DOUBLE_GRAYSCALE_UV, DOUBLE_UV, FLOAT_GRAYSCALE_UV, FLOAT_UV, GZIP_FILE_TYPE_UV, HEADER_SIZE, HELD_SCROLLBAR_UV, INT_ARRAY_GHOST_UV, INT_ARRAY_UV, INT_GRAYSCALE_UV, INT_UV, JUST_OVERLAPPING_BASE_Z, LINE_NUMBER_SEPARATOR_UV, LIST_GHOST_UV, LIST_UV, LITTLE_ENDIAN_HEADER_NBT_FILE_TYPE_UV, LITTLE_ENDIAN_NBT_FILE_TYPE_UV, LONG_ARRAY_GHOST_UV, LONG_ARRAY_UV, LONG_GRAYSCALE_UV, LONG_UV, MCA_FILE_TYPE_UV, NBT_FILE_TYPE_UV, REGION_UV, SCROLLBAR_Z, SHORT_GRAYSCALE_UV, SHORT_UV, SNBT_FILE_TYPE_UV, STEAL_ANIMATION_OVERLAY_UV, STRING_GHOST_UV, STRING_UV, UNHELD_SCROLLBAR_UV, UNKNOWN_NBT_GHOST_UV, UNKNOWN_NBT_UV, ZLIB_FILE_TYPE_UV};
 use crate::elements::{NbtCompound, NbtElement, NbtList, NbtRegion};
-use crate::error;
 use crate::render::{RenderContext, TextColor, VertexBufferBuilder, WindowProperties};
 use crate::tree::rename_element;
 use crate::util::{drop_on_separate_thread, now, LinkedQueue, StrExt, Vec2u};
@@ -474,7 +473,7 @@ impl Tab {
 		} else if let result = NbtElement::from_be_file(buf.as_slice()).context("Tried to parse uncompressed NBT") && {
 			#[cfg(debug_assertions)]
 			if result.is_err() {
-				error!("{result:?}");
+				crate::error!("{result:?}");
 			}
 			true
 		} && let Ok(nbt) = result {
@@ -482,7 +481,7 @@ impl Tab {
 		} else if let result = NbtElement::from_le_file(buf.as_slice()).context("Tried to parse uncompressed little-endian NBT") && {
 			#[cfg(debug_assertions)]
 			if result.is_err() {
-				error!("{result:?}");
+				crate::error!("{result:?}");
 			}
 			true
 		} && let Ok((nbt, header)) = result {
