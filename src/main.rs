@@ -4,28 +4,20 @@
 	incomplete_features,
 )]
 #![feature(
+	allocator_api,
+	cold_path,
 	duration_millis_float,
 	let_chains,
+	likely_unlikely,
 	maybe_uninit_array_assume_init,
 	panic_update_hook,
-	str_from_raw_parts,
-	sync_unsafe_cell,
-	variant_count,
     array_chunks,
     box_patterns,
-    box_into_inner,
     core_intrinsics,
     iter_array_chunks,
     iter_next_chunk,
-    optimize_attribute,
     stmt_expr_attributes,
-	ptr_as_ref_unchecked,
-	likely_unlikely,
-	vec_into_raw_parts,
 )]
-#![feature(maybe_uninit_slice)]
-#![feature(allocator_api)]
-#![feature(cold_path)]
 #![windows_subsystem = "windows"]
 
 extern crate core;
@@ -141,7 +133,6 @@ pub static mut WINDOW_PROPERTIES: render::WindowProperties = render::WindowPrope
 /// * render trees using [`RenderLine`](RenderLine) struct/enum
 /// * rendering code is duplicated af
 /// * rename line_number and true_line_number to y and line_number respectively
-/// * add `get_unchecked` and `get_unchecked_mut` methods to [elements::NbtElement] to be used in [tree::indices_for_true]
 /// # Long-Term Goals
 /// * smart screen
 /// * add multi-cursor

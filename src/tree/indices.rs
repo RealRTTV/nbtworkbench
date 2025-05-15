@@ -43,10 +43,8 @@ impl OwnedIndices {
         Self(Vec::new())
     }
     
-    pub fn push(&mut self, index: usize) -> &mut usize {
-        self.0.push(index);
-        // SAFETY: we just pushed an index to the indices
-        unsafe { self.0.as_mut_ptr().add(self.0.len() - 1).as_mut_unchecked() }
+    pub fn push(&mut self, index: usize) {
+        self.0.push(index)
     }
     
     pub fn pop(&mut self) -> Option<usize> {
@@ -54,7 +52,7 @@ impl OwnedIndices {
     }
     
     pub fn shrink_to_fit(&mut self) {
-        self.0.shrink_to_fit();
+        self.0.shrink_to_fit()
     }
 }
 

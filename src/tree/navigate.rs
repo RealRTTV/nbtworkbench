@@ -28,7 +28,7 @@ impl<'a> NavigationInformation<'a> {
                 true_line_number += sibling.true_height();
             }
 
-            let (k, v) = element.get(idx)?;
+            let (k, v) = element.get_kv(idx)?;
             key = k;
             element = v;
         }
@@ -121,7 +121,7 @@ impl<'nbt, 'indices> ParentNavigationInformation<'nbt, 'indices> {
 
         Some(Self {
             idx: last,
-            key: parent.get(last).and_then(|(a, _)| a),
+            key: parent.get_kv(last).and_then(|(a, _)| a),
             parent,
             line_number,
             true_line_number,
@@ -169,7 +169,7 @@ impl<'nbt, 'indices> ParentNavigationInformationMut<'nbt, 'indices> {
 
         Some(Self {
             idx: last,
-            key: parent.get(last).and_then(|(a, _)| a.map(|x| x.to_compact_string())),
+            key: parent.get_kv(last).and_then(|(a, _)| a.map(|x| x.to_compact_string())),
             parent,
             line_number,
             true_line_number,

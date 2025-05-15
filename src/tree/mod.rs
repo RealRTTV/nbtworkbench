@@ -35,7 +35,8 @@ pub fn indices_for_true(true_line_number: usize, mut root: &NbtElement) -> Optio
     while true_line_number > 0 {
         let mut idx = 0;
         loop {
-            let child = &root[idx];
+            // SAFETY: index is valid because of how the tree is structured
+            let child = unsafe { root.get_unchecked(idx) };
             let true_height = child.true_height();
             if true_line_number > true_height {
                 true_line_number -= true_height;

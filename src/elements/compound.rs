@@ -60,7 +60,6 @@ impl Clone for NbtCompound {
 
 impl NbtCompound {
 	pub const ID: u8 = 10;
-	#[optimize(speed)]
 	pub(in crate::elements) fn from_str0(mut s: &str) -> Result<(&str, Self), usize> {
 		s = s.strip_prefix('{').ok_or(s.len())?.trim_start();
 		let mut compound = Self::new();
@@ -214,10 +213,16 @@ impl NbtCompound {
 	pub fn is_empty(&self) -> bool { self.entries.is_empty() }
 
 	#[must_use]
-	pub fn get(&self, idx: usize) -> Option<(&str, &NbtElement)> { self.entries.get_idx(idx) }
+	pub fn get_kv(&self, idx: usize) -> Option<(&str, &NbtElement)> { self.entries.get_kv_idx(idx) }
 
 	#[must_use]
-	pub fn get_mut(&mut self, idx: usize) -> Option<(&str, &mut NbtElement)> { self.entries.get_idx_mut(idx) }
+	pub unsafe fn get_unchecked(&self, idx: usize) -> &NbtElement { self.entries.get_unchecked_idx(idx) }
+
+	#[must_use]
+	pub fn get_kv_mut(&mut self, idx: usize) -> Option<(&str, &mut NbtElement)> { self.entries.get_kv_idx_mut(idx) }
+
+	#[must_use]
+	pub unsafe fn get_unchecked_mut(&mut self, idx: usize) -> &mut NbtElement { self.entries.get_unchecked_idx_mut(idx) }
 
 	#[must_use]
 	pub fn value(&self) -> CompactString {
@@ -576,7 +581,7 @@ pub struct CompoundMap {
 impl CompoundMap {
 	pub fn matches(&self, other: &Self) -> bool {
 		for entry in &self.entries {
-			if let Some((key, value)) = other.idx_of(&entry.key).and_then(|idx| other.get_idx(idx)) && key == entry.key && entry.value.matches(value) {
+			if let Some((key, value)) = other.idx_of(&entry.key).and_then(|idx| other.get_kv_idx(idx)) && key == entry.key && entry.value.matches(value) {
 				continue
 			}
 			return false
@@ -794,26 +799,38 @@ impl CompoundMap {
 	}
 
 	#[must_use]
-	pub fn get_idx(&self, idx: usize) -> Option<(&str, &NbtElement)> {
+	pub fn get_kv_idx(&self, idx: usize) -> Option<(&str, &NbtElement)> {
 		let Entry { key, value, .. } = self.entries.get(idx)?;
 		Some((key.as_str(), value))
 	}
 
 	#[must_use]
-	pub fn get_idx_mut(&mut self, idx: usize) -> Option<(&str, &mut NbtElement)> {
-		let entry = self.entries.get_mut(idx)?;
-		Some((entry.key.as_str(), &mut entry.value))
+	pub unsafe fn get_unchecked_idx(&self, idx: usize) -> &NbtElement {
+		let Entry { value, .. } = self.entries.get_unchecked(idx);
+		value
 	}
-	
+
+	#[must_use]
+	pub fn get_kv_idx_mut(&mut self, idx: usize) -> Option<(&str, &mut NbtElement)> {
+		let Entry { key, value, .. } = self.entries.get_mut(idx)?;
+		Some((key.as_str(), value))
+	}
+
+	#[must_use]
+	pub unsafe fn get_unchecked_idx_mut(&mut self, idx: usize) -> &mut NbtElement {
+		let Entry { value, .. } = self.entries.get_unchecked_mut(idx);
+		value
+	}
+
 	#[must_use]
 	pub fn create_sort_mapping<F: FnMut((&str, &NbtElement), (&str, &NbtElement)) -> Ordering>(&self, mut f: F) -> Box<[usize]> {
 		let mut mapping = (0..self.len()).collect::<Vec<_>>();
-		mapping.sort_unstable_by(|&a, &b| f(self.get_idx(a).unwrap_or(("", NbtElement::NULL_REF)), self.get_idx(b).unwrap_or(("", NbtElement::NULL_REF))));
+		mapping.sort_unstable_by(|&a, &b| f(self.get_kv_idx(a).unwrap_or(("", NbtElement::NULL_REF)), self.get_kv_idx(b).unwrap_or(("", NbtElement::NULL_REF))));
 		mapping.into_boxed_slice()
 	}
 
 	pub fn update_key(&mut self, idx: usize, key: CompactString) -> Option<CompactString> {
-		if self.get_idx(idx).is_some_and(|(k, _)| k == key) {
+		if self.get_kv_idx(idx).is_some_and(|(k, _)| k == key) {
 			Some(key)
 		} else if self.has(key.as_ref()) {
 			None

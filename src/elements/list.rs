@@ -266,7 +266,13 @@ impl NbtList {
 	pub fn get(&self, idx: usize) -> Option<&NbtElement> { self.elements.get(idx) }
 
 	#[must_use]
+	pub unsafe fn get_unchecked(&self, idx: usize) -> &NbtElement { self.elements.get_unchecked(idx) }
+
+	#[must_use]
 	pub fn get_mut(&mut self, idx: usize) -> Option<&mut NbtElement> { self.elements.get_mut(idx) }
+
+	#[must_use]
+	pub unsafe fn get_unchecked_mut(&mut self, idx: usize) -> &mut NbtElement { self.elements.get_unchecked_mut(idx) }
 
 	#[must_use]
 	pub fn value(&self) -> CompactString {

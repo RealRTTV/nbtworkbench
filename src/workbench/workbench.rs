@@ -103,9 +103,9 @@ impl Workbench {
             cursor_visible: false,
             alerts: vec![],
             notifications: EnumMap::from_array(const {
-                let mut array = [const { MaybeUninit::<Option<Notification>>::uninit() }; core::mem::variant_count::<NotificationKind>()];
+                let mut array = [const { MaybeUninit::<Option<Notification>>::uninit() }; enum_map::enum_len::<NotificationKind>()];
                 let mut i = 0;
-                while i < core::mem::variant_count::<NotificationKind>() {
+                while i < enum_map::enum_len::<NotificationKind>() {
                     array[i].write(None);
                     i += 1;
                 }
@@ -154,15 +154,7 @@ impl Workbench {
             subscription: None,
             cursor_visible: true,
             alerts: vec![],
-            notifications: EnumMap::from_array(const {
-                let mut array = [const { MaybeUninit::<Option<Notification>>::uninit() }; core::mem::variant_count::<NotificationKind>()];
-                let mut i = 0;
-                while i < core::mem::variant_count::<NotificationKind>() {
-                    array[i].write(None);
-                    i += 1;
-                }
-                unsafe { MaybeUninit::array_assume_init(array) }
-            }),
+            notifications: EnumMap::from_fn(|_| None),
             scale: 1.0,
             steal_animation_data: None,
             search_box: SearchBox::new(),
@@ -751,7 +743,7 @@ impl Workbench {
             match add_element(&mut tab.value, kv, indices, &mut tab.bookmarks, mutable_indices!(self, tab)) {
                 Some(AddElementResult { indices, old_value }) => {
                     tab.value.expand_to_indices(&indices);
-                    let Some(old_kv) = tab.value.get_kv(&indices) else { return false };
+                    let Some(old_kv) = tab.value.get_kv_under_indices(&indices) else { return false };
                     let old_key = old_kv.0.map(|key| key.to_compact_string());
                     tab.append_to_history(WorkbenchAction::AddFromHeldEntry { indices, old_key, old_value, indices_history });
                     true
@@ -1153,7 +1145,7 @@ impl Workbench {
         let Some(SelectedText(Text { additional: SelectedTextAdditional { indices, .. }, .. })) = &tab.selected_text else { return None };
         let ParentNavigationInformationMut { parent, idx: a_idx, parent_indices, .. } = tab.value.navigate_parent_mut(indices)?;
         let b_idx = sibling_idx(a_idx)?;
-        if parent.get(a_idx).is_none() || parent.get(b_idx).is_none() { return None };
+        if parent.get_kv(a_idx).is_none() || parent.get_kv(b_idx).is_none() { return None };
         let result = match swap_element_same_depth(&mut tab.value, parent_indices.to_owned(), a_idx, b_idx, &mut tab.bookmarks, mutable_indices!(self, tab)) {
             Some(action) => action,
             None => {

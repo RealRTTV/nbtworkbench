@@ -64,7 +64,7 @@ impl<'a> TraversalInformation<'a> {
                 true_line_number += 1;
                 indices.push(idx);
                 depth += 1;
-                let kv = element.get(idx)?;
+                let kv = element.get_kv(idx)?;
                 key = kv.0;
                 element = kv.1;
             }

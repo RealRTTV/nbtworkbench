@@ -155,8 +155,8 @@ pub unsafe fn union_two_sorted_no_duplicates<T: Ord>(a: Vec<T>, b: Vec<T>) -> Ve
 	let mut out = Vec::with_capacity(a_len + b_len);
 
 	while a_ptr < a_end_ptr && b_ptr < b_end_ptr {
-		let a = a_ptr.as_mut_unchecked();
-		let b = b_ptr.as_mut_unchecked();
+		let a = &mut *a_ptr;
+		let b = &mut *b_ptr;
 
 		match Ord::cmp(a, b) {
 			Ordering::Less => {
@@ -207,8 +207,8 @@ pub unsafe fn intersection_two_sorted_no_duplicates<T: Ord>(a: Vec<T>, b: Vec<T>
 	let mut out = Vec::with_capacity(a_len + b_len);
 
 	while a_ptr < a_end_ptr && b_ptr < b_end_ptr {
-		let a = a_ptr.as_mut_unchecked();
-		let b = b_ptr.as_mut_unchecked();
+		let a = &mut *a_ptr;
+		let b = &mut *b_ptr;
 
 		match Ord::cmp(a, b) {
 			Ordering::Less => {
@@ -249,8 +249,8 @@ pub unsafe fn symmetric_difference_two_sorted_no_duplicates<T: Ord>(a: Vec<T>, b
 	let mut out = Vec::with_capacity(a_len + b_len);
 
 	while a_ptr < a_end_ptr && b_ptr < b_end_ptr {
-		let a = a_ptr.as_mut_unchecked();
-		let b = b_ptr.as_mut_unchecked();
+		let a = &mut *a_ptr;
+		let b = &mut *b_ptr;
 
 		match Ord::cmp(a, b) {
 			Ordering::Less => {
@@ -416,7 +416,6 @@ pub trait StrExt {
 
 impl StrExt for str {
 
-	#[optimize(speed)]
 		fn snbt_string_read(mut self: &Self) -> Result<(CompactString, &Self), usize> {
 		const MAPPING: [Option<u8>; 256] = {
 			let mut initial = [Option::<u8>::None; 256];

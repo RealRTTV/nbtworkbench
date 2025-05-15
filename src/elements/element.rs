@@ -1013,12 +1013,12 @@ impl NbtElement {
 	}
 
 	#[must_use]
-	pub fn get_kv(&self, indices: &Indices) -> Option<NbtElementAndKeyRef> {
+	pub fn get_kv_under_indices(&self, indices: &Indices) -> Option<NbtElementAndKeyRef> {
 		let mut key = None;
 		let mut value = self;
 
 		for idx in indices {
-			match value.get(idx) {
+			match value.get_kv(idx) {
 				Some((k, v)) => {
 					key = k;
 					value = v;
@@ -1034,21 +1034,35 @@ impl NbtElement {
 	}
 
 	#[must_use]
-	pub fn get(&self, idx: usize) -> Option<NbtElementAndKeyRef> {
+	pub fn get_kv(&self, idx: usize) -> Option<NbtElementAndKeyRef> {
 		unsafe {
 			match self.id() {
 				NbtByteArray::ID => self.byte_array.get(idx).map(|x| (None, x)),
 				NbtIntArray::ID => self.int_array.get(idx).map(|x| (None, x)),
 				NbtLongArray::ID => self.long_array.get(idx).map(|x| (None, x)),
 				NbtList::ID => self.list.get(idx).map(|x| (None, x)),
-				NbtCompound::ID => self.compound.get(idx).map(|(a, b)| (Some(a), b)),
+				NbtCompound::ID => self.compound.get_kv(idx).map(|(a, b)| (Some(a), b)),
 				NbtRegion::ID => self.region.get(idx).map(|x| (None, x)),
-				NbtChunk::ID => self.chunk.get(idx).map(|(a, b)| (Some(a), b)),
+				NbtChunk::ID => self.chunk.get_kv(idx).map(|(a, b)| (Some(a), b)),
 				_ => {
 					std::hint::cold_path();
 					None
 				},
 			}
+		}
+	}
+
+	#[must_use]
+	pub unsafe fn get_unchecked(&self, idx: usize) -> &NbtElement {
+		match self.id() {
+			NbtByteArray::ID => self.byte_array.get_unchecked(idx),
+			NbtIntArray::ID => self.int_array.get_unchecked(idx),
+			NbtLongArray::ID => self.long_array.get_unchecked(idx),
+			NbtList::ID => self.list.get_unchecked(idx),
+			NbtCompound::ID => self.compound.get_unchecked(idx),
+			NbtRegion::ID => self.region.get_unchecked(idx),
+			NbtChunk::ID => self.chunk.get_unchecked(idx),
+			_ => std::hint::unreachable_unchecked(),
 		}
 	}
 
@@ -1656,9 +1670,9 @@ impl NbtElement {
 				NbtIntArray::ID => self.int_array.get_mut(idx).map(|x| (None, x)),
 				NbtLongArray::ID => self.long_array.get_mut(idx).map(|x| (None, x)),
 				NbtList::ID => self.list.get_mut(idx).map(|x| (None, x)),
-				NbtCompound::ID => self.compound.get_mut(idx).map(|(a, b)| (Some(a), b)),
+				NbtCompound::ID => self.compound.get_kv_mut(idx).map(|(a, b)| (Some(a), b)),
 				NbtRegion::ID => self.region.get_mut(idx).map(|x| (None, x)),
-				NbtChunk::ID => self.chunk.get_mut(idx).map(|(a, b)| (Some(a), b)),
+				NbtChunk::ID => self.chunk.get_kv_mut(idx).map(|(a, b)| (Some(a), b)),
 				_ => {
 					std::hint::cold_path();
 					None
@@ -1667,8 +1681,22 @@ impl NbtElement {
 		}
 	}
 
+	#[must_use]
+	pub unsafe fn get_unchecked_mut(&mut self, idx: usize) -> &mut NbtElement {
+		match self.id() {
+			NbtByteArray::ID => self.byte_array.get_unchecked_mut(idx),
+			NbtIntArray::ID => self.int_array.get_unchecked_mut(idx),
+			NbtLongArray::ID => self.long_array.get_unchecked_mut(idx),
+			NbtList::ID => self.list.get_unchecked_mut(idx),
+			NbtCompound::ID => self.compound.get_unchecked_mut(idx),
+			NbtRegion::ID => self.region.get_unchecked_mut(idx),
+			NbtChunk::ID => self.chunk.get_unchecked_mut(idx),
+			_ => std::hint::unreachable_unchecked(),
+		}
+	}
+
 	pub fn try_compound_singleton_into_inner(mut self) -> Result<Self, Self> {
-		if let Some(compound) = self.as_compound_mut() && compound.len() == 1 && compound.get(0).is_some_and(|(key, _)| key.is_empty()) && let Some((_, inner)) = compound.remove(0) {
+		if let Some(compound) = self.as_compound_mut() && compound.len() == 1 && compound.get_kv(0).is_some_and(|(key, _)| key.is_empty()) && let Some((_, inner)) = compound.remove(0) {
 			Ok(inner)
 		} else {
 			Err(self)
@@ -1869,7 +1897,7 @@ impl<'a> Index<&'a str> for NbtElement {
 			},
 		};
 
-		if let Some(idx) = map.idx_of(index) && let Some((_, value)) = map.get_idx(idx) {
+		if let Some(idx) = map.idx_of(index) && let Some((_, value)) = map.get_kv_idx(idx) {
 			value
 		} else {
 			std::hint::cold_path();
@@ -1892,7 +1920,7 @@ impl<'a> IndexMut<&'a str> for NbtElement {
 				},
 			};
 
-			if let Some(idx) = map.idx_of(index) && let Some((_, value)) = map.get_idx_mut(idx) {
+			if let Some(idx) = map.idx_of(index) && let Some((_, value)) = map.get_kv_idx_mut(idx) {
 				Some(value)
 			} else {
 				std::hint::cold_path();
@@ -1913,7 +1941,7 @@ impl Index<usize> for NbtElement {
 	type Output = NbtElement;
 
 	fn index(&self, idx: usize) -> &Self::Output {
-		match self.get(idx) {
+		match self.get_kv(idx) {
 			Some((_, b)) => b,
 			None => {
 				std::hint::cold_path();

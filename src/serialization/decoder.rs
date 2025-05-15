@@ -47,7 +47,6 @@ pub struct BigEndianDecoder<'a> {
 
 #[allow(improper_ctypes_definitions)]
 impl<'a> BigEndianDecoder<'a> {
-    #[optimize(speed)]
     unsafe fn read_bytes<const N: usize>(&mut self) -> [u8; N] {
         let array = self.data.cast::<[u8; N]>().read();
         self.data = self.data.add(N);
@@ -56,7 +55,6 @@ impl<'a> BigEndianDecoder<'a> {
 }
 
 impl<'a> Decoder<'a> for BigEndianDecoder<'a> {
-    #[optimize(speed)]
     fn new(data: &'a [u8]) -> Self {
         Self {
             end: unsafe { data.as_ptr().add(data.len()) },
@@ -65,7 +63,6 @@ impl<'a> Decoder<'a> for BigEndianDecoder<'a> {
         }
     }
 
-    #[optimize(speed)]
     fn assert_len(&self, remaining_len: usize) -> NbtParseResult<()> {
         use crate::elements::nbt_parse_result::*;
         
@@ -82,7 +79,6 @@ impl<'a> Decoder<'a> for BigEndianDecoder<'a> {
         unsafe { config::get_sort_algorithm().sort(map) }
     }
 
-    #[optimize(speed)]
     #[allow(unused_mut)]
     unsafe fn read_ne_bytes<const N: usize>(&mut self) -> [u8; N] {
         let mut bytes = self.read_bytes::<N>();
@@ -91,40 +87,28 @@ impl<'a> Decoder<'a> for BigEndianDecoder<'a> {
         bytes
     }
 
-    #[optimize(speed)]
     unsafe fn u8(&mut self) -> u8 { u8::from_be_bytes(self.read_bytes()) }
 
-    #[optimize(speed)]
     unsafe fn u16(&mut self) -> u16 { u16::from_be_bytes(self.read_bytes()) }
 
-    #[optimize(speed)]
     unsafe fn u32(&mut self) -> u32 { u32::from_be_bytes(self.read_bytes()) }
 
-    #[optimize(speed)]
     unsafe fn u64(&mut self) -> u64 { u64::from_be_bytes(self.read_bytes()) }
 
-    #[optimize(speed)]
     unsafe fn i8(&mut self) -> i8 { i8::from_be_bytes(self.read_bytes()) }
 
-    #[optimize(speed)]
     unsafe fn i16(&mut self) -> i16 { i16::from_be_bytes(self.read_bytes()) }
 
-    #[optimize(speed)]
     unsafe fn i32(&mut self) -> i32 { i32::from_be_bytes(self.read_bytes()) }
 
-    #[optimize(speed)]
     unsafe fn i64(&mut self) -> i64 { i64::from_be_bytes(self.read_bytes()) }
 
-    #[optimize(speed)]
     unsafe fn f32(&mut self) -> f32 { f32::from_be_bytes(self.read_bytes()) }
 
-    #[optimize(speed)]
     unsafe fn f64(&mut self) -> f64 { f64::from_be_bytes(self.read_bytes()) }
 
-    #[optimize(speed)]
     unsafe fn skip(&mut self, amount: usize) { self.data = self.data.add(amount); }
 
-    #[optimize(speed)]
     unsafe fn string(&mut self) -> NbtParseResult<CompactString> {
         use crate::elements::nbt_parse_result::*;
         
@@ -145,7 +129,6 @@ pub struct LittleEndianDecoder<'a> {
 }
 
 impl<'a> LittleEndianDecoder<'a> {
-    #[optimize(speed)]
     unsafe fn read_bytes<const N: usize>(&mut self) -> [u8; N] {
         let array = self.data.cast::<[u8; N]>().read();
         self.data = self.data.add(N);
@@ -165,7 +148,6 @@ impl<'a> LittleEndianDecoder<'a> {
 
 #[allow(improper_ctypes_definitions)]
 impl<'a> Decoder<'a> for LittleEndianDecoder<'a> {
-    #[optimize(speed)]
     fn new(data: &'a [u8]) -> Self {
         use crate::elements::nbt_parse_result::*;   
            
@@ -186,7 +168,6 @@ impl<'a> Decoder<'a> for LittleEndianDecoder<'a> {
         this
     }
 
-    #[optimize(speed)]
     fn assert_len(&self, remaining_len: usize) -> NbtParseResult<()> {
         use crate::elements::nbt_parse_result::*;
         
@@ -203,7 +184,6 @@ impl<'a> Decoder<'a> for LittleEndianDecoder<'a> {
         unsafe { config::get_sort_algorithm().sort(map) }
     }
 
-    #[optimize(speed)]
     #[allow(unused_mut)]
     unsafe fn read_ne_bytes<const N: usize>(&mut self) -> [u8; N] {
         let mut bytes = self.read_bytes::<N>();
@@ -212,40 +192,28 @@ impl<'a> Decoder<'a> for LittleEndianDecoder<'a> {
         bytes
     }
 
-    #[optimize(speed)]
     unsafe fn u8(&mut self) -> u8 { u8::from_le_bytes(self.read_bytes()) }
 
-    #[optimize(speed)]
     unsafe fn u16(&mut self) -> u16 { u16::from_le_bytes(self.read_bytes()) }
 
-    #[optimize(speed)]
     unsafe fn u32(&mut self) -> u32 { u32::from_le_bytes(self.read_bytes()) }
 
-    #[optimize(speed)]
     unsafe fn u64(&mut self) -> u64 { u64::from_le_bytes(self.read_bytes()) }
 
-    #[optimize(speed)]
     unsafe fn i8(&mut self) -> i8 { i8::from_le_bytes(self.read_bytes()) }
 
-    #[optimize(speed)]
     unsafe fn i16(&mut self) -> i16 { i16::from_le_bytes(self.read_bytes()) }
 
-    #[optimize(speed)]
     unsafe fn i32(&mut self) -> i32 { i32::from_le_bytes(self.read_bytes()) }
 
-    #[optimize(speed)]
     unsafe fn i64(&mut self) -> i64 { i64::from_le_bytes(self.read_bytes()) }
 
-    #[optimize(speed)]
     unsafe fn f32(&mut self) -> f32 { f32::from_le_bytes(self.read_bytes()) }
 
-    #[optimize(speed)]
     unsafe fn f64(&mut self) -> f64 { f64::from_le_bytes(self.read_bytes()) }
 
-    #[optimize(speed)]
     unsafe fn skip(&mut self, amount: usize) { self.data = self.data.add(amount); }
 
-    #[optimize(speed)]
     unsafe fn string(&mut self) -> NbtParseResult<CompactString> {
         use crate::elements::nbt_parse_result::*;
         
