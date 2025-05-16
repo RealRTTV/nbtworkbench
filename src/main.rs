@@ -1,8 +1,5 @@
-#![allow(
-	semicolon_in_expressions_from_macros,
-	internal_features,
-	incomplete_features,
-)]
+#![allow(semicolon_in_expressions_from_macros, internal_features, incomplete_features)]
+#![warn(clippy::pedantic)]
 #![feature(
 	allocator_api,
 	cold_path,
@@ -11,32 +8,30 @@
 	likely_unlikely,
 	maybe_uninit_array_assume_init,
 	panic_update_hook,
-    array_chunks,
-    box_patterns,
-    core_intrinsics,
-    iter_array_chunks,
-    iter_next_chunk,
-    stmt_expr_attributes,
+	try_with_capacity,
+	vec_push_within_capacity,
+	array_chunks,
+	box_patterns,
+	core_intrinsics,
+	iter_array_chunks,
+	iter_next_chunk,
+	stmt_expr_attributes
 )]
 #![windows_subsystem = "windows"]
 
 extern crate core;
 
-#[cfg(not(target_arch = "wasm32"))]
-pub mod cli;
+#[cfg(not(target_arch = "wasm32"))] pub mod cli;
 pub mod config;
-pub mod render;
 pub mod elements;
+pub mod render;
 pub mod serialization;
-pub mod workbench;
-#[cfg(target_arch = "wasm32")]
-pub mod wasm;
-pub mod util;
 pub mod tree;
+pub mod util;
+#[cfg(target_arch = "wasm32")] pub mod wasm;
+pub mod workbench;
 
-pub use render::assets;
-pub use render::widget;
-
+pub use render::{assets, widget};
 use static_assertions::const_assert_eq;
 
 #[macro_export]
@@ -78,23 +73,27 @@ macro_rules! hash {
 
 #[macro_export]
 macro_rules! tab {
-    ($self:ident) => {
+	($self:ident) => {
 		#[allow(unused_unsafe)]
-		unsafe { $self.tabs.get_unchecked($self.tab) }
+		unsafe {
+			$self.tabs.get_unchecked($self.tab)
+		}
 	};
 }
 
 #[macro_export]
 macro_rules! tab_mut {
-    ($self:ident) => {
+	($self:ident) => {
 		#[allow(unused_unsafe)]
-		unsafe { $self.tabs.get_unchecked_mut($self.tab) }
+		unsafe {
+			$self.tabs.get_unchecked_mut($self.tab)
+		}
 	};
 }
 
 #[macro_export]
 macro_rules! get_interaction_information {
-    ($self:ident) => {{
+	($self:ident) => {{
 		let left_margin = $self.left_margin();
 		let horizontal_scroll = $self.horizontal_scroll();
 		let scroll = $self.scroll();
@@ -120,11 +119,10 @@ macro_rules! log {
 
 #[macro_export]
 macro_rules! mutable_indices {
-    ($workbench:ident, $tab:ident) => {
+	($workbench:ident, $tab:ident) => {
 		&mut MutableIndices::new(&mut $workbench.subscription, &mut $tab.selected_text)
 	};
 }
-
 
 pub static mut WORKBENCH: workbench::Workbench = unsafe { workbench::Workbench::uninit() };
 pub static mut WINDOW_PROPERTIES: render::WindowProperties = render::WindowProperties::Fake;
@@ -146,7 +144,8 @@ pub static mut WINDOW_PROPERTIES: render::WindowProperties = render::WindowPrope
 #[cfg(not(target_arch = "wasm32"))]
 pub fn main() -> ! {
 	config::read();
-	#[cfg(target_os = "windows")] unsafe {
+	#[cfg(target_os = "windows")]
+	unsafe {
 		winapi::um::wincon::AttachConsole(winapi::um::wincon::ATTACH_PARENT_PROCESS);
 	}
 
@@ -168,7 +167,4 @@ pub fn main() -> ! {
 }
 
 // required so chunk coordinates function with the hardcoded spacing offset
-const_assert_eq!(
-	render::VertexBufferBuilder::CHAR_WIDTH[b':' as usize],
-	render::VertexBufferBuilder::CHAR_WIDTH[b',' as usize]
-);
+const_assert_eq!(render::VertexBufferBuilder::CHAR_WIDTH[b':' as usize], render::VertexBufferBuilder::CHAR_WIDTH[b',' as usize]);

@@ -1,4 +1,4 @@
-use std::alloc::{alloc, dealloc, realloc, Layout};
+use std::alloc::{Layout, alloc, dealloc, realloc};
 use std::hint::likely;
 use std::io::Write;
 use std::mem::MaybeUninit;
@@ -24,10 +24,7 @@ impl Default for UncheckedBufWriter {
 impl Drop for UncheckedBufWriter {
 	fn drop(&mut self) {
 		unsafe {
-			dealloc(
-				self.buf.cast::<u8>(),
-				Layout::array::<u8>(Self::BUFFER_WIDTH).unwrap_unchecked(),
-			);
+			dealloc(self.buf.cast::<u8>(), Layout::array::<u8>(Self::BUFFER_WIDTH).unwrap_unchecked());
 		}
 	}
 }
@@ -51,7 +48,7 @@ impl Write for UncheckedBufWriter {
 
 impl UncheckedBufWriter {
 	const BUFFER_WIDTH: usize = 1 << 24;
-	
+
 	pub fn new() -> Self { Self::default() }
 
 	pub const fn remaining(&self) -> usize { Self::BUFFER_WIDTH - 1 - self.buf_len }
@@ -88,11 +85,7 @@ impl UncheckedBufWriter {
 		self.inner = if self.inner.is_null() {
 			alloc(Layout::array::<u8>(new_size).unwrap_unchecked())
 		} else {
-			realloc(
-				self.inner,
-				Layout::array::<u8>(malloc_size).unwrap_unchecked(),
-				new_size,
-			)
+			realloc(self.inner, Layout::array::<u8>(malloc_size).unwrap_unchecked(), new_size)
 		};
 		self.inner
 			.add(self.inner_len)
@@ -106,18 +99,16 @@ impl UncheckedBufWriter {
 	}
 
 	pub fn flush(&mut self) {
-		if self.buf_len == 0 { return }
-		
+		if self.buf_len == 0 {
+			return
+		}
+
 		unsafe {
 			let malloc_size = (self.inner_len + Self::BUFFER_WIDTH - 1) & !(Self::BUFFER_WIDTH - 1);
 			self.inner = if self.inner.is_null() {
 				alloc(Layout::array::<u8>(self.inner_len + self.buf_len).unwrap_unchecked())
 			} else {
-				realloc(
-					self.inner,
-					Layout::array::<u8>(malloc_size).unwrap_unchecked(),
-					self.inner_len + self.buf_len,
-				)
+				realloc(self.inner, Layout::array::<u8>(malloc_size).unwrap_unchecked(), self.inner_len + self.buf_len)
 			};
 			self.inner
 				.add(self.inner_len)

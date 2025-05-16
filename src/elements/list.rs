@@ -1,20 +1,17 @@
-use std::alloc::{alloc, Layout};
 use std::fmt::{Display, Formatter, Write};
 use std::hint::likely;
 use std::slice::{Iter, IterMut};
+#[cfg(not(target_arch = "wasm32"))] use std::thread::{Scope, scope};
 
-use compact_str::{format_compact, CompactString};
+use compact_str::{CompactString, format_compact};
 
-#[cfg(not(target_arch = "wasm32"))]
-use std::thread::{scope, Scope};
-#[cfg(target_arch = "wasm32")]
-use crate::wasm::{FakeScope as Scope, fake_scope as scope};
-
-use crate::assets::{ZOffset, BASE_Z, CONNECTION_UV, JUST_OVERLAPPING_BASE_TEXT_Z, LIST_UV};
-use crate::elements::{id_to_string_name, NbtChunk, NbtCompound, NbtElement};
+use crate::assets::{BASE_Z, CONNECTION_UV, JUST_OVERLAPPING_BASE_TEXT_Z, LIST_UV, ZOffset};
 use crate::elements::nbt_parse_result::NbtParseResult;
+use crate::elements::{NbtChunk, NbtCompound, NbtElement, id_to_string_name};
 use crate::render::{RenderContext, TextColor, VertexBufferBuilder};
 use crate::serialization::{Decoder, PrettyFormatter, UncheckedBufWriter};
+#[cfg(target_arch = "wasm32")]
+use crate::wasm::{FakeScope as Scope, fake_scope as scope};
 
 #[repr(C)]
 pub struct NbtList {
@@ -31,48 +28,53 @@ impl NbtList {
 		if self.is_empty() {
 			other.is_empty()
 		} else {
-			self.elements.iter().all(|a| other.elements.iter().any(|b| a.matches(b)))
+			self.elements
+				.iter()
+				.all(|a| other.elements.iter().any(|b| a.matches(b)))
 		}
 	}
 }
 
 impl PartialEq for NbtList {
 	fn eq(&self, other: &Self) -> bool {
-		self.elements.as_slice().eq(other.elements.as_slice())
+		self.elements
+			.as_slice()
+			.eq(other.elements.as_slice())
 	}
 }
 
 impl Clone for NbtList {
-		fn clone(&self) -> Self {
-		unsafe {
-			let len = self.elements.len();
-			let ptr = alloc(Layout::array::<NbtElement>(len).unwrap_unchecked()).cast::<NbtElement>();
-			let box_ptr = alloc(Layout::new::<Vec<NbtElement>>()).cast::<Vec<NbtElement>>();
-			for n in 0..len {
-				ptr.add(n).write(self.elements.get_unchecked(n).clone());
-			}
-			box_ptr.write(Vec::from_raw_parts(ptr.cast::<NbtElement>(), len, len));
-			Self {
-				elements: Box::from_raw(box_ptr),
-				height: self.height,
-				true_height: self.true_height,
-				max_depth: self.max_depth,
-				elements_bitset: self.elements_bitset,
-				open: self.open,
-			}
+	fn clone(&self) -> Self {
+		let mut vec = unsafe { Vec::try_with_capacity(self.len()).unwrap_unchecked() };
+		for src in self.elements.iter() {
+			unsafe {
+				vec.push_within_capacity(src.clone())
+					.unwrap_unchecked()
+			};
+		}
+		Self {
+			elements: unsafe { Box::try_new(vec).unwrap_unchecked() },
+			height: self.height,
+			true_height: self.true_height,
+			max_depth: self.max_depth,
+			elements_bitset: self.elements_bitset,
+			open: self.open,
 		}
 	}
 }
 
 impl NbtList {
 	pub const ID: u8 = 9;
-	pub(in crate::elements) fn from_str0(mut s: &str) -> Result<(&str, Self), usize> {
+	pub(super) fn from_str0(mut s: &str) -> Result<(&str, Self), usize> {
 		s = s.strip_prefix('[').ok_or(s.len())?.trim_start();
 		let mut list = Self::new(vec![]);
 		while !s.starts_with(']') {
 			let (s2, mut element) = NbtElement::from_str0(s, NbtElement::parse_int)?;
-			element = element.try_compound_singleton_into_inner().unwrap_or_else(|element| element);
-			list.insert(list.len(), element).map_err(|_| s.len())?;
+			element = element
+				.try_compound_singleton_into_inner()
+				.unwrap_or_else(|element| element);
+			list.insert(list.len(), element)
+				.map_err(|_| s.len())?;
 			s = s2.trim_start();
 			if let Some(s2) = s.strip_prefix(',') {
 				s = s2.trim_start();
@@ -85,32 +87,30 @@ impl NbtList {
 		list.recache_elements_bitset();
 		Ok((s, list))
 	}
-		pub fn from_bytes<'a, D: Decoder<'a>>(decoder: &mut D) -> NbtParseResult<Self> {
+	pub fn from_bytes<'a, D: Decoder<'a>>(decoder: &mut D) -> NbtParseResult<Self> {
 		use super::nbt_parse_result::*;
-		
+
 		unsafe {
 			decoder.assert_len(5)?;
 			let element = decoder.u8();
 			let len = decoder.u32() as usize;
-			let ptr = alloc(Layout::array::<NbtElement>(len).unwrap_unchecked()).cast::<NbtElement>();
+			let mut vec = from_opt(Vec::try_with_capacity(len).ok(), "Could not allocate enough memory for Vec")?;
 			let mut true_height = 1;
 			let mut extracted_inner_element = false;
-			for n in 0..len {
+			for _ in 0..len {
 				let mut element = NbtElement::from_bytes(element, decoder)?;
 				element = match element.try_compound_singleton_into_inner() {
 					Ok(inner) => {
 						extracted_inner_element = true;
 						inner
-					},
-					Err(element) => element
+					}
+					Err(element) => element,
 				};
 				true_height += element.true_height() as u32;
-				ptr.add(n).write(element);
+				from_opt(vec.push_within_capacity(element).ok(), "Vec was larger that stated")?;
 			}
-			let box_ptr = alloc(Layout::new::<Vec<NbtElement>>()).cast::<Vec<NbtElement>>();
-			box_ptr.write(Vec::from_raw_parts(ptr, len, len));
 			let mut list = Self {
-				elements: Box::from_raw(box_ptr),
+				elements: unsafe { Box::try_new(vec).unwrap_unchecked() },
 				height: 1 + len as u32,
 				true_height,
 				max_depth: 0,
@@ -158,8 +158,16 @@ impl NbtList {
 impl NbtList {
 	pub fn new(elements: Vec<NbtElement>) -> Self {
 		let mut this = Self {
-			height: elements.iter().map(NbtElement::height).sum::<usize>() as u32 + 1,
-			true_height: elements.iter().map(NbtElement::true_height).sum::<usize>() as u32 + 1,
+			height: elements
+				.iter()
+				.map(NbtElement::height)
+				.sum::<usize>() as u32
+				+ 1,
+			true_height: elements
+				.iter()
+				.map(NbtElement::true_height)
+				.sum::<usize>() as u32
+				+ 1,
 			elements: Box::new(elements),
 			open: false,
 			elements_bitset: 0,
@@ -180,13 +188,7 @@ impl NbtList {
 	}
 
 	#[must_use]
-	pub const fn height(&self) -> usize {
-		if self.open {
-			self.height as usize
-		} else {
-			1
-		}
-	}
+	pub const fn height(&self) -> usize { if self.open { self.height as usize } else { 1 } }
 
 	#[must_use]
 	pub const fn true_height(&self) -> usize { self.true_height as usize }
@@ -195,22 +197,10 @@ impl NbtList {
 	pub const fn is_heterogeneous(&self) -> bool { !self.elements_bitset.is_power_of_two() }
 
 	#[must_use]
-	pub const fn id(&self) -> u8 {
-		if self.is_heterogeneous() {
-			0
-		} else {
-			self.elements_bitset.trailing_zeros() as u8
-		}
-	}
+	pub const fn id(&self) -> u8 { if self.is_heterogeneous() { 0 } else { self.elements_bitset.trailing_zeros() as u8 } }
 
 	#[must_use]
-	pub const fn serialize_id(&self) -> u8 {
-		if self.is_heterogeneous() {
-			NbtCompound::ID
-		} else {
-			self.elements_bitset.trailing_zeros() as u8
-		}
-	}
+	pub const fn serialize_id(&self) -> u8 { if self.is_heterogeneous() { NbtCompound::ID } else { self.elements_bitset.trailing_zeros() as u8 } }
 
 	pub fn toggle(&mut self) {
 		self.open = !self.open && !self.is_empty();
@@ -229,15 +219,15 @@ impl NbtList {
 	pub fn is_empty(&self) -> bool { self.elements.is_empty() }
 
 	#[must_use]
-	pub fn can_insert(&self, value: &NbtElement) -> bool {
-		value.id() != NbtChunk::ID
-	}
+	pub fn can_insert(&self, value: &NbtElement) -> bool { value.id() != NbtChunk::ID }
 
 	pub fn insert(&mut self, idx: usize, value: NbtElement) -> Result<Option<NbtElement>, NbtElement> {
 		if self.can_insert(&value) {
 			self.increment(value.height(), value.true_height());
 			unsafe {
-				self.elements.try_reserve_exact(1).unwrap_unchecked();
+				self.elements
+					.try_reserve_exact(1)
+					.unwrap_unchecked();
 			}
 			self.elements.insert(idx, value);
 			Ok(None)
@@ -255,7 +245,9 @@ impl NbtList {
 	}
 
 	pub fn replace(&mut self, idx: usize, value: NbtElement) -> Option<NbtElement> {
-		if !self.can_insert(&value) || idx >= self.len() { return None; }
+		if !self.can_insert(&value) || idx >= self.len() {
+			return None;
+		}
 		self.increment(value.height(), value.true_height());
 		let old = core::mem::replace(&mut self.elements[idx], value);
 		self.decrement(old.height(), old.true_height());
@@ -277,11 +269,7 @@ impl NbtList {
 	#[must_use]
 	pub fn value(&self) -> CompactString {
 		let (single, multiple) = id_to_string_name(self.id());
-		format_compact!(
-			"{} {}",
-			self.len(),
-			if self.len() == 1 { single } else { multiple }
-		)
+		format_compact!("{} {}", self.len(), if self.len() == 1 { single } else { multiple })
 	}
 }
 
@@ -358,7 +346,9 @@ impl NbtList {
 			}
 
 			let pos = ctx.pos();
-			if ctx.draw_held_entry_bar(ctx.pos() + (16, 16), builder, |x, y| pos + (16, 8) == (x, y), |x| self.can_insert(x)) {} else if self.height() == 1 && ctx.draw_held_entry_bar(ctx.pos() + (16, 16), builder, |x, y| pos + (16, 16) == (x, y), |x| self.can_insert(x)) {}
+			if ctx.draw_held_entry_bar(ctx.pos() + (16, 16), builder, |x, y| pos + (16, 8) == (x, y), |x| self.can_insert(x)) {
+			} else if self.height() == 1 && ctx.draw_held_entry_bar(ctx.pos() + (16, 16), builder, |x, y| pos + (16, 16) == (x, y), |x| self.can_insert(x)) {
+			}
 
 			ctx.offset_pos(0, 16);
 		}
@@ -382,23 +372,10 @@ impl NbtList {
 				ctx.draw_held_entry_bar(ctx.pos(), builder, |x, y| pos == (x, y), |x| self.can_insert(x));
 
 				if remaining_scroll == 0 {
-					builder.draw_texture(
-						ctx.pos() - (16, 0),
-						CONNECTION_UV,
-						(
-							16,
-							(idx != self.len() - 1) as usize * 7 + 9,
-						),
-					);
+					builder.draw_texture(ctx.pos() - (16, 0), CONNECTION_UV, (16, (idx != self.len() - 1) as usize * 7 + 9));
 				}
 				ctx.check_for_key_duplicate(|_, _| false, false);
-				element.render(
-					&mut remaining_scroll,
-					builder,
-					None,
-					idx == self.len() - 1,
-					ctx,
-				);
+				element.render(&mut remaining_scroll, builder, None, idx == self.len() - 1, ctx);
 
 				let pos = ctx.pos();
 				ctx.draw_held_entry_bar(pos, builder, |x, y| pos == (x, y + 8), |x| self.can_insert(x));
@@ -439,7 +416,9 @@ impl NbtList {
 				let _ = write!(builder, "{}", self.value());
 			}
 
-			if ctx.draw_held_entry_bar(pos + (16, 16), builder, |x, y| pos + (16, 8) == (x, y), |x| self.can_insert(x)) {} else if self.height() == 1 && ctx.draw_held_entry_bar(pos + (16, 16), builder, |x, y| pos + (16, 16) == (x, y), |x| self.can_insert(x)) {}
+			if ctx.draw_held_entry_bar(pos + (16, 16), builder, |x, y| pos + (16, 8) == (x, y), |x| self.can_insert(x)) {
+			} else if self.height() == 1 && ctx.draw_held_entry_bar(pos + (16, 16), builder, |x, y| pos + (16, 16) == (x, y), |x| self.can_insert(x)) {
+			}
 
 			ctx.offset_pos(0, 16);
 			y_before += 16;
@@ -466,23 +445,10 @@ impl NbtList {
 				ctx.draw_held_entry_bar(ctx.pos(), builder, |x, y| pos == (x, y), |x| self.can_insert(x));
 
 				if *remaining_scroll == 0 {
-					builder.draw_texture(
-						ctx.pos() - (16, 0),
-						CONNECTION_UV,
-						(
-							16,
-							(idx != self.len() - 1) as usize * 7 + 9,
-						),
-					);
+					builder.draw_texture(ctx.pos() - (16, 0), CONNECTION_UV, (16, (idx != self.len() - 1) as usize * 7 + 9));
 				}
 				ctx.check_for_key_duplicate(|_, _| false, false);
-				element.render(
-					remaining_scroll,
-					builder,
-					None,
-					tail && idx == self.len() - 1,
-					ctx,
-				);
+				element.render(remaining_scroll, builder, None, tail && idx == self.len() - 1, ctx);
 
 				let pos = ctx.pos();
 				ctx.draw_held_entry_bar(ctx.pos(), builder, |x, y| pos == (x, y + 8), |x| self.can_insert(x));

@@ -4,18 +4,21 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use anyhow::{anyhow, ensure, Context, Result};
+use anyhow::{Context, Result, anyhow, ensure};
 use flate2::Compression;
 use uuid::Uuid;
 use zune_inflate::DeflateDecoder;
 
 use super::{HeldEntry, MarkedLines, WorkbenchAction};
-use crate::assets::{ZOffset, BASE_Z, BYTE_ARRAY_GHOST_UV, BYTE_ARRAY_UV, BYTE_GRAYSCALE_UV, BYTE_UV, CHUNK_GHOST_UV, CHUNK_UV, COMPOUND_GHOST_UV, COMPOUND_ROOT_UV, COMPOUND_UV, DOUBLE_GRAYSCALE_UV, DOUBLE_UV, FLOAT_GRAYSCALE_UV, FLOAT_UV, GZIP_FILE_TYPE_UV, HEADER_SIZE, HELD_SCROLLBAR_UV, INT_ARRAY_GHOST_UV, INT_ARRAY_UV, INT_GRAYSCALE_UV, INT_UV, JUST_OVERLAPPING_BASE_Z, LINE_NUMBER_SEPARATOR_UV, LIST_GHOST_UV, LIST_UV, LITTLE_ENDIAN_HEADER_NBT_FILE_TYPE_UV, LITTLE_ENDIAN_NBT_FILE_TYPE_UV, LONG_ARRAY_GHOST_UV, LONG_ARRAY_UV, LONG_GRAYSCALE_UV, LONG_UV, MCA_FILE_TYPE_UV, NBT_FILE_TYPE_UV, REGION_UV, SCROLLBAR_Z, SHORT_GRAYSCALE_UV, SHORT_UV, SNBT_FILE_TYPE_UV, STEAL_ANIMATION_OVERLAY_UV, STRING_GHOST_UV, STRING_UV, UNHELD_SCROLLBAR_UV, UNKNOWN_NBT_GHOST_UV, UNKNOWN_NBT_UV, ZLIB_FILE_TYPE_UV};
+use crate::assets::{BASE_Z, BYTE_ARRAY_GHOST_UV, BYTE_ARRAY_UV, BYTE_GRAYSCALE_UV, BYTE_UV, CHUNK_GHOST_UV, CHUNK_UV, COMPOUND_GHOST_UV, COMPOUND_ROOT_UV, COMPOUND_UV, DOUBLE_GRAYSCALE_UV, DOUBLE_UV, FLOAT_GRAYSCALE_UV, FLOAT_UV, GZIP_FILE_TYPE_UV,
+                    HEADER_SIZE, HELD_SCROLLBAR_UV, INT_ARRAY_GHOST_UV, INT_ARRAY_UV, INT_GRAYSCALE_UV, INT_UV, JUST_OVERLAPPING_BASE_Z, LINE_NUMBER_SEPARATOR_UV, LIST_GHOST_UV, LIST_UV, LITTLE_ENDIAN_HEADER_NBT_FILE_TYPE_UV,
+                    LITTLE_ENDIAN_NBT_FILE_TYPE_UV, LONG_ARRAY_GHOST_UV, LONG_ARRAY_UV, LONG_GRAYSCALE_UV, LONG_UV, MCA_FILE_TYPE_UV, NBT_FILE_TYPE_UV, REGION_UV, SCROLLBAR_Z, SHORT_GRAYSCALE_UV, SHORT_UV, SNBT_FILE_TYPE_UV,
+                    STEAL_ANIMATION_OVERLAY_UV, STRING_GHOST_UV, STRING_UV, UNHELD_SCROLLBAR_UV, UNKNOWN_NBT_GHOST_UV, UNKNOWN_NBT_UV, ZLIB_FILE_TYPE_UV, ZOffset};
 use crate::elements::{NbtCompound, NbtElement, NbtList, NbtRegion};
 use crate::render::{RenderContext, TextColor, VertexBufferBuilder, WindowProperties};
 use crate::tree::rename_element;
-use crate::util::{drop_on_separate_thread, now, LinkedQueue, StrExt, Vec2u};
-use crate::widget::{get_cursor_left_jump_idx, get_cursor_right_jump_idx, SelectedText, SelectedTextAdditional, Text, TEXT_DOUBLE_CLICK_INTERVAL};
+use crate::util::{LinkedQueue, StrExt, Vec2u, drop_on_separate_thread, now};
+use crate::widget::{SelectedText, SelectedTextAdditional, TEXT_DOUBLE_CLICK_INTERVAL, Text, get_cursor_left_jump_idx, get_cursor_right_jump_idx};
 
 pub struct Tab {
 	pub value: Box<NbtElement>,
@@ -59,8 +62,14 @@ impl Tab {
 
 		Ok(Self {
 			value: Box::new(nbt),
-			name: path.file_name().map(OsStr::to_string_lossy).context("Could not obtain path filename")?.into(),
-			path: Some(path).filter(|path| path.is_absolute()).map(|path| path.to_path_buf()),
+			name: path
+				.file_name()
+				.map(OsStr::to_string_lossy)
+				.context("Could not obtain path filename")?
+				.into(),
+			path: Some(path)
+				.filter(|path| path.is_absolute())
+				.map(|path| path.to_path_buf()),
 			format,
 			undos: LinkedQueue::new(),
 			redos: LinkedQueue::new(),
@@ -81,11 +90,11 @@ impl Tab {
 			cache_cursor_x: None,
 		})
 	}
-	
+
 	#[must_use]
 	pub fn new_empty_tab(region: bool, window_dims: impl Into<Vec2u>) -> Self {
 		let window_dims = window_dims.into();
-		
+
 		Self {
 			value: Box::new(if region { NbtElement::Region(NbtRegion::new()) } else { NbtElement::Compound(NbtCompound::new()) }),
 			name: "new.nbt".into(),
@@ -114,7 +123,10 @@ impl Tab {
 	#[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
 	pub fn save(&mut self, force_dialog: bool, window_properties: &mut WindowProperties) -> Result<()> {
 		self.write_selected_text(true, window_properties, false, false);
-		if let Some(path) = self.path.as_deref() && path.is_absolute() && !force_dialog {
+		if let Some(path) = self.path.as_deref()
+			&& path.is_absolute()
+			&& !force_dialog
+		{
 			std::fs::write(path, self.format.encode(&self.value))?;
 			self.unsaved_changes = false;
 			Ok(())
@@ -129,10 +141,30 @@ impl Tab {
 			};
 			let dialog = native_dialog::FileDialogBuilder::default()
 				.add_filter(Self::FILE_TYPE_FILTERS[initial_index].0, Self::FILE_TYPE_FILTERS[initial_index].1)
-				.add_filters(Self::FILE_TYPE_FILTERS.iter().copied().map(|(a, b)| (a.to_owned(), b.iter().map(|x| x.to_string()).collect::<Vec<_>>())).enumerate().filter(|(idx, _)| *idx != initial_index).map(|(_, x)| x))
+				.add_filters(
+					Self::FILE_TYPE_FILTERS
+						.iter()
+						.copied()
+						.map(|(a, b)| {
+							(
+								a.to_owned(),
+								b.iter()
+									.map(|x| x.to_string())
+									.collect::<Vec<_>>(),
+							)
+						})
+						.enumerate()
+						.filter(|(idx, _)| *idx != initial_index)
+						.map(|(_, x)| x),
+				)
 				.save_single_file();
 			let Ok(Some(path)) = dialog.show() else { return Ok(()) };
-			self.name = path.file_name().and_then(|x| x.to_str()).expect("Path has a filename").to_string().into_boxed_str();
+			self.name = path
+				.file_name()
+				.and_then(|x| x.to_str())
+				.expect("Path has a filename")
+				.to_string()
+				.into_boxed_str();
 			std::fs::write(&path, self.format.encode(&self.value))?;
 			self.path = Some(path);
 			self.unsaved_changes = false;
@@ -149,13 +181,10 @@ impl Tab {
 		Ok(())
 	}
 
-		pub fn render(&self, builder: &mut VertexBufferBuilder, ctx: &mut RenderContext, held: bool, skip_tooltips: bool, steal_delta: f32) {
+	pub fn render(&self, builder: &mut VertexBufferBuilder, ctx: &mut RenderContext, held: bool, skip_tooltips: bool, steal_delta: f32) {
 		let (mouse_x, mouse_y) = ctx.mouse_pos().into();
 
-		let horizontal_scroll_before = core::mem::replace(
-			&mut builder.horizontal_scroll,
-			self.horizontal_scroll(),
-		);
+		let horizontal_scroll_before = core::mem::replace(&mut builder.horizontal_scroll, self.horizontal_scroll());
 		// let start = std::time::Instant::now();
 		if let Some(compound) = self.value.as_compound() {
 			compound.render_root(builder, &self.name, ctx);
@@ -166,7 +195,11 @@ impl Tab {
 		}
 		// println!("Tree Only: {}ms", start.elapsed().as_millis_f64());
 		builder.color = TextColor::White.to_raw();
-		if self.value.as_region().is_some_and(|region| region.is_grid_layout()) {
+		if self
+			.value
+			.as_region()
+			.is_some_and(|region| region.is_grid_layout())
+		{
 			ctx.render_grid_line_numbers(builder, &self.bookmarks);
 		} else {
 			ctx.render_line_numbers(builder, &self.bookmarks);
@@ -181,56 +214,30 @@ impl Tab {
 				let scrollbar_height = (total & !15) * total / height;
 				let offset = total * self.scroll() / height + HEADER_SIZE;
 				let held = ((builder.window_width() - 8)..builder.window_width()).contains(&mouse_x) && (offset..=(offset + scrollbar_height)).contains(&mouse_y) || held;
-				let uv = if held {
-					HELD_SCROLLBAR_UV
-				} else {
-					UNHELD_SCROLLBAR_UV
-				};
-				builder.draw_texture_z(
-					(builder.window_width() - 7, offset),
-					SCROLLBAR_Z,
-					uv,
-					(6, 1),
-				);
+				let uv = if held { HELD_SCROLLBAR_UV } else { UNHELD_SCROLLBAR_UV };
+				builder.draw_texture_z((builder.window_width() - 7, offset), SCROLLBAR_Z, uv, (6, 1));
 				if scrollbar_height > 2 {
-					builder.draw_texture_region_z(
-						(builder.window_width() - 7, offset + 1),
-						SCROLLBAR_Z,
-						uv + (0, 5),
-						(6, scrollbar_height.saturating_sub(1)),
-						(6, 4),
-					);
+					builder.draw_texture_region_z((builder.window_width() - 7, offset + 1), SCROLLBAR_Z, uv + (0, 5), (6, scrollbar_height.saturating_sub(1)), (6, 4));
 				}
 				if scrollbar_height > 1 {
-					builder.draw_texture_z(
-						(builder.window_width() - 7, offset + scrollbar_height),
-						SCROLLBAR_Z,
-						uv + (0, 15),
-						(6, 1),
-					);
+					builder.draw_texture_z((builder.window_width() - 7, offset + scrollbar_height), SCROLLBAR_Z, uv + (0, 15), (6, 1));
 				}
 			}
 		}
 
-		if self.value.as_region().is_none_or(|region| !region.is_grid_layout()) {
+		if self
+			.value
+			.as_region()
+			.is_none_or(|region| !region.is_grid_layout())
+		{
 			ctx.render_scrollbar_bookmarks(builder, &self.bookmarks, &self.value);
 		}
-		
+
 		// shifted one left to center between clipboard and freehand
-		builder.draw_texture_region_z(
-			(260, 22),
-			BASE_Z,
-			LINE_NUMBER_SEPARATOR_UV,
-			(2, 23),
-			(2, 16),
-		);
+		builder.draw_texture_region_z((260, 22), BASE_Z, LINE_NUMBER_SEPARATOR_UV, (2, 23), (2, 16));
 
 		{
-			let mx = if (24..46).contains(&mouse_y) && mouse_x >= 16 + 16 + 4 {
-				Some((mouse_x - (16 + 16 + 4)) & !15)
-			} else {
-				None
-			};
+			let mx = if (24..46).contains(&mouse_y) && mouse_x >= 16 + 16 + 4 { Some((mouse_x - (16 + 16 + 4)) & !15) } else { None };
 			for (idx, (selected, unselected, name)) in [
 				(BYTE_UV, BYTE_GRAYSCALE_UV, "Byte (1)"),
 				(SHORT_UV, SHORT_GRAYSCALE_UV, "Short (2)"),
@@ -245,8 +252,8 @@ impl Tab {
 				(LIST_UV, LIST_GHOST_UV, "List (-)"),
 				(COMPOUND_UV, COMPOUND_GHOST_UV, "Compound (=)"),
 			]
-				.into_iter()
-				.enumerate()
+			.into_iter()
+			.enumerate()
 			{
 				let uv = if mx == Some(idx * 16) && !skip_tooltips {
 					builder.draw_tooltip(&[name], (idx * 16 + 16 + 16 + 4, 26 + 16), false);
@@ -282,7 +289,13 @@ impl Tab {
 		if steal_delta > 0.0 {
 			let y = ((mouse_y - HEADER_SIZE) & !15) + HEADER_SIZE;
 			let height = (16.0 * steal_delta).round() as usize;
-			builder.draw_texture_region_z((ctx.left_margin() - 2, y + (16 - height)), JUST_OVERLAPPING_BASE_Z, STEAL_ANIMATION_OVERLAY_UV, (builder.window_width() + 2 - ctx.left_margin(), height), (16, 16));
+			builder.draw_texture_region_z(
+				(ctx.left_margin() - 2, y + (16 - height)),
+				JUST_OVERLAPPING_BASE_Z,
+				STEAL_ANIMATION_OVERLAY_UV,
+				(builder.window_width() + 2 - ctx.left_margin(), height),
+				(16, 16),
+			);
 		}
 	}
 
@@ -300,7 +313,9 @@ impl Tab {
 	pub fn set_selected_text(&mut self, y: Option<usize>, selected_text: Option<SelectedText>) {
 		self.selected_text = selected_text;
 		let now = now();
-		if let Some(selected_text) = self.selected_text.as_mut() && let Some(y) = y {
+		if let Some(selected_text) = self.selected_text.as_mut()
+			&& let Some(y) = y
+		{
 			let (old_y, times_clicked, timestamp) = core::mem::replace(&mut self.last_selected_text_interaction, (y, 0, now));
 			if now - timestamp < TEXT_DOUBLE_CLICK_INTERVAL && old_y == y && !selected_text.value.is_empty() {
 				self.last_selected_text_interaction = (y, times_clicked + 1, now);
@@ -308,7 +323,10 @@ impl Tab {
 				let (left, right) = if times_clicked % 2 == 1 {
 					(0, selected_text.value.len())
 				} else {
-					(get_cursor_left_jump_idx(selected_text.cursor, selected_text.value.as_bytes()), get_cursor_right_jump_idx(selected_text.cursor, selected_text.value.as_bytes()))
+					(
+						get_cursor_left_jump_idx(selected_text.cursor, selected_text.value.as_bytes()),
+						get_cursor_right_jump_idx(selected_text.cursor, selected_text.value.as_bytes()),
+					)
 				};
 				if right > left {
 					selected_text.selection = Some(left);
@@ -328,9 +346,7 @@ impl Tab {
 	}
 
 	#[must_use]
-	pub fn format(&self) -> FileFormat {
-		self.format
-	}
+	pub fn format(&self) -> FileFormat { self.format }
 
 	pub fn modify_scroll(&mut self, f: impl FnOnce(usize) -> usize) {
 		self.scroll = f(self.scroll);
@@ -379,19 +395,24 @@ impl Tab {
 		self.window_height = window_height;
 		self.refresh_scrolls();
 	}
-	
+
 	#[must_use]
-	pub fn path(&self) -> Option<&Path> {
-		self.path.as_deref()
+	pub fn path(&self) -> Option<&Path> { self.path.as_deref() }
+
+	#[must_use]
+	pub fn left_margin(&self) -> usize {
+		((self.value.true_height()
+			+ self
+				.held_entry
+				.as_ref()
+				.map_or(0, |held_entry| held_entry.kv.1.true_height()))
+		.ilog10() as usize
+			+ 1) * 8 + 4
+			+ 8
 	}
 
 	#[must_use]
-	pub fn left_margin(&self) -> usize { ((self.value.true_height() + self.held_entry.as_ref().map_or(0, |held_entry| held_entry.kv.1.true_height())).ilog10() as usize + 1) * 8 + 4 + 8 }
-	
-	#[must_use]
-	pub fn window_dims(&self) -> Vec2u {
-		Vec2u::new(self.window_width, self.window_height)
-	}
+	pub fn window_dims(&self) -> Vec2u { Vec2u::new(self.window_width, self.window_height) }
 
 	pub fn on_scroll(&mut self, scroll: f32) {
 		#[cfg(target_os = "macos")]
@@ -426,7 +447,13 @@ impl Tab {
 	}
 
 	pub fn write_selected_text(&mut self, result_on_failure: bool, window_properties: &mut WindowProperties, close_selected_text_on_success: bool, close_selected_text_on_failure: bool) -> bool {
-		if let Some(SelectedText(Text { value, editable: true, additional: SelectedTextAdditional { indices, prefix, suffix, .. }, .. })) = self.selected_text.clone() {
+		if let Some(SelectedText(Text {
+			value,
+			editable: true,
+			additional: SelectedTextAdditional { indices, prefix, suffix, .. },
+			..
+		})) = self.selected_text.clone()
+		{
 			let key = prefix.0.is_empty() && !suffix.0.is_empty();
 			let (key, value) = if key { (Some(value.into()), None) } else { (None, Some(value.into())) };
 			return if let Some(result) = rename_element(&mut self.value, indices, key, value, &mut self.path, &mut self.name, window_properties) {
@@ -447,45 +474,54 @@ impl Tab {
 
 	pub fn parse_raw(path: &Path, buf: Vec<u8>) -> Result<(NbtElement, FileFormat)> {
 		Ok(if let Some("mca" | "mcr") = path.extension().and_then(OsStr::to_str) {
-			(
-				NbtElement::from_be_mca(buf.as_slice()).context("Failed to parse MCA file")?,
-				FileFormat::Mca,
-			)
-		} else if let Some(0x1F8B) = buf.first_chunk::<2>().copied().map(u16::from_be_bytes) {
+			(NbtElement::from_be_mca(buf.as_slice()).context("Failed to parse MCA file")?, FileFormat::Mca)
+		} else if let Some(0x1F8B) = buf
+			.first_chunk::<2>()
+			.copied()
+			.map(u16::from_be_bytes)
+		{
 			(
 				NbtElement::from_be_file(
 					&DeflateDecoder::new(buf.as_slice())
 						.decode_gzip()
 						.context("Failed to decode gzip compressed NBT")?,
 				)
-					.context("Failed to parse NBT")?,
+				.context("Failed to parse NBT")?,
 				FileFormat::Gzip,
 			)
-		} else if let Some(0x7801 | 0x789C | 0x78DA) = buf.first_chunk::<2>().copied().map(u16::from_be_bytes) {
+		} else if let Some(0x7801 | 0x789C | 0x78DA) = buf
+			.first_chunk::<2>()
+			.copied()
+			.map(u16::from_be_bytes)
+		{
 			(
 				NbtElement::from_be_file(
 					&DeflateDecoder::new(buf.as_slice())
 						.decode_zlib()
 						.context("Failed to decode zlib compressed NBT")?,
 				)
-					.context("Failed to parse NBT")?,
+				.context("Failed to parse NBT")?,
 				FileFormat::Zlib,
 			)
-		} else if let result = NbtElement::from_be_file(buf.as_slice()).context("Tried to parse uncompressed NBT") && {
-			#[cfg(debug_assertions)]
-			if result.is_err() {
-				crate::error!("{result:?}");
-			}
-			true
-		} && let Ok(nbt) = result {
+		} else if let result = NbtElement::from_be_file(buf.as_slice()).context("Tried to parse uncompressed NBT")
+			&& {
+				#[cfg(debug_assertions)]
+				if result.is_err() {
+					crate::error!("{result:?}");
+				}
+				true
+			} && let Ok(nbt) = result
+		{
 			(nbt, FileFormat::Nbt)
-		} else if let result = NbtElement::from_le_file(buf.as_slice()).context("Tried to parse uncompressed little-endian NBT") && {
-			#[cfg(debug_assertions)]
-			if result.is_err() {
-				crate::error!("{result:?}");
-			}
-			true
-		} && let Ok((nbt, header)) = result {
+		} else if let result = NbtElement::from_le_file(buf.as_slice()).context("Tried to parse uncompressed little-endian NBT")
+			&& {
+				#[cfg(debug_assertions)]
+				if result.is_err() {
+					crate::error!("{result:?}");
+				}
+				true
+			} && let Ok((nbt, header)) = result
+		{
 			(nbt, if header { FileFormat::LittleEndianHeaderNbt } else { FileFormat::LittleEndianNbt })
 		} else {
 			(
@@ -493,11 +529,11 @@ impl Tab {
 					.ok()
 					.and_then(|s| NbtElement::from_str(s).ok())
 					.context(anyhow!(
-							"Failed to find file type for file {}",
-							path.file_name()
-								.unwrap_or(&OsStr::new(""))
-								.to_string_lossy()
-						))?
+						"Failed to find file type for file {}",
+						path.file_name()
+							.unwrap_or(&OsStr::new(""))
+							.to_string_lossy()
+					))?
 					.1,
 				FileFormat::Snbt,
 			)
@@ -522,16 +558,18 @@ impl Tab {
 		self.uuid = Uuid::new_v4();
 		self.selected_text = None;
 		self.last_close_attempt = Duration::ZERO;
-		let old = (core::mem::replace(&mut self.value, Box::new(value)), core::mem::replace(&mut self.undos, LinkedQueue::new()), core::mem::replace(&mut self.redos, LinkedQueue::new()));
+		let old = (
+			core::mem::replace(&mut self.value, Box::new(value)),
+			core::mem::replace(&mut self.undos, LinkedQueue::new()),
+			core::mem::replace(&mut self.redos, LinkedQueue::new()),
+		);
 		drop_on_separate_thread(old);
 
 		Ok(())
 	}
 
 	#[cfg(target_arch = "wasm32")]
-	pub fn refresh(&mut self) -> Result<()> {
-		Ok(())
-	}
+	pub fn refresh(&mut self) -> Result<()> { Ok(()) }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -632,7 +670,5 @@ impl FileFormat {
 }
 
 impl Display for FileFormat {
-	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-		write!(f, "{}", self.into_str())
-	}
+	fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "{}", self.into_str()) }
 }

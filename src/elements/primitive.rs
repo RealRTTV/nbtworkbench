@@ -13,10 +13,10 @@ macro_rules! primitive {
 			pub const ID: u8 = $id;
 
 			pub fn to_be_bytes(&self, writer: &mut UncheckedBufWriter) { writer.write(self.value.to_be_bytes().as_ref()); }
-			
+
 			pub fn from_bytes<'a, D: Decoder<'a>>(decoder: &mut D) -> NbtParseResult<Self> {
 				use super::nbt_parse_result::*;
-				
+
 				unsafe {
 					decoder.assert_len(core::mem::size_of::<$t>())?;
 					ok(Self {
@@ -72,13 +72,14 @@ macro_rules! primitive {
 	};
 }
 
-use compact_str::{CompactString, ToCompactString};
 use std::fmt::{Display, Formatter, Write};
 
-use crate::assets::{ZOffset, BASE_Z, BYTE_UV, DOUBLE_UV, FLOAT_UV, INT_UV, JUST_OVERLAPPING_BASE_TEXT_Z, LONG_UV, SHORT_UV};
+use compact_str::{CompactString, ToCompactString};
+
+use crate::assets::{BASE_Z, BYTE_UV, DOUBLE_UV, FLOAT_UV, INT_UV, JUST_OVERLAPPING_BASE_TEXT_Z, LONG_UV, SHORT_UV, ZOffset};
+use crate::elements::nbt_parse_result::NbtParseResult;
 use crate::render::{RenderContext, TextColor, VertexBufferBuilder};
 use crate::serialization::{Decoder, PrettyFormatter, UncheckedBufWriter};
-use crate::elements::nbt_parse_result::NbtParseResult;
 
 primitive!(BYTE_UV, { Some('b') }, NbtByte, i8, 1);
 primitive!(SHORT_UV, { Some('s') }, NbtShort, i16, 2);

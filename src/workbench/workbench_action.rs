@@ -1,12 +1,13 @@
-use crate::elements::{NbtElement, NbtElementAndKey};
-use crate::render::WindowProperties;
-use crate::tree::{add_element, remove_element, rename_element, reorder_element, replace_element, swap_element_same_depth, AddElementResult, MutableIndices, OwnedIndices, RemoveElementResult, ReplaceElementResult};
-use crate::workbench::{HeldEntry, MarkedLines};
 use std::path::PathBuf;
 
-use crate::util::LinkedQueue;
-use anyhow::{ensure, Context, Result};
+use anyhow::{Context, Result, ensure};
 use compact_str::{CompactString, ToCompactString};
+
+use crate::elements::{NbtElement, NbtElementAndKey};
+use crate::render::WindowProperties;
+use crate::tree::{AddElementResult, MutableIndices, OwnedIndices, RemoveElementResult, ReplaceElementResult, add_element, remove_element, rename_element, reorder_element, replace_element, swap_element_same_depth};
+use crate::util::LinkedQueue;
+use crate::workbench::{HeldEntry, MarkedLines};
 
 #[derive(Debug)]
 #[must_use]
@@ -46,18 +47,18 @@ pub enum WorkbenchAction {
 		/// The key of the [held entry](HeldEntry) before it was added to the [tab](super::Tab)'s value
 		old_key: Option<CompactString>,
 
-		/// The value of the 
+		/// The value of the
 		old_value: Option<NbtElement>,
 	},
 	/// Uses the [held entry](HeldEntry)'s history to get the indices to insert at
 	RemoveToHeldEntry,
 	DiscardHeldEntry {
-		held_entry: HeldEntry
+		held_entry: HeldEntry,
 	},
 	CreateHeldEntry,
 	Bulk {
 		actions: Box<[Self]>,
-	}
+	},
 }
 
 impl WorkbenchAction {
@@ -73,25 +74,53 @@ impl WorkbenchAction {
 			Self::RemoveToHeldEntry => (),
 			Self::DiscardHeldEntry { .. } => (),
 			Self::CreateHeldEntry => (),
-			Self::Bulk { actions } => for action in actions { action.shrink_to_fit(); },
+			Self::Bulk { actions } =>
+				for action in actions {
+					action.shrink_to_fit();
+				},
 		}
 	}
 
-	pub fn undo<'m1, 'm2: 'm1>(self, root: &mut NbtElement, bookmarks: &mut MarkedLines, mutable_indices: &'m1 mut MutableIndices<'m2>, path: &mut Option<PathBuf>, name: &mut Box<str>, held_entry: &mut Option<HeldEntry>, window_properties: &mut WindowProperties) -> Result<Self> {
+	pub fn undo<'m1, 'm2: 'm1>(
+		self,
+		root: &mut NbtElement,
+		bookmarks: &mut MarkedLines,
+		mutable_indices: &'m1 mut MutableIndices<'m2>,
+		path: &mut Option<PathBuf>,
+		name: &mut Box<str>,
+		held_entry: &mut Option<HeldEntry>,
+		window_properties: &mut WindowProperties,
+	) -> Result<Self> {
 		Ok(match self {
-			Self::Add { indices } => remove_element(root, indices, bookmarks, mutable_indices).context("Could remove element")?.into_action(),
-			Self::Remove { kv, indices, } => add_element(root, kv, indices, bookmarks, mutable_indices).context("Couldn't add element")?.into_action(),
-			Self::Replace { indices, value, } => replace_element(root, value, indices, bookmarks, mutable_indices).context("Could not replace element")?.into_action(),
-			Self::Rename { indices, key, value } => rename_element(root, indices, key, value, path, name, window_properties).context("Could not rename element")?.into_action(),
-			Self::Swap { parent, a, b, } => swap_element_same_depth(root, parent, a, b, bookmarks, mutable_indices).context("Could not swap elements")?.into_action(),
-			Self::Reorder { indices, mapping } => reorder_element(root, indices, mapping, bookmarks, mutable_indices).context("Could not reorder element")?.into_action(),
-			Self::AddFromHeldEntry { indices, mut indices_history, old_key, old_value } => {
+			Self::Add { indices } => remove_element(root, indices, bookmarks, mutable_indices)
+				.context("Could remove element")?
+				.into_action(),
+			Self::Remove { kv, indices } => add_element(root, kv, indices, bookmarks, mutable_indices)
+				.context("Couldn't add element")?
+				.into_action(),
+			Self::Replace { indices, value } => replace_element(root, value, indices, bookmarks, mutable_indices)
+				.context("Could not replace element")?
+				.into_action(),
+			Self::Rename { indices, key, value } => rename_element(root, indices, key, value, path, name, window_properties)
+				.context("Could not rename element")?
+				.into_action(),
+			Self::Swap { parent, a, b } => swap_element_same_depth(root, parent, a, b, bookmarks, mutable_indices)
+				.context("Could not swap elements")?
+				.into_action(),
+			Self::Reorder { indices, mapping } => reorder_element(root, indices, mapping, bookmarks, mutable_indices)
+				.context("Could not reorder element")?
+				.into_action(),
+			Self::AddFromHeldEntry {
+				indices,
+				mut indices_history,
+				old_key,
+				old_value,
+			} => {
 				ensure!(held_entry.is_none(), "To remove an element and make a held entry out of it, one cannot have an pre-existing held entry.");
 
 				let (indices, kv) = if let Some(old_value) = old_value {
 					let ReplaceElementResult { indices, kv } = replace_element(root, (old_key, old_value), indices, bookmarks, mutable_indices).context("Could not remove element")?;
 					(indices, kv)
-
 				} else {
 					let RemoveElementResult { indices, kv, replaces } = remove_element(root, indices, bookmarks, mutable_indices).context("Could not remove element")?;
 					ensure!(!replaces, "If the indices had replacement for this value, then we would have the old value to swap it out with");
@@ -102,10 +131,14 @@ impl WorkbenchAction {
 				Self::RemoveToHeldEntry
 			}
 			Self::RemoveToHeldEntry => {
-				let HeldEntry { kv, mut indices_history } = held_entry.take().context("Expected a held entry to add to the tab")?;
+				let HeldEntry { kv, mut indices_history } = held_entry
+					.take()
+					.context("Expected a held entry to add to the tab")?;
 				if let Some(indices) = indices_history.pop() {
 					let AddElementResult { indices, old_value } = add_element(root, kv, indices, bookmarks, mutable_indices).context("Couldn't add element from held entry")?;
-					let old_kv = root.get_kv_under_indices(&indices).context("We just added an element to these indices, it for sure is valid")?;
+					let old_kv = root
+						.get_kv_under_indices(&indices)
+						.context("We just added an element to these indices, it for sure is valid")?;
 					let old_key = old_kv.0.map(|key| key.to_compact_string());
 					Self::AddFromHeldEntry { indices, indices_history, old_key, old_value }
 				} else {
@@ -118,20 +151,20 @@ impl WorkbenchAction {
 				Self::RemoveToHeldEntry
 			}
 			Self::CreateHeldEntry => {
-				let held_entry = held_entry.take().context("Expected a held entry that was created")?;
+				let held_entry = held_entry
+					.take()
+					.context("Expected a held entry that was created")?;
 				Self::DiscardHeldEntry { held_entry }
 			}
-			Self::Bulk { actions } => {
-				Self::Bulk {
-					actions: actions
-						.into_vec()
-						.into_iter()
-						.rev()
-						.map(|action| action.undo(root, bookmarks, mutable_indices, path, name, held_entry, window_properties))
-						.collect::<Result<Vec<_>>>()?
-						.into_boxed_slice()
-				}
-			}
+			Self::Bulk { actions } => Self::Bulk {
+				actions: actions
+					.into_vec()
+					.into_iter()
+					.rev()
+					.map(|action| action.undo(root, bookmarks, mutable_indices, path, name, held_entry, window_properties))
+					.collect::<Result<Vec<_>>>()?
+					.into_boxed_slice(),
+			},
 		})
 	}
 }

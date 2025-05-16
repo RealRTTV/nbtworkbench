@@ -1,9 +1,10 @@
 #![feature(maybe_uninit_array_assume_init)]
 
-use flate2::Compression;
 use std::fs::write;
 use std::io::Read;
 use std::mem::MaybeUninit;
+
+use flate2::Compression;
 
 const UNICODE: &[u8] = include_bytes!("src/assets/build/unicode.hex");
 

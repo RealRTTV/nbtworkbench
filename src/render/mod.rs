@@ -1,18 +1,20 @@
+pub mod assets;
+mod color;
 pub mod shader;
 pub mod text_shader;
 mod vertex_buffer_builder;
-mod window;
-pub mod assets;
-mod color;
 pub mod widget;
+mod window;
 
-use crate::assets::{BASE_TEXT_Z, BASE_Z, BOOKMARK_UV, BOOKMARK_Z, END_LINE_NUMBER_SEPARATOR_UV, HEADER_SIZE, HIDDEN_BOOKMARK_UV, INSERTION_CHUNK_UV, INSERTION_UV, INVALID_STRIPE_UV, LINE_NUMBER_SEPARATOR_UV, LINE_NUMBER_Z, SCROLLBAR_BOOKMARK_Z, SELECTED_TOGGLE_OFF_UV, SELECTED_TOGGLE_ON_UV, TEXT_UNDERLINE_UV, TOGGLE_Z, UNSELECTED_TOGGLE_OFF_UV, UNSELECTED_TOGGLE_ON_UV};
-use crate::elements::NbtElement;
-use crate::util::{StrExt, Vec2u};
-use crate::workbench::MarkedLineSlice;
 pub use color::*;
 pub use vertex_buffer_builder::*;
 pub use window::*;
+
+use crate::assets::{BASE_TEXT_Z, BASE_Z, BOOKMARK_UV, BOOKMARK_Z, END_LINE_NUMBER_SEPARATOR_UV, HEADER_SIZE, HIDDEN_BOOKMARK_UV, INSERTION_CHUNK_UV, INSERTION_UV, INVALID_STRIPE_UV, LINE_NUMBER_SEPARATOR_UV, LINE_NUMBER_Z, SCROLLBAR_BOOKMARK_Z,
+                    SELECTED_TOGGLE_OFF_UV, SELECTED_TOGGLE_ON_UV, TEXT_UNDERLINE_UV, TOGGLE_Z, UNSELECTED_TOGGLE_OFF_UV, UNSELECTED_TOGGLE_ON_UV};
+use crate::elements::NbtElement;
+use crate::util::{StrExt, Vec2u};
+use crate::workbench::MarkedLineSlice;
 
 pub struct RenderContext<'a> {
 	selecting_key: bool,
@@ -70,16 +72,16 @@ impl<'a> RenderContext<'a> {
 		self.x_offset = self.x_offset.wrapping_add(x as usize);
 		self.y_offset = self.y_offset.wrapping_add(y as usize);
 	}
-	
+
 	#[must_use]
 	pub fn selected_text_y(&self) -> Option<usize> { self.selected_text_y }
-	
+
 	#[must_use]
 	pub const fn mouse_pos(&self) -> Vec2u { Vec2u::new(self.mouse_x, self.mouse_y) }
-	
+
 	#[must_use]
 	pub const fn left_margin(&self) -> usize { self.left_margin }
-	
+
 	#[must_use]
 	pub const fn has_invalid_key_error(&self) -> bool { self.invalid_key_error }
 
@@ -88,7 +90,7 @@ impl<'a> RenderContext<'a> {
 
 	#[must_use]
 	pub const fn has_duplicate_key_error(&self) -> bool { self.key_duplicate_error }
-	
+
 	pub const fn set_red_line_number(&mut self, y: usize, idx: usize) { self.red_line_numbers[idx] = y; }
 
 	pub fn check_for_key_duplicate<F: FnOnce(&str, Option<&str>) -> bool>(&mut self, f: F, extend: bool) {
@@ -104,7 +106,8 @@ impl<'a> RenderContext<'a> {
 		let (_, y) = self.pos().into();
 		if let Some(selected_key) = self.selected_key.as_ref()
 			&& Some(y) == self.selected_text_y
-			&& self.selecting_key {
+			&& self.selecting_key
+		{
 			self.invalid_key_error = f(selected_key);
 		}
 	}
@@ -140,16 +143,15 @@ impl<'a> RenderContext<'a> {
 	#[must_use]
 	pub fn forbid(&self, pos: impl Into<(usize, usize)>) -> bool {
 		let (_, y) = pos.into();
-		if self.selected_text_y == Some(y) {
-			false
-		} else {
-			true
-		}
+		if self.selected_text_y == Some(y) { false } else { true }
 	}
 
 	pub fn render_errors(&mut self, pos: impl Into<(usize, usize)>, builder: &mut VertexBufferBuilder) {
 		let (x, y) = pos.into();
-		if let Some(selected_text_y) = self.selected_text_y && (self.key_duplicate_error | self.invalid_key_error | self.invalid_value_error) && y == selected_text_y {
+		if let Some(selected_text_y) = self.selected_text_y
+			&& (self.key_duplicate_error | self.invalid_key_error | self.invalid_value_error)
+			&& y == selected_text_y
+		{
 			self.red_line_numbers[0] = selected_text_y;
 			self.draw_error_underline(x, y, builder);
 		}
@@ -157,26 +159,22 @@ impl<'a> RenderContext<'a> {
 
 	pub fn draw_error_underline_width(&self, x: usize, y: usize, overridden_width: usize, builder: &mut VertexBufferBuilder) {
 		let horizontal_scroll_before = core::mem::replace(&mut builder.horizontal_scroll, 0);
-		builder.draw_texture_region_z(
-			(0, y),
-			BASE_Z,
-			INVALID_STRIPE_UV + (1, 1),
-			(builder.window_width(), 16),
-			(14, 14),
-		);
+		builder.draw_texture_region_z((0, y), BASE_Z, INVALID_STRIPE_UV + (1, 1), (builder.window_width(), 16), (14, 14));
 		builder.horizontal_scroll = horizontal_scroll_before;
-		builder.draw_texture_region_z(
-			(x + 20, y + 14),
-			BASE_Z,
-			TEXT_UNDERLINE_UV,
-			(overridden_width, 2),
-			(16, 2),
-		);
+		builder.draw_texture_region_z((x + 20, y + 14), BASE_Z, TEXT_UNDERLINE_UV, (overridden_width, 2), (16, 2));
 	}
 
 	pub fn draw_error_underline(&self, x: usize, y: usize, builder: &mut VertexBufferBuilder) {
-		let key_width = self.selected_key.as_deref().map(str::width).unwrap_or(0);
-		let value_width = self.selected_value.as_deref().map(str::width).unwrap_or(0);
+		let key_width = self
+			.selected_key
+			.as_deref()
+			.map(str::width)
+			.unwrap_or(0);
+		let value_width = self
+			.selected_value
+			.as_deref()
+			.map(str::width)
+			.unwrap_or(0);
 		let (overridden_width, x_shift) = if self.selected_key.is_some() {
 			if self.extend_error {
 				(key_width + value_width + ": ".width(), 0)
@@ -200,7 +198,7 @@ impl<'a> RenderContext<'a> {
 
 	pub fn render_line_numbers(&self, builder: &mut VertexBufferBuilder, mut bookmarks: &MarkedLineSlice) {
 		use std::fmt::Write as _;
-		
+
 		let start = self.line_numbers.first();
 		while let Some((head, rest)) = bookmarks.split_first() {
 			if start.is_some_and(|&start| start > head.true_line_number()) {
@@ -214,60 +212,33 @@ impl<'a> RenderContext<'a> {
 			let next_line_number = self.line_numbers.get(idx + 1).copied();
 
 			let color = if (self.red_line_numbers[0] == y) | (self.red_line_numbers[1] == y) {
-				if idx % 2 == 0 {
-					0xC33C3C
-				} else {
-					TextColor::Red.to_raw()
-				}
+				if idx % 2 == 0 { 0xC33C3C } else { TextColor::Red.to_raw() }
 			} else {
-				if idx % 2 == 0 {
-					0x777777
-				} else {
-					TextColor::Gray.to_raw()
-				}
+				if idx % 2 == 0 { 0x777777 } else { TextColor::Gray.to_raw() }
 			};
 			let color = core::mem::replace(&mut builder.color, color);
-			builder.settings(
-				(
-					self.left_margin - line_number.ilog10() as usize * 8 - 16,
-					y,
-				),
-				false,
-				BASE_TEXT_Z,
-			);
+			builder.settings((self.left_margin - line_number.ilog10() as usize * 8 - 16, y), false, BASE_TEXT_Z);
 			let _ = write!(builder, "{line_number}");
 			builder.color = color;
 
-			if let Some((first, rest)) = bookmarks.split_first() && line_number == first.true_line_number() {
+			if let Some((first, rest)) = bookmarks.split_first()
+				&& line_number == first.true_line_number()
+			{
 				bookmarks = rest;
-				builder.draw_texture_region_z(
-					(1, y + 2),
-					BOOKMARK_Z,
-					first.uv(),
-					(builder.text_coords.0 + 1, 12),
-					(16, 16),
-				);
+				builder.draw_texture_region_z((1, y + 2), BOOKMARK_Z, first.uv(), (builder.text_coords.0 + 1, 12), (16, 16));
 			}
 			let mut hidden_bookmarks = 0_usize;
-			while let Some((first, rest)) = bookmarks.split_first() && next_line_number.is_none_or(|next_line_number| line_number <= first.true_line_number() && first.true_line_number() < next_line_number) {
+			while let Some((first, rest)) = bookmarks.split_first()
+				&& next_line_number.is_none_or(|next_line_number| line_number <= first.true_line_number() && first.true_line_number() < next_line_number)
+			{
 				bookmarks = rest;
 				if hidden_bookmarks < 5 {
-					builder.draw_texture_region_z(
-						(1, y + 15),
-						BOOKMARK_Z,
-						first.uv(),
-						(builder.text_coords.0 + 1, 2),
-						(16, 16),
-					);
+					builder.draw_texture_region_z((1, y + 15), BOOKMARK_Z, first.uv(), (builder.text_coords.0 + 1, 2), (16, 16));
 				}
 				hidden_bookmarks += 1;
 			}
 
-			let uv = if idx + 1 == self.line_numbers.len() {
-				END_LINE_NUMBER_SEPARATOR_UV
-			} else {
-				LINE_NUMBER_SEPARATOR_UV
-			};
+			let uv = if idx + 1 == self.line_numbers.len() { END_LINE_NUMBER_SEPARATOR_UV } else { LINE_NUMBER_SEPARATOR_UV };
 			builder.draw_texture_z((builder.text_coords.0 + 4, y), LINE_NUMBER_Z, uv, (2, 16));
 			y += 16;
 		}
@@ -275,47 +246,28 @@ impl<'a> RenderContext<'a> {
 
 	pub fn render_grid_line_numbers(&self, builder: &mut VertexBufferBuilder, mut bookmarks: &MarkedLineSlice) {
 		use std::fmt::Write as _;
-		
+
 		let scroll = builder.scroll();
 
 		let last_line_number = (self.line_numbers.len() > 1) as usize * 32 + 1;
 		for line_number in 1..=last_line_number {
-			let uv = if line_number == last_line_number {
-				END_LINE_NUMBER_SEPARATOR_UV
-			} else {
-				LINE_NUMBER_SEPARATOR_UV
-			};
+			let uv = if line_number == last_line_number { END_LINE_NUMBER_SEPARATOR_UV } else { LINE_NUMBER_SEPARATOR_UV };
 			if 16 * line_number >= scroll + 16 {
-				let color = if line_number % 2 == 1 {
-					0x777777
-				} else {
-					TextColor::Gray.to_raw()
-				};
+				let color = if line_number % 2 == 1 { 0x777777 } else { TextColor::Gray.to_raw() };
 				let color = core::mem::replace(&mut builder.color, color);
-				builder.settings(
-					(
-						self.left_margin - line_number.ilog10() as usize * 8 - 16,
-						HEADER_SIZE + 16 * line_number - 16 - scroll,
-					),
-					false,
-					BASE_TEXT_Z,
-				);
+				builder.settings((self.left_margin - line_number.ilog10() as usize * 8 - 16, HEADER_SIZE + 16 * line_number - 16 - scroll), false, BASE_TEXT_Z);
 				let _ = write!(builder, "{line_number}");
 				builder.color = color;
 				builder.draw_texture_z((builder.text_coords.0 + 4, HEADER_SIZE + 16 * line_number - 16 - scroll), LINE_NUMBER_Z, uv, (2, 16));
 			}
 		}
 
-		if let Some((first, rest)) = bookmarks.split_first() && first.true_line_number() == 1 {
+		if let Some((first, rest)) = bookmarks.split_first()
+			&& first.true_line_number() == 1
+		{
 			bookmarks = rest;
 			if scroll < 16 {
-				builder.draw_texture_region_z(
-					(1, HEADER_SIZE + 2),
-					BOOKMARK_Z,
-					first.uv(),
-					(self.left_margin - 7, 12),
-					(16, 16),
-				);
+				builder.draw_texture_region_z((1, HEADER_SIZE + 2), BOOKMARK_Z, first.uv(), (self.left_margin - 7, 12), (16, 16));
 			}
 		}
 
@@ -324,30 +276,22 @@ impl<'a> RenderContext<'a> {
 			let x = idx % 32;
 			let z = idx / 32;
 			let pos = Vec2u::new(self.left_margin + 16 + 16 + x * 16, HEADER_SIZE + 16 + z * 16);
-			if let Some((first, rest)) = bookmarks.split_first() && first.true_line_number() == line_number {
+			if let Some((first, rest)) = bookmarks.split_first()
+				&& first.true_line_number() == line_number
+			{
 				bookmarks = rest;
 				if pos.y >= scroll + HEADER_SIZE {
-					builder.draw_texture_region_z(
-						pos - (0, scroll),
-						BOOKMARK_Z,
-						first.uv(),
-						(16, 16),
-						(16, 16),
-					);
+					builder.draw_texture_region_z(pos - (0, scroll), BOOKMARK_Z, first.uv(), (16, 16), (16, 16));
 				}
 			}
 			let mut hidden_bookmarks = 0_usize;
-			while let Some((first, rest)) = bookmarks.split_first() && next_line_number.is_none_or(|next_line_number| line_number <= first.true_line_number() && first.true_line_number() < next_line_number) {
+			while let Some((first, rest)) = bookmarks.split_first()
+				&& next_line_number.is_none_or(|next_line_number| line_number <= first.true_line_number() && first.true_line_number() < next_line_number)
+			{
 				bookmarks = rest;
 				if hidden_bookmarks < 5 {
 					if pos.y >= scroll + HEADER_SIZE {
-						builder.draw_texture_region_z(
-							pos + (0, 14) - (0, scroll),
-							BOOKMARK_Z,
-							first.uv(),
-							(16, 2),
-							(16, 16),
-						);
+						builder.draw_texture_region_z(pos + (0, 14) - (0, scroll), BOOKMARK_Z, first.uv(), (16, 2), (16, 16));
 					}
 				}
 				hidden_bookmarks += 1;
@@ -356,7 +300,9 @@ impl<'a> RenderContext<'a> {
 	}
 
 	pub fn render_key_value_errors(&mut self, builder: &mut VertexBufferBuilder) {
-		if self.mouse_y < HEADER_SIZE { return }
+		if self.mouse_y < HEADER_SIZE {
+			return
+		}
 		let y = ((self.mouse_y - HEADER_SIZE) & !15) + HEADER_SIZE;
 		if self
 			.red_line_numbers
@@ -389,12 +335,7 @@ impl<'a> RenderContext<'a> {
 			let y = HEADER_SIZE + (bookmark.line_number() * (builder.window_height() - HEADER_SIZE)) / height;
 			if bookmark.uv() == BOOKMARK_UV {
 				if bookmarks_at_y < 5 {
-					builder.draw_texture_z(
-						(builder.window_width() - 8, y),
-						SCROLLBAR_BOOKMARK_Z,
-						BOOKMARK_UV,
-						(8, 2),
-					);
+					builder.draw_texture_z((builder.window_width() - 8, y), SCROLLBAR_BOOKMARK_Z, BOOKMARK_UV, (8, 2));
 				}
 
 				if y == bookmark_y {
@@ -405,12 +346,7 @@ impl<'a> RenderContext<'a> {
 				}
 			} else {
 				if hidden_bookmarks_at_y < 5 {
-					builder.draw_texture_z(
-						(builder.window_width() - 8, y),
-						SCROLLBAR_BOOKMARK_Z,
-						HIDDEN_BOOKMARK_UV,
-						(8, 2),
-					);
+					builder.draw_texture_z((builder.window_width() - 8, y), SCROLLBAR_BOOKMARK_Z, HIDDEN_BOOKMARK_UV, (8, 2));
 				}
 
 				if y == hidden_bookmark_y {
@@ -425,7 +361,10 @@ impl<'a> RenderContext<'a> {
 
 	pub fn draw_held_entry_bar<F: FnOnce(usize, usize) -> bool, G: FnOnce(&NbtElement) -> bool>(&mut self, pos: impl Into<(usize, usize)>, builder: &mut VertexBufferBuilder, f: F, g: G) -> bool {
 		let (x_offset, y_offset) = pos.into();
-		if let Some((element, pos)) = self.ghost && f(pos.x, pos.y) && g(element) {
+		if let Some((element, pos)) = self.ghost
+			&& f(pos.x, pos.y)
+			&& g(element)
+		{
 			builder.draw_texture_region_z((self.left_margin - 2, y_offset - 1), BASE_Z, INSERTION_UV, (x_offset + 18 - self.left_margin, 2), (16, 2));
 			true
 		} else {
@@ -435,7 +374,10 @@ impl<'a> RenderContext<'a> {
 
 	pub fn draw_held_entry_chunk<F: FnOnce(usize, usize) -> bool, G: FnOnce(&NbtElement) -> bool>(&mut self, pos: impl Into<(usize, usize)>, builder: &mut VertexBufferBuilder, f: F, g: G) -> bool {
 		let (x_offset, y_offset) = pos.into();
-		if let Some((element, pos)) = self.ghost && f(pos.x, pos.y) && g(element) {
+		if let Some((element, pos)) = self.ghost
+			&& f(pos.x, pos.y)
+			&& g(element)
+		{
 			builder.draw_texture_region_z((self.left_margin - 2, y_offset), BASE_Z, INSERTION_CHUNK_UV, (x_offset + 18 - self.left_margin, 16), (16, 16));
 			true
 		} else {
@@ -445,7 +387,10 @@ impl<'a> RenderContext<'a> {
 
 	pub fn draw_held_entry_grid_chunk<F: FnOnce(usize, usize) -> bool, G: FnOnce(&NbtElement) -> bool>(&mut self, pos: impl Into<(usize, usize)>, builder: &mut VertexBufferBuilder, f: F, g: G) -> bool {
 		let (x_offset, y_offset) = pos.into();
-		if let Some((element, pos)) = self.ghost && f(pos.x, pos.y) && g(element) {
+		if let Some((element, pos)) = self.ghost
+			&& f(pos.x, pos.y)
+			&& g(element)
+		{
 			builder.draw_texture_region_z((x_offset, y_offset), BASE_Z, INSERTION_CHUNK_UV, (16, 16), (16, 16));
 			true
 		} else {

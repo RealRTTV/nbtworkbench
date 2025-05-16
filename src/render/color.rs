@@ -54,7 +54,5 @@ impl TextColor {
 }
 
 impl Into<u32> for TextColor {
-	fn into(self) -> u32 {
-		self.to_raw()
-	}
+	fn into(self) -> u32 { self.to_raw() }
 }

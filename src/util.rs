@@ -1,30 +1,29 @@
 use std::alloc::{Allocator, Layout};
-use compact_str::{CompactString, ToCompactString};
-use regex::{Regex, RegexBuilder};
 use std::cmp::Ordering;
 use std::fmt::{Debug, Formatter};
 use std::hint::likely;
 use std::mem::MaybeUninit;
-use crate::render::VertexBufferBuilder;
 
+use compact_str::{CompactString, ToCompactString};
+use regex::{Regex, RegexBuilder};
+
+use crate::render::VertexBufferBuilder;
 #[cfg(target_arch = "wasm32")]
 pub use crate::wasm::{get_clipboard, now, set_clipboard};
 
 #[must_use]
 #[cfg(not(target_arch = "wasm32"))]
-pub fn get_clipboard() -> Option<String> {
-	cli_clipboard::get_contents().ok()
-}
+pub fn get_clipboard() -> Option<String> { cli_clipboard::get_contents().ok() }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub fn set_clipboard(value: String) -> bool {
-	cli_clipboard::set_contents(value).is_ok()
-}
+pub fn set_clipboard(value: String) -> bool { cli_clipboard::set_contents(value).is_ok() }
 
 #[must_use]
 #[cfg(not(target_arch = "wasm32"))]
 pub fn now() -> std::time::Duration {
-    std::time::SystemTime::UNIX_EPOCH.elapsed().unwrap_or_else(|e| e.duration())
+	std::time::SystemTime::UNIX_EPOCH
+		.elapsed()
+		.unwrap_or_else(|e| e.duration())
 }
 
 #[must_use]
@@ -46,7 +45,7 @@ pub fn create_regex(mut str: String, case_sensitive: bool) -> Option<Regex> {
 				'u' => flags |= 0b010000,
 				'y' => flags |= 0b100000,
 				'/' => break,
-				_ => return None
+				_ => return None,
 			}
 		}
 		flags
@@ -67,11 +66,16 @@ pub fn split_lines<const MAX_WIDTH: usize>(s: String) -> Vec<String> {
 	let mut lines = Vec::new();
 	let mut current_line = String::new();
 	let mut is_previous_byte_ascii_whitespace = true;
-	for word in s.as_bytes().split_inclusive(|byte| {
-		let is_ascii_whitespace = byte.is_ascii_whitespace();
-		let is_previous_byte_ascii_whitespace = core::mem::replace(&mut is_previous_byte_ascii_whitespace, is_ascii_whitespace);
-		!is_previous_byte_ascii_whitespace && is_ascii_whitespace
-	}).filter(|slice| !slice.is_empty()).map(|slice| unsafe { std::str::from_utf8_unchecked(slice) }) {
+	for word in s
+		.as_bytes()
+		.split_inclusive(|byte| {
+			let is_ascii_whitespace = byte.is_ascii_whitespace();
+			let is_previous_byte_ascii_whitespace = core::mem::replace(&mut is_previous_byte_ascii_whitespace, is_ascii_whitespace);
+			!is_previous_byte_ascii_whitespace && is_ascii_whitespace
+		})
+		.filter(|slice| !slice.is_empty())
+		.map(|slice| unsafe { std::str::from_utf8_unchecked(slice) })
+	{
 		if current_line.width() + word.width() > MAX_WIDTH {
 			lines.push(current_line.trim_ascii_end().to_string());
 			current_line = String::new();
@@ -88,7 +92,7 @@ pub fn split_lines<const MAX_WIDTH: usize>(s: String) -> Vec<String> {
 
 #[must_use]
 pub fn nth(n: usize) -> String {
-    use std::fmt::Write as _;
+	use std::fmt::Write as _;
 
 	let mut buf = String::with_capacity(n.checked_ilog10().map_or(1, |x| x + 1) as usize + 2);
 	let _ = write!(&mut buf, "{n}");
@@ -106,14 +110,10 @@ pub fn nth(n: usize) -> String {
 }
 
 #[must_use]
-pub fn encompasses_or_equal<T: Ord>(outer: &[T], inner: &[T]) -> bool {
-	outer.len() <= inner.len() && outer == &inner[..outer.len()]
-}
+pub fn encompasses_or_equal<T: Ord>(outer: &[T], inner: &[T]) -> bool { outer.len() <= inner.len() && outer == &inner[..outer.len()] }
 
 #[must_use]
-pub fn encompasses<T: Ord>(outer: &[T], inner: &[T]) -> bool {
-	outer.len() < inner.len() && outer == &inner[..outer.len()]
-}
+pub fn encompasses<T: Ord>(outer: &[T], inner: &[T]) -> bool { outer.len() < inner.len() && outer == &inner[..outer.len()] }
 
 #[must_use]
 pub const fn is_utf8_char_boundary(x: u8) -> bool { (x as i8) >= -0x40 }
@@ -139,7 +139,6 @@ pub const fn valid_unescaped_char(byte: u8) -> bool { matches!(byte, b'0'..=b'9'
 #[must_use]
 pub const fn valid_starting_char(byte: u8) -> bool { matches!(byte, b'A'..=b'Z' | b'a'..=b'z' | b'_') }
 
-
 /// # Safety
 /// `a` or `b` must not contain values repeated (such that `Ord::cmp()` returns Ordering::Equal) between elements within their own set
 #[must_use]
@@ -160,17 +159,35 @@ pub unsafe fn union_two_sorted_no_duplicates<T: Ord>(a: Vec<T>, b: Vec<T>) -> Ve
 
 		match Ord::cmp(a, b) {
 			Ordering::Less => {
-				out.push(a_ptr.cast::<MaybeUninit<T>>().replace(MaybeUninit::uninit()).assume_init());
+				out.push(
+					a_ptr
+						.cast::<MaybeUninit<T>>()
+						.replace(MaybeUninit::uninit())
+						.assume_init(),
+				);
 				a_ptr = a_ptr.add(1);
 			}
 			Ordering::Equal => {
-				out.push(a_ptr.cast::<MaybeUninit<T>>().replace(MaybeUninit::uninit()).assume_init());
-				b_ptr.cast::<MaybeUninit<T>>().replace(MaybeUninit::uninit()).assume_init_drop();
+				out.push(
+					a_ptr
+						.cast::<MaybeUninit<T>>()
+						.replace(MaybeUninit::uninit())
+						.assume_init(),
+				);
+				b_ptr
+					.cast::<MaybeUninit<T>>()
+					.replace(MaybeUninit::uninit())
+					.assume_init_drop();
 				a_ptr = a_ptr.add(1);
 				b_ptr = b_ptr.add(1);
 			}
 			Ordering::Greater => {
-				out.push(b_ptr.cast::<MaybeUninit<T>>().replace(MaybeUninit::uninit()).assume_init());
+				out.push(
+					b_ptr
+						.cast::<MaybeUninit<T>>()
+						.replace(MaybeUninit::uninit())
+						.assume_init(),
+				);
 				b_ptr = b_ptr.add(1);
 			}
 		}
@@ -178,11 +195,13 @@ pub unsafe fn union_two_sorted_no_duplicates<T: Ord>(a: Vec<T>, b: Vec<T>) -> Ve
 
 	if a_ptr < a_end_ptr {
 		let remaining = a_end_ptr.offset_from_unsigned(a_ptr);
-		out.as_mut_ptr().copy_from_nonoverlapping(a_ptr, remaining);
+		out.as_mut_ptr()
+			.copy_from_nonoverlapping(a_ptr, remaining);
 		out.set_len(out.len() + remaining);
 	} else {
 		let remaining = b_end_ptr.offset_from_unsigned(b_ptr);
-		out.as_mut_ptr().copy_from_nonoverlapping(b_ptr, remaining);
+		out.as_mut_ptr()
+			.copy_from_nonoverlapping(b_ptr, remaining);
 		out.set_len(out.len() + remaining);
 	}
 
@@ -212,17 +231,31 @@ pub unsafe fn intersection_two_sorted_no_duplicates<T: Ord>(a: Vec<T>, b: Vec<T>
 
 		match Ord::cmp(a, b) {
 			Ordering::Less => {
-				a_ptr.cast::<MaybeUninit<T>>().replace(MaybeUninit::uninit()).assume_init_drop();
+				a_ptr
+					.cast::<MaybeUninit<T>>()
+					.replace(MaybeUninit::uninit())
+					.assume_init_drop();
 				a_ptr = a_ptr.add(1);
 			}
 			Ordering::Equal => {
-				out.push(a_ptr.cast::<MaybeUninit<T>>().replace(MaybeUninit::uninit()).assume_init());
-				b_ptr.cast::<MaybeUninit<T>>().replace(MaybeUninit::uninit()).assume_init_drop();
+				out.push(
+					a_ptr
+						.cast::<MaybeUninit<T>>()
+						.replace(MaybeUninit::uninit())
+						.assume_init(),
+				);
+				b_ptr
+					.cast::<MaybeUninit<T>>()
+					.replace(MaybeUninit::uninit())
+					.assume_init_drop();
 				a_ptr = a_ptr.add(1);
 				b_ptr = b_ptr.add(1);
 			}
 			Ordering::Greater => {
-				b_ptr.cast::<MaybeUninit<T>>().replace(MaybeUninit::uninit()).assume_init_drop();
+				b_ptr
+					.cast::<MaybeUninit<T>>()
+					.replace(MaybeUninit::uninit())
+					.assume_init_drop();
 				b_ptr = b_ptr.add(1);
 			}
 		}
@@ -254,17 +287,33 @@ pub unsafe fn symmetric_difference_two_sorted_no_duplicates<T: Ord>(a: Vec<T>, b
 
 		match Ord::cmp(a, b) {
 			Ordering::Less => {
-				out.push(a_ptr.cast::<MaybeUninit<T>>().replace(MaybeUninit::uninit()).assume_init());
+				out.push(
+					a_ptr
+						.cast::<MaybeUninit<T>>()
+						.replace(MaybeUninit::uninit())
+						.assume_init(),
+				);
 				a_ptr = a_ptr.add(1);
 			}
 			Ordering::Equal => {
-				a_ptr.cast::<MaybeUninit<T>>().replace(MaybeUninit::uninit()).assume_init_drop();
-				b_ptr.cast::<MaybeUninit<T>>().replace(MaybeUninit::uninit()).assume_init_drop();
+				a_ptr
+					.cast::<MaybeUninit<T>>()
+					.replace(MaybeUninit::uninit())
+					.assume_init_drop();
+				b_ptr
+					.cast::<MaybeUninit<T>>()
+					.replace(MaybeUninit::uninit())
+					.assume_init_drop();
 				a_ptr = a_ptr.add(1);
 				b_ptr = b_ptr.add(1);
 			}
 			Ordering::Greater => {
-				out.push(b_ptr.cast::<MaybeUninit<T>>().replace(MaybeUninit::uninit()).assume_init());
+				out.push(
+					b_ptr
+						.cast::<MaybeUninit<T>>()
+						.replace(MaybeUninit::uninit())
+						.assume_init(),
+				);
 				b_ptr = b_ptr.add(1);
 			}
 		}
@@ -272,11 +321,13 @@ pub unsafe fn symmetric_difference_two_sorted_no_duplicates<T: Ord>(a: Vec<T>, b
 
 	if a_ptr < a_end_ptr {
 		let remaining = a_end_ptr.offset_from_unsigned(a_ptr);
-		out.as_mut_ptr().copy_from_nonoverlapping(a_ptr, remaining);
+		out.as_mut_ptr()
+			.copy_from_nonoverlapping(a_ptr, remaining);
 		out.set_len(out.len() + remaining);
 	} else {
 		let remaining = b_end_ptr.offset_from_unsigned(b_ptr);
-		out.as_mut_ptr().copy_from_nonoverlapping(b_ptr, remaining);
+		out.as_mut_ptr()
+			.copy_from_nonoverlapping(b_ptr, remaining);
 		out.set_len(out.len() + remaining);
 	}
 
@@ -295,9 +346,7 @@ impl<'a, T> IntoIterator for &'a LinkedQueue<T> {
 	type Item = &'a T;
 	type IntoIter = LinkedQueueIter<'a, T>;
 
-	fn into_iter(self) -> Self::IntoIter {
-		self.iter()
-	}
+	fn into_iter(self) -> Self::IntoIter { self.iter() }
 }
 
 impl<T: Debug> Debug for LinkedQueue<T> {
@@ -335,10 +384,7 @@ impl<T> LinkedQueue<T> {
 	pub const fn new() -> Self { Self { tail: None, len: 0 } }
 
 	pub fn push(&mut self, value: T) {
-		self.tail = Some(Box::new(SinglyLinkedNode {
-			value,
-			prev: self.tail.take(),
-		}));
+		self.tail = Some(Box::new(SinglyLinkedNode { value, prev: self.tail.take() }));
 		self.len += 1;
 	}
 
@@ -374,11 +420,7 @@ impl<T> LinkedQueue<T> {
 	}
 
 	#[must_use]
-	pub fn iter(&self) -> LinkedQueueIter<'_, T> {
-		LinkedQueueIter {
-			tail: &self.tail,
-		}
-	}
+	pub fn iter(&self) -> LinkedQueueIter<'_, T> { LinkedQueueIter { tail: &self.tail } }
 }
 
 pub struct LinkedQueueIter<'a, T> {
@@ -415,8 +457,7 @@ pub trait StrExt {
 }
 
 impl StrExt for str {
-
-		fn snbt_string_read(mut self: &Self) -> Result<(CompactString, &Self), usize> {
+	fn snbt_string_read(mut self: &Self) -> Result<(CompactString, &Self), usize> {
 		const MAPPING: [Option<u8>; 256] = {
 			let mut initial = [Option::<u8>::None; 256];
 			initial[b'0' as usize] = Some(0);
@@ -449,16 +490,17 @@ impl StrExt for str {
 				.char_indices()
 				.find(|(_, c)| !valid_unescaped_char(*c as u8))
 				.map_or(self.len(), |(idx, _)| idx);
-			let (s, s2) = unsafe {
-				(
-					self.get_unchecked(..end_idx),
-					self.get_unchecked(end_idx..self.len()),
-				)
-			};
-			if s.needs_escape() { return Err(s2.len()) }
+			let (s, s2) = unsafe { (self.get_unchecked(..end_idx), self.get_unchecked(end_idx..self.len())) };
+			if s.needs_escape() {
+				return Err(s2.len())
+			}
 			Ok((s.to_compact_string(), s2))
 		} else {
-			let enclosing = self.as_bytes().first().copied().ok_or(self.len())?;
+			let enclosing = self
+				.as_bytes()
+				.first()
+				.copied()
+				.ok_or(self.len())?;
 			self = unsafe { self.get_unchecked(1..) };
 			let (end, len) = 'a: {
 				let mut backslash = false;
@@ -636,16 +678,22 @@ impl StrExt for str {
 				}
 			}
 
-			if self.len() < end + 1 { return Err(self.len()) };
+			if self.len() < end + 1 {
+				return Err(self.len())
+			};
 			unsafe { Ok((out, self.get_unchecked((end + 1)..))) }
 		}
 	}
 
-	fn needs_escape(&self) -> bool { self.as_bytes().first().copied().is_some_and(valid_starting_char) || !self.bytes().all(valid_unescaped_char) }
-
-	fn width(&self) -> usize {
-		self.chars().map(CharExt::width).sum()
+	fn needs_escape(&self) -> bool {
+		self.as_bytes()
+			.first()
+			.copied()
+			.is_some_and(valid_starting_char)
+			|| !self.bytes().all(valid_unescaped_char)
 	}
+
+	fn width(&self) -> usize { self.chars().map(CharExt::width).sum() }
 
 	fn contains_ignore_ascii_case(&self, other: &Self) -> bool {
 		let haystack = self.as_bytes();
@@ -722,7 +770,10 @@ pub const fn width_ascii(s: &str) -> usize {
 
 pub fn drop_on_separate_thread<T: 'static + Send>(t: T) {
 	#[cfg(not(target_arch = "wasm32"))]
-	std::thread::Builder::new().stack_size(1_048_576 * 64 /*64MiB*/).spawn(move || drop(t)).expect("Failed to spawn thread");
+	std::thread::Builder::new()
+		.stack_size(1_048_576 * 64 /* 64MiB */)
+		.spawn(move || drop(t))
+		.expect("Failed to spawn thread");
 	#[cfg(target_arch = "wasm32")]
 	drop(t)
 }
@@ -734,9 +785,7 @@ pub struct Vec2u {
 }
 
 impl Debug for Vec2u {
-	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-		write!(f, "({x},{y})", x = self.x, y = self.y)
-	}
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result { write!(f, "({x},{y})", x = self.x, y = self.y) }
 }
 
 impl Vec2u {
@@ -780,10 +829,7 @@ impl<T: Into<(usize, usize)>> std::ops::Add<T> for Vec2u {
 
 	fn add(self, rhs: T) -> Self::Output {
 		let (x, y) = rhs.into();
-		Self {
-			x: self.x + x,
-			y: self.y + y,
-		}
+		Self { x: self.x + x, y: self.y + y }
 	}
 }
 
@@ -800,10 +846,7 @@ impl<T: Into<(usize, usize)>> std::ops::Sub<T> for Vec2u {
 
 	fn sub(self, rhs: T) -> Self::Output {
 		let (x, y) = rhs.into();
-		Self {
-			x: self.x - x,
-			y: self.y - y,
-		}
+		Self { x: self.x - x, y: self.y - y }
 	}
 }
 
@@ -831,21 +874,20 @@ impl AxisAlignedBoundingBox {
 			high: Vec2u::new(x1, y1),
 		}
 	}
-	
+
 	#[must_use]
 	pub fn contains(self, point: Vec2u) -> bool {
-		let Self { low: Vec2u { x: x0, y: y0 }, high: Vec2u { x: x1, y: y1 } } = self;
+		let Self {
+			low: Vec2u { x: x0, y: y0 },
+			high: Vec2u { x: x1, y: y1 },
+		} = self;
 		let Vec2u { x, y } = point;
 		x0 <= x && x <= x1 && y0 <= y && y <= y1
 	}
-	
-	#[must_use]
-	pub fn low(self) -> Vec2u {
-		self.low
-	}
 
 	#[must_use]
-	pub fn high(self) -> Vec2u {
-		self.high
-	}
+	pub fn low(self) -> Vec2u { self.low }
+
+	#[must_use]
+	pub fn high(self) -> Vec2u { self.high }
 }

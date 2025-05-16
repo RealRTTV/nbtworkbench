@@ -2,7 +2,7 @@ macro_rules! array {
 	($element_field:ident, $name:ident, $t:ty, $my_id:literal, $id:literal, $char:literal, $uv:ident, $element_uv:ident, $default_snbt_integer:ident, $try_into_element:ident) => {
 		#[repr(C)]
 		pub struct $name {
-			pub(in crate::elements) values: Box<Vec<NbtElement>>,
+			pub(super) values: Box<Vec<NbtElement>>,
 			max_depth: u32,
 			open: bool,
 		}
@@ -24,24 +24,22 @@ macro_rules! array {
 		}
 
 		impl PartialEq for $name {
-			fn eq(&self, other: &Self) -> bool {
-				self.values.eq(&other.values)
-			}
+			fn eq(&self, other: &Self) -> bool { self.values.eq(&other.values) }
 		}
 
 		impl Clone for $name {
-						fn clone(&self) -> Self {
-				unsafe {
-					let len = self.values.len();
-					let ptr = alloc(Layout::array::<NbtElement>(len).unwrap_unchecked()).cast::<NbtElement>();
-					let boxx = alloc(Layout::new::<Vec<NbtElement>>()).cast::<Vec<NbtElement>>();
-					Vec::as_ptr(&self.values).copy_to_nonoverlapping(ptr, len);
-					boxx.write(Vec::from_raw_parts(ptr, len, len));
-					Self {
-						values: Box::from_raw(boxx),
-						max_depth: self.max_depth,
-						open: self.open,
-					}
+			fn clone(&self) -> Self {
+				let mut vec = unsafe { Vec::try_with_capacity(self.values.len()).unwrap_unchecked() };
+				for src in self.values.iter() {
+					unsafe {
+						vec.push_within_capacity(src.clone())
+							.unwrap_unchecked()
+					};
+				}
+				Self {
+					values: unsafe { Box::try_new(vec).unwrap_unchecked() },
+					max_depth: self.max_depth,
+					open: self.open,
 				}
 			}
 		}
@@ -59,17 +57,18 @@ macro_rules! array {
 			pub const ID: u8 = $my_id;
 
 			pub(in $crate::elements) fn from_str0(mut s: &str) -> Result<(&str, Self), usize> {
+				s = s.strip_prefix('[').ok_or(s.len())?.trim_start();
 				s = s
-					.strip_prefix('[').ok_or(s.len())?
-					.trim_start();
-				s = s
-					.strip_prefix(concat!($char, ";")).ok_or(s.len())?
+					.strip_prefix(concat!($char, ";"))
+					.ok_or(s.len())?
 					.trim_start();
 				let mut array = Self::new();
 				while !s.starts_with(']') {
 					let (s2, element) = NbtElement::from_str0(s, NbtElement::$default_snbt_integer)?;
 					let element = element.$try_into_element().ok_or(s.len())?;
-					array.insert(array.len(), element).map_err(|_| s.len())?;
+					array
+						.insert(array.len(), element)
+						.map_err(|_| s.len())?;
 					s = s2.trim_start();
 					if let Some(s2) = s.strip_prefix(',') {
 						s = s2.trim_start();
@@ -84,26 +83,22 @@ macro_rules! array {
 			pub fn from_bytes<'a, D: Decoder<'a>>(decoder: &mut D) -> NbtParseResult<Self> {
 				use super::nbt_parse_result::*;
 
-				unsafe {
-					decoder.assert_len(4)?;
-					let len = decoder.u32() as usize;
-					decoder.assert_len(len * core::mem::size_of::<$t>())?;
-					let vec = alloc(Layout::array::<NbtElement>(len).unwrap_unchecked()).cast::<NbtElement>();
-					for idx in 0..len {
-						let mut element = NbtElement {
-							$element_field: core::mem::transmute(<$t>::from_ne_bytes(decoder.read_ne_bytes::<{ core::mem::size_of::<$t>() }>()))
-						};
-						element.set_id($id);
-						vec.add(idx).write(element);
-					}
-					let boxx = alloc(Layout::new::<Vec<NbtElement>>()).cast::<Vec<NbtElement>>();
-					boxx.write(Vec::from_raw_parts(vec, len, len));
-					ok(Self {
-						values: Box::from_raw(boxx),
-						open: false,
-						max_depth: 0,
-					})
+				decoder.assert_len(4)?;
+				let len = unsafe { decoder.u32() } as usize;
+				decoder.assert_len(len * core::mem::size_of::<$t>())?;
+				let mut vec = from_opt(Vec::try_with_capacity(len).ok(), "Could not allocate enough memory for Vec")?;
+				for _ in 0..len {
+					let mut element = NbtElement {
+						$element_field: unsafe { core::mem::transmute(<$t>::from_ne_bytes(decoder.read_ne_bytes::<{ core::mem::size_of::<$t>() }>())) },
+					};
+					element.set_id($id);
+					from_opt(vec.push_within_capacity(element).ok(), "Vec was longer than originally stated")?;
 				}
+				ok(Self {
+					values: unsafe { Box::try_new(vec).unwrap_unchecked() },
+					open: false,
+					max_depth: 0,
+				})
 			}
 
 			pub fn to_be_bytes(&self, writer: &mut UncheckedBufWriter) {
@@ -129,20 +124,12 @@ macro_rules! array {
 			pub fn decrement(&mut self, _: usize, _: usize) {}
 
 			#[must_use]
-			pub fn height(&self) -> usize {
-				if self.open {
-					self.len() + 1
-				} else {
-					1
-				}
-			}
+			pub fn height(&self) -> usize { if self.open { self.len() + 1 } else { 1 } }
 
 			#[must_use]
 			pub fn true_height(&self) -> usize { self.len() + 1 }
 
-			pub fn toggle(&mut self) {
-				self.open = !self.open && !self.is_empty();
-			}
+			pub fn toggle(&mut self) { self.open = !self.open && !self.is_empty(); }
 
 			#[must_use]
 			pub const fn open(&self) -> bool { self.open }
@@ -160,7 +147,9 @@ macro_rules! array {
 				if value.id() == $id {
 					// the time complexity is fine here
 					unsafe {
-						self.values.try_reserve_exact(1).unwrap_unchecked();
+						self.values
+							.try_reserve_exact(1)
+							.unwrap_unchecked();
 					}
 					self.values.insert(idx, value);
 					self.increment(1, 1);
@@ -178,7 +167,9 @@ macro_rules! array {
 			}
 
 			pub fn replace(&mut self, idx: usize, value: NbtElement) -> Option<NbtElement> {
-				if !self.can_insert(&value) || idx >= self.len() { return None; }
+				if !self.can_insert(&value) || idx >= self.len() {
+					return None;
+				}
 				self.increment(value.height(), value.true_height());
 				let old = core::mem::replace(&mut self.values[idx], value);
 				self.decrement(old.height(), old.true_height());
@@ -212,7 +203,9 @@ macro_rules! array {
 						let _ = write!(builder, "{}", self.value());
 					}
 
-					if ctx.draw_held_entry_bar(pos + (16, 16), builder, |x, y| pos == (x - 16, y - 8), |x| self.can_insert(x)) {} else if self.height() == 1 && ctx.draw_held_entry_bar(pos + (16, 16), builder, |x, y| pos == (x - 16, y - 16), |x| self.can_insert(x)) {}
+					if ctx.draw_held_entry_bar(pos + (16, 16), builder, |x, y| pos == (x - 16, y - 8), |x| self.can_insert(x)) {
+					} else if self.height() == 1 && ctx.draw_held_entry_bar(pos + (16, 16), builder, |x, y| pos == (x - 16, y - 16), |x| self.can_insert(x)) {
+					}
 
 					ctx.offset_pos(0, 16);
 				}
@@ -234,14 +227,7 @@ macro_rules! array {
 
 						ctx.draw_held_entry_bar(pos, builder, |x, y| pos == (x, y), |x| self.can_insert(x));
 
-						builder.draw_texture(
-							pos - (16, 0),
-							CONNECTION_UV,
-							(
-								16,
-								(idx != self.len() - 1) as usize * 7 + 9,
-							),
-						);
+						builder.draw_texture(pos - (16, 0), CONNECTION_UV, (16, (idx != self.len() - 1) as usize * 7 + 9));
 						if !tail {
 							builder.draw_texture(pos - (32, 0), CONNECTION_UV, (8, 16));
 						}
@@ -271,24 +257,20 @@ macro_rules! array {
 
 			#[must_use]
 			pub fn get(&self, idx: usize) -> Option<&NbtElement> { self.values.get(idx) }
-			
+
 			#[must_use]
-			pub unsafe fn get_unchecked(&self, idx: usize) -> &NbtElement { self.values.get_unchecked(idx) }
+			pub unsafe fn get_unchecked(&self, idx: usize) -> &NbtElement { unsafe { self.values.get_unchecked(idx) } }
 
 			#[must_use]
 			pub fn get_mut(&mut self, idx: usize) -> Option<&mut NbtElement> { self.values.get_mut(idx) }
-			
+
 			#[must_use]
-			pub unsafe fn get_unchecked_mut(&mut self, idx: usize) -> &mut NbtElement { self.values.get_unchecked_mut(idx) }
+			pub unsafe fn get_unchecked_mut(&mut self, idx: usize) -> &mut NbtElement { unsafe { self.values.get_unchecked_mut(idx) } }
 
 			#[must_use]
 			pub fn value(&self) -> CompactString {
 				let (single, multiple) = id_to_string_name($id);
-				format_compact!(
-					"{} {}",
-					self.len(),
-					if self.len() == 1 { single } else { multiple }
-				)
+				format_compact!("{} {}", self.len(), if self.len() == 1 { single } else { multiple })
 			}
 
 			// ret type is #[must_use]
@@ -317,11 +299,9 @@ macro_rules! array {
 			pub fn render_icon(&self, pos: impl Into<(usize, usize)>, z: ZOffset, builder: &mut VertexBufferBuilder) { builder.draw_texture_z(pos, z, $uv, (16, 16)); }
 
 			pub fn render_element_icon(pos: impl Into<(usize, usize)>, builder: &mut VertexBufferBuilder) { builder.draw_texture(pos, $element_uv, (16, 16)); }
-			
+
 			#[must_use]
-            pub fn can_insert(&self, value: &NbtElement) -> bool {
-				value.id() == $id
-			}
+			pub fn can_insert(&self, value: &NbtElement) -> bool { value.id() == $id }
 		}
 
 		impl Display for $name {
@@ -363,17 +343,16 @@ macro_rules! array {
 	};
 }
 
-use std::alloc::{alloc, Layout};
 use std::fmt;
 use std::fmt::{Display, Write};
 use std::hint::likely;
 use std::slice::{Iter, IterMut};
 
-use compact_str::{format_compact, CompactString, ToCompactString};
+use compact_str::{CompactString, ToCompactString, format_compact};
 
-use crate::assets::{ZOffset, BASE_Z, BYTE_ARRAY_UV, BYTE_UV, CONNECTION_UV, INT_ARRAY_UV, INT_UV, JUST_OVERLAPPING_BASE_TEXT_Z, LONG_ARRAY_UV, LONG_UV};
-use crate::elements::{id_to_string_name, NbtElement};
+use crate::assets::{BASE_Z, BYTE_ARRAY_UV, BYTE_UV, CONNECTION_UV, INT_ARRAY_UV, INT_UV, JUST_OVERLAPPING_BASE_TEXT_Z, LONG_ARRAY_UV, LONG_UV, ZOffset};
 use crate::elements::nbt_parse_result::NbtParseResult;
+use crate::elements::{NbtElement, id_to_string_name};
 use crate::render::{RenderContext, TextColor, VertexBufferBuilder};
 use crate::serialization::{Decoder, PrettyFormatter, UncheckedBufWriter};
 use crate::util::StrExt;

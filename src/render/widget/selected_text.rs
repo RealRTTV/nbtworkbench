@@ -7,9 +7,10 @@ use crate::assets::{BASE_TEXT_Z, HEADER_SIZE, SELECTED_TEXT_SELECTION_Z, SELECTE
 use crate::elements::NbtElement;
 use crate::flags;
 use crate::render::{TextColor, VertexBufferBuilder};
-use crate::tree::{line_number_at, OwnedIndices};
+use crate::tree::{OwnedIndices, line_number_at};
 use crate::util::{CharExt, StrExt};
-use crate::widget::{Cachelike, SelectedTextKeyResult, SelectedTextKeyResult::{Down, ForceClose, ForceOpen, MoveToKeyfix, ShiftDown, ShiftUp, Up, MoveToValuefix}, Text};
+use crate::widget::SelectedTextKeyResult::{Down, ForceClose, ForceOpen, MoveToKeyfix, MoveToValuefix, ShiftDown, ShiftUp, Up};
+use crate::widget::{Cachelike, SelectedTextKeyResult, Text};
 
 #[derive(Clone, Debug)]
 #[allow(clippy::module_name_repetitions)] // yeah no, it's better like this
@@ -22,23 +23,31 @@ pub struct SelectedTextCache {
 }
 
 impl PartialEq for SelectedTextCache {
-	fn eq(&self, other: &Self) -> bool {
-		self.keyfix == other.keyfix && self.value == other.value && self.valuefix == other.valuefix
-	}
+	fn eq(&self, other: &Self) -> bool { self.keyfix == other.keyfix && self.value == other.value && self.valuefix == other.valuefix }
 }
 
 impl Cachelike<SelectedTextAdditional> for SelectedTextCache {
-	fn new(text: &Text<SelectedTextAdditional, Self>) -> Self where Self: Sized {
+	fn new(text: &Text<SelectedTextAdditional, Self>) -> Self
+	where Self: Sized {
 		Self {
-			keyfix: text.additional.keyfix.clone().map(|(a, b)| (a.into_boxed_str(), b)),
-			valuefix: text.additional.valuefix.clone().map(|(a, b)| (a.into_boxed_str(), b)),
+			keyfix: text
+				.additional
+				.keyfix
+				.clone()
+				.map(|(a, b)| (a.into_boxed_str(), b)),
+			valuefix: text
+				.additional
+				.valuefix
+				.clone()
+				.map(|(a, b)| (a.into_boxed_str(), b)),
 			value: text.value.clone().into_boxed_str(),
 			cursor: text.cursor,
 			selection: text.selection,
 		}
 	}
 
-	fn revert(self, text: &mut Text<SelectedTextAdditional, Self>) where Self: Sized {
+	fn revert(self, text: &mut Text<SelectedTextAdditional, Self>)
+	where Self: Sized {
 		let Self { keyfix, value, valuefix, cursor, selection } = self;
 		text.additional.keyfix = keyfix.map(|(a, b)| (a.into_string(), b));
 		text.additional.valuefix = valuefix.map(|(a, b)| (a.into_string(), b));
@@ -54,19 +63,15 @@ pub struct SelectedText(pub Text<SelectedTextAdditional, SelectedTextCache>);
 impl Deref for SelectedText {
 	type Target = Text<SelectedTextAdditional, SelectedTextCache>;
 
-	fn deref(&self) -> &Self::Target {
-		&self.0
-	}
+	fn deref(&self) -> &Self::Target { &self.0 }
 }
 
 impl DerefMut for SelectedText {
-	fn deref_mut(&mut self) -> &mut Self::Target {
-		&mut self.0
-	}
+	fn deref_mut(&mut self) -> &mut Self::Target { &mut self.0 }
 }
 
 #[derive(Clone)]
-pub struct SelectedTextAdditional  {
+pub struct SelectedTextAdditional {
 	// todo, change this to be Option<usize> and a cache that removes itself on every write
 	pub y: usize,
 	pub indices: OwnedIndices,
@@ -79,17 +84,14 @@ pub struct SelectedTextAdditional  {
 
 impl SelectedText {
 	#[must_use]
-		pub fn new(target_x: usize, mouse_x: usize, y: usize, key: Option<(Box<str>, TextColor, bool)>, value: Option<(Box<str>, TextColor, bool)>, indices: OwnedIndices) -> Option<Self> {
+	pub fn new(target_x: usize, mouse_x: usize, y: usize, key: Option<(Box<str>, TextColor, bool)>, value: Option<(Box<str>, TextColor, bool)>, indices: OwnedIndices) -> Option<Self> {
 		let key_width = if let Some((key, key_color, true)) = key.clone() {
 			let key_width = key.width();
 
 			if mouse_x + 4 >= target_x {
 				let (suffix, valuefix) = if let Some((v, valuefix_color, b)) = &value {
 					if *b {
-						(
-							(": " .to_owned(), TextColor::TreeKey),
-							Some((v.clone().into_string(), *valuefix_color)),
-						)
+						((": ".to_owned(), TextColor::TreeKey), Some((v.clone().into_string(), *valuefix_color)))
 					} else {
 						((format!(": {v}"), TextColor::TreeKey), None)
 					}
@@ -98,17 +100,15 @@ impl SelectedText {
 				};
 
 				if mouse_x <= target_x {
-					return Some(
-						Self(Text::new(key.into_string(), 0, true, SelectedTextAdditional {
-							y,
-							indices,
-							value_color: key_color,
-							keyfix: None,
-							prefix: (String::new(), TextColor::White),
-							suffix,
-							valuefix,
-						})),
-					);
+					return Some(Self(Text::new(key.into_string(), 0, true, SelectedTextAdditional {
+						y,
+						indices,
+						value_color: key_color,
+						keyfix: None,
+						prefix: (String::new(), TextColor::White),
+						suffix,
+						valuefix,
+					})));
 				}
 
 				if target_x + key_width
@@ -121,17 +121,15 @@ impl SelectedText {
 							.unwrap_or(0) as usize
 					&& mouse_x < target_x + key_width + 7
 				{
-					return Some(
-						Self(Text::new(key.clone().into_string(), key.len(), true, SelectedTextAdditional {
-							y,
-							indices,
-							value_color: key_color,
-							keyfix: None,
-							prefix: (String::new(), TextColor::White),
-							suffix,
-							valuefix,
-						})),
-					);
+					return Some(Self(Text::new(key.clone().into_string(), key.len(), true, SelectedTextAdditional {
+						y,
+						indices,
+						value_color: key_color,
+						keyfix: None,
+						prefix: (String::new(), TextColor::White),
+						suffix,
+						valuefix,
+					})));
 				}
 
 				let mut cursor = 0;
@@ -153,8 +151,7 @@ impl SelectedText {
 							prefix: (String::new(), TextColor::White),
 							suffix,
 							valuefix,
-						})),
-						);
+						})));
 					}
 				}
 			}
@@ -168,10 +165,7 @@ impl SelectedText {
 			if mouse_x + 4 >= value_x {
 				let (keyfix, prefix) = if let Some((k, key_color, b)) = key.as_ref() {
 					if *b {
-						(
-							Some((k.as_ref().to_owned(), *key_color)),
-							(": ".to_owned(), TextColor::TreeKey),
-						)
+						(Some((k.as_ref().to_owned(), *key_color)), (": ".to_owned(), TextColor::TreeKey))
 					} else {
 						(None, (format!("{k}: "), TextColor::TreeKey))
 					}
@@ -188,8 +182,7 @@ impl SelectedText {
 						prefix,
 						suffix: (String::new(), TextColor::White),
 						valuefix: None,
-					})),
-					);
+					})));
 				}
 
 				let value_width = value.width();
@@ -213,8 +206,7 @@ impl SelectedText {
 						prefix,
 						suffix: (String::new(), TextColor::White),
 						valuefix: None,
-					})),
-					);
+					})));
 				}
 
 				let value_width = value_width as isize;
@@ -239,14 +231,16 @@ impl SelectedText {
 			}
 		}
 
-		let full_width = key.as_ref().map_or(0, |(x, _, _)| x.width())
-			+ value.as_ref().map_or(0, |(x, _, _)| x.width())
-			+ if key.is_some() && value.is_some() {
-				": ".width()
-			} else {
-				0
-			};
-		if key.as_ref().is_none_or(|(_, _, display)| !*display) && value.as_ref().is_none_or(|(_, _, display)| !*display) && mouse_x <= target_x + full_width && mouse_x + 16 >= target_x {
+		let full_width = key.as_ref().map_or(0, |(x, _, _)| x.width()) + value.as_ref().map_or(0, |(x, _, _)| x.width()) + if key.is_some() && value.is_some() { ": ".width() } else { 0 };
+		if key
+			.as_ref()
+			.is_none_or(|(_, _, display)| !*display)
+			&& value
+				.as_ref()
+				.is_none_or(|(_, _, display)| !*display)
+			&& mouse_x <= target_x + full_width
+			&& mouse_x + 16 >= target_x
+		{
 			Some(Self(Text::new(if key.is_some() { ": ".to_owned() } else { String::new() }, 0, false, SelectedTextAdditional {
 				y,
 				indices,
@@ -255,57 +249,76 @@ impl SelectedText {
 				prefix: (String::new(), TextColor::White),
 				suffix: (String::new(), TextColor::White),
 				valuefix: value.map(|(x, color, _)| (x.into_string(), color)),
-			})),
-			)
+			})))
 		} else {
 			None
 		}
 	}
 
-	pub fn width(&self) -> usize { self.prefix.0.width() + self.keyfix.as_ref().map(|x| x.0.width()).unwrap_or(0) + self.value.width() + self.valuefix.as_ref().map(|x| x.0.width()).unwrap_or(0) + self.suffix.0.width() }
+	pub fn width(&self) -> usize {
+		self.prefix.0.width()
+			+ self
+				.keyfix
+				.as_ref()
+				.map(|x| x.0.width())
+				.unwrap_or(0)
+			+ self.value.width()
+			+ self
+				.valuefix
+				.as_ref()
+				.map(|x| x.0.width())
+				.unwrap_or(0)
+			+ self.suffix.0.width()
+	}
 
 	#[cfg_attr(not(debug_assertions), inline)]
 	#[allow(clippy::cognitive_complexity, clippy::too_many_lines)] // I handled this fn well
 	#[must_use]
 	pub fn on_key_press(&mut self, key: KeyCode, char: Option<char>, flags: u8) -> SelectedTextKeyResult {
 		if key == KeyCode::ArrowUp {
-		    if flags & !flags!(Ctrl) == 0 {
-		        return Up(flags == flags!(Ctrl));
-		    } else if flags == flags!(Ctrl + Shift) {
-		        return ShiftUp;
-		    }
+			if flags & !flags!(Ctrl) == 0 {
+				return Up(flags == flags!(Ctrl));
+			} else if flags == flags!(Ctrl + Shift) {
+				return ShiftUp;
+			}
 		}
 
 		if key == KeyCode::ArrowDown {
-		    if flags & !flags!(Ctrl) == 0 {
-		        return Down(flags == flags!(Ctrl));
-		    } else if flags == flags!(Ctrl + Shift) {
-		        return ShiftDown;
-		    }
+			if flags & !flags!(Ctrl) == 0 {
+				return Down(flags == flags!(Ctrl));
+			} else if flags == flags!(Ctrl + Shift) {
+				return ShiftDown;
+			}
 		}
 
 		if key == KeyCode::ArrowLeft {
-			if flags & !flags!(Ctrl) == 0 && self.selection.is_none() && self.cursor == 0 && self.keyfix.is_some() { return MoveToKeyfix }
-			if flags & !flags!(Shift) == flags!(Alt) { return ForceClose }
+			if flags & !flags!(Ctrl) == 0 && self.selection.is_none() && self.cursor == 0 && self.keyfix.is_some() {
+				return MoveToKeyfix
+			}
+			if flags & !flags!(Shift) == flags!(Alt) {
+				return ForceClose
+			}
 		}
 
 		if key == KeyCode::ArrowRight {
-			if flags & !flags!(Ctrl) == 0 && self.selection.is_none() && self.cursor == self.value.len() && self.valuefix.is_some() { return MoveToValuefix }
-			if (flags) & !flags!(Shift) == flags!(Alt) { return ForceOpen }
+			if flags & !flags!(Ctrl) == 0 && self.selection.is_none() && self.cursor == self.value.len() && self.valuefix.is_some() {
+				return MoveToValuefix
+			}
+			if (flags) & !flags!(Shift) == flags!(Alt) {
+				return ForceOpen
+			}
 		}
 
 		self.0.on_key_press(key, char, flags).into()
 	}
 
-	pub fn post_input(&mut self) {
-		self.0.post_input()
-	}
+	pub fn post_input(&mut self) { self.0.post_input() }
 
 	pub fn recache_y(&mut self, root: &NbtElement) {
 		let line_number = line_number_at(&self.indices, root);
 		self.y = line_number * 16 + HEADER_SIZE;
 	}
-	
+
 	pub fn set_indices(&mut self, indices: OwnedIndices, root: &NbtElement) {
 		self.indices = indices;
 		self.recache_y(root);
@@ -313,11 +326,18 @@ impl SelectedText {
 
 	pub fn render(&self, builder: &mut VertexBufferBuilder, left_margin: usize) {
 		let x = self.indices.len() * 16 + 32 + 4 + left_margin;
-		let y = if builder.scroll() > self.y { return; } else { self.y - builder.scroll() };
-		if y < HEADER_SIZE { return }
+		let y = if builder.scroll() > self.y {
+			return;
+		} else {
+			self.y - builder.scroll()
+		};
+		if y < HEADER_SIZE {
+			return
+		}
 
 		let prefix_width = self.prefix.0.as_str().width() + self.keyfix.as_ref().map_or(0, |x| x.0.width());
-		self.0.render(builder, self.value_color, (x + prefix_width, y).into(), SELECTED_TEXT_Z, SELECTED_TEXT_SELECTION_Z);
+		self.0
+			.render(builder, self.value_color, (x + prefix_width, y).into(), SELECTED_TEXT_Z, SELECTED_TEXT_SELECTION_Z);
 
 		builder.draw_texture_z((x - 4 - 16, y), SELECTED_TEXT_Z, SELECTION_UV, (16, 16));
 		builder.settings((x, y), false, BASE_TEXT_Z);

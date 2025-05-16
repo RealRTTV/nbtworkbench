@@ -3,7 +3,7 @@ use std::ops::BitAnd;
 
 use winit::dpi::PhysicalSize;
 
-use crate::assets::{ZOffset, BASE_TEXT_Z, BASE_Z, TOOLTIP_UV, TOOLTIP_Z};
+use crate::assets::{BASE_TEXT_Z, BASE_Z, TOOLTIP_UV, TOOLTIP_Z, ZOffset};
 use crate::render::TextColor;
 use crate::util::{StrExt, Vec2u};
 
@@ -32,11 +32,7 @@ impl core::fmt::Write for VertexBufferBuilder {
 	fn write_str(&mut self, text: &str) -> std::fmt::Result {
 		let (mut x, y) = self.text_coords;
 		x += text.chars().fold(0, |offset, char| {
-			let char = if (char as u32) < 56832 {
-				char as u16
-			} else {
-				56829
-			};
+			let char = if (char as u32) < 56832 { char as u16 } else { 56829 };
 			offset + self.draw_char(char, x + offset, y, self.text_z)
 		});
 		self.text_coords = (x, y);
@@ -73,7 +69,7 @@ impl VertexBufferBuilder {
 			two_over_width: 2.0 / size.width as f32,
 			negative_two_over_height: -2.0 / size.height as f32,
 			tooltips: vec![],
-			scale
+			scale,
 		}
 	}
 
@@ -115,7 +111,15 @@ impl VertexBufferBuilder {
 
 	pub fn draw_tooltip(&mut self, text: &[&str], pos: impl Into<(usize, usize)>, force_draw_right: bool) {
 		let color = self.color;
-		self.tooltips.push((text.iter().map(|s| s.to_string()).collect::<Vec<_>>().into_boxed_slice(), Vec2u::from(pos.into()), force_draw_right, color));
+		self.tooltips.push((
+			text.iter()
+				.map(|s| s.to_string())
+				.collect::<Vec<_>>()
+				.into_boxed_slice(),
+			Vec2u::from(pos.into()),
+			force_draw_right,
+			color,
+		));
 	}
 
 	pub fn reset(&mut self) {
@@ -146,7 +150,9 @@ impl VertexBufferBuilder {
 				x = usize::max(x.saturating_sub(text_width + 30), 4)
 			}
 			if !no_tooltip_repositioning && y + text.len() * 16 + 9 > self.window_height() {
-				y = self.window_height().saturating_sub(text.len() * 16 + 9);
+				y = self
+					.window_height()
+					.saturating_sub(text.len() * 16 + 9);
 			}
 			self.text_z = TOOLTIP_Z;
 			self.text_coords = (x + 3, y + 3);
@@ -160,51 +166,16 @@ impl VertexBufferBuilder {
 			}
 			let width = max - 3 - x;
 			let height = self.text_coords.1 - 3 - y;
-			self.draw_texture_region_z(
-				(x + 3, y),
-				TOOLTIP_Z,
-				TOOLTIP_UV + (3, 0),
-				(width, 3),
-				(10, 3),
-			);
+			self.draw_texture_region_z((x + 3, y), TOOLTIP_Z, TOOLTIP_UV + (3, 0), (width, 3), (10, 3));
 			self.draw_texture_z((x + width + 3, y), TOOLTIP_Z, TOOLTIP_UV + (13, 0), (3, 3));
 
 			self.draw_texture_z((x, y + height + 3), TOOLTIP_Z, TOOLTIP_UV + (0, 13), (3, 3));
-			self.draw_texture_region_z(
-				(x + 3, y + height + 3),
-				TOOLTIP_Z,
-				TOOLTIP_UV + (3, 13),
-				(width, 3),
-				(10, 3),
-			);
-			self.draw_texture_z(
-				(x + width + 3, y + height + 3),
-				TOOLTIP_Z,
-				TOOLTIP_UV + (13, 13),
-				(3, 3),
-			);
-			self.draw_texture_region_z(
-				(x, y + 3),
-				TOOLTIP_Z,
-				TOOLTIP_UV + (0, 3),
-				(3, height),
-				(3, 10),
-			);
-			self.draw_texture_region_z(
-				(x + width + 3, y + 3),
-				TOOLTIP_Z,
-				TOOLTIP_UV + (13, 3),
-				(3, height),
-				(3, 10),
-			);
+			self.draw_texture_region_z((x + 3, y + height + 3), TOOLTIP_Z, TOOLTIP_UV + (3, 13), (width, 3), (10, 3));
+			self.draw_texture_z((x + width + 3, y + height + 3), TOOLTIP_Z, TOOLTIP_UV + (13, 13), (3, 3));
+			self.draw_texture_region_z((x, y + 3), TOOLTIP_Z, TOOLTIP_UV + (0, 3), (3, height), (3, 10));
+			self.draw_texture_region_z((x + width + 3, y + 3), TOOLTIP_Z, TOOLTIP_UV + (13, 3), (3, height), (3, 10));
 
-			self.draw_texture_region_z(
-				(x + 3, y + 3),
-				TOOLTIP_Z,
-				TOOLTIP_UV + (3, 3),
-				(width, height),
-				(10, 10),
-			);
+			self.draw_texture_region_z((x + 3, y + 3), TOOLTIP_Z, TOOLTIP_UV + (3, 3), (width, height), (10, 10));
 		}
 	}
 
@@ -219,9 +190,13 @@ impl VertexBufferBuilder {
 			let char = f32::from_bits(char as u32);
 
 			let x0 = x.mul_add(self.two_over_width, -1.0);
-			let x1 = self.two_over_width.mul_add(Self::CHAR_HEIGHT as f32 * self.scale, x0);
+			let x1 = self
+				.two_over_width
+				.mul_add(Self::CHAR_HEIGHT as f32 * self.scale, x0);
 			let y1 = y.mul_add(self.negative_two_over_height, 1.0);
-			let y0 = self.negative_two_over_height.mul_add(Self::CHAR_HEIGHT as f32 * self.scale, y1);
+			let y0 = self
+				.negative_two_over_height
+				.mul_add(Self::CHAR_HEIGHT as f32 * self.scale, y1);
 
 			let len = self.text_vertices_len;
 			let vec = &mut self.text_vertices;
@@ -284,23 +259,9 @@ impl VertexBufferBuilder {
 
 	pub fn indices(&self) -> &[u8] { unsafe { core::slice::from_raw_parts(self.indices.as_ptr().cast::<u8>(), self.indices.len() * 4) } }
 
-	pub fn text_vertices(&self) -> &[u8] {
-		unsafe {
-			core::slice::from_raw_parts(
-				self.text_vertices.as_ptr().cast::<u8>(),
-				self.text_vertices.len() * 4,
-			)
-		}
-	}
+	pub fn text_vertices(&self) -> &[u8] { unsafe { core::slice::from_raw_parts(self.text_vertices.as_ptr().cast::<u8>(), self.text_vertices.len() * 4) } }
 
-	pub fn text_indices(&self) -> &[u8] {
-		unsafe {
-			core::slice::from_raw_parts(
-				self.text_indices.as_ptr().cast::<u8>(),
-				self.text_indices.len() * 4,
-			)
-		}
-	}
+	pub fn text_indices(&self) -> &[u8] { unsafe { core::slice::from_raw_parts(self.text_indices.as_ptr().cast::<u8>(), self.text_indices.len() * 4) } }
 
 	pub fn indices_len(&self) -> u32 { self.indices.len() as u32 }
 
@@ -313,7 +274,7 @@ impl VertexBufferBuilder {
 		self.draw_texture_region_z(pos, z, uv, dims, dims);
 	}
 
-		pub fn draw_texture_region_z(&mut self, pos: impl Into<(usize, usize)>, z: ZOffset, uv: impl Into<(usize, usize)>, dims: impl Into<(usize, usize)>, uv_dims: impl Into<(usize, usize)>) {
+	pub fn draw_texture_region_z(&mut self, pos: impl Into<(usize, usize)>, z: ZOffset, uv: impl Into<(usize, usize)>, dims: impl Into<(usize, usize)>, uv_dims: impl Into<(usize, usize)>) {
 		unsafe {
 			let pos = pos.into();
 			let uv = uv.into();
@@ -371,7 +332,11 @@ impl VertexBufferBuilder {
 			vec.set_len(vertices_len + 20);
 
 			let indices_len = self.indices.len();
-			let ptr = self.indices.as_mut_ptr().add(indices_len).cast::<u8>();
+			let ptr = self
+				.indices
+				.as_mut_ptr()
+				.add(indices_len)
+				.cast::<u8>();
 
 			*ptr = len as u8;
 			*(ptr.add(1)) = (len >> 8) as u8;

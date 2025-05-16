@@ -1,4 +1,4 @@
-use std::alloc::{alloc, dealloc, Layout};
+use std::alloc::{Layout, alloc, dealloc};
 use std::array;
 use std::fmt::{Display, Formatter};
 use std::mem::{ManuallyDrop, MaybeUninit};
@@ -7,7 +7,7 @@ use std::ptr::NonNull;
 
 use compact_str::CompactString;
 
-use crate::assets::{ZOffset, BASE_Z, JUST_OVERLAPPING_BASE_TEXT_Z, STRING_UV};
+use crate::assets::{BASE_Z, JUST_OVERLAPPING_BASE_TEXT_Z, STRING_UV, ZOffset};
 use crate::elements::nbt_parse_result::NbtParseResult;
 use crate::render::{RenderContext, TextColor, VertexBufferBuilder};
 use crate::serialization::{Decoder, PrettyFormatter, UncheckedBufWriter};
@@ -20,31 +20,22 @@ pub struct NbtString {
 }
 
 impl NbtString {
-	pub fn matches(&self, other: &Self) -> bool {
-		self.str.as_str() == other.str.as_str()
-	}
+	pub fn matches(&self, other: &Self) -> bool { self.str.as_str() == other.str.as_str() }
 }
 
 impl NbtString {
 	pub const ID: u8 = 8;
-	pub(in crate::elements) fn from_str0(s: &str) -> Result<(&str, Self), usize> {
+	pub(super) fn from_str0(s: &str) -> Result<(&str, Self), usize> {
 		let (str, s) = s.snbt_string_read()?;
-		Ok((
-			s,
-			Self {
-				str: TwentyThree::new(str),
-			},
-		))
+		Ok((s, Self { str: TwentyThree::new(str) }))
 	}
 
 	pub fn from_bytes<'a, D: Decoder<'a>>(decoder: &mut D) -> NbtParseResult<Self> {
 		use super::nbt_parse_result::*;
-		
+
 		unsafe {
 			decoder.assert_len(2)?;
-			ok(Self {
-				str: TwentyThree::new(decoder.string()?),
-			})
+			ok(Self { str: TwentyThree::new(decoder.string()?) })
 		}
 	}
 
@@ -55,21 +46,11 @@ impl NbtString {
 
 impl NbtString {
 	#[must_use]
-	pub fn new(str: CompactString) -> Self {
-		Self {
-			str: TwentyThree::new(str),
-		}
-	}
+	pub fn new(str: CompactString) -> Self { Self { str: TwentyThree::new(str) } }
 }
 
 impl Display for NbtString {
-	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-		if self.str.as_str().needs_escape() {
-			write!(f, "{:?}", self.str.as_str())
-		} else {
-			write!(f, "{}", self.str.as_str())
-		}
-	}
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result { if self.str.as_str().needs_escape() { write!(f, "{:?}", self.str.as_str()) } else { write!(f, "{}", self.str.as_str()) } }
 }
 
 impl NbtString {
@@ -128,9 +109,7 @@ impl Clone for TwentyThree {
 }
 
 impl PartialEq for TwentyThree {
-	fn eq(&self, other: &Self) -> bool {
-		self.as_str().eq(other.as_str())
-	}
+	fn eq(&self, other: &Self) -> bool { self.as_str().eq(other.as_str()) }
 }
 
 impl TwentyThree {
@@ -154,9 +133,7 @@ impl TwentyThree {
 				let ptr = s.as_ptr();
 				let res = Self {
 					stack: ManuallyDrop::new(if len == 23 {
-						StackTwentyThree {
-							data: ptr.cast::<[u8; 23]>().read(),
-						}
+						StackTwentyThree { data: ptr.cast::<[u8; 23]>().read() }
 					} else {
 						let mut data = array::from_fn::<u8, 23, _>(|idx| s.as_bytes().get(idx).copied().unwrap_or(0));
 						data[22] = 192 + len as u8;
@@ -196,10 +173,7 @@ impl Drop for TwentyThree {
 	fn drop(&mut self) {
 		unsafe {
 			if self.heap.variant == 254 {
-				dealloc(
-					self.heap.ptr.as_ptr(),
-					Layout::array::<u8>(self.heap.len).unwrap_unchecked(),
-				);
+				dealloc(self.heap.ptr.as_ptr(), Layout::array::<u8>(self.heap.len).unwrap_unchecked());
 			}
 		}
 	}

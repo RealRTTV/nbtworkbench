@@ -4,57 +4,53 @@ use crate::workbench::{MarkedLines, WorkbenchAction};
 
 #[must_use]
 pub fn remove_element<'m1, 'm2: 'm1>(root: &mut NbtElement, indices: OwnedIndices, bookmarks: &mut MarkedLines, mutable_indices: &'m1 mut MutableIndices<'m2>) -> Option<RemoveElementResult> {
-    let ParentNavigationInformationMut { true_line_number, parent, idx, parent_indices, .. } = root.navigate_parent_mut(&indices)?;
-    let (old_parent_height, old_parent_true_height) = (parent.height(), parent.true_height());
-    // SAFETY: we have updated all the relevant data
-    let (key, value) = unsafe { parent.remove(idx) }?;
-    let (height, true_height) = (value.height(), value.true_height());
-    let (parent_height, parent_true_height) = (parent.height(), parent.true_height());
-    let (diff, true_diff) = (old_parent_height.wrapping_sub(parent_height), old_parent_true_height.wrapping_sub(parent_true_height));
-    // exists because of regions
-    let been_replaced = !(height == diff && true_height == true_diff);
-    bookmarks.remove(true_line_number..true_line_number + true_height);
-    bookmarks[true_line_number..].decrement(diff, true_diff);
+	let ParentNavigationInformationMut {
+		true_line_number, parent, idx, parent_indices, ..
+	} = root.navigate_parent_mut(&indices)?;
+	let (old_parent_height, old_parent_true_height) = (parent.height(), parent.true_height());
+	// SAFETY: we have updated all the relevant data
+	let (key, value) = unsafe { parent.remove(idx) }?;
+	let (height, true_height) = (value.height(), value.true_height());
+	let (parent_height, parent_true_height) = (parent.height(), parent.true_height());
+	let (diff, true_diff) = (old_parent_height.wrapping_sub(parent_height), old_parent_true_height.wrapping_sub(parent_true_height));
+	// exists because of regions
+	let been_replaced = !(height == diff && true_height == true_diff);
+	bookmarks.remove(true_line_number..true_line_number + true_height);
+	bookmarks[true_line_number..].decrement(diff, true_diff);
 
-    mutable_indices.apply(|mutable_indices, ci| {
-        if indices.encompasses_or_equal(mutable_indices) {
-            ci.remove();
-        } else if parent_indices.encompasses(mutable_indices) {
-            if mutable_indices[parent_indices.len()] >= idx && !been_replaced {
-                mutable_indices[parent_indices.len()] -= 1;
-            }
-        }
-    });
+	mutable_indices.apply(|mutable_indices, ci| {
+		if indices.encompasses_or_equal(mutable_indices) {
+			ci.remove();
+		} else if parent_indices.encompasses(mutable_indices) {
+			if mutable_indices[parent_indices.len()] >= idx && !been_replaced {
+				mutable_indices[parent_indices.len()] -= 1;
+			}
+		}
+	});
 
-    root.recache_along_indices(&parent_indices);
+	root.recache_along_indices(&parent_indices);
 
-    Some(RemoveElementResult {
-        indices,
-        kv: (key, value),
-        replaces: been_replaced,
-    })
+	Some(RemoveElementResult {
+		indices,
+		kv: (key, value),
+		replaces: been_replaced,
+	})
 }
 
 #[derive(Clone)]
 pub struct RemoveElementResult {
-    pub indices: OwnedIndices,
-    pub kv: NbtElementAndKey,
-    pub replaces: bool,
+	pub indices: OwnedIndices,
+	pub kv: NbtElementAndKey,
+	pub replaces: bool,
 }
 
 impl RemoveElementResult {
-    #[must_use]
-    pub fn into_action(self) -> WorkbenchAction {
-        if self.replaces {
-            WorkbenchAction::Replace {
-                indices: self.indices,
-                value: self.kv,
-            }
-        } else {
-            WorkbenchAction::Remove {
-                kv: self.kv,
-                indices: self.indices,
-            }
-        }
-    }
+	#[must_use]
+	pub fn into_action(self) -> WorkbenchAction {
+		if self.replaces {
+			WorkbenchAction::Replace { indices: self.indices, value: self.kv }
+		} else {
+			WorkbenchAction::Remove { kv: self.kv, indices: self.indices }
+		}
+	}
 }

@@ -1,11 +1,11 @@
-use lazy_static::lazy_static;
 use std::mem::ManuallyDrop;
+
+pub use ZOffset::*;
+use lazy_static::lazy_static;
 use winit::window::Theme;
 use zune_png::zune_core::options::DecoderOptions;
 
-pub use ZOffset::*;
-
-use crate::util::{now, Vec2u};
+use crate::util::{Vec2u, now};
 
 pub const HEADER_SIZE: usize = 48;
 
@@ -159,36 +159,40 @@ pub const REPLACE_BY_SEARCH_HITS: Vec2u = Vec2u::new(0, 192);
 #[allow(non_camel_case_types)]
 #[derive(Copy, Clone)]
 pub enum ZOffset {
-	SEARCH_BOX_Z = 50,
-	SEARCH_BOX_SELECTION_Z = 51,
-	JUST_UNDERLAPPING_BASE_Z = 79,
-    BASE_Z = 80,
-    JUST_OVERLAPPING_BASE_Z = 81,
-    BASE_TEXT_Z = 90,
-    JUST_OVERLAPPING_BASE_TEXT_Z = 91,
-    TOGGLE_Z = 100,
-    LINE_NUMBER_Z = 130,
-    LINE_NUMBER_CONNECTOR_Z = 131,
-    BOOKMARK_Z = 140,
-	JUST_OVERLAPPING_BOOKMARK_Z = 141,
-    SELECTED_TEXT_Z = 170,
-	SELECTED_TEXT_SELECTION_Z = 171,
-    ACTION_WHEEL_Z = 190,
-    SCROLLBAR_BOOKMARK_Z = 199,
-    SCROLLBAR_Z = 200,
-	REPLACE_BOX_Z = 210,
-	REPLACE_BOX_SELECTION_Z = 211,
-    HELD_ENTRY_Z = 220,
-    HELD_ENTRY_TEXT_Z = 221,
-    NOTIFICATION_Z = 240,
-    NOTIFICATION_TEXT_Z = 241,
-	DEBUG_TEXT_Z = 251,
-    TOOLTIP_Z = 255,
+	SEARCH_BOX_Z                 = 50,
+	SEARCH_BOX_SELECTION_Z       = 51,
+	JUST_UNDERLAPPING_BASE_Z     = 79,
+	BASE_Z                       = 80,
+	JUST_OVERLAPPING_BASE_Z      = 81,
+	BASE_TEXT_Z                  = 90,
+	JUST_OVERLAPPING_BASE_TEXT_Z = 91,
+	TOGGLE_Z                     = 100,
+	LINE_NUMBER_Z                = 130,
+	LINE_NUMBER_CONNECTOR_Z      = 131,
+	BOOKMARK_Z                   = 140,
+	JUST_OVERLAPPING_BOOKMARK_Z  = 141,
+	SELECTED_TEXT_Z              = 170,
+	SELECTED_TEXT_SELECTION_Z    = 171,
+	ACTION_WHEEL_Z               = 190,
+	SCROLLBAR_BOOKMARK_Z         = 199,
+	SCROLLBAR_Z                  = 200,
+	REPLACE_BOX_Z                = 210,
+	REPLACE_BOX_SELECTION_Z      = 211,
+	HELD_ENTRY_Z                 = 220,
+	HELD_ENTRY_TEXT_Z            = 221,
+	NOTIFICATION_Z               = 240,
+	NOTIFICATION_TEXT_Z          = 241,
+	DEBUG_TEXT_Z                 = 251,
+	TOOLTIP_Z                    = 255,
 }
 
 lazy_static! {
-	static ref DARK_ATLAS_CELL: Vec<u8> = zune_png::PngDecoder::new_with_options(DARK_ATLAS_ENCODED, DecoderOptions::new_fast().png_set_confirm_crc(false)).decode_raw().unwrap();
-	static ref LIGHT_ATLAS_CELL: Vec<u8> = zune_png::PngDecoder::new_with_options(LIGHT_ATLAS_ENCODED, DecoderOptions::new_fast().png_set_confirm_crc(false)).decode_raw().unwrap();
+	static ref DARK_ATLAS_CELL: Vec<u8> = zune_png::PngDecoder::new_with_options(DARK_ATLAS_ENCODED, DecoderOptions::new_fast().png_set_confirm_crc(false))
+		.decode_raw()
+		.unwrap();
+	static ref LIGHT_ATLAS_CELL: Vec<u8> = zune_png::PngDecoder::new_with_options(LIGHT_ATLAS_ENCODED, DecoderOptions::new_fast().png_set_confirm_crc(false))
+		.decode_raw()
+		.unwrap();
 }
 
 pub fn atlas(theme: Theme) -> &'static [u8] {

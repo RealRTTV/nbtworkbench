@@ -35,7 +35,7 @@ wgsl! {
 	fn fragment(input: VertexOutput) -> @location(0) vec4<f32> {
 		var out: vec4<f32> = textureLoad(texture, vec2<u32>(input.tex_coords), 0);
 		if (out[3] == 0.0) {
-		    discard;
+			discard;
 		}
 
 		// to srgb
