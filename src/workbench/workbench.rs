@@ -885,7 +885,7 @@ impl Workbench {
     fn open_file(&mut self, window_properties: &mut WindowProperties) {
         let dialog = native_dialog::FileDialogBuilder::default()
             .set_location("~/Downloads")
-            .add_filters(Tab::FILE_TYPE_FILTERS.iter().copied().map(|(a, b)| (a.to_owned(), b.iter().map(|x| x.to_owned()).collect::<Vec<_>>())))
+            .add_filters(Tab::FILE_TYPE_FILTERS.iter().copied().map(|(a, b)| (a.to_owned(), b.iter().map(|x| x.to_string()).collect::<Vec<_>>())))
             .open_single_file();
         let dialog_result = dialog.show();
         self.ignore_event_end = now() + Duration::from_millis(50);
