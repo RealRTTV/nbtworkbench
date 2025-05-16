@@ -129,7 +129,7 @@ impl Tab {
 			};
 			let dialog = native_dialog::FileDialogBuilder::default()
 				.add_filter(Self::FILE_TYPE_FILTERS[initial_index].0, Self::FILE_TYPE_FILTERS[initial_index].1)
-				.add_filters(Self::FILE_TYPE_FILTERS.iter().copied().map(|(a, b)| (a.to_owned(), b.iter().map(|x| x.to_owned()).collect::<Vec<_>>())).enumerate().filter(|(idx, _)| *idx != initial_index))
+				.add_filters(Self::FILE_TYPE_FILTERS.iter().copied().map(|(a, b)| (a.to_owned(), b.iter().map(|x| x.to_string()).collect::<Vec<_>>())).enumerate().filter(|(idx, _)| *idx != initial_index))
 				.save_single_file();
 			let Ok(Some(path)) = dialog.show() else { return Ok(()) };
 			self.name = path.file_name().and_then(|x| x.to_str()).expect("Path has a filename").to_string().into_boxed_str();
