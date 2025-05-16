@@ -212,7 +212,7 @@ impl<'window> State<'window> {
 					gles_minor_version: Gles3MinorVersion::default(),
 					fence_behavior: GlFenceBehavior::default(),
 				},
-				dx12: Dx12BackendOptions { shader_compiler: Dx12Compiler::StaticDxc },
+				dx12: Dx12BackendOptions { shader_compiler: Dx12Compiler::Fxc },
 				noop: NoopBackendOptions { enable: false },
 			},
 		});
