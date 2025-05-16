@@ -119,7 +119,6 @@ impl Tab {
 			self.unsaved_changes = false;
 			Ok(())
 		} else {
-			let mut builder = native_dialog::FileDialog::new();
 			let initial_index = match self.format {
 				FileFormat::Nbt => 0,
 				FileFormat::Snbt => 1,
@@ -128,9 +127,11 @@ impl Tab {
 				FileFormat::LittleEndianNbt => 4,
 				FileFormat::LittleEndianHeaderNbt => 5,
 			};
-			builder = builder.add_filter(Self::FILE_TYPE_FILTERS[initial_index].0, Self::FILE_TYPE_FILTERS[initial_index].1);
-			builder = Self::FILE_TYPE_FILTERS.iter().enumerate().filter_map(|(idx, value)| if idx == initial_index { None } else { Some(value) }).fold(builder, |builder, filter| builder.add_filter(filter.0, filter.1));
-			let Some(path) = builder.show_save_single_file()? else { return Ok(()) };
+			let dialog = native_dialog::FileDialogBuilder::default()
+				.add_filter(Self::FILE_TYPE_FILTERS[initial_index].0, Self::FILE_TYPE_FILTERS[initial_index].1)
+				.add_filters(Self::FILE_TYPE_FILTERS.iter().copied().map(|(a, b)| (a.to_owned(), b.iter().map(|x| x.to_owned()).collect::<Vec<_>>())).enumerate().filter(|(idx, _)| *idx != initial_index))
+				.save_single_file();
+			let Ok(Some(path)) = dialog.show() else { return Ok(()) };
 			self.name = path.file_name().and_then(|x| x.to_str()).expect("Path has a filename").to_string().into_boxed_str();
 			std::fs::write(&path, self.format.encode(&self.value))?;
 			self.path = Some(path);

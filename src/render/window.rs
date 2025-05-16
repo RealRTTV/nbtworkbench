@@ -59,6 +59,7 @@ pub async fn run() -> ! {
 							Err(SurfaceError::Lost | SurfaceError::Outdated) => self.state.surface.configure(&self.state.device, &self.state.config),
 							Err(SurfaceError::OutOfMemory) => std::process::exit(1),
 							Err(SurfaceError::Timeout) => { error!("Frame took too long to process") },
+							Err(SurfaceError::Other) => { error!("Failed to acquire texture") }
 						}
 					}
 					WindowEvent::CloseRequested => if self.workbench.close() == 0 { std::process::exit(0) },
@@ -157,11 +158,21 @@ pub struct State<'window> {
 impl<'window> State<'window> {
 	#[allow(clippy::too_many_lines)] // yeah, but... what am I supposed to do?
 	async fn new(window: &'window Window, size: PhysicalSize<u32>) -> State<'window> {
-		let instance = Instance::new(InstanceDescriptor {
-			backends: Backends::all(),
-			flags: Default::default(),
-			dx12_shader_compiler: Dx12Compiler::default(),
-			gles_minor_version: Default::default(),
+		let instance = Instance::new(&InstanceDescriptor {
+			backends: Instance::enabled_backend_features(),
+			flags: if cfg!(debug_assertions) { InstanceFlags::advanced_debugging() } else { InstanceFlags::empty() },
+			backend_options: BackendOptions {
+				gl: GlBackendOptions {
+					gles_minor_version: Gles3MinorVersion::default(),
+					fence_behavior: GlFenceBehavior::default(),
+				},
+				dx12: Dx12BackendOptions {
+					shader_compiler: Dx12Compiler::StaticDxc,
+				},
+				noop: NoopBackendOptions {
+					enable: false,
+				},
+			},
 		});
 		let surface = instance.create_surface(window).expect("Surface was able to be created");
 		let adapter = instance
@@ -189,8 +200,8 @@ impl<'window> State<'window> {
 					},
 					label: None,
 					memory_hints: Default::default(),
+					trace: Trace::Off,
 				},
-				None,
 			)
 			.await
 			.expect("Could obtain device");
@@ -227,14 +238,14 @@ impl<'window> State<'window> {
 			view_formats: &[],
 		});
 		queue.write_texture(
-			ImageCopyTexture {
+			TexelCopyTextureInfo {
 				texture: &diffuse_texture,
 				mip_level: 0,
 				origin: Origin3d::ZERO,
 				aspect: TextureAspect::All,
 			},
 			atlas(get_theme()),
-			ImageDataLayout {
+			TexelCopyBufferLayout {
 				offset: 0,
 				bytes_per_row: Some(4 * ATLAS_WIDTH as u32),
 				rows_per_image: Some(ATLAS_HEIGHT as u32),
@@ -362,7 +373,7 @@ impl<'window> State<'window> {
 				include_bytes!("../assets/unicode.hex.zib"),
 				DeflateOptions::default().set_confirm_checksum(false),
 			).decode_zlib().ok().expect("there is no way this fails, otherwise i deserve the ub that comes from this.")
-		}, ImageDataLayout {
+		}, TexelCopyBufferLayout {
 			offset: 0,
 			bytes_per_row: Some(512),
 			rows_per_image: Some(UNICODE_LEN as u32 / 512),
@@ -563,14 +574,14 @@ impl<'window> State<'window> {
 		
 		if self.previous_theme != get_theme() {
 			self.queue.write_texture(
-				ImageCopyTexture {
+				TexelCopyTextureInfo {
 					texture: &self.diffuse_texture,
 					mip_level: 0,
 					origin: Origin3d::ZERO,
 					aspect: TextureAspect::All,
 				},
 				atlas(get_theme()),
-				ImageDataLayout {
+				TexelCopyBufferLayout {
 					offset: 0,
 					bytes_per_row: Some(4 * ATLAS_WIDTH as u32),
 					rows_per_image: Some(ATLAS_HEIGHT as u32),
