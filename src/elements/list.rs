@@ -6,7 +6,7 @@ use std::slice::{Iter, IterMut};
 use compact_str::{CompactString, format_compact};
 
 use crate::assets::{BASE_Z, CONNECTION_UV, JUST_OVERLAPPING_BASE_TEXT_Z, LIST_UV, ZOffset};
-use crate::elements::nbt_parse_result::NbtParseResult;
+use crate::elements::result::NbtParseResult;
 use crate::elements::{NbtChunk, NbtCompound, NbtElement, id_to_string_name};
 use crate::render::{RenderContext, TextColor, VertexBufferBuilder};
 use crate::serialization::{Decoder, PrettyFormatter, UncheckedBufWriter};
@@ -88,7 +88,7 @@ impl NbtList {
 		Ok((s, list))
 	}
 	pub fn from_bytes<'a, D: Decoder<'a>>(decoder: &mut D) -> NbtParseResult<Self> {
-		use super::nbt_parse_result::*;
+		use super::result::*;
 
 		unsafe {
 			decoder.assert_len(5)?;
@@ -268,8 +268,8 @@ impl NbtList {
 
 	#[must_use]
 	pub fn value(&self) -> CompactString {
-		let (single, multiple) = id_to_string_name(self.id());
-		format_compact!("{} {}", self.len(), if self.len() == 1 { single } else { multiple })
+		let item = id_to_string_name(self.id(), self.len());
+		format_compact!("{} {item}", self.len())
 	}
 }
 

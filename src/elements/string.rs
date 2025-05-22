@@ -8,7 +8,7 @@ use std::ptr::NonNull;
 use compact_str::CompactString;
 
 use crate::assets::{BASE_Z, JUST_OVERLAPPING_BASE_TEXT_Z, STRING_UV, ZOffset};
-use crate::elements::nbt_parse_result::NbtParseResult;
+use crate::elements::result::NbtParseResult;
 use crate::render::{RenderContext, TextColor, VertexBufferBuilder};
 use crate::serialization::{Decoder, PrettyFormatter, UncheckedBufWriter};
 use crate::util::StrExt;
@@ -31,7 +31,7 @@ impl NbtString {
 	}
 
 	pub fn from_bytes<'a, D: Decoder<'a>>(decoder: &mut D) -> NbtParseResult<Self> {
-		use super::nbt_parse_result::*;
+		use super::result::*;
 
 		unsafe {
 			decoder.assert_len(2)?;

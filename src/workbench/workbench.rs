@@ -16,18 +16,24 @@ use winit::event::{ElementState, KeyEvent, MouseButton, MouseScrollDelta};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::Theme;
 
-use crate::assets::{ACTION_WHEEL_Z, BASE_TEXT_Z, BASE_Z, CLOSED_WIDGET_UV, DARK_STRIPE_UV, HEADER_SIZE, HELD_ENTRY_Z, HORIZONTAL_SEPARATOR_UV, HOVERED_STRIPE_UV, HOVERED_WIDGET_UV, JUST_OVERLAPPING_BASE_TEXT_Z, LIGHT_STRIPE_UV,
-                    LINE_NUMBER_SEPARATOR_UV, REPLACE_BOX_Z, SAVE_GRAYSCALE_UV, SAVE_UV, SELECTED_ACTION_WHEEL, SELECTED_WIDGET_UV, TRAY_UV, UNSELECTED_ACTION_WHEEL, UNSELECTED_WIDGET_UV, ZOffset};
+use crate::assets::{
+	ACTION_WHEEL_Z, BASE_TEXT_Z, BASE_Z, CLOSED_WIDGET_UV, DARK_STRIPE_UV, HEADER_SIZE, HELD_ENTRY_Z, HORIZONTAL_SEPARATOR_UV, HOVERED_STRIPE_UV, HOVERED_WIDGET_UV, JUST_OVERLAPPING_BASE_TEXT_Z, LIGHT_STRIPE_UV, LINE_NUMBER_SEPARATOR_UV,
+	REPLACE_BOX_Z, SAVE_GRAYSCALE_UV, SAVE_UV, SELECTED_ACTION_WHEEL, SELECTED_WIDGET_UV, TRAY_UV, UNSELECTED_ACTION_WHEEL, UNSELECTED_WIDGET_UV, ZOffset,
+};
 use crate::elements::{CompoundMap, NbtByte, NbtByteArray, NbtChunk, NbtCompound, NbtDouble, NbtElement, NbtElementAndKey, NbtFloat, NbtInt, NbtIntArray, NbtList, NbtLong, NbtLongArray, NbtRegion, NbtShort, NbtString};
 use crate::render::{MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH, RenderContext, TextColor, VertexBufferBuilder, WINDOW_HEIGHT, WINDOW_WIDTH, WindowProperties};
 use crate::serialization::{BigEndianDecoder, Decoder, UncheckedBufWriter};
-use crate::tree::{AddElementResult, Indices, MutableIndices, NavigationInformation, OwnedIndices, ParentNavigationInformationMut, RemoveElementResult, TraversalInformation, TraversalInformationMut, add_element, close_element, expand_element,
-                  open_element, remove_element, replace_element, swap_element_same_depth};
+use crate::tree::{
+	AddElementResult, Indices, MutableIndices, NavigationInformation, OwnedIndices, ParentNavigationInformationMut, RemoveElementResult, TraversalInformation, TraversalInformationMut, add_element, close_element, expand_element, open_element,
+	remove_element, replace_element, swap_element_same_depth,
+};
 use crate::util::{LinkedQueue, StrExt, Vec2u, drop_on_separate_thread, get_clipboard, now, nth, set_clipboard};
 #[cfg(target_arch = "wasm32")] use crate::wasm::fake_scope as scope;
-use crate::widget::{Alert, ButtonWidget, ButtonWidgetAccumulatedResult, ButtonWidgetContext, ButtonWidgetContextMut, ExactMatchButton, FreehandModeButton, NewTabButton, Notification, NotificationKind, OpenFileButton, RefreshButton, ReplaceBox,
-                    ReplaceBoxKeyResult, ReplaceByButton, SEARCH_BOX_END_X, SEARCH_BOX_START_X, SearchBox, SearchBoxKeyResult, SearchFlagsButton, SearchModeButton, SearchOperationButton, SelectedText, SelectedTextAdditional, SelectedTextKeyResult,
-                    SortAlgorithmButton, TEXT_DOUBLE_CLICK_INTERVAL, Text, ThemeButton, get_cursor_idx, get_cursor_left_jump_idx, get_cursor_right_jump_idx};
+use crate::widget::{
+	Alert, ButtonWidget, ButtonWidgetAccumulatedResult, ButtonWidgetContext, ButtonWidgetContextMut, ExactMatchButton, FreehandModeButton, NewTabButton, Notification, NotificationKind, OpenFileButton, RefreshButton, ReplaceBox, ReplaceBoxKeyResult,
+	ReplaceByButton, SEARCH_BOX_END_X, SEARCH_BOX_START_X, SearchBox, SearchBoxKeyResult, SearchFlagsButton, SearchModeButton, SearchOperationButton, SelectedText, SelectedTextAdditional, SelectedTextKeyResult, SortAlgorithmButton,
+	TEXT_DOUBLE_CLICK_INTERVAL, Text, ThemeButton, get_cursor_idx, get_cursor_left_jump_idx, get_cursor_right_jump_idx,
+};
 use crate::workbench::{ElementAction, FileFormat, MarkedLine, MarkedLines, Tab, WorkbenchAction};
 use crate::{config, flags, get_interaction_information, hash, mutable_indices, tab, tab_mut};
 
@@ -2269,7 +2275,7 @@ impl Workbench {
 				"sub indices: {:?}",
 				self.subscription
 					.as_ref()
-					.map(|subscription| &*subscription.indices)
+					.map(|subscription| &subscription.indices)
 			),
 			format!(
 				"sub tab uuid: {:?}",

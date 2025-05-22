@@ -10,7 +10,7 @@ use compact_str::{CompactString, format_compact};
 use zune_inflate::{DeflateDecoder, DeflateOptions};
 
 use crate::assets::{BASE_Z, CHUNK_GHOST_UV, CHUNK_UV, CONNECTION_UV, HEADER_SIZE, JUST_OVERLAPPING_BASE_TEXT_Z, JUST_OVERLAPPING_BOOKMARK_Z, LINE_NUMBER_CONNECTOR_Z, LINE_NUMBER_SEPARATOR_UV, REGION_GRID_UV, REGION_UV, ZOffset};
-use crate::elements::nbt_parse_result::NbtParseResult;
+use crate::elements::result::NbtParseResult;
 use crate::elements::{NbtCompound, NbtElement};
 use crate::render::{RenderContext, TextColor, VertexBufferBuilder};
 use crate::serialization::{PrettyFormatter, UncheckedBufWriter};
@@ -84,7 +84,7 @@ impl NbtRegion {
 
 	#[must_use]
 	pub fn from_be_bytes(bytes: &[u8]) -> NbtParseResult<Self> {
-		use super::nbt_parse_result::*;
+		use super::result::*;
 
 		fn parse(raw: u32, bytes: &[u8]) -> NbtParseResult<(FileFormat, NbtParseResult<NbtCompound>)> {
 			if raw < 512 {
@@ -161,53 +161,53 @@ impl NbtRegion {
 	}
 
 	pub fn to_be_bytes(&self, writer: &mut UncheckedBufWriter) {
-		unsafe {
-			scope(move |s| {
-				let mut chunks = Vec::with_capacity(1024);
-				for chunk in self.chunks.iter() {
-					let chunk = chunk.as_chunk_unchecked();
-					chunks.push(s.spawn(move || {
-						if chunk.is_unloaded() {
-							(vec![], 0)
-						} else {
-							let chunk = &(chunk as *const NbtChunk as *const NbtElement)
-								.cast::<ManuallyDrop<NbtChunk>>()
-								.read();
-							let mut writer = UncheckedBufWriter::new();
-							chunk.to_be_bytes(&mut writer);
-							(writer.finish(), chunk.last_modified)
-						}
-					}));
-				}
-				let mut o = 2_u32;
-				let mut offsets = [0; 1024];
-				let mut timestamps = [0; 1024];
-				let mut new_chunks = Vec::with_capacity(chunks.len());
-				for (chunk, (offset, timestamp)) in chunks
-					.into_iter()
-					.zip(offsets.iter_mut().zip(timestamps.iter_mut()))
-				{
-					let Ok((chunk, last_modified)) = chunk.join() else {
-						return;
-					};
-					let sectors = (chunk.len() / 4096) as u32;
-					if sectors > 0 {
-						*offset = (o.to_be() >> 8) | (sectors << 24);
-						o += sectors;
-						*timestamp = last_modified;
-						new_chunks.push(chunk);
+		scope(move |s| {
+			let mut chunks = Vec::with_capacity(1024);
+			for chunk in self.chunks.iter() {
+				let chunk = unsafe { chunk.as_chunk_unchecked() };
+				chunks.push(s.spawn(move || {
+					if chunk.is_unloaded() {
+						(vec![], 0)
 					} else {
-						*offset = 0;
-						*timestamp = 0;
+						let chunk = unsafe {
+							(chunk as *const NbtChunk as *const NbtElement)
+								.cast::<ManuallyDrop<NbtChunk>>()
+								.as_ref_unchecked()
+						};
+						let mut writer = UncheckedBufWriter::new();
+						chunk.to_be_bytes(&mut writer);
+						(writer.finish(), chunk.last_modified)
 					}
+				}));
+			}
+			let mut o = 2_u32;
+			let mut offsets = [0; 1024];
+			let mut timestamps = [0; 1024];
+			let mut new_chunks = Vec::with_capacity(chunks.len());
+			for (chunk, (offset, timestamp)) in chunks
+				.into_iter()
+				.zip(offsets.iter_mut().zip(timestamps.iter_mut()))
+			{
+				let Ok((chunk, last_modified)) = chunk.join() else {
+					return;
+				};
+				let sectors = (chunk.len() / 4096) as u32;
+				if sectors > 0 {
+					*offset = (o.to_be() >> 8) | (sectors << 24);
+					o += sectors;
+					*timestamp = last_modified;
+					new_chunks.push(chunk);
+				} else {
+					*offset = 0;
+					*timestamp = 0;
 				}
-				writer.write(&core::mem::transmute::<_, [u8; 4096]>(offsets));
-				writer.write(&core::mem::transmute::<_, [u8; 4096]>(timestamps));
-				for chunk in new_chunks {
-					writer.write(&chunk);
-				}
-			});
-		}
+			}
+			writer.write(unsafe { &core::mem::transmute::<_, [u8; 4096]>(offsets) });
+			writer.write(unsafe { &core::mem::transmute::<_, [u8; 4096]>(timestamps) });
+			for chunk in new_chunks {
+				writer.write(&chunk);
+			}
+		});
 	}
 
 	pub fn increment(&mut self, amount: usize, true_amount: usize) {
@@ -618,7 +618,7 @@ impl NbtChunk {
 }
 
 impl PartialEq for NbtChunk {
-	fn eq(&self, other: &Self) -> bool { (&*self.inner).eq(&*other.inner) }
+	fn eq(&self, other: &Self) -> bool { self.inner.eq(&other.inner) }
 }
 
 impl Clone for NbtChunk {
@@ -654,29 +654,29 @@ impl NbtChunk {
 
 	pub fn to_be_bytes(&self, writer: &mut UncheckedBufWriter) {
 		// todo, mcc files
-		unsafe {
-			let encoded = self
-				.compression
-				.encode(&*(self.inner.as_ref() as *const NbtCompound).cast::<NbtElement>());
-			let len = encoded.len() + 1;
-			// plus four for the len field writing, and + 1 for the compression
-			let pad_len = (4096 - (len + 4) % 4096) % 4096;
-			writer.write(&(len as u32).to_be_bytes());
-			writer.write(
-				&match self.compression {
-					FileFormat::Gzip => 1_u8,
-					FileFormat::Zlib => 2_u8,
-					FileFormat::Nbt => 3_u8,
-					FileFormat::Lz4 => 4_u8,
-					_ => core::hint::unreachable_unchecked(),
-				}
-				.to_be_bytes(),
-			);
-			writer.write(&encoded);
-			drop(encoded);
-			let pad = vec![0; pad_len];
-			writer.write(&pad);
-		}
+		let encoded = self.compression.encode(unsafe {
+			(self.inner.as_ref() as *const NbtCompound)
+				.cast::<NbtElement>()
+				.as_ref_unchecked()
+		});
+		let len = encoded.len() + 1;
+		// plus four for the len field writing, and + 1 for the compression
+		let pad_len = (4096 - (len + 4) % 4096) % 4096;
+		writer.write(&(len as u32).to_be_bytes());
+		writer.write(
+			&match self.compression {
+				FileFormat::Gzip => 1_u8,
+				FileFormat::Zlib => 2_u8,
+				FileFormat::Nbt => 3_u8,
+				FileFormat::Lz4 => 4_u8,
+				_ => unsafe { core::hint::unreachable_unchecked() },
+			}
+			.to_be_bytes(),
+		);
+		writer.write(&encoded);
+		drop(encoded);
+		let pad = vec![0; pad_len];
+		writer.write(&pad);
 	}
 
 	#[must_use]

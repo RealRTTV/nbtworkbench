@@ -3,6 +3,7 @@
 #![feature(
 	allocator_api,
 	cold_path,
+	const_manually_drop,
 	duration_millis_float,
 	let_chains,
 	likely_unlikely,
@@ -17,6 +18,7 @@
 	iter_next_chunk,
 	stmt_expr_attributes
 )]
+#![feature(ptr_as_ref_unchecked)]
 #![windows_subsystem = "windows"]
 
 extern crate core;

@@ -38,7 +38,7 @@ impl ButtonWidget for SearchModeButton {
 			builder.color = TextColor::White.to_raw();
 			let binding = format!("{search_mode} Mode");
 			let non_regex_warning_line = [&binding, "Regex $ replacement syntax is disabled on Bookmarked Lines replacement"];
-			let regular_line = [&*binding];
+			let regular_line = [binding.as_str()];
 			builder.draw_tooltip(
 				if let SearchMode::Regex = search_mode
 					&& !replace_by.can_use_regex()

@@ -5,7 +5,7 @@ use compact_str::CompactString;
 
 use crate::config;
 use crate::elements::CompoundMap;
-use crate::elements::nbt_parse_result::NbtParseResult;
+use crate::elements::result::NbtParseResult;
 
 pub trait Decoder<'a> {
 	fn new(data: &'a [u8]) -> Self
@@ -37,7 +37,7 @@ pub trait Decoder<'a> {
 
 	unsafe fn f64(&mut self) -> f64;
 
-	unsafe fn skip(&mut self, amount: usize);
+	fn skip(&mut self, amount: usize);
 
 	unsafe fn string(&mut self) -> NbtParseResult<CompactString>;
 }
@@ -67,7 +67,7 @@ impl<'a> Decoder<'a> for BigEndianDecoder<'a> {
 	}
 
 	fn assert_len(&self, remaining_len: usize) -> NbtParseResult<()> {
-		use crate::elements::nbt_parse_result::*;
+		use crate::elements::result::*;
 
 		// <= end because it will read *until* that byte
 		if unsafe { likely((self.data.add(remaining_len) as usize) <= self.end as usize) } { ok(()) } else { err("Out of bounds") }
@@ -106,10 +106,14 @@ impl<'a> Decoder<'a> for BigEndianDecoder<'a> {
 
 	unsafe fn f64(&mut self) -> f64 { f64::from_be_bytes(self.read_bytes()) }
 
-	unsafe fn skip(&mut self, amount: usize) { self.data = self.data.add(amount); }
+	fn skip(&mut self, amount: usize) {
+		unsafe {
+			self.data = self.data.add(amount);
+		}
+	}
 
 	unsafe fn string(&mut self) -> NbtParseResult<CompactString> {
-		use crate::elements::nbt_parse_result::*;
+		use crate::elements::result::*;
 
 		let len = self.u16() as usize;
 		self.assert_len(len)?;
@@ -144,7 +148,7 @@ impl<'a> LittleEndianDecoder<'a> {
 #[allow(improper_ctypes_definitions)]
 impl<'a> Decoder<'a> for LittleEndianDecoder<'a> {
 	fn new(data: &'a [u8]) -> Self {
-		use crate::elements::nbt_parse_result::*;
+		use crate::elements::result::*;
 
 		let mut this = Self {
 			end: unsafe { data.as_ptr().add(data.len()) },
@@ -164,7 +168,7 @@ impl<'a> Decoder<'a> for LittleEndianDecoder<'a> {
 	}
 
 	fn assert_len(&self, remaining_len: usize) -> NbtParseResult<()> {
-		use crate::elements::nbt_parse_result::*;
+		use crate::elements::result::*;
 
 		// <= end because it will read *until* that byte
 		if unsafe { likely((self.data.add(remaining_len) as usize) <= self.end as usize) } { ok(()) } else { err("Out of bounds") }
@@ -203,10 +207,10 @@ impl<'a> Decoder<'a> for LittleEndianDecoder<'a> {
 
 	unsafe fn f64(&mut self) -> f64 { f64::from_le_bytes(self.read_bytes()) }
 
-	unsafe fn skip(&mut self, amount: usize) { self.data = self.data.add(amount); }
+	fn skip(&mut self, amount: usize) { unsafe { self.data = self.data.add(amount) }; }
 
 	unsafe fn string(&mut self) -> NbtParseResult<CompactString> {
-		use crate::elements::nbt_parse_result::*;
+		use crate::elements::result::*;
 
 		let len = self.u16() as usize;
 		self.assert_len(len)?;

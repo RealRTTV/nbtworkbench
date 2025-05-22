@@ -200,7 +200,7 @@ impl ElementAction {
 						let mut buffer = UncheckedBufWriter::new();
 						element.to_le_bytes(&mut buffer);
 						let contents = buffer.finish();
-						let (subscription_type, bytes) = match (element.id(), &*contents) {
+						let (subscription_type, bytes) = match (element.id(), contents.as_slice()) {
 							(NbtByteArray::ID, [_, _, _, _, bytes @ ..]) => (FileUpdateSubscriptionType::ByteArray, bytes),
 							(NbtIntArray::ID, [_, _, _, _, bytes @ ..]) => (FileUpdateSubscriptionType::IntArray, bytes),
 							(NbtLongArray::ID, [_, _, _, _, bytes @ ..]) => (FileUpdateSubscriptionType::LongArray, bytes),

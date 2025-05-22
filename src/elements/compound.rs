@@ -9,7 +9,7 @@ use hashbrown::hash_table::Entry::*;
 use hashbrown::hash_table::HashTable;
 
 use crate::assets::{BASE_Z, COMPOUND_ROOT_UV, COMPOUND_UV, CONNECTION_UV, HEADER_SIZE, JUST_OVERLAPPING_BASE_TEXT_Z, LINE_NUMBER_CONNECTOR_Z, LINE_NUMBER_SEPARATOR_UV, ZOffset};
-use crate::elements::nbt_parse_result::NbtParseResult;
+use crate::elements::result::NbtParseResult;
 use crate::elements::{NbtChunk, NbtElement, NbtElementAndKey};
 use crate::render::{RenderContext, TextColor, VertexBufferBuilder};
 use crate::serialization::{Decoder, PrettyFormatter, UncheckedBufWriter};
@@ -78,7 +78,7 @@ impl NbtCompound {
 
 	#[must_use]
 	pub fn from_bytes<'a, D: Decoder<'a>>(decoder: &mut D) -> NbtParseResult<Self> {
-		use super::nbt_parse_result::*;
+		use super::result::*;
 
 		let mut compound = Self::new();
 		unsafe {
@@ -612,18 +612,18 @@ impl CompoundMap {
 	pub fn is_empty(&self) -> bool { self.entries.is_empty() }
 
 	pub fn insert_full(&mut self, key: CompactString, element: NbtElement) -> (usize, Option<NbtElement>) {
-		unsafe {
-			let hash = hash!(key);
-			match self
-				.indices
-				.entry(hash, |&idx| self.entries.get_unchecked(idx).key == key, |&idx| hash!(self.entries.get_unchecked(idx).key))
-			{
-				Occupied(entry) => {
-					let idx = *entry.get();
-					(idx, Some(core::mem::replace(&mut self.entries.get_unchecked_mut(idx).value, element)))
-				}
-				Vacant(slot) => {
-					let len = self.entries.len();
+		let hash = hash!(key);
+		match self
+			.indices
+			.entry(hash, |&idx| unsafe { self.entries.get_unchecked(idx) }.key == key, |&idx| hash!(unsafe { self.entries.get_unchecked(idx) }.key))
+		{
+			Occupied(entry) => {
+				let idx = *entry.get();
+				(idx, Some(core::mem::replace(&mut unsafe { self.entries.get_unchecked_mut(idx) }.value, element)))
+			}
+			Vacant(slot) => {
+				let len = self.entries.len();
+				unsafe {
 					self.entries.try_reserve(1).unwrap_unchecked();
 					self.entries
 						.as_mut_ptr()
@@ -631,28 +631,28 @@ impl CompoundMap {
 						.write(Entry { key, value: element, additional: 0 });
 					self.entries.set_len(len + 1);
 					slot.insert(len);
-					(len, None)
 				}
+				(len, None)
 			}
 		}
 	}
 
 	pub fn insert_at(&mut self, key: CompactString, element: NbtElement, idx: usize) -> Option<(CompactString, NbtElement)> {
-		unsafe {
-			let hash = hash!(key);
-			let (prev, end, ptr) = match self
-				.indices
-				.entry(hash, |&idx| self.entries.get_unchecked(idx).key == key, |&idx| hash!(self.entries.get_unchecked(idx).key))
-			{
-				Occupied(mut entry) => {
-					let before = core::mem::replace(entry.get_mut(), idx);
-					let Entry { key: k, value: v, .. } = self.entries.remove(before);
-					self.entries
-						.insert(idx, Entry { key, value: element, additional: 0 });
-					(Some((k, v)), before, entry.get_mut() as *mut usize)
-				}
-				Vacant(slot) => {
-					let len = self.entries.len();
+		let hash = hash!(key);
+		let (prev, end, ptr) = match self
+			.indices
+			.entry(hash, |&idx| self.entries.get_unchecked(idx).key == key, |&idx| hash!(self.entries.get_unchecked(idx).key))
+		{
+			Occupied(mut entry) => {
+				let before = core::mem::replace(entry.get_mut(), idx);
+				let Entry { key: k, value: v, .. } = self.entries.remove(before);
+				self.entries
+					.insert(idx, Entry { key, value: element, additional: 0 });
+				(Some((k, v)), before, entry.get_mut() as *mut usize)
+			}
+			Vacant(slot) => {
+				let len = self.entries.len();
+				unsafe {
 					self.entries
 						.try_reserve_exact(1)
 						.unwrap_unchecked();
@@ -663,33 +663,33 @@ impl CompoundMap {
 						.add(idx)
 						.write(Entry { key, value: element, additional: 0 });
 					self.entries.set_len(len + 1);
-					let mut entry = slot.insert(len);
-					(None, len, entry.get_mut() as *mut usize)
 				}
-			};
-
-			match idx.cmp(&end) {
-				Ordering::Less =>
-					for index in self.indices.iter_mut() {
-						let value = *index;
-						if value >= idx && value <= end {
-							*index += 1;
-						}
-					},
-				Ordering::Equal => {}
-				Ordering::Greater =>
-					for index in self.indices.iter_mut() {
-						let value = *index;
-						if value <= idx && value >= end {
-							*index -= 1;
-						}
-					},
+				let mut entry = slot.insert(len);
+				(None, len, entry.get_mut() as *mut usize)
 			}
+		};
 
-			*ptr = idx;
-
-			prev
+		match idx.cmp(&end) {
+			Ordering::Less =>
+				for index in self.indices.iter_mut() {
+					let value = *index;
+					if value >= idx && value <= end {
+						*index += 1;
+					}
+				},
+			Ordering::Equal => {}
+			Ordering::Greater =>
+				for index in self.indices.iter_mut() {
+					let value = *index;
+					if value <= idx && value >= end {
+						*index -= 1;
+					}
+				},
 		}
+
+		*ptr = idx;
+
+		prev
 	}
 
 	/// # Safety

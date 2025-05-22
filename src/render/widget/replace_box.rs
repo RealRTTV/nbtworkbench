@@ -285,7 +285,7 @@ impl ReplaceBox {
 		let mut current_indices = OwnedIndices::new();
 		let mut indices_max = vec![];
 		let mut actions = vec![];
-		let mut queue = vec![(None, &*root)];
+		let mut queue = vec![(None, root.as_ref())];
 		let mut failures = 0;
 
 		while let Some((key, element)) = queue.pop() {

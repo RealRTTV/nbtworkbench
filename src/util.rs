@@ -145,13 +145,13 @@ pub const fn valid_starting_char(byte: u8) -> bool { matches!(byte, b'A'..=b'Z' 
 pub unsafe fn union_two_sorted_no_duplicates<T: Ord>(a: Vec<T>, b: Vec<T>) -> Vec<T> {
 	let (a_root_ptr, a_len, a_cap, a_alloc) = a.into_parts_with_alloc();
 	let mut a_ptr = a_root_ptr.as_ptr();
-	let a_end_ptr = a_ptr.add(a_len);
+	let a_end_ptr = unsafe { a_ptr.add(a_len) };
 
 	let (b_root_ptr, b_len, b_cap, b_alloc) = b.into_parts_with_alloc();
 	let mut b_ptr = b_root_ptr.as_ptr();
-	let b_end_ptr = b_ptr.add(b_len);
+	let b_end_ptr = unsafe { b_ptr.add(b_len) };
 
-	let mut out = Vec::with_capacity(a_len + b_len);
+	let mut out = unsafe { Vec::try_with_capacity(a_len + b_len).unwrap_unchecked() };
 
 	while a_ptr < a_end_ptr && b_ptr < b_end_ptr {
 		let a = &mut *a_ptr;
@@ -767,6 +767,45 @@ pub const fn width_ascii(s: &str) -> usize {
 	}
 	width
 }
+
+macro_rules! unsigned_num_width {
+	($name:ident, $ty:ty) => {
+		#[allow(dead_code)]
+		#[must_use]
+		pub const fn $name(x: $ty) -> usize { x.checked_ilog10().map_or(1, |x| x + 1) as usize * width_ascii("1") }
+	};
+}
+
+macro_rules! signed_num_width {
+	($name:ident, $ty:ty) => {
+		#[allow(dead_code)]
+		#[must_use]
+		pub const fn $name(x: $ty) -> usize { x.abs().checked_ilog10().map_or(1, |x| x + 1) as usize * width_ascii("1") + if x < 0 { width_ascii("-") } else { width_ascii("") } }
+	};
+}
+
+macro_rules! float_num_width {
+	($name:ident, $ty:ty) => {
+		#[allow(dead_code)]
+		#[must_use]
+		pub fn $name(x: $ty) -> usize { $crate::util::StrExt::width(&x.to_string()) }
+	};
+}
+
+unsigned_num_width!(u8_width, u8);
+unsigned_num_width!(u16_width, u16);
+unsigned_num_width!(u32_width, u32);
+unsigned_num_width!(u64_width, u64);
+unsigned_num_width!(usize_width, usize);
+
+signed_num_width!(i8_width, i8);
+signed_num_width!(i16_width, i16);
+signed_num_width!(i32_width, i32);
+signed_num_width!(i64_width, i64);
+signed_num_width!(isize_width, isize);
+
+float_num_width!(f32_width, f32);
+float_num_width!(f64_width, f64);
 
 pub fn drop_on_separate_thread<T: 'static + Send>(t: T) {
 	#[cfg(not(target_arch = "wasm32"))]

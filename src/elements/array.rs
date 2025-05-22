@@ -1,5 +1,5 @@
 macro_rules! array {
-	($element_field:ident, $name:ident, $t:ty, $my_id:literal, $id:literal, $char:literal, $uv:ident, $element_uv:ident, $default_snbt_integer:ident, $try_into_element:ident) => {
+	($element_field:ident, $constructor:ident, $name:ident, $t:ty, $my_id:literal, $id:literal, $char:literal, $uv:ident, $element_uv:ident, $default_snbt_integer:ident, $try_into_element:ident) => {
 		#[repr(C)]
 		pub struct $name {
 			pub(super) values: Box<Vec<NbtElement>>,
@@ -81,17 +81,14 @@ macro_rules! array {
 			}
 
 			pub fn from_bytes<'a, D: Decoder<'a>>(decoder: &mut D) -> NbtParseResult<Self> {
-				use super::nbt_parse_result::*;
+				use super::result::*;
 
 				decoder.assert_len(4)?;
 				let len = unsafe { decoder.u32() } as usize;
 				decoder.assert_len(len * core::mem::size_of::<$t>())?;
 				let mut vec = from_opt(Vec::try_with_capacity(len).ok(), "Could not allocate enough memory for Vec")?;
 				for _ in 0..len {
-					let mut element = NbtElement {
-						$element_field: unsafe { core::mem::transmute(<$t>::from_ne_bytes(decoder.read_ne_bytes::<{ core::mem::size_of::<$t>() }>())) },
-					};
-					element.set_id($id);
+					let mut element = NbtElement::$constructor(unsafe { core::mem::transmute(<$t>::from_ne_bytes(decoder.read_ne_bytes::<{ core::mem::size_of::<$t>() }>())) });
 					from_opt(vec.push_within_capacity(element).ok(), "Vec was longer than originally stated")?;
 				}
 				ok(Self {
@@ -269,8 +266,8 @@ macro_rules! array {
 
 			#[must_use]
 			pub fn value(&self) -> CompactString {
-				let (single, multiple) = id_to_string_name($id);
-				format_compact!("{} {}", self.len(), if self.len() == 1 { single } else { multiple })
+				let item = id_to_string_name($id, self.len());
+				format_compact!("{} {item}", self.len())
 			}
 
 			// ret type is #[must_use]
@@ -351,12 +348,12 @@ use std::slice::{Iter, IterMut};
 use compact_str::{CompactString, ToCompactString, format_compact};
 
 use crate::assets::{BASE_Z, BYTE_ARRAY_UV, BYTE_UV, CONNECTION_UV, INT_ARRAY_UV, INT_UV, JUST_OVERLAPPING_BASE_TEXT_Z, LONG_ARRAY_UV, LONG_UV, ZOffset};
-use crate::elements::nbt_parse_result::NbtParseResult;
+use crate::elements::result::NbtParseResult;
 use crate::elements::{NbtElement, id_to_string_name};
 use crate::render::{RenderContext, TextColor, VertexBufferBuilder};
 use crate::serialization::{Decoder, PrettyFormatter, UncheckedBufWriter};
 use crate::util::StrExt;
 
-array!(byte, NbtByteArray, i8, 7, 1, 'B', BYTE_ARRAY_UV, BYTE_UV, parse_byte, array_try_into_byte);
-array!(int, NbtIntArray, i32, 11, 3, 'I', INT_ARRAY_UV, INT_UV, parse_int, array_try_into_int);
-array!(long, NbtLongArray, i64, 12, 4, 'L', LONG_ARRAY_UV, LONG_UV, parse_long, array_try_into_long);
+array!(byte, Byte, NbtByteArray, i8, 7, 1, 'B', BYTE_ARRAY_UV, BYTE_UV, parse_byte, array_try_into_byte);
+array!(int, Int, NbtIntArray, i32, 11, 3, 'I', INT_ARRAY_UV, INT_UV, parse_int, array_try_into_int);
+array!(long, Long, NbtLongArray, i64, 12, 4, 'L', LONG_ARRAY_UV, LONG_UV, parse_long, array_try_into_long);

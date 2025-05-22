@@ -7,8 +7,10 @@ use winit::event::MouseButton;
 use winit::keyboard::KeyCode;
 use winit::window::Theme;
 
-use crate::assets::{AND_SELECTION_OPERATION_UV, BOOKMARK_UV, DARK_STRIPE_UV, HIDDEN_BOOKMARK_UV, OR_SELECTION_OPERATION_UV, REGEX_SEARCH_MODE_UV, REPLACE_SELECTION_OPERATION_UV, SEARCH_BOX_SELECTION_Z, SEARCH_BOX_Z, SEARCH_KEYS_AND_VALUES_UV,
-                    SEARCH_KEYS_UV, SEARCH_VALUES_UV, SNBT_SEARCH_MODE_UV, STRING_SEARCH_MODE_UV, XOR_SELECTION_OPERATION_UV};
+use crate::assets::{
+	AND_SELECTION_OPERATION_UV, BOOKMARK_UV, DARK_STRIPE_UV, HIDDEN_BOOKMARK_UV, OR_SELECTION_OPERATION_UV, REGEX_SEARCH_MODE_UV, REPLACE_SELECTION_OPERATION_UV, SEARCH_BOX_SELECTION_Z, SEARCH_BOX_Z, SEARCH_KEYS_AND_VALUES_UV, SEARCH_KEYS_UV,
+	SEARCH_VALUES_UV, SNBT_SEARCH_MODE_UV, STRING_SEARCH_MODE_UV, XOR_SELECTION_OPERATION_UV,
+};
 use crate::elements::{NbtElement, NbtElementAndKey, NbtElementAndKeyRef};
 use crate::render::widget::text::get_cursor_idx;
 use crate::render::{TextColor, VertexBufferBuilder};
@@ -434,7 +436,7 @@ impl SearchBox {
 	pub fn search0(root: &NbtElement, predicate: &SearchPredicate) -> MarkedLines {
 		let mut new_bookmarks = Vec::new();
 		let mut queue = Vec::new();
-		queue.push(((None, &*root), true));
+		queue.push(((None, root.as_ref()), true));
 		let mut true_line_number = 1;
 		let mut line_number = 0;
 		while let Some(((key, value), parent_open)) = queue.pop() {

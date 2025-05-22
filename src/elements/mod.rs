@@ -20,7 +20,7 @@ pub type NbtElementAndKey = (Option<compact_str::CompactString>, NbtElement);
 
 pub type NbtElementAndKeyRef<'a> = (Option<&'a str>, &'a NbtElement);
 
-pub mod nbt_parse_result {
+pub mod result {
 	use std::error::Error;
 
 	#[cfg(debug_assertions)]

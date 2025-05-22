@@ -10,10 +10,12 @@ use uuid::Uuid;
 use zune_inflate::DeflateDecoder;
 
 use super::{HeldEntry, MarkedLines, WorkbenchAction};
-use crate::assets::{BASE_Z, BYTE_ARRAY_GHOST_UV, BYTE_ARRAY_UV, BYTE_GRAYSCALE_UV, BYTE_UV, CHUNK_GHOST_UV, CHUNK_UV, COMPOUND_GHOST_UV, COMPOUND_ROOT_UV, COMPOUND_UV, DOUBLE_GRAYSCALE_UV, DOUBLE_UV, FLOAT_GRAYSCALE_UV, FLOAT_UV, GZIP_FILE_TYPE_UV,
-                    HEADER_SIZE, HELD_SCROLLBAR_UV, INT_ARRAY_GHOST_UV, INT_ARRAY_UV, INT_GRAYSCALE_UV, INT_UV, JUST_OVERLAPPING_BASE_Z, LINE_NUMBER_SEPARATOR_UV, LIST_GHOST_UV, LIST_UV, LITTLE_ENDIAN_HEADER_NBT_FILE_TYPE_UV,
-                    LITTLE_ENDIAN_NBT_FILE_TYPE_UV, LONG_ARRAY_GHOST_UV, LONG_ARRAY_UV, LONG_GRAYSCALE_UV, LONG_UV, MCA_FILE_TYPE_UV, NBT_FILE_TYPE_UV, REGION_UV, SCROLLBAR_Z, SHORT_GRAYSCALE_UV, SHORT_UV, SNBT_FILE_TYPE_UV,
-                    STEAL_ANIMATION_OVERLAY_UV, STRING_GHOST_UV, STRING_UV, UNHELD_SCROLLBAR_UV, UNKNOWN_NBT_GHOST_UV, UNKNOWN_NBT_UV, ZLIB_FILE_TYPE_UV, ZOffset};
+use crate::assets::{
+	BASE_Z, BYTE_ARRAY_GHOST_UV, BYTE_ARRAY_UV, BYTE_GRAYSCALE_UV, BYTE_UV, CHUNK_GHOST_UV, CHUNK_UV, COMPOUND_GHOST_UV, COMPOUND_ROOT_UV, COMPOUND_UV, DOUBLE_GRAYSCALE_UV, DOUBLE_UV, FLOAT_GRAYSCALE_UV, FLOAT_UV, GZIP_FILE_TYPE_UV, HEADER_SIZE,
+	HELD_SCROLLBAR_UV, INT_ARRAY_GHOST_UV, INT_ARRAY_UV, INT_GRAYSCALE_UV, INT_UV, JUST_OVERLAPPING_BASE_Z, LINE_NUMBER_SEPARATOR_UV, LIST_GHOST_UV, LIST_UV, LITTLE_ENDIAN_HEADER_NBT_FILE_TYPE_UV, LITTLE_ENDIAN_NBT_FILE_TYPE_UV, LONG_ARRAY_GHOST_UV,
+	LONG_ARRAY_UV, LONG_GRAYSCALE_UV, LONG_UV, MCA_FILE_TYPE_UV, NBT_FILE_TYPE_UV, REGION_UV, SCROLLBAR_Z, SHORT_GRAYSCALE_UV, SHORT_UV, SNBT_FILE_TYPE_UV, STEAL_ANIMATION_OVERLAY_UV, STRING_GHOST_UV, STRING_UV, UNHELD_SCROLLBAR_UV,
+	UNKNOWN_NBT_GHOST_UV, UNKNOWN_NBT_UV, ZLIB_FILE_TYPE_UV, ZOffset,
+};
 use crate::elements::{NbtCompound, NbtElement, NbtList, NbtRegion};
 use crate::render::{RenderContext, TextColor, VertexBufferBuilder, WindowProperties};
 use crate::tree::rename_element;
@@ -626,15 +628,15 @@ impl FileFormat {
 			Self::Nbt | Self::Mca => data.to_be_file(),
 			Self::Gzip => {
 				let mut vec = vec![];
-				let _ = flate2::read::GzEncoder::new(&*data.to_be_file(), Compression::best()).read_to_end(&mut vec);
+				let _ = flate2::read::GzEncoder::new(data.to_be_file(), Compression::best()).read_to_end(&mut vec);
 				vec
 			}
 			Self::Zlib => {
 				let mut vec = vec![];
-				let _ = flate2::read::ZlibEncoder::new(&*data.to_be_file(), Compression::best()).read_to_end(&mut vec);
+				let _ = flate2::read::ZlibEncoder::new(data.to_be_file(), Compression::best()).read_to_end(&mut vec);
 				vec
 			}
-			Self::Lz4 => lz4_flex::compress(&*data.to_be_file()),
+			Self::Lz4 => lz4_flex::compress(&data.to_be_file()),
 			Self::Snbt => data.to_string().into_bytes(),
 			format @ (Self::LittleEndianNbt | Self::LittleEndianHeaderNbt) => data.to_le_file(format == Self::LittleEndianHeaderNbt),
 		}

@@ -15,7 +15,7 @@ macro_rules! primitive {
 			pub fn to_be_bytes(&self, writer: &mut UncheckedBufWriter) { writer.write(self.value.to_be_bytes().as_ref()); }
 
 			pub fn from_bytes<'a, D: Decoder<'a>>(decoder: &mut D) -> NbtParseResult<Self> {
-				use super::nbt_parse_result::*;
+				use super::result::*;
 
 				unsafe {
 					decoder.assert_len(core::mem::size_of::<$t>())?;
@@ -77,7 +77,7 @@ use std::fmt::{Display, Formatter, Write};
 use compact_str::{CompactString, ToCompactString};
 
 use crate::assets::{BASE_Z, BYTE_UV, DOUBLE_UV, FLOAT_UV, INT_UV, JUST_OVERLAPPING_BASE_TEXT_Z, LONG_UV, SHORT_UV, ZOffset};
-use crate::elements::nbt_parse_result::NbtParseResult;
+use crate::elements::result::NbtParseResult;
 use crate::render::{RenderContext, TextColor, VertexBufferBuilder};
 use crate::serialization::{Decoder, PrettyFormatter, UncheckedBufWriter};
 
