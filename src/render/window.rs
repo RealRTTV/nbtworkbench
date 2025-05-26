@@ -15,13 +15,13 @@ use winit::platform::windows::WindowAttributesExtWindows;
 use winit::window::{Icon, Theme, Window, WindowAttributes, WindowId};
 use zune_inflate::DeflateOptions;
 
-use crate::assets::{atlas, icon, ATLAS_HEIGHT, ATLAS_WIDTH, HEADER_SIZE, ICON_HEIGHT, ICON_WIDTH, UNICODE_LEN};
+use crate::assets::{ATLAS_HEIGHT, ATLAS_WIDTH, HEADER_SIZE, ICON_HEIGHT, ICON_WIDTH, UNICODE_LEN, atlas, icon};
 use crate::config::get_theme;
 use crate::render::VertexBufferBuilder;
 use crate::util::now;
 use crate::widget::{SEARCH_BOX_END_X, SEARCH_BOX_START_X};
 use crate::workbench::Workbench;
-use crate::{error, WINDOW_PROPERTIES, WORKBENCH};
+use crate::{WINDOW_PROPERTIES, WORKBENCH, error};
 
 pub const WINDOW_HEIGHT: usize = 420;
 pub const WINDOW_WIDTH: usize = 720;

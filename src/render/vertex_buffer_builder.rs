@@ -3,7 +3,7 @@ use std::ops::BitAnd;
 
 use winit::dpi::PhysicalSize;
 
-use crate::assets::{ZOffset, BASE_TEXT_Z, BASE_Z, TOOLTIP_UV, TOOLTIP_Z};
+use crate::assets::{BASE_TEXT_Z, BASE_Z, TOOLTIP_UV, TOOLTIP_Z, ZOffset};
 use crate::render::TextColor;
 use crate::util::{StrExt, Vec2u};
 

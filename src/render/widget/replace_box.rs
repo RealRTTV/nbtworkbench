@@ -12,9 +12,9 @@ use crate::assets::{DARK_STRIPE_UV, REPLACE_BOX_SELECTION_Z, REPLACE_BOX_Z, REPL
 use crate::elements::{CompoundEntry, Matches, NbtElement, NbtElementAndKey, NbtElementAndKeyRef};
 use crate::render::widget::text::get_cursor_idx;
 use crate::render::{TextColor, VertexBufferBuilder, WindowProperties};
-use crate::tree::{indices_for_true, rename_element, replace_element, Indices, MutableIndices, OwnedIndices, RenameElementResult, ReplaceElementResult};
-use crate::util::{create_regex, now, StrExt, Vec2u};
-use crate::widget::{Cachelike, Notification, NotificationKind, ReplaceBoxKeyResult, SearchBox, SearchFlags, SearchMode, Text, SEARCH_BOX_END_X, SEARCH_BOX_START_X};
+use crate::tree::{Indices, MutableIndices, OwnedIndices, RenameElementResult, ReplaceElementResult, indices_for_true, rename_element, replace_element};
+use crate::util::{StrExt, Vec2u, create_regex, now};
+use crate::widget::{Cachelike, Notification, NotificationKind, ReplaceBoxKeyResult, SEARCH_BOX_END_X, SEARCH_BOX_START_X, SearchBox, SearchFlags, SearchMode, Text};
 use crate::workbench::{MarkedLines, SortAlgorithm, WorkbenchAction};
 use crate::{config, flags};
 

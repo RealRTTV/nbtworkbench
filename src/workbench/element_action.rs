@@ -4,7 +4,6 @@ use std::{fs::OpenOptions, process::Command};
 
 #[cfg(not(target_arch = "wasm32"))]
 use notify::{EventKind, PollWatcher, RecursiveMode, Watcher};
-use uuid::Uuid;
 
 use crate::assets::{ACTION_WHEEL_Z, COPY_FORMATTED_UV, COPY_RAW_UV, INSERT_FROM_CLIPBOARD_UV, INVERT_BOOKMARKS_UV, SORT_COMPOUND_BY_NAME_UV, SORT_COMPOUND_BY_TYPE_UV};
 #[cfg(not(target_arch = "wasm32"))]
@@ -12,8 +11,8 @@ use crate::assets::{OPEN_ARRAY_IN_HEX_UV, OPEN_IN_TXT_UV};
 use crate::elements::{CompoundEntry, NbtByte, NbtByteArray, NbtChunk, NbtCompound, NbtDouble, NbtElement, NbtElementVariant, NbtFloat, NbtInt, NbtIntArray, NbtList, NbtLong, NbtLongArray, NbtPattern, NbtShort, NbtString};
 use crate::render::VertexBufferBuilder;
 use crate::serialization::UncheckedBufWriter;
-use crate::tree::{add_element, reorder_element, MutableIndices, NavigationInformation, OwnedIndices, ReorderElementResult};
-use crate::util::{get_clipboard, now, set_clipboard, StrExt};
+use crate::tree::{MutableIndices, NavigationInformation, OwnedIndices, ReorderElementResult, add_element, reorder_element};
+use crate::util::{StrExt, get_clipboard, now, set_clipboard};
 use crate::widget::Alert;
 use crate::workbench::{FileUpdateSubscription, FileUpdateSubscriptionType, MarkedLine, MarkedLines, WorkbenchAction};
 
@@ -125,7 +124,7 @@ impl ElementAction {
 	}
 
 	// todo: add more alerts for errors (potentially have anyhow::Result)
-	pub fn apply<'m1, 'm2: 'm1>(self, root: &mut NbtElement, mut indices: OwnedIndices, bookmarks: &mut MarkedLines, mutable_indices: &'m1 mut MutableIndices<'m2>, alerts: &mut Vec<Alert>, tab_uuid: Uuid) -> Option<WorkbenchAction> {
+	pub fn apply<'m1, 'm2: 'm1>(self, root: &mut NbtElement, mut indices: OwnedIndices, bookmarks: &mut MarkedLines, mutable_indices: &'m1 mut MutableIndices<'m2>, alerts: &mut Vec<Alert>) -> Option<WorkbenchAction> {
 		#[must_use]
 		#[cfg(not(target_arch = "wasm32"))]
 		fn open_file(str: &str) -> bool {
@@ -242,7 +241,7 @@ impl ElementAction {
 				if !open_file(&path.display().to_string()) {
 					return None
 				}
-				mutable_indices.set_subscription(Some(FileUpdateSubscription::new(subscription_type, indices, rx, watcher, tab_uuid)));
+				mutable_indices.set_subscription(Some(FileUpdateSubscription::new(subscription_type, indices, rx, watcher)));
 				None
 			}
 			action @ (Self::SortCompoundByName | Self::SortCompoundByType) => {

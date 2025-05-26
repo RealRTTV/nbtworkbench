@@ -3,7 +3,8 @@ macro_rules! array {
 		mod $module {
 			#[cfg(not(target_arch = "wasm32"))] use ::std::thread::Scope;
 			#[cfg(target_arch = "wasm32")] use $crate::wasm::FakeScope as Scope;
-			use crate::elements::{NbtElementVariant, ComplexNbtElementVariant, NbtElement};
+
+			use crate::elements::{ComplexNbtElementVariant, NbtElement, NbtElementVariant};
 
 			#[repr(C)]
 			pub struct $name {
@@ -13,9 +14,7 @@ macro_rules! array {
 			}
 
 			impl $crate::elements::Matches for $name {
-				fn matches(&self, other: &Self) -> bool {
-					self.eq(other)
-				}
+				fn matches(&self, other: &Self) -> bool { self.eq(other) }
 			}
 
 			impl PartialEq for $name {
@@ -141,7 +140,11 @@ macro_rules! array {
 					decoder.assert_len(len * core::mem::size_of::<<Self::ChildType as $crate::elements::PrimitiveNbtElementVariant>::InnerType>())?;
 					let mut vec = from_opt(Vec::try_with_capacity(len).ok(), "Could not allocate enough memory for Vec")?;
 					for _ in 0..len {
-						let element = $constructor(unsafe { core::mem::transmute(<<Self::ChildType as $crate::elements::PrimitiveNbtElementVariant>::InnerType>::from_ne_bytes(decoder.read_ne_bytes::<{ core::mem::size_of::<<Self::ChildType as $crate::elements::PrimitiveNbtElementVariant>::InnerType>() }>())) });
+						let element = $constructor(unsafe {
+							core::mem::transmute(<<Self::ChildType as $crate::elements::PrimitiveNbtElementVariant>::InnerType>::from_ne_bytes(
+								decoder.read_ne_bytes::<{ core::mem::size_of::<<Self::ChildType as $crate::elements::PrimitiveNbtElementVariant>::InnerType>() }>(),
+							))
+						});
 						from_opt(vec.push_within_capacity(element).ok(), "Vec was longer than originally stated")?;
 					}
 					let mut array = Self {
@@ -227,7 +230,11 @@ macro_rules! array {
 
 							ctx.line_number();
 							builder.draw_texture_z(pos, $crate::assets::BASE_Z, Self::ChildType::UV, (16, 16));
-							ctx.check_for_invalid_value(|value| value.parse::<<Self::ChildType as $crate::elements::PrimitiveNbtElementVariant>::InnerType>().is_err());
+							ctx.check_for_invalid_value(|value| {
+								value
+									.parse::<<Self::ChildType as $crate::elements::PrimitiveNbtElementVariant>::InnerType>()
+									.is_err()
+							});
 							ctx.render_errors(pos, builder);
 							let str = ::compact_str::format_compact!("{}", Self::transmute(element));
 							if ctx.forbid(pos) {
@@ -260,7 +267,12 @@ macro_rules! array {
 				fn new(entries: Vec<Self::Entry>) -> Self
 				where Self: Sized {
 					Self {
-                        values: Box::new(entries.into_iter().filter(|entry| entry.id() == Self::CHILD_ID).collect::<Vec<_>>()),
+						values: Box::new(
+							entries
+								.into_iter()
+								.filter(|entry| entry.id() == Self::CHILD_ID)
+								.collect::<Vec<_>>(),
+						),
 						max_depth: 0,
 						open: false,
 					}
@@ -278,9 +290,7 @@ macro_rules! array {
 
 				fn max_depth(&self) -> usize { self.max_depth as usize }
 
-				unsafe fn toggle(&mut self) {
-					self.open = !self.open && !self.is_empty();
-				}
+				unsafe fn toggle(&mut self) { self.open = !self.open && !self.is_empty(); }
 
 				unsafe fn insert(&mut self, idx: usize, entry: Self::Entry) -> Result<Option<Self::Entry>, Self::Entry> {
 					if self.can_insert(&entry) {
@@ -313,9 +323,7 @@ macro_rules! array {
 					Ok(Some(core::mem::replace(&mut self.values[idx], entry)))
 				}
 
-				unsafe fn swap(&mut self, a: usize, b: usize) {
-					self.values.swap(a, b);
-				}
+				unsafe fn swap(&mut self, a: usize, b: usize) { self.values.swap(a, b); }
 
 				unsafe fn shut<'a, 'b>(&mut self, _scope: &'a Scope<'a, 'b>) { self.open = false; }
 

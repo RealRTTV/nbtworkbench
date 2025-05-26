@@ -4,7 +4,7 @@ use std::fmt::{Display, Formatter};
 use std::hint::likely;
 use std::mem::MaybeUninit;
 use std::slice::{Iter, IterMut};
-#[cfg(not(target_arch = "wasm32"))] use std::thread::{scope, Scope};
+#[cfg(not(target_arch = "wasm32"))] use std::thread::{Scope, scope};
 
 use crate::assets::{CONNECTION_UV, HEADER_SIZE, JUST_OVERLAPPING_BASE_TEXT_Z, JUST_OVERLAPPING_BOOKMARK_Z, LINE_NUMBER_CONNECTOR_Z, LINE_NUMBER_SEPARATOR_UV, REGION_GRID_UV, REGION_UV};
 use crate::elements::result::NbtParseResult;
@@ -13,7 +13,7 @@ use crate::render::{RenderContext, TextColor, VertexBufferBuilder};
 use crate::serialization::{Decoder, PrettyDisplay, PrettyFormatter, UncheckedBufWriter};
 use crate::util::Vec2u;
 #[cfg(target_arch = "wasm32")]
-use crate::wasm::{fake_scope as scope, FakeScope as Scope};
+use crate::wasm::{FakeScope as Scope, fake_scope as scope};
 use crate::workbench::MarkedLines;
 
 #[repr(C)]

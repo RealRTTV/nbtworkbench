@@ -1,11 +1,11 @@
 use std::path::PathBuf;
 
-use anyhow::{ensure, Context, Result};
+use anyhow::{Context, Result, ensure};
 use compact_str::CompactString;
 
 use crate::elements::{NbtElement, NbtElementAndKey};
 use crate::render::WindowProperties;
-use crate::tree::{add_element, remove_element, rename_element, reorder_element, replace_element, swap_element_same_depth, AddElementResult, MutableIndices, OwnedIndices, RemoveElementResult, ReplaceElementResult};
+use crate::tree::{AddElementResult, MutableIndices, OwnedIndices, RemoveElementResult, ReplaceElementResult, add_element, remove_element, rename_element, reorder_element, replace_element, swap_element_same_depth};
 use crate::util::LinkedQueue;
 use crate::workbench::{HeldEntry, MarkedLines};
 
@@ -107,11 +107,7 @@ impl WorkbenchAction {
 			Self::Reorder { indices, mapping } => reorder_element(root, indices, mapping, bookmarks, mutable_indices)
 				.context("Could not reorder element")?
 				.into_action(),
-			Self::AddFromHeldEntry {
-				indices,
-				mut indices_history,
-				old_kv
-			} => {
+			Self::AddFromHeldEntry { indices, mut indices_history, old_kv } => {
 				ensure!(held_entry.is_none(), "To remove an element and make a held entry out of it, one cannot have an pre-existing held entry.");
 
 				let (indices, kv) = if let Some(old_kv) = old_kv {

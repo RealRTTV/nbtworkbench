@@ -4,7 +4,7 @@ use enum_map::Enum;
 
 use crate::assets::{NOTIFICATION_BAR_BACKDROP_UV, NOTIFICATION_BAR_UV, NOTIFICATION_TEXT_Z, NOTIFICATION_UV, NOTIFICATION_Z};
 use crate::render::{TextColor, VertexBufferBuilder};
-use crate::util::{now, smoothstep64, split_lines, StrExt, Vec2u};
+use crate::util::{StrExt, Vec2u, now, smoothstep64, split_lines};
 
 #[derive(Copy, Clone, Enum)]
 pub enum NotificationKind {

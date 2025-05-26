@@ -57,7 +57,11 @@ macro_rules! primitive {
 
 					ctx.line_number();
 					builder.draw_texture(ctx.pos(), Self::UV, (16, 16));
-					ctx.check_for_invalid_value(|value| value.parse::<<Self as $crate::elements::PrimitiveNbtElementVariant>::InnerType>().is_err());
+					ctx.check_for_invalid_value(|value| {
+						value
+							.parse::<<Self as $crate::elements::PrimitiveNbtElementVariant>::InnerType>()
+							.is_err()
+					});
 					ctx.render_errors(ctx.pos(), builder);
 					if ctx.forbid(ctx.pos()) {
 						builder.settings(ctx.pos() + (20, 0), false, $crate::assets::JUST_OVERLAPPING_BASE_TEXT_Z);

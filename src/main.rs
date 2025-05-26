@@ -120,7 +120,7 @@ macro_rules! log {
 #[macro_export]
 macro_rules! mutable_indices {
 	($workbench:ident, $tab:ident) => {
-		&mut MutableIndices::new(&mut $workbench.subscription, &mut $tab.selected_text)
+		&mut MutableIndices::new(&mut $tab.subscription, &mut $tab.selected_text)
 	};
 }
 
@@ -140,8 +140,6 @@ pub static mut WINDOW_PROPERTIES: render::WindowProperties = render::WindowPrope
 /// * [chunk](elements::chunk::NbtChunk) section rendering
 /// # Minor Features
 /// * [`last_modified`](elements::chunk::NbtChunk) field actually gets the ability to be set
-/// * add set intersection operations for line number searching (+ dedicated negate button)
-/// * add option for [`ReplaceBox`](widget::ReplaceBox) to use existing highlighted line numbers or hits for search box
 /// # Major Features
 /// * macros
 #[cfg(not(target_arch = "wasm32"))]
@@ -149,8 +147,8 @@ pub fn main() -> ! {
 	config::read();
 	#[cfg(target_os = "windows")]
 	unsafe {
-		winapi::um::wincon::AttachConsole(winapi::um::wincon::ATTACH_PARENT_PROCESS);
-	}
+		winapi::um::wincon::AttachConsole(winapi::um::wincon::ATTACH_PARENT_PROCESS)
+	};
 
 	match std::env::args().nth(1).as_deref() {
 		Some("find") => cli::find(),

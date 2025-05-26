@@ -4,21 +4,20 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use anyhow::{anyhow, ensure, Context, Result};
+use anyhow::{Context, Result, anyhow, ensure};
 use flate2::Compression;
-use uuid::Uuid;
 use zune_inflate::DeflateDecoder;
 
-use super::{HeldEntry, MarkedLines, WorkbenchAction};
+use super::{FileUpdateSubscription, HeldEntry, MarkedLines, WorkbenchAction};
 use crate::assets::{
-	ZOffset, BASE_Z, GZIP_FILE_TYPE_UV, HEADER_SIZE, HELD_SCROLLBAR_UV, JUST_OVERLAPPING_BASE_Z, LINE_NUMBER_SEPARATOR_UV, LITTLE_ENDIAN_HEADER_NBT_FILE_TYPE_UV, LITTLE_ENDIAN_NBT_FILE_TYPE_UV, MCA_FILE_TYPE_UV, NBT_FILE_TYPE_UV,
-	SCROLLBAR_Z, SNBT_FILE_TYPE_UV, STEAL_ANIMATION_OVERLAY_UV, UNHELD_SCROLLBAR_UV, FROM_CLIPBOARD_GHOST_UV, FROM_CLIPBOARD_UV, ZLIB_FILE_TYPE_UV,
+	BASE_Z, FROM_CLIPBOARD_GHOST_UV, FROM_CLIPBOARD_UV, GZIP_FILE_TYPE_UV, HEADER_SIZE, HELD_SCROLLBAR_UV, JUST_OVERLAPPING_BASE_Z, LINE_NUMBER_SEPARATOR_UV, LITTLE_ENDIAN_HEADER_NBT_FILE_TYPE_UV, LITTLE_ENDIAN_NBT_FILE_TYPE_UV, MCA_FILE_TYPE_UV,
+	NBT_FILE_TYPE_UV, SCROLLBAR_Z, SNBT_FILE_TYPE_UV, STEAL_ANIMATION_OVERLAY_UV, UNHELD_SCROLLBAR_UV, ZLIB_FILE_TYPE_UV, ZOffset,
 };
 use crate::elements::{ComplexNbtElementVariant, NbtByte, NbtByteArray, NbtChunk, NbtCompound, NbtDouble, NbtElement, NbtElementVariant, NbtFloat, NbtInt, NbtIntArray, NbtList, NbtLong, NbtLongArray, NbtRegion, NbtShort, NbtString};
 use crate::render::{RenderContext, TextColor, VertexBufferBuilder, WindowProperties};
 use crate::tree::rename_element;
-use crate::util::{drop_on_separate_thread, now, LinkedQueue, StrExt, Vec2u};
-use crate::widget::{get_cursor_left_jump_idx, get_cursor_right_jump_idx, SelectedText, SelectedTextAdditional, Text, TEXT_DOUBLE_CLICK_INTERVAL};
+use crate::util::{LinkedQueue, StrExt, Vec2u, drop_on_separate_thread, now};
+use crate::widget::{SelectedText, SelectedTextAdditional, TEXT_DOUBLE_CLICK_INTERVAL, Text, get_cursor_left_jump_idx, get_cursor_right_jump_idx};
 
 pub struct Tab {
 	pub value: Box<NbtElement>,
@@ -33,8 +32,8 @@ pub struct Tab {
 	pub(super) window_height: usize,
 	pub(super) window_width: usize,
 	pub bookmarks: MarkedLines,
-	pub(super) uuid: Uuid,
 	pub freehand_mode: bool,
+	pub subscription: Option<FileUpdateSubscription>,
 	pub(super) selected_text: Option<SelectedText>,
 	pub(super) last_close_attempt: Duration,
 	pub(super) last_selected_text_interaction: (usize, usize, Duration),
@@ -79,8 +78,8 @@ impl Tab {
 			window_height,
 			window_width,
 			bookmarks: MarkedLines::new(),
-			uuid: Uuid::new_v4(),
 			freehand_mode: false,
+			subscription: None,
 			selected_text: None,
 			last_close_attempt: Duration::ZERO,
 			last_selected_text_interaction: (0, 0, Duration::ZERO),
@@ -108,8 +107,8 @@ impl Tab {
 			window_height: window_dims.x,
 			window_width: window_dims.y,
 			bookmarks: MarkedLines::new(),
-			uuid: Uuid::new_v4(),
 			freehand_mode: false,
+			subscription: None,
 			selected_text: None,
 			last_close_attempt: Duration::ZERO,
 			last_selected_text_interaction: (0, 0, Duration::ZERO),
@@ -555,7 +554,6 @@ impl Tab {
 		self.scroll = 0;
 		self.format = format;
 		self.unsaved_changes = false;
-		self.uuid = Uuid::new_v4();
 		self.selected_text = None;
 		self.last_close_attempt = Duration::ZERO;
 		let old = (

@@ -1,4 +1,4 @@
-use std::alloc::{alloc, dealloc, realloc, Layout};
+use std::alloc::{Layout, alloc, dealloc, realloc};
 use std::hint::likely;
 use std::io::Write;
 use std::mem::MaybeUninit;
@@ -66,11 +66,14 @@ impl UncheckedBufWriter {
 			}
 		}
 	}
-	
+
 	pub fn write_bytes(&mut self, byte: u8, count: usize) {
 		unsafe {
 			if likely(count < self.remaining()) {
-				self.buf.add(self.buf_len).cast::<u8>().write_bytes(byte, count);
+				self.buf
+					.add(self.buf_len)
+					.cast::<u8>()
+					.write_bytes(byte, count);
 				self.buf_len += count;
 			} else {
 				self.write_bytes_pushing_cold(byte, count);

@@ -5,8 +5,8 @@ use compact_str::CompactString;
 use parking_lot::RwLock;
 
 use crate::config;
-use crate::elements::result::NbtParseResult;
 use crate::elements::CompoundMap;
+use crate::elements::result::NbtParseResult;
 
 pub trait Decoder<'a>: Send {
 	fn new(data: &'a [u8]) -> Self

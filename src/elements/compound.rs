@@ -4,7 +4,7 @@ use std::fmt::{Display, Formatter, Write};
 use std::hint::likely;
 use std::ops::Deref;
 use std::slice::{Iter, IterMut};
-#[cfg(not(target_arch = "wasm32"))] use std::thread::{scope, Scope};
+#[cfg(not(target_arch = "wasm32"))] use std::thread::{Scope, scope};
 
 use compact_str::CompactString;
 use hashbrown::hash_table::Entry::*;
@@ -15,9 +15,9 @@ use crate::elements::result::NbtParseResult;
 use crate::elements::{ComplexNbtElementVariant, Matches, NbtElement, NbtElementAndKey, NbtElementAndKeyRef, NbtElementAndKeyRefMut, NbtElementVariant};
 use crate::render::{RenderContext, TextColor, VertexBufferBuilder};
 use crate::serialization::{Decoder, PrettyDisplay, PrettyFormatter, UncheckedBufWriter};
-use crate::util::{width_ascii, StrExt, Vec2u};
+use crate::util::{StrExt, Vec2u, width_ascii};
 #[cfg(target_arch = "wasm32")]
-use crate::wasm::{fake_scope as scope, FakeScope as Scope};
+use crate::wasm::{FakeScope as Scope, fake_scope as scope};
 use crate::{config, hash};
 
 #[repr(C)]
@@ -521,21 +521,15 @@ impl PartialEq for CompoundEntry {
 }
 
 impl From<CompoundEntry> for NbtElementAndKey {
-	fn from(value: CompoundEntry) -> Self {
-		(Some(value.key), value.value)
-	}
+	fn from(value: CompoundEntry) -> Self { (Some(value.key), value.value) }
 }
 
 impl<'a> From<&'a CompoundEntry> for NbtElementAndKeyRef<'a> {
-	fn from(value: &'a CompoundEntry) -> Self {
-		(Some(value.key.as_str()), &value.value)
-	}
+	fn from(value: &'a CompoundEntry) -> Self { (Some(value.key.as_str()), &value.value) }
 }
 
 impl<'a> From<&'a mut CompoundEntry> for NbtElementAndKeyRefMut<'a> {
-	fn from(value: &'a mut CompoundEntry) -> Self {
-		(Some(value.key.as_str()), &mut value.value)
-	}
+	fn from(value: &'a mut CompoundEntry) -> Self { (Some(value.key.as_str()), &mut value.value) }
 }
 
 impl CompoundEntry {

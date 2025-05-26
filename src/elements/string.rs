@@ -1,4 +1,4 @@
-use std::alloc::{alloc, dealloc, Layout};
+use std::alloc::{Layout, alloc, dealloc};
 use std::array;
 use std::borrow::Cow;
 use std::fmt::{Display, Formatter};

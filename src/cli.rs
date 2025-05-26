@@ -1,5 +1,5 @@
 use std::fmt::Formatter;
-use std::fs::{read, File};
+use std::fs::{File, read};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 

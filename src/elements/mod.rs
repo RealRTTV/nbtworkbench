@@ -35,21 +35,15 @@ pub type NbtElementAndKeyRef<'a> = (Option<&'a str>, &'a NbtElement);
 pub type NbtElementAndKeyRefMut<'a> = (Option<&'a str>, &'a mut NbtElement);
 
 impl From<NbtElement> for NbtElementAndKey {
-	fn from(value: NbtElement) -> Self {
-		(None, value)
-	}
+	fn from(value: NbtElement) -> Self { (None, value) }
 }
 
 impl<'a> From<&'a NbtElement> for NbtElementAndKeyRef<'a> {
-	fn from(value: &'a NbtElement) -> Self {
-		(None, value)
-	}
+	fn from(value: &'a NbtElement) -> Self { (None, value) }
 }
 
 impl<'a> From<&'a mut NbtElement> for NbtElementAndKeyRefMut<'a> {
-	fn from(value: &'a mut NbtElement) -> Self {
-		(None, value)
-	}
+	fn from(value: &'a mut NbtElement) -> Self { (None, value) }
 }
 
 pub mod result {

@@ -7,7 +7,7 @@ use crate::assets::{BASE_TEXT_Z, HEADER_SIZE, SELECTED_TEXT_SELECTION_Z, SELECTE
 use crate::elements::NbtElement;
 use crate::flags;
 use crate::render::{TextColor, VertexBufferBuilder};
-use crate::tree::{line_number_at, OwnedIndices};
+use crate::tree::{OwnedIndices, line_number_at};
 use crate::util::{CharExt, StrExt};
 use crate::widget::SelectedTextKeyResult::{Down, ForceClose, ForceOpen, MoveToKeyfix, MoveToValuefix, ShiftDown, ShiftUp, Up};
 use crate::widget::{Cachelike, SelectedTextKeyResult, Text};

@@ -4,10 +4,10 @@ use std::time::Duration;
 
 use winit::keyboard::KeyCode;
 
-use crate::assets::{ZOffset, SELECTION_UV};
+use crate::assets::{SELECTION_UV, ZOffset};
 use crate::flags;
 use crate::render::{TextColor, VertexBufferBuilder};
-use crate::util::{get_clipboard, is_jump_char_boundary, is_utf8_char_boundary, now, set_clipboard, CharExt, LinkedQueue, StrExt, Vec2u};
+use crate::util::{CharExt, LinkedQueue, StrExt, Vec2u, get_clipboard, is_jump_char_boundary, is_utf8_char_boundary, now, set_clipboard};
 use crate::widget::KeyResult::{Escape, Failed, Finish, NothingSpecial};
 
 pub const TEXT_DOUBLE_CLICK_INTERVAL: Duration = Duration::from_millis(250);

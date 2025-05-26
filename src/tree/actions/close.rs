@@ -3,7 +3,7 @@
 use crate::elements::NbtElement;
 use crate::tree::{Indices, NavigationInformationMut};
 #[cfg(target_arch = "wasm32")]
-use crate::wasm::{fake_scope as scope, FakeScope as Scope};
+use crate::wasm::{FakeScope as Scope, fake_scope as scope};
 use crate::workbench::MarkedLines;
 
 #[must_use]

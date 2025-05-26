@@ -6,35 +6,32 @@ use std::sync::mpsc::TryRecvError;
 #[cfg(not(target_arch = "wasm32"))] use std::thread::scope;
 use std::time::Duration;
 
-use anyhow::{anyhow, bail, ensure, Context, Result};
-use compact_str::{format_compact, CompactString, ToCompactString};
+use anyhow::{Context, Result, anyhow, bail, ensure};
+use compact_str::{CompactString, ToCompactString, format_compact};
 use enum_map::EnumMap;
 use fxhash::{FxBuildHasher, FxHashSet};
-use uuid::Uuid;
 use winit::dpi::{PhysicalPosition, PhysicalSize};
 use winit::event::{ElementState, KeyEvent, MouseButton, MouseScrollDelta};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::Theme;
 
 use crate::assets::{
-	ZOffset, ACTION_WHEEL_Z, BASE_TEXT_Z, BASE_Z, CLOSED_WIDGET_UV, DARK_STRIPE_UV, HEADER_SIZE, HELD_ENTRY_Z, HORIZONTAL_SEPARATOR_UV, HOVERED_STRIPE_UV, HOVERED_WIDGET_UV, JUST_OVERLAPPING_BASE_TEXT_Z, LIGHT_STRIPE_UV,
-	LINE_NUMBER_SEPARATOR_UV, REPLACE_BOX_Z, SAVE_GRAYSCALE_UV, SAVE_UV, SELECTED_ACTION_WHEEL, SELECTED_WIDGET_UV, TRAY_UV, UNSELECTED_ACTION_WHEEL, UNSELECTED_WIDGET_UV,
+	ACTION_WHEEL_Z, BASE_TEXT_Z, BASE_Z, CLOSED_WIDGET_UV, DARK_STRIPE_UV, HEADER_SIZE, HELD_ENTRY_Z, HORIZONTAL_SEPARATOR_UV, HOVERED_STRIPE_UV, HOVERED_WIDGET_UV, JUST_OVERLAPPING_BASE_TEXT_Z, LIGHT_STRIPE_UV, LINE_NUMBER_SEPARATOR_UV,
+	REPLACE_BOX_Z, SAVE_GRAYSCALE_UV, SAVE_UV, SELECTED_ACTION_WHEEL, SELECTED_WIDGET_UV, TRAY_UV, UNSELECTED_ACTION_WHEEL, UNSELECTED_WIDGET_UV, ZOffset,
 };
-use crate::elements::{
-	CompoundMap, NbtByte, NbtByteArray, NbtChunk, NbtCompound, NbtDouble, NbtElement, NbtElementAndKey, NbtElementVariant, NbtFloat, NbtInt, NbtIntArray, NbtList, NbtLong, NbtLongArray, NbtRegion, NbtShort, NbtString,
-};
-use crate::render::{RenderContext, TextColor, VertexBufferBuilder, WindowProperties, MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH, WINDOW_HEIGHT, WINDOW_WIDTH};
+use crate::elements::{CompoundMap, NbtByte, NbtByteArray, NbtChunk, NbtCompound, NbtDouble, NbtElement, NbtElementAndKey, NbtElementVariant, NbtFloat, NbtInt, NbtIntArray, NbtList, NbtLong, NbtLongArray, NbtRegion, NbtShort, NbtString};
+use crate::render::{MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH, RenderContext, TextColor, VertexBufferBuilder, WINDOW_HEIGHT, WINDOW_WIDTH, WindowProperties};
 use crate::serialization::{BigEndianDecoder, Decoder, UncheckedBufWriter};
 use crate::tree::{
-	add_element, close_element, expand_element, expand_element_to_indices, open_element, remove_element, replace_element, swap_element_same_depth, AddElementResult, Indices, MutableIndices, NavigationInformation,
-	OwnedIndices, ParentNavigationInformationMut, RemoveElementResult, TraversalInformation, TraversalInformationMut,
+	AddElementResult, Indices, MutableIndices, NavigationInformation, OwnedIndices, ParentNavigationInformationMut, RemoveElementResult, TraversalInformation, TraversalInformationMut, add_element, close_element, expand_element,
+	expand_element_to_indices, open_element, remove_element, replace_element, swap_element_same_depth,
 };
-use crate::util::{drop_on_separate_thread, get_clipboard, now, nth, set_clipboard, LinkedQueue, StrExt, Vec2u};
+use crate::util::{LinkedQueue, StrExt, Vec2u, drop_on_separate_thread, get_clipboard, now, nth, set_clipboard};
 #[cfg(target_arch = "wasm32")] use crate::wasm::fake_scope as scope;
 use crate::widget::{
-	get_cursor_idx, get_cursor_left_jump_idx, get_cursor_right_jump_idx, Alert, ButtonWidget, ButtonWidgetAccumulatedResult, ButtonWidgetContext, ButtonWidgetContextMut, ExactMatchButton, FreehandModeButton, NewTabButton, Notification, NotificationKind, OpenFileButton,
-	RefreshButton, ReplaceBox, ReplaceBoxKeyResult, ReplaceByButton, SearchBox, SearchBoxKeyResult, SearchFlagsButton, SearchModeButton, SearchOperationButton, SelectedText, SelectedTextAdditional, SelectedTextKeyResult,
-	SortAlgorithmButton, Text, ThemeButton, SEARCH_BOX_END_X, SEARCH_BOX_START_X, TEXT_DOUBLE_CLICK_INTERVAL,
+	Alert, ButtonWidget, ButtonWidgetAccumulatedResult, ButtonWidgetContext, ButtonWidgetContextMut, ExactMatchButton, FreehandModeButton, NewTabButton, Notification, NotificationKind, OpenFileButton, RefreshButton, ReplaceBox, ReplaceBoxKeyResult,
+	ReplaceByButton, SEARCH_BOX_END_X, SEARCH_BOX_START_X, SearchBox, SearchBoxKeyResult, SearchFlagsButton, SearchModeButton, SearchOperationButton, SelectedText, SelectedTextAdditional, SelectedTextKeyResult, SortAlgorithmButton,
+	TEXT_DOUBLE_CLICK_INTERVAL, Text, ThemeButton, get_cursor_idx, get_cursor_left_jump_idx, get_cursor_right_jump_idx,
 };
 use crate::workbench::{ElementAction, FileFormat, MarkedLine, MarkedLines, Tab, WorkbenchAction};
 use crate::{config, flags, get_interaction_information, hash, mutable_indices, tab, tab_mut};
@@ -76,7 +73,6 @@ pub struct Workbench {
 	tab_scroll: usize,
 	scrollbar_offset: Option<usize>,
 	action_wheel: Option<(usize, usize)>,
-	subscription: Option<FileUpdateSubscription>,
 	pub cursor_visible: bool,
 	alerts: Vec<Alert>,
 	notifications: EnumMap<NotificationKind, Option<Notification>>,
@@ -120,7 +116,6 @@ impl Workbench {
 			tab_scroll: 0,
 			scrollbar_offset: None,
 			action_wheel: None,
-			subscription: None,
 			cursor_visible: false,
 			alerts: vec![],
 			notifications: EnumMap::from_array(
@@ -174,7 +169,6 @@ impl Workbench {
 			tab_scroll: 0,
 			scrollbar_offset: None,
 			action_wheel: None,
-			subscription: None,
 			cursor_visible: true,
 			alerts: vec![],
 			notifications: EnumMap::from_fn(|_| None),
@@ -244,7 +238,6 @@ impl Workbench {
 				window_height: WINDOW_HEIGHT,
 				window_width: WINDOW_WIDTH,
 				bookmarks: MarkedLines::new(),
-				uuid: Uuid::new_v4(),
 				freehand_mode: false,
 				selected_text: None,
 				last_close_attempt: Duration::ZERO,
@@ -530,7 +523,7 @@ impl Workbench {
 			return true
 		};
 		if let Some(action) = element.actions().get(highlight_idx).copied()
-			&& let Some(action) = action.apply(&mut tab.value, indices, &mut tab.bookmarks, mutable_indices!(self, tab), &mut self.alerts, tab.uuid)
+			&& let Some(action) = action.apply(&mut tab.value, indices, &mut tab.bookmarks, mutable_indices!(self, tab), &mut self.alerts)
 		{
 			tab.append_to_history(action);
 		}
@@ -538,75 +531,67 @@ impl Workbench {
 	}
 
 	pub fn try_subscription(&mut self) -> Result<()> {
-		if let Some(subscription) = &mut self.subscription {
-			if let Some(tab) = self
-				.tabs
-				.iter_mut()
-				.find(|tab| tab.uuid == subscription.tab_uuid)
+		for tab in &mut self.tabs {
+			let Some(subscription) = &mut tab.subscription else { continue };
+			if let Err(e) = subscription
+				.watcher
+				.poll()
+				.map_err(|x| anyhow!("{x}"))
 			{
-				if let Err(e) = subscription
-					.watcher
-					.poll()
-					.map_err(|x| anyhow!("{x}"))
-				{
-					self.subscription = None;
-					return Err(e);
-				};
-				match subscription.rx.try_recv() {
-					Ok(data) => {
-						let kv = match subscription.r#type {
-							FileUpdateSubscriptionType::Snbt => {
-								let s = core::str::from_utf8(&data).context("File was not a valid UTF8 string")?;
-								let sort = config::set_sort_algorithm(SortAlgorithm::None);
-								let result = NbtElement::from_str(s);
-								config::set_sort_algorithm(sort);
-								match result {
-									Ok(kv) => kv,
-									Err(idx) => bail!("Failed to parse SNBT at index {idx}"),
-								}
+				tab.subscription = None;
+				return Err(e);
+			};
+			match subscription.rx.try_recv() {
+				Ok(data) => {
+					let kv = match subscription.r#type {
+						FileUpdateSubscriptionType::Snbt => {
+							let s = core::str::from_utf8(&data).context("File was not a valid UTF8 string")?;
+							let sort = config::set_sort_algorithm(SortAlgorithm::None);
+							let result = NbtElement::from_str(s);
+							config::set_sort_algorithm(sort);
+							match result {
+								Ok(kv) => kv,
+								Err(idx) => bail!("Failed to parse SNBT at index {idx}"),
 							}
-							kind => {
-								let (id, prefix, width): (u8, &[u8], usize) = match kind {
-									FileUpdateSubscriptionType::ByteArray => (NbtByteArray::ID, &[], 1),
-									FileUpdateSubscriptionType::IntArray => (NbtIntArray::ID, &[], 4),
-									FileUpdateSubscriptionType::LongArray => (NbtLongArray::ID, &[], 8),
-									FileUpdateSubscriptionType::ByteList => (NbtList::ID, &[NbtByte::ID], 1),
-									FileUpdateSubscriptionType::ShortList => (NbtList::ID, &[NbtShort::ID], 2),
-									FileUpdateSubscriptionType::IntList => (NbtList::ID, &[NbtInt::ID], 4),
-									FileUpdateSubscriptionType::LongList => (NbtList::ID, &[NbtLong::ID], 8),
-									FileUpdateSubscriptionType::Snbt => bail!("Explicit SNBT parsing was skipped??"),
-								};
-								let mut buf = UncheckedBufWriter::new();
-								buf.write(prefix);
-								ensure!(data.len() % width == 0, "Hex data was of an incorrect length, length was {len} bytes, should be multiples of {width}", len = data.len());
-								let buf = buf.finish();
-								let mut decoder = BigEndianDecoder::new(&buf);
-								let value = NbtElement::from_bytes(id, &mut decoder).context("Could not read bytes for array")?;
-								let NavigationInformation { key, .. } = tab
-									.value
-									.navigate(&subscription.indices)
-									.context("Failed to navigate subscription indices")?;
-								let key = key.map(CompactString::from);
-								(key, value)
-							}
-						};
-						let action = replace_element(&mut tab.value, kv, subscription.indices.clone(), &mut tab.bookmarks, mutable_indices!(self, tab))
-							.context("Failed to replace element")?
-							.into_action();
-						tab.append_to_history(action);
-						tab.refresh_scrolls();
-					}
-					Err(TryRecvError::Disconnected) => {
-						self.subscription = None;
-						bail!("Could not update; file subscription disconnected.");
-					}
-					Err(TryRecvError::Empty) => {
-						// do nothing ig
-					}
+						}
+						kind => {
+							let (id, prefix, width): (u8, &[u8], usize) = match kind {
+								FileUpdateSubscriptionType::ByteArray => (NbtByteArray::ID, &[], 1),
+								FileUpdateSubscriptionType::IntArray => (NbtIntArray::ID, &[], 4),
+								FileUpdateSubscriptionType::LongArray => (NbtLongArray::ID, &[], 8),
+								FileUpdateSubscriptionType::ByteList => (NbtList::ID, &[NbtByte::ID], 1),
+								FileUpdateSubscriptionType::ShortList => (NbtList::ID, &[NbtShort::ID], 2),
+								FileUpdateSubscriptionType::IntList => (NbtList::ID, &[NbtInt::ID], 4),
+								FileUpdateSubscriptionType::LongList => (NbtList::ID, &[NbtLong::ID], 8),
+								FileUpdateSubscriptionType::Snbt => bail!("Explicit SNBT parsing was skipped??"),
+							};
+							let mut buf = UncheckedBufWriter::new();
+							buf.write(prefix);
+							ensure!(data.len() % width == 0, "Hex data was of an incorrect length, length was {len} bytes, should be multiples of {width}", len = data.len());
+							let buf = buf.finish();
+							let mut decoder = BigEndianDecoder::new(&buf);
+							let value = NbtElement::from_bytes(id, &mut decoder).context("Could not read bytes for array")?;
+							let NavigationInformation { key, .. } = tab
+								.value
+								.navigate(&subscription.indices)
+								.context("Failed to navigate subscription indices")?;
+							let key = key.map(CompactString::from);
+							(key, value)
+						}
+					};
+					let action = replace_element(&mut tab.value, kv, subscription.indices.clone(), &mut tab.bookmarks, mutable_indices!(self, tab))
+						.context("Failed to replace element")?
+						.into_action();
+					tab.append_to_history(action);
+					tab.refresh_scrolls();
 				}
-			} else {
-				self.subscription = None;
-				bail!("Could not update; file subscription tab closed.");
+				Err(TryRecvError::Disconnected) => {
+					tab.subscription = None;
+					bail!("Could not update; file subscription disconnected.");
+				}
+				Err(TryRecvError::Empty) => {
+					// do nothing ig
+				}
 			}
 		}
 
@@ -873,9 +858,9 @@ impl Workbench {
 					Err(idx) => bail!("Could not parse clipboard as SNBT (failed at index {idx})"),
 				}
 			} else {
-				let old_held_entry = tab.held_entry.replace(HeldEntry::from_aether((
-					None,
-					match x / 16 {
+				let old_held_entry = tab
+					.held_entry
+					.replace(HeldEntry::from_aether((None, match x / 16 {
 						0 => NbtElement::Byte(NbtByte::default()),
 						1 => NbtElement::Short(NbtShort::default()),
 						2 => NbtElement::Int(NbtInt::default()),
@@ -890,8 +875,7 @@ impl Workbench {
 						11 => NbtElement::Compound(NbtCompound::default()),
 						12 if tab.value.id() == NbtRegion::ID => NbtElement::Chunk(NbtChunk::default()),
 						_ => return Ok(false),
-					}
-				)));
+					})));
 				if let Some(held_entry) = old_held_entry {
 					tab.append_to_history(WorkbenchAction::DiscardHeldEntry { held_entry })
 				}
@@ -2276,19 +2260,12 @@ impl Workbench {
 			format!("action wheel coords: {:?}", self.action_wheel),
 			format!(
 				"sub indices: {:?}",
-				self.subscription
+				tab.subscription
 					.as_ref()
 					.map(|subscription| &subscription.indices)
 			),
-			format!(
-				"sub tab uuid: {:?}",
-				self.subscription
-					.as_ref()
-					.map(|subscription| subscription.tab_uuid)
-			),
 			format!("scale: {}", self.scale),
 			format!("last SB input: y={}, since={}ms", self.search_box.last_interaction.0, (now() - self.search_box.last_interaction.1).as_millis()),
-			format!("tab uuid: {}", tab.uuid),
 			format!("file format: {:?}", tab.format),
 			format!("undos len: {}", tab.undos.len()),
 			format!("redos len: {}", tab.redos.len()),
@@ -2914,12 +2891,11 @@ pub struct FileUpdateSubscription {
 	pub indices: OwnedIndices,
 	rx: std::sync::mpsc::Receiver<Vec<u8>>,
 	watcher: notify::PollWatcher,
-	tab_uuid: Uuid,
 }
 
 impl FileUpdateSubscription {
 	#[must_use]
-	pub fn new(r#type: FileUpdateSubscriptionType, indices: OwnedIndices, rx: std::sync::mpsc::Receiver<Vec<u8>>, watcher: notify::PollWatcher, tab_uuid: Uuid) -> Self { Self { r#type, indices, rx, watcher, tab_uuid } }
+	pub fn new(r#type: FileUpdateSubscriptionType, indices: OwnedIndices, rx: std::sync::mpsc::Receiver<Vec<u8>>, watcher: notify::PollWatcher) -> Self { Self { r#type, indices, rx, watcher } }
 }
 
 #[derive(Copy, Clone)]

@@ -6,13 +6,13 @@ use std::ops::{Deref, DerefMut};
 use zune_inflate::{DeflateDecoder, DeflateOptions};
 
 use crate::assets::{CHUNK_GHOST_UV, CHUNK_UV, CONNECTION_UV, HEADER_SIZE, JUST_OVERLAPPING_BASE_TEXT_Z};
-use crate::elements::result::{err, from_opt, from_result, ok, NbtParseResult};
+use crate::elements::result::{NbtParseResult, err, from_opt, from_result, ok};
 use crate::elements::{ComplexNbtElementVariant, CompoundEntry, Matches, NbtCompound, NbtElement, NbtElementVariant};
 use crate::render::{RenderContext, TextColor, VertexBufferBuilder};
 use crate::serialization::{Decoder, PrettyDisplay, PrettyFormatter, UncheckedBufWriter};
-use crate::util::{now, StrExt, Vec2u};
+use crate::util::{StrExt, Vec2u, now};
 #[cfg(target_arch = "wasm32")]
-use crate::wasm::{fake_scope as scope, FakeScope as Scope};
+use crate::wasm::{FakeScope as Scope, fake_scope as scope};
 use crate::workbench::FileFormat;
 
 #[repr(C)]

@@ -2,16 +2,16 @@ use std::borrow::Cow;
 use std::fmt::{Display, Formatter, Write};
 use std::hint::likely;
 use std::slice::{Iter, IterMut};
-#[cfg(not(target_arch = "wasm32"))] use std::thread::{scope, Scope};
+#[cfg(not(target_arch = "wasm32"))] use std::thread::{Scope, scope};
 
 use crate::assets::{CONNECTION_UV, JUST_OVERLAPPING_BASE_TEXT_Z, LIST_GHOST_UV, LIST_UV};
 use crate::elements::result::NbtParseResult;
-use crate::elements::{id_to_string_name, ComplexNbtElementVariant, Matches, NbtCompound, NbtElement, NbtElementVariant};
+use crate::elements::{ComplexNbtElementVariant, Matches, NbtCompound, NbtElement, NbtElementVariant, id_to_string_name};
 use crate::render::{RenderContext, TextColor, VertexBufferBuilder};
 use crate::serialization::{Decoder, PrettyDisplay, PrettyFormatter, UncheckedBufWriter};
 use crate::util::Vec2u;
 #[cfg(target_arch = "wasm32")]
-use crate::wasm::{fake_scope as scope, FakeScope as Scope};
+use crate::wasm::{FakeScope as Scope, fake_scope as scope};
 
 #[repr(C)]
 pub struct NbtList {
@@ -156,7 +156,11 @@ impl NbtElementVariant for NbtList {
 		while !s.starts_with(']') {
 			let (s2, mut element) = NbtElement::from_str0(s, NbtElement::parse_int)?;
 			// SAFETY: no caches have been made
-			element = unsafe { element.try_compound_singleton_into_inner().unwrap_or_else(|element| element) };
+			element = unsafe {
+				element
+					.try_compound_singleton_into_inner()
+					.unwrap_or_else(|element| element)
+			};
 			unsafe { list.insert(list.len(), element) }.map_err(|_| s.len())?;
 			s = s2.trim_start();
 			if let Some(s2) = s.strip_prefix(',') {
@@ -184,7 +188,11 @@ impl NbtElementVariant for NbtList {
 		for _ in 0..len {
 			let mut element = NbtElement::from_bytes(element, decoder)?;
 			// SAFETY: no caches have been made
-			element = unsafe { element.try_compound_singleton_into_inner().unwrap_or_else(|element| element) };
+			element = unsafe {
+				element
+					.try_compound_singleton_into_inner()
+					.unwrap_or_else(|element| element)
+			};
 			true_height += element.true_height() as u32;
 			from_opt(vec.push_within_capacity(element).ok(), "Vec was larger that stated")?;
 		}
@@ -259,7 +267,9 @@ impl NbtElementVariant for NbtList {
 				let _ = write!(builder, "{}", self.value());
 			}
 
-			if ctx.draw_held_entry_bar(pos + (16, 16), builder, |x, y| pos + (16, 8) == (x, y), |x| self.can_insert(x)) {} else if self.height() == 1 && ctx.draw_held_entry_bar(pos + (16, 16), builder, |x, y| pos + (16, 16) == (x, y), |x| self.can_insert(x)) {}
+			if ctx.draw_held_entry_bar(pos + (16, 16), builder, |x, y| pos + (16, 8) == (x, y), |x| self.can_insert(x)) {
+			} else if self.height() == 1 && ctx.draw_held_entry_bar(pos + (16, 16), builder, |x, y| pos + (16, 16) == (x, y), |x| self.can_insert(x)) {
+			}
 
 			ctx.offset_pos(0, 16);
 			y_before += 16;

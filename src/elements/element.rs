@@ -8,7 +8,10 @@ use std::slice::{Iter, IterMut};
 use compact_str::CompactString;
 
 use crate::elements::result::NbtParseResult;
-use crate::elements::{ComplexNbtElementVariant, CompoundEntry, Matches, NbtByte, NbtByteArray, NbtChunk, NbtCompound, NbtDouble, NbtElementAndKey, NbtElementAndKeyRef, NbtElementAndKeyRefMut, NbtElementVariant, NbtFloat, NbtInt, NbtIntArray, NbtList, NbtLong, NbtLongArray, NbtRegion, NbtShort, NbtString, PrimitiveNbtElementVariant};
+use crate::elements::{
+	ComplexNbtElementVariant, CompoundEntry, Matches, NbtByte, NbtByteArray, NbtChunk, NbtCompound, NbtDouble, NbtElementAndKey, NbtElementAndKeyRef, NbtElementAndKeyRefMut, NbtElementVariant, NbtFloat, NbtInt, NbtIntArray, NbtList, NbtLong,
+	NbtLongArray, NbtRegion, NbtShort, NbtString, PrimitiveNbtElementVariant,
+};
 use crate::render::{RenderContext, TextColor, VertexBufferBuilder};
 use crate::serialization::{BigEndianDecoder, Decoder, LittleEndianDecoder, PrettyDisplay, PrettyFormatter, UncheckedBufWriter};
 use crate::tree::{
@@ -16,7 +19,7 @@ use crate::tree::{
 	TraversalInformationMut,
 };
 use crate::util;
-use crate::util::{width_ascii, StrExt, Vec2u};
+use crate::util::{StrExt, Vec2u, width_ascii};
 #[cfg(target_arch = "wasm32")] use crate::wasm::FakeScope as Scope;
 use crate::workbench::{DropResult, ElementAction, MarkedLines};
 
@@ -976,7 +979,7 @@ impl NbtElement {
 	#[must_use]
 	pub fn value_width(&self) -> usize {
 		use NbtPattern as Nbt;
-		use util::{i8_width, i16_width, i32_width, i64_width, f32_width, f64_width, usize_width, u8_width};
+		use util::{f32_width, f64_width, i8_width, i16_width, i32_width, i64_width, u8_width, usize_width};
 
 		match self.as_pattern() {
 			Nbt::Byte(x) => i8_width(x.value),
@@ -1292,13 +1295,25 @@ impl NbtElement {
 		use NbtPatternMut as Nbt;
 
 		Ok(match self.as_pattern_mut() {
-			Nbt::ByteArray(byte_array) => unsafe { byte_array.insert(idx, kv.1)?.map(NbtElement::into) },
+			Nbt::ByteArray(byte_array) => unsafe {
+				byte_array
+					.insert(idx, kv.1)?
+					.map(NbtElement::into)
+			},
 			Nbt::List(list) => unsafe { list.insert(idx, kv.1)?.map(NbtElement::into) },
-			Nbt::Compound(compound) => compound.insert(idx, CompoundEntry::new(kv.0.unwrap_or(CompactString::const_new("_")), kv.1))?.map(CompoundEntry::into),
+			Nbt::Compound(compound) => compound
+				.insert(idx, CompoundEntry::new(kv.0.unwrap_or(CompactString::const_new("_")), kv.1))?
+				.map(CompoundEntry::into),
 			Nbt::IntArray(int_array) => unsafe { int_array.insert(idx, kv.1)?.map(NbtElement::into) },
-			Nbt::LongArray(long_array) => unsafe { long_array.insert(idx, kv.1)?.map(NbtElement::into) },
+			Nbt::LongArray(long_array) => unsafe {
+				long_array
+					.insert(idx, kv.1)?
+					.map(NbtElement::into)
+			},
 			Nbt::Region(region) => unsafe { region.insert(idx, kv.1)?.map(NbtElement::into) },
-			Nbt::Chunk(chunk) => chunk.insert(idx, CompoundEntry::new(kv.0.unwrap_or(CompactString::const_new("_")), kv.1))?.map(CompoundEntry::into),
+			Nbt::Chunk(chunk) => chunk
+				.insert(idx, CompoundEntry::new(kv.0.unwrap_or(CompactString::const_new("_")), kv.1))?
+				.map(CompoundEntry::into),
 			_ => return Err(kv),
 		})
 	}
@@ -1309,12 +1324,32 @@ impl NbtElement {
 		use NbtPatternMut as Nbt;
 
 		Ok(match self.as_pattern_mut() {
-			Nbt::ByteArray(byte_array) => unsafe { byte_array.replace(idx, kv.1)?.map(NbtElement::into) },
-			Nbt::IntArray(int_array) => unsafe { int_array.replace(idx, kv.1)?.map(NbtElement::into) },
-			Nbt::LongArray(long_array) => unsafe { long_array.replace(idx, kv.1)?.map(NbtElement::into) },
+			Nbt::ByteArray(byte_array) => unsafe {
+				byte_array
+					.replace(idx, kv.1)?
+					.map(NbtElement::into)
+			},
+			Nbt::IntArray(int_array) => unsafe {
+				int_array
+					.replace(idx, kv.1)?
+					.map(NbtElement::into)
+			},
+			Nbt::LongArray(long_array) => unsafe {
+				long_array
+					.replace(idx, kv.1)?
+					.map(NbtElement::into)
+			},
 			Nbt::List(list) => unsafe { list.replace(idx, kv.1)?.map(NbtElement::into) },
-			Nbt::Compound(compound) => unsafe { compound.replace(idx, CompoundEntry::new(kv.0.unwrap_or(CompactString::const_new("_")), kv.1))?.map(CompoundEntry::into) },
-			Nbt::Chunk(chunk) => unsafe { chunk.replace(idx, CompoundEntry::new(kv.0.unwrap_or(CompactString::const_new("_")), kv.1))?.map(CompoundEntry::into) },
+			Nbt::Compound(compound) => unsafe {
+				compound
+					.replace(idx, CompoundEntry::new(kv.0.unwrap_or(CompactString::const_new("_")), kv.1))?
+					.map(CompoundEntry::into)
+			},
+			Nbt::Chunk(chunk) => unsafe {
+				chunk
+					.replace(idx, CompoundEntry::new(kv.0.unwrap_or(CompactString::const_new("_")), kv.1))?
+					.map(CompoundEntry::into)
+			},
 			Nbt::Region(region) => unsafe { region.replace(idx, kv.1)?.map(NbtElement::into) },
 			_ => return Err(kv),
 		})
@@ -1409,7 +1444,10 @@ impl NbtElement {
 				(before, success)
 			}
 			Nbt::String(string) => (
-				core::mem::replace(string, NbtString::new(value.into())).str.as_str().to_owned(),
+				core::mem::replace(string, NbtString::new(value.into()))
+					.str
+					.as_str()
+					.to_owned(),
 				true,
 			),
 			_ => {
@@ -1468,7 +1506,9 @@ impl NbtElement {
 	pub unsafe fn try_compound_singleton_into_inner(mut self) -> Result<Self, Self> {
 		if let Some(compound) = self.as_compound_mut()
 			&& compound.len() == 1
-			&& compound.get(0).is_some_and(|entry| entry.key.is_empty())
+			&& compound
+				.get(0)
+				.is_some_and(|entry| entry.key.is_empty())
 			&& let Some(CompoundEntry { key: _, value }) = unsafe { compound.remove(0) }
 		{
 			Ok(value)
@@ -1570,7 +1610,9 @@ impl<'a> Index<&'a str> for NbtElement {
 			}
 		};
 
-		if let Some(idx) = map.idx_of(index) && let Some(CompoundEntry { key: _, value }) = map.entries.get(idx) {
+		if let Some(idx) = map.idx_of(index)
+			&& let Some(CompoundEntry { key: _, value }) = map.entries.get(idx)
+		{
 			value
 		} else {
 			std::hint::cold_path();
@@ -1595,7 +1637,9 @@ impl<'a> IndexMut<&'a str> for NbtElement {
 				}
 			};
 
-			if let Some(idx) = map.idx_of(index) && let Some(CompoundEntry { key: _, value }) = map.entries.get_mut(idx) {
+			if let Some(idx) = map.idx_of(index)
+				&& let Some(CompoundEntry { key: _, value }) = map.entries.get_mut(idx)
+			{
 				Some(value)
 			} else {
 				std::hint::cold_path();
