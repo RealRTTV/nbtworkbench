@@ -331,7 +331,7 @@ impl ComplexNbtElementVariant for NbtList {
 		this
 	}
 
-	fn height(&self) -> usize { if self.open { self.height as usize } else { 1 } }
+	fn height(&self) -> usize { self.height as usize }
 
 	fn true_height(&self) -> usize { self.true_height as usize }
 

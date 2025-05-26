@@ -175,7 +175,6 @@ pub trait ComplexNbtElementVariant: NbtElementVariant {
 	fn new(entries: Vec<Self::Entry>) -> Self
 	where Self: Sized;
 
-	// todo: potentially removable `open` check
 	#[must_use]
 	fn height(&self) -> usize;
 
