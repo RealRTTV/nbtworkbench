@@ -1536,87 +1536,24 @@ impl Debug for NbtElement {
 }
 
 impl Drop for NbtElement {
-	// todo: replace with as_pattern_mut
 	fn drop(&mut self) {
-		unsafe {
-			let id = self.id();
-			match id {
-				NbtByteArray::ID | NbtIntArray::ID | NbtLongArray::ID => {
-					let vec = &mut *self.byte_array.values;
-					if !vec.is_empty() {
-						dealloc(vec.as_mut_ptr().cast(), Layout::array::<Self>(vec.capacity()).unwrap_unchecked());
-					}
-					dealloc((vec as *mut Vec<Self>).cast(), Layout::new::<Vec<Self>>());
-				}
-				NbtString::ID => {
-					(&raw mut self.string.str).drop_in_place();
-				}
-				NbtList::ID => {
-					let list = &mut *self.list.elements;
-					for entry in &mut *list {
-						if entry.id() > NbtDouble::ID {
-							(entry as *mut Self).drop_in_place();
-						}
-					}
-					if !list.is_empty() {
-						dealloc(list.as_mut_ptr().cast(), Layout::array::<Self>(list.capacity()).unwrap_unchecked());
-					}
-					dealloc((list as *mut Vec<Self>).cast(), Layout::new::<Vec<Self>>());
-				}
-				NbtCompound::ID => {
-					let map = &mut *self.compound.map;
-					let CompoundMap { indices, entries } = map;
-					(indices as *mut HashTable<usize>).drop_in_place();
-					for CompoundEntry { value, key, .. } in &mut *entries {
-						(value as *mut Self).drop_in_place();
-						if key.is_heap_allocated() {
-							dealloc(key.as_mut_ptr(), Layout::array::<u8>(key.len()).unwrap_unchecked());
-						}
-					}
-					if !entries.is_empty() {
-						dealloc(entries.as_mut_ptr().cast(), Layout::array::<CompoundEntry>(entries.capacity()).unwrap_unchecked());
-					}
-					dealloc((map as *mut CompoundMap).cast(), Layout::new::<CompoundMap>());
-				}
-				NbtChunk::ID => {
-					let map = &mut *self.chunk.map;
-					let CompoundMap { indices, entries } = map;
-					(indices as *mut HashTable<usize>).drop_in_place();
-					for CompoundEntry { value, key, .. } in &mut *entries {
-						(value as *mut Self).drop_in_place();
-						if key.is_heap_allocated() {
-							dealloc(key.as_mut_ptr(), Layout::array::<u8>(key.len()).unwrap_unchecked());
-						}
-					}
-					if !entries.is_empty() {
-						dealloc(entries.as_mut_ptr().cast(), Layout::array::<CompoundEntry>(entries.capacity()).unwrap_unchecked());
-					}
-					dealloc((map as *mut CompoundMap).cast(), Layout::new::<CompoundMap>());
-				}
-				// no real speedup from using threads, seems to be memory-bound, or dealloc-call-bound
-				NbtRegion::ID => {
-					let chunks = *(&raw const self.region.chunks).read();
-					for mut chunk in core::mem::transmute::<_, [ManuallyDrop<Self>; 1024]>(chunks) {
-						let ptr = &mut **chunk.as_chunk_unchecked_mut();
-						let map = &mut *ptr.map;
-						let CompoundMap { indices, entries } = map;
-						(indices as *mut HashTable<usize>).drop_in_place();
-						for CompoundEntry { value, key, .. } in &mut *entries {
-							(value as *mut Self).drop_in_place();
-							if key.is_heap_allocated() {
-								dealloc(key.as_mut_ptr(), Layout::array::<u8>(key.len()).unwrap_unchecked());
-							}
-						}
-						if !entries.is_empty() {
-							dealloc(entries.as_mut_ptr().cast(), Layout::array::<CompoundEntry>(entries.capacity()).unwrap_unchecked());
-						}
-						dealloc((map as *mut CompoundMap).cast(), Layout::new::<CompoundMap>());
-						dealloc((ptr as *mut NbtCompound).cast(), Layout::new::<NbtCompound>());
-					}
-				}
-				NbtByte::ID | NbtShort::ID | NbtInt::ID | NbtLong::ID | NbtFloat::ID | NbtDouble::ID | Self::NULL_ID => {}
-				_ => core::hint::unreachable_unchecked(),
-			}
+		use NbtPatternMut as Nbt;
+
+		match self.as_pattern_mut() {
+			Nbt::Byte(inner) => unsafe { (&raw mut inner).drop_in_place() },
+			Nbt::Short(inner) => unsafe { (&raw mut inner).drop_in_place() },
+			Nbt::Int(inner) => unsafe { (&raw mut inner).drop_in_place() },
+			Nbt::Long(inner) => unsafe { (&raw mut inner).drop_in_place() },
+			Nbt::Float(inner) => unsafe { (&raw mut inner).drop_in_place() },
+			Nbt::Double(inner) => unsafe { (&raw mut inner).drop_in_place() },
+			Nbt::ByteArray(inner) => unsafe { (&raw mut inner).drop_in_place() },
+			Nbt::String(inner) => unsafe { (&raw mut inner).drop_in_place() },
+			Nbt::List(inner) => unsafe { (&raw mut inner).drop_in_place() },
+			Nbt::Compound(inner) => unsafe { (&raw mut inner).drop_in_place() },
+			Nbt::IntArray(inner) => unsafe { (&raw mut inner).drop_in_place() },
+			Nbt::LongArray(inner) => unsafe { (&raw mut inner).drop_in_place() },
+			Nbt::Chunk(inner) => unsafe { (&raw mut inner).drop_in_place() },
+			Nbt::Region(inner) => unsafe { (&raw mut inner).drop_in_place() },
 		}
 	}
 }
