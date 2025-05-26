@@ -23,7 +23,7 @@ pub use string::*;
 
 use crate::elements::result::NbtParseResult;
 use crate::render::{RenderContext, VertexBufferBuilder};
-use crate::serialization::{Decoder, PrettyFormatter, UncheckedBufWriter};
+use crate::serialization::{Decoder, PrettyDisplay, PrettyFormatter, UncheckedBufWriter};
 use crate::util::Vec2u;
 #[cfg(target_arch = "wasm32")] use crate::wasm::FakeScope as Scope;
 use crate::workbench::MarkedLines;
@@ -125,7 +125,7 @@ pub trait Matches {
 	fn matches(&self, other: &Self) -> bool;
 }
 
-pub trait NbtElementVariant: Clone + PartialEq + Display + Matches + Default {
+pub trait NbtElementVariant: Clone + PartialEq + Display + Matches + Default + PrettyDisplay {
 	const ID: u8;
 	const UV: Vec2u;
 	const GHOST_UV: Vec2u;
@@ -141,9 +141,6 @@ pub trait NbtElementVariant: Clone + PartialEq + Display + Matches + Default {
 	fn to_le_bytes(&self, writer: &mut UncheckedBufWriter);
 
 	fn render(&self, builder: &mut VertexBufferBuilder, name: Option<&str>, remaining_scroll: &mut usize, tail: bool, ctx: &mut RenderContext);
-
-	// todo: move to own trait
-	fn pretty_fmt(&self, f: &mut PrettyFormatter);
 
 	#[must_use]
 	fn value(&self) -> Cow<'_, str>;

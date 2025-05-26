@@ -10,7 +10,7 @@ use crate::assets::{CONNECTION_UV, HEADER_SIZE, JUST_OVERLAPPING_BASE_TEXT_Z, JU
 use crate::elements::result::NbtParseResult;
 use crate::elements::{ComplexNbtElementVariant, Matches, NbtChunk, NbtElement, NbtElementVariant};
 use crate::render::{RenderContext, TextColor, VertexBufferBuilder};
-use crate::serialization::{Decoder, PrettyFormatter, UncheckedBufWriter};
+use crate::serialization::{Decoder, PrettyDisplay, PrettyFormatter, UncheckedBufWriter};
 use crate::util::Vec2u;
 #[cfg(target_arch = "wasm32")]
 use crate::wasm::{fake_scope as scope, FakeScope as Scope};
@@ -88,6 +88,35 @@ impl Display for NbtRegion {
 		}
 		write!(f, "}}")?;
 		Ok(())
+	}
+}
+
+impl PrettyDisplay for NbtRegion {
+	fn pretty_fmt(&self, f: &mut PrettyFormatter) {
+		if self.is_empty() {
+			f.write_str("Region {}")
+		} else {
+			f.write_str("Region {\n");
+			f.increase();
+			let len = self.loaded_chunks();
+			for (idx, chunk) in self
+				.children()
+				.filter_map(NbtElement::as_chunk)
+				.filter(|chunk| chunk.is_loaded())
+				.enumerate()
+			{
+				f.indent();
+				chunk.pretty_fmt(f);
+				if idx + 1 < len {
+					f.write_str(",\n");
+				} else {
+					f.write_str("\n");
+				}
+			}
+			f.decrease();
+			f.indent();
+			f.write_str("}");
+		}
 	}
 }
 
@@ -342,33 +371,6 @@ impl NbtElementVariant for NbtRegion {
 					value.render(&mut *remaining_scroll, builder, None, idx == self.len() - 1 && tail, ctx);
 				}
 			}
-		}
-	}
-
-	fn pretty_fmt(&self, f: &mut PrettyFormatter) {
-		if self.is_empty() {
-			f.write_str("Region {}")
-		} else {
-			f.write_str("Region {\n");
-			f.increase();
-			let len = self.loaded_chunks();
-			for (idx, chunk) in self
-				.children()
-				.filter_map(NbtElement::as_chunk)
-				.filter(|chunk| chunk.is_loaded())
-				.enumerate()
-			{
-				f.indent();
-				chunk.pretty_fmt(f);
-				if idx + 1 < len {
-					f.write_str(",\n");
-				} else {
-					f.write_str("\n");
-				}
-			}
-			f.decrease();
-			f.indent();
-			f.write_str("}");
 		}
 	}
 

@@ -12,7 +12,7 @@ use crate::assets::{BASE_Z, JUST_OVERLAPPING_BASE_TEXT_Z, STRING_GHOST_UV, STRIN
 use crate::elements::result::NbtParseResult;
 use crate::elements::{Matches, NbtElementVariant, PrimitiveNbtElementVariant};
 use crate::render::{RenderContext, TextColor, VertexBufferBuilder};
-use crate::serialization::{Decoder, PrettyFormatter, UncheckedBufWriter};
+use crate::serialization::{Decoder, PrettyDisplay, PrettyFormatter, UncheckedBufWriter};
 use crate::util::{StrExt, Vec2u};
 
 #[repr(transparent)]
@@ -27,6 +27,10 @@ impl Matches for NbtString {
 
 impl Display for NbtString {
 	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result { if self.str.as_str().needs_escape() { write!(f, "{:?}", self.str.as_str()) } else { write!(f, "{}", self.str.as_str()) } }
+}
+
+impl PrettyDisplay for NbtString {
+	fn pretty_fmt(&self, f: &mut PrettyFormatter) { f.write_str(self.str.as_str()) }
 }
 
 impl NbtElementVariant for NbtString {
@@ -73,8 +77,6 @@ impl NbtElementVariant for NbtString {
 
 		ctx.offset_pos(0, 16);
 	}
-
-	fn pretty_fmt(&self, f: &mut PrettyFormatter) { f.write_str(self.str.as_str()) }
 
 	fn value(&self) -> Cow<'_, str> { Cow::Borrowed(self.str.as_str()) }
 }

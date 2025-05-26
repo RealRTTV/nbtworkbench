@@ -66,6 +66,17 @@ impl UncheckedBufWriter {
 			}
 		}
 	}
+	
+	pub fn write_bytes(&mut self, byte: u8, count: usize) {
+		unsafe {
+			if likely(count < self.remaining()) {
+				self.buf.add(self.buf_len).cast::<u8>().write_bytes(byte, count);
+				self.buf_len += count;
+			} else {
+				self.write_bytes_pushing_cold(byte, count);
+			}
+		}
+	}
 
 	pub fn write_be_str(&mut self, str: &str) {
 		self.write(&(str.len() as u16).to_be_bytes());
@@ -95,6 +106,27 @@ impl UncheckedBufWriter {
 			.add(self.inner_len)
 			.copy_from_nonoverlapping(bytes.as_ptr(), bytes.len());
 		self.inner_len += bytes.len();
+		self.buf_len = 0;
+	}
+
+	#[cold]
+	#[inline(never)]
+	unsafe fn write_bytes_pushing_cold(&mut self, byte: u8, count: usize) {
+		let malloc_size = (self.inner_len + Self::BUFFER_WIDTH - 1) & !(Self::BUFFER_WIDTH - 1);
+		let new_size = (self.inner_len + count + self.buf_len + Self::BUFFER_WIDTH - 1) & !(Self::BUFFER_WIDTH - 1);
+		self.inner = if self.inner.is_null() {
+			alloc(Layout::array::<u8>(new_size).unwrap_unchecked())
+		} else {
+			realloc(self.inner, Layout::array::<u8>(malloc_size).unwrap_unchecked(), new_size)
+		};
+		self.inner
+			.add(self.inner_len)
+			.copy_from_nonoverlapping(self.buf.cast::<u8>(), self.buf_len);
+		self.inner_len += self.buf_len;
+		self.inner
+			.add(self.inner_len)
+			.write_bytes(byte, count);
+		self.inner_len += count;
 		self.buf_len = 0;
 	}
 

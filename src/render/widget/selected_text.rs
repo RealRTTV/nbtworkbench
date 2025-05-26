@@ -72,7 +72,6 @@ impl DerefMut for SelectedText {
 
 #[derive(Clone)]
 pub struct SelectedTextAdditional {
-	// todo, change this to be Option<usize> and a cache that removes itself on every write
 	pub y: usize,
 	pub indices: OwnedIndices,
 	pub value_color: TextColor,

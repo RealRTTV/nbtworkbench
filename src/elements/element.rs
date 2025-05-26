@@ -1,4 +1,3 @@
-use std::alloc::{dealloc, Layout};
 use std::borrow::Cow;
 use std::fmt::{Debug, Display, Error, Formatter};
 use std::mem::ManuallyDrop;
@@ -7,12 +6,11 @@ use std::slice::{Iter, IterMut};
 #[cfg(not(target_arch = "wasm32"))] use std::thread::Scope;
 
 use compact_str::CompactString;
-use hashbrown::HashTable;
 
 use crate::elements::result::NbtParseResult;
-use crate::elements::{ComplexNbtElementVariant, CompoundEntry, CompoundMap, Matches, NbtByte, NbtByteArray, NbtChunk, NbtCompound, NbtDouble, NbtElementAndKey, NbtElementAndKeyRef, NbtElementAndKeyRefMut, NbtElementVariant, NbtFloat, NbtInt, NbtIntArray, NbtList, NbtLong, NbtLongArray, NbtRegion, NbtShort, NbtString, PrimitiveNbtElementVariant};
+use crate::elements::{ComplexNbtElementVariant, CompoundEntry, Matches, NbtByte, NbtByteArray, NbtChunk, NbtCompound, NbtDouble, NbtElementAndKey, NbtElementAndKeyRef, NbtElementAndKeyRefMut, NbtElementVariant, NbtFloat, NbtInt, NbtIntArray, NbtList, NbtLong, NbtLongArray, NbtRegion, NbtShort, NbtString, PrimitiveNbtElementVariant};
 use crate::render::{RenderContext, TextColor, VertexBufferBuilder};
-use crate::serialization::{BigEndianDecoder, Decoder, LittleEndianDecoder, PrettyFormatter, UncheckedBufWriter};
+use crate::serialization::{BigEndianDecoder, Decoder, LittleEndianDecoder, PrettyDisplay, PrettyFormatter, UncheckedBufWriter};
 use crate::tree::{
 	Indices, IterativeNavigationInformationMut, NavigationInformation, NavigationInformationMut, OwnedIndices, ParentIterativeNavigationInformationMut, ParentNavigationInformation, ParentNavigationInformationMut, TraversalInformation,
 	TraversalInformationMut,
@@ -1503,9 +1501,8 @@ impl Display for NbtElement {
 	}
 }
 
-/// Pretty Formatter
-impl NbtElement {
-	pub fn pretty_fmt(&self, f: &mut PrettyFormatter) {
+impl PrettyDisplay for NbtElement {
+	fn pretty_fmt(&self, f: &mut PrettyFormatter) {
 		use NbtPattern as Nbt;
 
 		match self.as_pattern() {
@@ -1540,20 +1537,20 @@ impl Drop for NbtElement {
 		use NbtPatternMut as Nbt;
 
 		match self.as_pattern_mut() {
-			Nbt::Byte(inner) => unsafe { (&raw mut inner).drop_in_place() },
-			Nbt::Short(inner) => unsafe { (&raw mut inner).drop_in_place() },
-			Nbt::Int(inner) => unsafe { (&raw mut inner).drop_in_place() },
-			Nbt::Long(inner) => unsafe { (&raw mut inner).drop_in_place() },
-			Nbt::Float(inner) => unsafe { (&raw mut inner).drop_in_place() },
-			Nbt::Double(inner) => unsafe { (&raw mut inner).drop_in_place() },
-			Nbt::ByteArray(inner) => unsafe { (&raw mut inner).drop_in_place() },
-			Nbt::String(inner) => unsafe { (&raw mut inner).drop_in_place() },
-			Nbt::List(inner) => unsafe { (&raw mut inner).drop_in_place() },
-			Nbt::Compound(inner) => unsafe { (&raw mut inner).drop_in_place() },
-			Nbt::IntArray(inner) => unsafe { (&raw mut inner).drop_in_place() },
-			Nbt::LongArray(inner) => unsafe { (&raw mut inner).drop_in_place() },
-			Nbt::Chunk(inner) => unsafe { (&raw mut inner).drop_in_place() },
-			Nbt::Region(inner) => unsafe { (&raw mut inner).drop_in_place() },
+			Nbt::Byte(inner) => unsafe { (inner as *mut NbtByte).drop_in_place() },
+			Nbt::Short(inner) => unsafe { (inner as *mut NbtShort).drop_in_place() },
+			Nbt::Int(inner) => unsafe { (inner as *mut NbtInt).drop_in_place() },
+			Nbt::Long(inner) => unsafe { (inner as *mut NbtLong).drop_in_place() },
+			Nbt::Float(inner) => unsafe { (inner as *mut NbtFloat).drop_in_place() },
+			Nbt::Double(inner) => unsafe { (inner as *mut NbtDouble).drop_in_place() },
+			Nbt::ByteArray(inner) => unsafe { (inner as *mut NbtByteArray).drop_in_place() },
+			Nbt::String(inner) => unsafe { (inner as *mut NbtString).drop_in_place() },
+			Nbt::List(inner) => unsafe { (inner as *mut NbtList).drop_in_place() },
+			Nbt::Compound(inner) => unsafe { (inner as *mut NbtCompound).drop_in_place() },
+			Nbt::IntArray(inner) => unsafe { (inner as *mut NbtIntArray).drop_in_place() },
+			Nbt::LongArray(inner) => unsafe { (inner as *mut NbtLongArray).drop_in_place() },
+			Nbt::Chunk(inner) => unsafe { (inner as *mut NbtChunk).drop_in_place() },
+			Nbt::Region(inner) => unsafe { (inner as *mut NbtRegion).drop_in_place() },
 		}
 	}
 }

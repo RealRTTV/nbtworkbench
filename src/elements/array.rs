@@ -66,6 +66,30 @@ macro_rules! array {
 				}
 			}
 
+			impl $crate::serialization::PrettyDisplay for $name {
+				fn pretty_fmt(&self, f: &mut $crate::serialization::PrettyFormatter) {
+					if self.is_empty() {
+						f.write_str(concat!("[", $char, ";]"))
+					} else {
+						let len = self.len();
+						f.write_str(concat!("[", $char, ";\n"));
+						f.increase();
+						for (idx, element) in self.children().enumerate() {
+							f.indent();
+							element.pretty_fmt(f);
+							if idx + 1 < len {
+								f.write_str(",\n");
+							} else {
+								f.write_str("\n");
+							}
+						}
+						f.decrease();
+						f.indent();
+						f.write_str("]");
+					}
+				}
+			}
+
 			impl $name {
 				pub const CHILD_ID: u8 = <$element>::ID;
 
@@ -221,28 +245,6 @@ macro_rules! array {
 						ctx.offset_pos(-16, 0);
 					} else {
 						ctx.skip_line_numbers(self.len());
-					}
-				}
-
-				fn pretty_fmt(&self, f: &mut $crate::serialization::PrettyFormatter) {
-					if self.is_empty() {
-						f.write_str(concat!("[", $char, ";]"))
-					} else {
-						let len = self.len();
-						f.write_str(concat!("[", $char, ";\n"));
-						f.increase();
-						for (idx, element) in self.children().enumerate() {
-							f.indent();
-							element.pretty_fmt(f);
-							if idx + 1 < len {
-								f.write_str(",\n");
-							} else {
-								f.write_str("\n");
-							}
-						}
-						f.decrease();
-						f.indent();
-						f.write_str("]");
 					}
 				}
 

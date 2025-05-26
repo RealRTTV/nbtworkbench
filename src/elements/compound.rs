@@ -14,7 +14,7 @@ use crate::assets::{COMPOUND_GHOST_UV, COMPOUND_ROOT_UV, COMPOUND_UV, CONNECTION
 use crate::elements::result::NbtParseResult;
 use crate::elements::{ComplexNbtElementVariant, Matches, NbtElement, NbtElementAndKey, NbtElementAndKeyRef, NbtElementAndKeyRefMut, NbtElementVariant};
 use crate::render::{RenderContext, TextColor, VertexBufferBuilder};
-use crate::serialization::{Decoder, PrettyFormatter, UncheckedBufWriter};
+use crate::serialization::{Decoder, PrettyDisplay, PrettyFormatter, UncheckedBufWriter};
 use crate::util::{width_ascii, StrExt, Vec2u};
 #[cfg(target_arch = "wasm32")]
 use crate::wasm::{fake_scope as scope, FakeScope as Scope};
@@ -76,6 +76,37 @@ impl Display for NbtCompound {
 			}
 		}
 		write!(f, "}}")
+	}
+}
+
+impl PrettyDisplay for NbtCompound {
+	fn pretty_fmt(&self, f: &mut PrettyFormatter) {
+		if self.is_empty() {
+			f.write_str("{}")
+		} else {
+			let len = self.len();
+			f.write_str("{\n");
+			f.increase();
+			for (idx, CompoundEntry { key, value }) in self.children().enumerate() {
+				f.indent();
+				if key.needs_escape() {
+					f.write_str(&format!("{key:?}"));
+					f.write_str(": ");
+				} else {
+					f.write_str(key);
+					f.write_str(": ");
+				}
+				value.pretty_fmt(f);
+				if idx + 1 < len {
+					f.write_str(",\n");
+				} else {
+					f.write_str("\n");
+				}
+			}
+			f.decrease();
+			f.indent();
+			f.write_str("}");
+		}
 	}
 }
 
@@ -269,35 +300,6 @@ impl NbtElementVariant for NbtCompound {
 			ctx.offset_pos(-16, 0);
 		} else {
 			ctx.skip_line_numbers(self.true_height() - 1);
-		}
-	}
-
-	fn pretty_fmt(&self, f: &mut PrettyFormatter) {
-		if self.is_empty() {
-			f.write_str("{}")
-		} else {
-			let len = self.len();
-			f.write_str("{\n");
-			f.increase();
-			for (idx, CompoundEntry { key, value }) in self.children().enumerate() {
-				f.indent();
-				if key.needs_escape() {
-					f.write_str(&format!("{key:?}"));
-					f.write_str(": ");
-				} else {
-					f.write_str(key);
-					f.write_str(": ");
-				}
-				value.pretty_fmt(f);
-				if idx + 1 < len {
-					f.write_str(",\n");
-				} else {
-					f.write_str("\n");
-				}
-			}
-			f.decrease();
-			f.indent();
-			f.write_str("}");
 		}
 	}
 

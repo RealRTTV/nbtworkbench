@@ -8,7 +8,7 @@ use crate::assets::{CONNECTION_UV, JUST_OVERLAPPING_BASE_TEXT_Z, LIST_GHOST_UV, 
 use crate::elements::result::NbtParseResult;
 use crate::elements::{id_to_string_name, ComplexNbtElementVariant, Matches, NbtCompound, NbtElement, NbtElementVariant};
 use crate::render::{RenderContext, TextColor, VertexBufferBuilder};
-use crate::serialization::{Decoder, PrettyFormatter, UncheckedBufWriter};
+use crate::serialization::{Decoder, PrettyDisplay, PrettyFormatter, UncheckedBufWriter};
 use crate::util::Vec2u;
 #[cfg(target_arch = "wasm32")]
 use crate::wasm::{fake_scope as scope, FakeScope as Scope};
@@ -91,6 +91,37 @@ impl Display for NbtList {
 			}
 		}
 		write!(f, "]")
+	}
+}
+
+impl PrettyDisplay for NbtList {
+	fn pretty_fmt(&self, f: &mut PrettyFormatter) {
+		if self.is_empty() {
+			f.write_str("[]")
+		} else {
+			let len = self.len();
+			let heterogeneous = self.is_heterogeneous();
+			f.write_str("[\n");
+			f.increase();
+			for (idx, element) in self.children().enumerate() {
+				f.indent();
+				if heterogeneous && element.id() != NbtCompound::ID {
+					f.write_str("{ '': ");
+					element.pretty_fmt(f);
+					f.write_str(" }");
+				} else {
+					element.pretty_fmt(f);
+				}
+				if idx + 1 < len {
+					f.write_str(",\n");
+				} else {
+					f.write_str("\n");
+				}
+			}
+			f.decrease();
+			f.indent();
+			f.write_str("]");
+		}
 	}
 }
 
@@ -228,9 +259,7 @@ impl NbtElementVariant for NbtList {
 				let _ = write!(builder, "{}", self.value());
 			}
 
-			if ctx.draw_held_entry_bar(pos + (16, 16), builder, |x, y| pos + (16, 8) == (x, y), |x| self.can_insert(x)) {
-			} else if self.height() == 1 && ctx.draw_held_entry_bar(pos + (16, 16), builder, |x, y| pos + (16, 16) == (x, y), |x| self.can_insert(x)) {
-			}
+			if ctx.draw_held_entry_bar(pos + (16, 16), builder, |x, y| pos + (16, 8) == (x, y), |x| self.can_insert(x)) {} else if self.height() == 1 && ctx.draw_held_entry_bar(pos + (16, 16), builder, |x, y| pos + (16, 16) == (x, y), |x| self.can_insert(x)) {}
 
 			ctx.offset_pos(0, 16);
 			y_before += 16;
@@ -276,35 +305,6 @@ impl NbtElementVariant for NbtList {
 			ctx.offset_pos(-16, 0);
 		} else {
 			ctx.skip_line_numbers(self.true_height() - 1);
-		}
-	}
-
-	fn pretty_fmt(&self, f: &mut PrettyFormatter) {
-		if self.is_empty() {
-			f.write_str("[]")
-		} else {
-			let len = self.len();
-			let heterogeneous = self.is_heterogeneous();
-			f.write_str("[\n");
-			f.increase();
-			for (idx, element) in self.children().enumerate() {
-				f.indent();
-				if heterogeneous && element.id() != NbtCompound::ID {
-					f.write_str("{ '': ");
-					element.pretty_fmt(f);
-					f.write_str(" }");
-				} else {
-					element.pretty_fmt(f);
-				}
-				if idx + 1 < len {
-					f.write_str(",\n");
-				} else {
-					f.write_str("\n");
-				}
-			}
-			f.decrease();
-			f.indent();
-			f.write_str("]");
 		}
 	}
 

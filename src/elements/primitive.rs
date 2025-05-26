@@ -21,6 +21,10 @@ macro_rules! primitive {
 				}
 			}
 
+			impl $crate::serialization::PrettyDisplay for $name {
+				fn pretty_fmt(&self, f: &mut $crate::serialization::PrettyFormatter) { f.write_str(&self.to_string()) }
+			}
+
 			impl $crate::elements::NbtElementVariant for $name {
 				const ID: u8 = $id;
 
@@ -68,8 +72,6 @@ macro_rules! primitive {
 
 					ctx.offset_pos(0, 16);
 				}
-
-				fn pretty_fmt(&self, f: &mut $crate::serialization::PrettyFormatter) { f.write_str(&self.to_string()) }
 
 				fn value(&self) -> ::std::borrow::Cow<'_, str> { ::std::borrow::Cow::Owned(format!("{}", self.value)) }
 			}

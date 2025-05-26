@@ -9,7 +9,7 @@ use crate::assets::{CHUNK_GHOST_UV, CHUNK_UV, CONNECTION_UV, HEADER_SIZE, JUST_O
 use crate::elements::result::{err, from_opt, from_result, ok, NbtParseResult};
 use crate::elements::{ComplexNbtElementVariant, CompoundEntry, Matches, NbtCompound, NbtElement, NbtElementVariant};
 use crate::render::{RenderContext, TextColor, VertexBufferBuilder};
-use crate::serialization::{Decoder, PrettyFormatter, UncheckedBufWriter};
+use crate::serialization::{Decoder, PrettyDisplay, PrettyFormatter, UncheckedBufWriter};
 use crate::util::{now, StrExt, Vec2u};
 #[cfg(target_arch = "wasm32")]
 use crate::wasm::{fake_scope as scope, FakeScope as Scope};
@@ -72,6 +72,13 @@ impl Display for NbtChunk {
 			}
 		}
 		write!(f, "}}")
+	}
+}
+
+impl PrettyDisplay for NbtChunk {
+	fn pretty_fmt(&self, f: &mut PrettyFormatter) {
+		f.write_str(&format!("{} | {} ", self.x, self.z));
+		self.inner.pretty_fmt(f)
 	}
 }
 
@@ -306,11 +313,6 @@ impl NbtElementVariant for NbtChunk {
 		} else {
 			ctx.skip_line_numbers(self.true_height() - 1);
 		}
-	}
-
-	fn pretty_fmt(&self, f: &mut PrettyFormatter) {
-		f.write_str(&format!("{} | {} ", self.x, self.z));
-		self.inner.pretty_fmt(f)
 	}
 
 	fn value(&self) -> Cow<'_, str> { Cow::Owned(format!("{}, {}", self.x, self.z)) }
