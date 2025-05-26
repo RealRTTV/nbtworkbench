@@ -29,7 +29,7 @@ impl<'a> NavigationInformation<'a> {
 				true_line_number += sibling.true_height();
 			}
 
-			let (k, v) = element.get_kv(idx)?;
+			let (k, v) = element.get(idx)?;
 			key = k;
 			element = v;
 		}
@@ -122,7 +122,7 @@ impl<'nbt, 'indices> ParentNavigationInformation<'nbt, 'indices> {
 
 		Some(Self {
 			idx: last,
-			key: parent.get_kv(last).and_then(|(a, _)| a),
+			key: parent.get(last).and_then(|(a, _)| a),
 			parent,
 			line_number,
 			true_line_number,
@@ -171,12 +171,160 @@ impl<'nbt, 'indices> ParentNavigationInformationMut<'nbt, 'indices> {
 		Some(Self {
 			idx: last,
 			key: parent
-				.get_kv(last)
+				.get(last)
 				.and_then(|(a, _)| a.map(|x| x.to_compact_string())),
 			parent,
 			line_number,
 			true_line_number,
 			parent_indices,
+		})
+	}
+}
+
+pub struct IterativeNavigationInformationMut<'nbt, 'indices> {
+	head: bool,
+	element: &'nbt mut NbtElement,
+	line_number: usize,
+	true_line_number: usize,
+	indices: &'indices Indices,
+}
+
+impl<'nbt, 'indices> IterativeNavigationInformationMut<'nbt, 'indices> {
+	/// # Safety
+	///
+	/// All usages of the &mut [NbtElement] reference must not modify the indices of its children,
+	/// For example, [super::add_element] is not permitted, however [super::open_element] is.
+	///
+	/// Additionally, these values cannot be stored anywhere in memory because of aliasing.
+	#[must_use]
+	pub unsafe fn new(element: &'nbt mut NbtElement, indices: &'indices Indices) -> Self {
+		Self {
+			head: false,
+			element,
+			line_number: 0,
+			true_line_number: 1,
+			indices,
+		}
+	}
+}
+
+pub struct IterativeNavigationInformationMutItem<'nbt> {
+	pub element: &'nbt mut NbtElement,
+	pub line_number: usize,
+	pub true_line_number: usize,
+	pub idx: Option<usize>,
+}
+
+impl<'nbt, 'indices> Iterator for IterativeNavigationInformationMut<'nbt, 'indices> {
+	type Item = IterativeNavigationInformationMutItem<'nbt>;
+
+	fn next(&mut self) -> Option<Self::Item> {
+		if !core::mem::replace(&mut self.head, true) {
+			return Some(Self::Item {
+				element: unsafe { std::ptr::read(&raw const self.element) },
+				line_number: self.line_number,
+				true_line_number: self.true_line_number,
+				idx: None,
+			})
+		}
+
+		let (idx, rest) = self.indices.split_first()?;
+		self.indices = rest;
+
+		self.line_number += 1;
+		self.true_line_number += 1;
+		for jdx in 0..idx {
+			let sibling = self.element[jdx].as_nonnull()?;
+			self.line_number += sibling.height();
+			self.true_line_number += sibling.true_height();
+		}
+
+		let (element, child_element) = unsafe {
+			let duplicate_reference = std::ptr::read(&raw const self.element);
+			let child_reference = core::mem::transmute::<_, &'nbt mut NbtElement>(self.element[idx].as_nonnull_mut()?);
+			(duplicate_reference, child_reference)
+		};
+
+		self.element = child_element;
+
+		Some(Self::Item {
+			element,
+			line_number: self.line_number,
+			true_line_number: self.true_line_number,
+			idx: Some(idx),
+		})
+	}
+}
+
+pub struct ParentIterativeNavigationInformationMut<'nbt, 'indices> {
+	head: bool,
+	element: &'nbt mut NbtElement,
+	line_number: usize,
+	true_line_number: usize,
+	indices: &'indices Indices,
+}
+
+impl<'nbt, 'indices> ParentIterativeNavigationInformationMut<'nbt, 'indices> {
+	/// # Safety
+	///
+	/// All usages of the &mut [`NbtElement`] reference must not modify the indices of its children,
+	/// For example, [`super::add_element`] is not permitted, however [`super::open_element`] is.
+	///
+	/// Additionally, these values cannot be stored anywhere in memory because of aliasing.
+	#[must_use]
+	pub unsafe fn new(element: &'nbt mut NbtElement, indices: &'indices Indices) -> Self {
+		Self {
+			head: false,
+			element,
+			line_number: 0,
+			true_line_number: 1,
+			indices,
+		}
+	}
+}
+
+impl<'nbt, 'indices> Iterator for ParentIterativeNavigationInformationMut<'nbt, 'indices> {
+	type Item = IterativeNavigationInformationMutItem<'nbt>;
+
+	fn next(&mut self) -> Option<Self::Item> {
+		if !core::mem::replace(&mut self.head, true) {
+			return Some(Self::Item {
+				element: unsafe { std::ptr::read(&raw const self.element) },
+				line_number: self.line_number,
+				true_line_number: self.true_line_number,
+				idx: None,
+			})
+		}
+
+		let (idx, rest) = self.indices.split_first()?;
+		self.indices = rest;
+
+		// this is the final node, but since we're only iterating parents, we exclude this one.
+		if rest.is_root() {
+			return None;
+		}
+
+		self.line_number += 1;
+		self.true_line_number += 1;
+		for jdx in 0..idx {
+			let sibling = self.element[jdx].as_nonnull()?;
+			self.line_number += sibling.height();
+			self.true_line_number += sibling.true_height();
+		}
+
+		let (element, child_element) = unsafe {
+			let duplicate_reference = std::ptr::read(&raw const self.element);
+			let child_reference = core::mem::transmute::<_, &'nbt mut NbtElement>(self.element[idx].as_nonnull_mut()?);
+			(duplicate_reference, child_reference)
+		};
+
+		self.element = child_element;
+
+		Some(Self::Item {
+			element,
+			line_number: self.line_number,
+			true_line_number: self.true_line_number,
+			idx: Some(idx),
 		})
 	}
 }

@@ -34,8 +34,8 @@ fn main() {
 		write(r"src/assets/unicode.hex.zib", &buf).unwrap();
 	}
 
-	if std::env::var("CARGO_CFG_TARGET_OS").unwrap() == "windows" {
-		if let Err(e) = winres::WindowsResource::new()
+	if std::env::var("CARGO_CFG_TARGET_OS").unwrap() == "windows"
+		&& let Err(e) = winres::WindowsResource::new()
 			.set_icon_with_id(r"src/assets/build/icon_128.ico", "2")
 			.set_icon_with_id(r"src/assets/build/icon_64.ico", "3")
 			.set_icon_with_id(r"src/assets/build/icon_48.ico", "4")
@@ -43,9 +43,8 @@ fn main() {
 			.set_icon_with_id(r"src/assets/build/icon_16.ico", "6")
 			.set_icon_with_id(r"src/assets/build/icon_256.ico", "!")
 			.compile()
-		{
-			eprintln!("Error! {e}");
-			std::process::exit(1);
-		}
+	{
+		eprintln!("Error! {e}");
+		std::process::exit(1);
 	}
 }

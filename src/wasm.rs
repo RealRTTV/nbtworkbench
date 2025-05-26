@@ -2,9 +2,9 @@ use std::time::Duration;
 
 use wasm_bindgen::prelude::wasm_bindgen;
 
-use crate::render::{TextColor, run};
+use crate::render::{run, TextColor};
 use crate::widget::Alert;
-use crate::{WINDOW_PROPERTIES, WORKBENCH, config};
+use crate::{config, WINDOW_PROPERTIES, WORKBENCH};
 
 #[macro_export]
 macro_rules! error {

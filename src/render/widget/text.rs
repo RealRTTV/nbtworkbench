@@ -4,10 +4,10 @@ use std::time::Duration;
 
 use winit::keyboard::KeyCode;
 
-use crate::assets::{SELECTION_UV, ZOffset};
+use crate::assets::{ZOffset, SELECTION_UV};
 use crate::flags;
 use crate::render::{TextColor, VertexBufferBuilder};
-use crate::util::{CharExt, LinkedQueue, StrExt, Vec2u, get_clipboard, is_jump_char_boundary, is_utf8_char_boundary, now, set_clipboard};
+use crate::util::{get_clipboard, is_jump_char_boundary, is_utf8_char_boundary, now, set_clipboard, CharExt, LinkedQueue, StrExt, Vec2u};
 use crate::widget::KeyResult::{Escape, Failed, Finish, NothingSpecial};
 
 pub const TEXT_DOUBLE_CLICK_INTERVAL: Duration = Duration::from_millis(250);
@@ -341,7 +341,7 @@ impl<Additional: Clone, Cache: Cachelike<Additional>> Text<Additional, Cache> {
 				let new = self
 					.selection
 					.map_or(self.cursor, |x| x.min(self.cursor));
-				self.selection = if new == 0 { None } else { Some(new) };
+				self.selection = (new != 0).then_some(new);
 			} else {
 				self.selection = None;
 			}
@@ -354,7 +354,7 @@ impl<Additional: Clone, Cache: Cachelike<Additional>> Text<Additional, Cache> {
 				let new = self
 					.selection
 					.map_or(self.cursor, |x| x.max(self.cursor));
-				self.selection = if new == self.value.len() { None } else { Some(new) };
+				self.selection = (new != self.value.len()).then_some(new);
 			} else {
 				self.selection = None;
 			}

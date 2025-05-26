@@ -9,12 +9,12 @@ use winit::keyboard::KeyCode;
 use winit::window::Theme;
 
 use crate::assets::{DARK_STRIPE_UV, REPLACE_BOX_SELECTION_Z, REPLACE_BOX_Z, REPLACE_BY_BOOKMARKED_LINES, REPLACE_BY_SEARCH_HITS};
-use crate::elements::{NbtElement, NbtElementAndKey, NbtElementAndKeyRef};
+use crate::elements::{CompoundEntry, Matches, NbtElement, NbtElementAndKey, NbtElementAndKeyRef};
 use crate::render::widget::text::get_cursor_idx;
 use crate::render::{TextColor, VertexBufferBuilder, WindowProperties};
-use crate::tree::{Indices, MutableIndices, OwnedIndices, RenameElementResult, ReplaceElementResult, indices_for_true, rename_element, replace_element};
-use crate::util::{StrExt, Vec2u, create_regex, now};
-use crate::widget::{Cachelike, Notification, NotificationKind, ReplaceBoxKeyResult, SEARCH_BOX_END_X, SEARCH_BOX_START_X, SearchBox, SearchFlags, SearchMode, Text};
+use crate::tree::{indices_for_true, rename_element, replace_element, Indices, MutableIndices, OwnedIndices, RenameElementResult, ReplaceElementResult};
+use crate::util::{create_regex, now, StrExt, Vec2u};
+use crate::widget::{Cachelike, Notification, NotificationKind, ReplaceBoxKeyResult, SearchBox, SearchFlags, SearchMode, Text, SEARCH_BOX_END_X, SEARCH_BOX_START_X};
 use crate::workbench::{MarkedLines, SortAlgorithm, WorkbenchAction};
 use crate::{config, flags};
 
@@ -285,17 +285,19 @@ impl ReplaceBox {
 		let mut current_indices = OwnedIndices::new();
 		let mut indices_max = vec![];
 		let mut actions = vec![];
-		let mut queue = vec![(None, root.as_ref())];
+		let mut queue: Vec<NbtElementAndKeyRef> = vec![(None, root)];
 		let mut failures = 0;
 
 		while let Some((key, element)) = queue.pop() {
 			let mut element_replaced = false;
 			if replacement.matches((key, element)) {
-				let key_str = if replacement.needs_key() { key.map(|s| s.to_owned()) } else { None };
+				let key_str = key
+					.filter(|_| replacement.needs_key())
+					.map(|s| s.to_owned());
 				let element_str = if replacement.needs_element_snbt() {
 					Some((element.to_string(), TextColor::White))
 				} else if replacement.needs_element_value() {
-					Some(element.value()).map(|(a, b)| (a.into_string(), b))
+					Some(element.value()).map(|(a, b)| (a.into_owned(), b))
 				} else {
 					None
 				};
@@ -340,7 +342,7 @@ impl ReplaceBox {
 					}
 					Some(Err(iter)) => {
 						let mut len = 0_usize;
-						for (key, value) in iter.rev() {
+						for CompoundEntry { key, value } in iter.rev() {
 							queue.push((Some(key), value));
 							len += 1;
 						}
@@ -564,8 +566,14 @@ impl BookmarkedBasedSearchReplacement {
 	pub fn replace<'m1, 'm2: 'm1>(&self, root: &mut NbtElement, indices: OwnedIndices, fake_name: &mut Box<str>, mutable_indices: &'m1 mut MutableIndices<'m2>, bookmarks: &mut MarkedLines) -> Option<WorkbenchAction> {
 		match &self.inner {
 			BookmarkedBasedSearchReplacementInner::String(str) => {
-				let key = if self.search_flags.has_key() { Some(str.to_compact_string()) } else { None };
-				let value = if self.search_flags.has_value() { Some(str.to_compact_string()) } else { None };
+				let key = self
+					.search_flags
+					.has_key()
+					.then(|| str.to_compact_string());
+				let value = self
+					.search_flags
+					.has_value()
+					.then(|| str.to_owned());
 				rename_element(root, indices, key, value, &mut None, fake_name, &mut WindowProperties::Fake).map(RenameElementResult::into_action)
 			}
 			BookmarkedBasedSearchReplacementInner::Snbt(replacement) => replace_element(root, replacement.clone(), indices, bookmarks, mutable_indices).map(ReplaceElementResult::into_action),

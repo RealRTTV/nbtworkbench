@@ -1,11 +1,11 @@
 use std::mem::ManuallyDrop;
 
-pub use ZOffset::*;
 use lazy_static::lazy_static;
 use winit::window::Theme;
 use zune_png::zune_core::options::DecoderOptions;
+pub use ZOffset::*;
 
-use crate::util::{Vec2u, now};
+use crate::util::{now, Vec2u};
 
 pub const HEADER_SIZE: usize = 48;
 
@@ -28,8 +28,8 @@ const RELIC_MUSIC_DISC_ICON: &[u8] = include_bytes!("../assets/discs/relic.hex")
 const STAL_MUSIC_DISC_ICON: &[u8] = include_bytes!("../assets/discs/stal.hex");
 
 pub const CONNECTION_UV: Vec2u = Vec2u::new(64, 64);
-pub const UNKNOWN_NBT_UV: Vec2u = Vec2u::new(112, 32);
-pub const UNKNOWN_NBT_GHOST_UV: Vec2u = Vec2u::new(112, 48);
+pub const FROM_CLIPBOARD_UV: Vec2u = Vec2u::new(112, 32);
+pub const FROM_CLIPBOARD_GHOST_UV: Vec2u = Vec2u::new(112, 48);
 pub const SELECTION_UV: Vec2u = Vec2u::new(0, 80);
 pub const UNSELECTED_WIDGET_UV: Vec2u = Vec2u::new(80, 64);
 pub const SELECTED_WIDGET_UV: Vec2u = Vec2u::new(96, 64);
@@ -116,12 +116,12 @@ pub const REGION_UV: Vec2u = Vec2u::new(96, 32);
 pub const REGION_GRID_UV: Vec2u = Vec2u::new(96, 48);
 pub const CHUNK_UV: Vec2u = Vec2u::new(64, 32);
 
-pub const BYTE_GRAYSCALE_UV: Vec2u = Vec2u::new(0, 16);
-pub const SHORT_GRAYSCALE_UV: Vec2u = Vec2u::new(16, 16);
-pub const INT_GRAYSCALE_UV: Vec2u = Vec2u::new(32, 16);
-pub const LONG_GRAYSCALE_UV: Vec2u = Vec2u::new(48, 16);
-pub const FLOAT_GRAYSCALE_UV: Vec2u = Vec2u::new(64, 16);
-pub const DOUBLE_GRAYSCALE_UV: Vec2u = Vec2u::new(80, 16);
+pub const BYTE_GHOST_UV: Vec2u = Vec2u::new(0, 16);
+pub const SHORT_GHOST_UV: Vec2u = Vec2u::new(16, 16);
+pub const INT_GHOST_UV: Vec2u = Vec2u::new(32, 16);
+pub const LONG_GHOST_UV: Vec2u = Vec2u::new(48, 16);
+pub const FLOAT_GHOST_UV: Vec2u = Vec2u::new(64, 16);
+pub const DOUBLE_GHOST_UV: Vec2u = Vec2u::new(80, 16);
 pub const BYTE_ARRAY_GHOST_UV: Vec2u = Vec2u::new(96, 16);
 pub const STRING_GHOST_UV: Vec2u = Vec2u::new(16, 48);
 pub const LIST_GHOST_UV: Vec2u = Vec2u::new(32, 48);
@@ -129,6 +129,7 @@ pub const COMPOUND_GHOST_UV: Vec2u = Vec2u::new(48, 48);
 pub const INT_ARRAY_GHOST_UV: Vec2u = Vec2u::new(112, 16);
 pub const LONG_ARRAY_GHOST_UV: Vec2u = Vec2u::new(0, 48);
 pub const CHUNK_GHOST_UV: Vec2u = Vec2u::new(64, 48);
+
 pub const ALERT_UV: Vec2u = Vec2u::new(112, 144);
 pub const NOTIFICATION_UV: Vec2u = Vec2u::new(112, 184);
 pub const NOTIFICATION_BAR_UV: Vec2u = Vec2u::new(112, 204);

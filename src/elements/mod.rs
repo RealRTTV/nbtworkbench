@@ -3,22 +3,54 @@ mod chunk;
 mod compound;
 mod element;
 mod list;
-mod null;
 mod primitive;
+mod region;
 mod string;
+
+use std::borrow::Cow;
+use std::fmt::Display;
+use std::slice;
+#[cfg(not(target_arch = "wasm32"))] use std::thread::Scope;
 
 pub use array::*;
 pub use chunk::*;
 pub use compound::*;
 pub use element::*;
 pub use list::*;
-pub use null::*;
 pub use primitive::*;
+pub use region::*;
 pub use string::*;
+
+use crate::elements::result::NbtParseResult;
+use crate::render::{RenderContext, VertexBufferBuilder};
+use crate::serialization::{Decoder, PrettyFormatter, UncheckedBufWriter};
+use crate::util::Vec2u;
+#[cfg(target_arch = "wasm32")] use crate::wasm::FakeScope as Scope;
+use crate::workbench::MarkedLines;
 
 pub type NbtElementAndKey = (Option<compact_str::CompactString>, NbtElement);
 
 pub type NbtElementAndKeyRef<'a> = (Option<&'a str>, &'a NbtElement);
+
+pub type NbtElementAndKeyRefMut<'a> = (Option<&'a str>, &'a mut NbtElement);
+
+impl From<NbtElement> for NbtElementAndKey {
+	fn from(value: NbtElement) -> Self {
+		(None, value)
+	}
+}
+
+impl<'a> From<&'a NbtElement> for NbtElementAndKeyRef<'a> {
+	fn from(value: &'a NbtElement) -> Self {
+		(None, value)
+	}
+}
+
+impl<'a> From<&'a mut NbtElement> for NbtElementAndKeyRefMut<'a> {
+	fn from(value: &'a mut NbtElement) -> Self {
+		(None, value)
+	}
+}
 
 pub mod result {
 	use std::error::Error;
@@ -27,6 +59,7 @@ pub mod result {
 	pub type NbtParseResult<T> = anyhow::Result<T>;
 
 	#[cfg(not(debug_assertions))]
+	#[must_use]
 	pub type NbtParseResult<T> = Option<T>;
 
 	#[must_use]
@@ -85,4 +118,117 @@ pub mod result {
 		#[cfg(not(debug_assertions))]
 		return result.ok();
 	}
+}
+
+pub trait Matches {
+	#[must_use]
+	fn matches(&self, other: &Self) -> bool;
+}
+
+pub trait NbtElementVariant: Clone + PartialEq + Display + Matches + Default {
+	const ID: u8;
+	const UV: Vec2u;
+	const GHOST_UV: Vec2u;
+
+	fn from_str0(s: &str) -> Result<(&str, Self), usize>
+	where Self: Sized;
+
+	fn from_bytes<'a, D: Decoder<'a>>(decoder: &mut D) -> NbtParseResult<Self>
+	where Self: Sized;
+
+	fn to_be_bytes(&self, writer: &mut UncheckedBufWriter);
+
+	fn to_le_bytes(&self, writer: &mut UncheckedBufWriter);
+
+	fn render(&self, builder: &mut VertexBufferBuilder, name: Option<&str>, remaining_scroll: &mut usize, tail: bool, ctx: &mut RenderContext);
+
+	// todo: move to own trait
+	fn pretty_fmt(&self, f: &mut PrettyFormatter);
+
+	#[must_use]
+	fn value(&self) -> Cow<'_, str>;
+
+	#[must_use]
+	fn uv(&self) -> Vec2u { Self::UV }
+}
+
+pub trait PrimitiveNbtElementVariant: NbtElementVariant {
+	type InnerType;
+
+	#[must_use]
+	fn new(inner: Self::InnerType) -> Self
+	where Self: Sized;
+
+	#[must_use]
+	fn height(&self) -> usize { 1 }
+
+	#[must_use]
+	fn true_height(&self) -> usize { 1 }
+}
+
+pub trait ComplexNbtElementVariant: NbtElementVariant {
+	type Entry;
+
+	const ROOT_UV: Vec2u = Self::UV;
+
+	#[must_use]
+	fn new(entries: Vec<Self::Entry>) -> Self
+	where Self: Sized;
+
+	// todo: potentially removable `open` check
+	#[must_use]
+	fn height(&self) -> usize;
+
+	#[must_use]
+	fn true_height(&self) -> usize;
+
+	#[must_use]
+	fn len(&self) -> usize;
+
+	#[must_use]
+	fn is_empty(&self) -> bool { self.len() == 0 }
+
+	#[must_use]
+	fn can_insert(&self, value: &NbtElement) -> bool;
+
+	#[must_use]
+	fn is_open(&self) -> bool;
+
+	#[must_use]
+	fn max_depth(&self) -> usize;
+
+	unsafe fn toggle(&mut self);
+
+	unsafe fn insert(&mut self, idx: usize, entry: Self::Entry) -> Result<Option<Self::Entry>, Self::Entry>;
+
+	#[must_use]
+	unsafe fn remove(&mut self, idx: usize) -> Option<Self::Entry>;
+
+	unsafe fn replace(&mut self, idx: usize, entry: Self::Entry) -> Result<Option<Self::Entry>, Self::Entry>;
+
+	unsafe fn swap(&mut self, a: usize, b: usize);
+
+	unsafe fn shut<'a, 'b>(&'b mut self, scope: &'a Scope<'a, 'b>);
+
+	unsafe fn expand<'a, 'b>(&'b mut self, scope: &'a Scope<'a, 'b>);
+
+	fn recache(&mut self);
+
+	fn on_style_change(&mut self, bookmarks: &mut MarkedLines) -> bool { false }
+
+	#[must_use]
+	fn get(&self, idx: usize) -> Option<&Self::Entry>;
+
+	#[must_use]
+	fn get_mut(&mut self, idx: usize) -> Option<&mut Self::Entry>;
+
+	#[must_use]
+	unsafe fn get_unchecked(&self, idx: usize) -> &Self::Entry;
+
+	#[must_use]
+	unsafe fn get_unchecked_mut(&mut self, idx: usize) -> &mut Self::Entry;
+
+	fn children(&self) -> slice::Iter<'_, Self::Entry>;
+
+	fn children_mut(&mut self) -> slice::IterMut<'_, Self::Entry>;
 }

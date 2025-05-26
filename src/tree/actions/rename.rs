@@ -9,7 +9,7 @@ use crate::tree::{OwnedIndices, ParentNavigationInformationMut};
 use crate::workbench::WorkbenchAction;
 
 #[must_use]
-pub fn rename_element(root: &mut NbtElement, indices: OwnedIndices, key: Option<CompactString>, value: Option<CompactString>, path: &mut Option<PathBuf>, name: &mut Box<str>, window_properties: &mut WindowProperties) -> Option<RenameElementResult> {
+pub fn rename_element(root: &mut NbtElement, indices: OwnedIndices, key: Option<CompactString>, value: Option<String>, path: &mut Option<PathBuf>, name: &mut Box<str>, window_properties: &mut WindowProperties) -> Option<RenameElementResult> {
 	if key.is_none() && value.is_none() {
 		return None;
 	}
@@ -46,7 +46,7 @@ pub fn rename_element(root: &mut NbtElement, indices: OwnedIndices, key: Option<
 			.as_ref()
 			.map(|path| path.as_os_str().to_string_lossy())
 			.as_deref()
-			.unwrap_or(&name)
+			.unwrap_or(name)
 			== key
 		{
 			return None;
@@ -66,8 +66,7 @@ pub fn rename_element(root: &mut NbtElement, indices: OwnedIndices, key: Option<
 					path.replace(buf)
 						.as_deref()
 						.and_then(|path| path.to_str())
-						.map(|str| str.to_compact_string())
-						.unwrap_or_else(|| old_name.to_compact_string()),
+						.map_or_else(|| old_name.into_string(), |str| str.to_owned()),
 				),
 			})
 		} else {
@@ -82,12 +81,11 @@ pub fn rename_element(root: &mut NbtElement, indices: OwnedIndices, key: Option<
 pub struct RenameElementResult {
 	pub indices: OwnedIndices,
 	pub key: Option<CompactString>,
-	pub value: Option<CompactString>,
+	pub value: Option<String>,
 }
 
 #[allow(dead_code)]
 impl RenameElementResult {
-	#[must_use]
 	pub fn into_action(self) -> WorkbenchAction {
 		WorkbenchAction::Rename {
 			indices: self.indices,

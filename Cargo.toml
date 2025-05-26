@@ -1,6 +1,6 @@
 [package]
 name = "nbtworkbench"
-version = "1.6.2"
+version = "1.6.3"
 edition = "2024"
 description = "A modern NBT Editor written in Rust designed for performance and efficiency."
 license-file = "LICENSE"
@@ -52,7 +52,7 @@ winres = "0.1.12"
 zune-inflate = { version = "0.2.54", features = ["gzip", "zlib"] }
 flate2 = "1.1.1"
 winit = "0.30.10"
-wgpu = { version = "25.0.0", default-features = false, features = ["webgl", "wgsl", "dx12", "metal", "vulkan", "static-dxc"] }
+wgpu = { version = "25.0.0", default-features = false, features = ["webgl", "wgsl", "dx12", "metal", "vulkan"] }
 fxhash = "0.2.1"
 hashbrown = { version = "0.15.3", features = ["inline-more", "nightly"], default-features = false }
 notify = "8.0.0"

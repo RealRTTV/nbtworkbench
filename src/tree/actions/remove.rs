@@ -7,11 +7,11 @@ pub fn remove_element<'m1, 'm2: 'm1>(root: &mut NbtElement, indices: OwnedIndice
 	let ParentNavigationInformationMut {
 		true_line_number, parent, idx, parent_indices, ..
 	} = root.navigate_parent_mut(&indices)?;
-	let (old_parent_height, old_parent_true_height) = (parent.height(), parent.true_height());
+	let (old_parent_height, old_parent_true_height) = parent.heights();
 	// SAFETY: we have updated all the relevant data
 	let (key, value) = unsafe { parent.remove(idx) }?;
-	let (height, true_height) = (value.height(), value.true_height());
-	let (parent_height, parent_true_height) = (parent.height(), parent.true_height());
+	let (height, true_height) = value.heights();
+	let (parent_height, parent_true_height) = parent.heights();
 	let (diff, true_diff) = (old_parent_height.wrapping_sub(parent_height), old_parent_true_height.wrapping_sub(parent_true_height));
 	// exists because of regions
 	let been_replaced = !(height == diff && true_height == true_diff);
@@ -48,7 +48,7 @@ impl RemoveElementResult {
 	#[must_use]
 	pub fn into_action(self) -> WorkbenchAction {
 		if self.replaces {
-			WorkbenchAction::Replace { indices: self.indices, value: self.kv }
+			WorkbenchAction::Replace { indices: self.indices, kv: self.kv }
 		} else {
 			WorkbenchAction::Remove { kv: self.kv, indices: self.indices }
 		}

@@ -459,30 +459,30 @@ pub trait StrExt {
 impl StrExt for str {
 	fn snbt_string_read(mut self: &Self) -> Result<(CompactString, &Self), usize> {
 		const MAPPING: [Option<u8>; 256] = {
-			let mut initial = [Option::<u8>::None; 256];
-			initial[b'0' as usize] = Some(0);
-			initial[b'1' as usize] = Some(1);
-			initial[b'2' as usize] = Some(2);
-			initial[b'3' as usize] = Some(3);
-			initial[b'4' as usize] = Some(4);
-			initial[b'5' as usize] = Some(5);
-			initial[b'6' as usize] = Some(6);
-			initial[b'7' as usize] = Some(7);
-			initial[b'8' as usize] = Some(8);
-			initial[b'9' as usize] = Some(9);
-			initial[b'a' as usize] = Some(10);
-			initial[b'b' as usize] = Some(11);
-			initial[b'c' as usize] = Some(12);
-			initial[b'd' as usize] = Some(13);
-			initial[b'e' as usize] = Some(14);
-			initial[b'f' as usize] = Some(15);
-			initial[b'A' as usize] = Some(10);
-			initial[b'B' as usize] = Some(11);
-			initial[b'C' as usize] = Some(12);
-			initial[b'D' as usize] = Some(13);
-			initial[b'E' as usize] = Some(14);
-			initial[b'F' as usize] = Some(15);
-			initial
+			let mut mapping = [Option::<u8>::None; 256];
+			mapping[b'0' as usize] = Some(0);
+			mapping[b'1' as usize] = Some(1);
+			mapping[b'2' as usize] = Some(2);
+			mapping[b'3' as usize] = Some(3);
+			mapping[b'4' as usize] = Some(4);
+			mapping[b'5' as usize] = Some(5);
+			mapping[b'6' as usize] = Some(6);
+			mapping[b'7' as usize] = Some(7);
+			mapping[b'8' as usize] = Some(8);
+			mapping[b'9' as usize] = Some(9);
+			mapping[b'a' as usize] = Some(10);
+			mapping[b'b' as usize] = Some(11);
+			mapping[b'c' as usize] = Some(12);
+			mapping[b'd' as usize] = Some(13);
+			mapping[b'e' as usize] = Some(14);
+			mapping[b'f' as usize] = Some(15);
+			mapping[b'A' as usize] = Some(10);
+			mapping[b'B' as usize] = Some(11);
+			mapping[b'C' as usize] = Some(12);
+			mapping[b'D' as usize] = Some(13);
+			mapping[b'E' as usize] = Some(14);
+			mapping[b'F' as usize] = Some(15);
+			mapping
 		};
 
 		if !self.starts_with('"') && !self.starts_with('\'') {
@@ -772,7 +772,12 @@ macro_rules! unsigned_num_width {
 	($name:ident, $ty:ty) => {
 		#[allow(dead_code)]
 		#[must_use]
-		pub const fn $name(x: $ty) -> usize { x.checked_ilog10().map_or(1, |x| x + 1) as usize * width_ascii("1") }
+		pub const fn $name(x: $ty) -> usize {
+			(match x.checked_ilog10() {
+				Some(n) => n as usize + 1,
+				None => 1,
+			}) * width_ascii("1")
+		}
 	};
 }
 
@@ -780,7 +785,13 @@ macro_rules! signed_num_width {
 	($name:ident, $ty:ty) => {
 		#[allow(dead_code)]
 		#[must_use]
-		pub const fn $name(x: $ty) -> usize { x.abs().checked_ilog10().map_or(1, |x| x + 1) as usize * width_ascii("1") + if x < 0 { width_ascii("-") } else { width_ascii("") } }
+		pub const fn $name(x: $ty) -> usize {
+			(match x.abs().checked_ilog10() {
+				Some(n) => n as usize + 1,
+				None => 1,
+			}) * width_ascii("1")
+				+ if x < 0 { width_ascii("-") } else { width_ascii("") }
+		}
 	};
 }
 
@@ -788,7 +799,7 @@ macro_rules! float_num_width {
 	($name:ident, $ty:ty) => {
 		#[allow(dead_code)]
 		#[must_use]
-		pub fn $name(x: $ty) -> usize { $crate::util::StrExt::width(&x.to_string()) }
+		pub fn $name(x: $ty) -> usize { $crate::util::StrExt::width(x.to_string().as_str()) }
 	};
 }
 

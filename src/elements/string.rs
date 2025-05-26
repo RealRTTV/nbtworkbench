@@ -1,5 +1,6 @@
-use std::alloc::{Layout, alloc, dealloc};
+use std::alloc::{alloc, dealloc, Layout};
 use std::array;
+use std::borrow::Cow;
 use std::fmt::{Display, Formatter};
 use std::mem::{ManuallyDrop, MaybeUninit};
 use std::ops::Deref;
@@ -7,30 +8,40 @@ use std::ptr::NonNull;
 
 use compact_str::CompactString;
 
-use crate::assets::{BASE_Z, JUST_OVERLAPPING_BASE_TEXT_Z, STRING_UV, ZOffset};
+use crate::assets::{BASE_Z, JUST_OVERLAPPING_BASE_TEXT_Z, STRING_GHOST_UV, STRING_UV};
 use crate::elements::result::NbtParseResult;
+use crate::elements::{Matches, NbtElementVariant, PrimitiveNbtElementVariant};
 use crate::render::{RenderContext, TextColor, VertexBufferBuilder};
 use crate::serialization::{Decoder, PrettyFormatter, UncheckedBufWriter};
-use crate::util::StrExt;
+use crate::util::{StrExt, Vec2u};
 
 #[repr(transparent)]
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Default)]
 pub struct NbtString {
 	pub str: TwentyThree,
 }
 
-impl NbtString {
-	pub fn matches(&self, other: &Self) -> bool { self.str.as_str() == other.str.as_str() }
+impl Matches for NbtString {
+	fn matches(&self, other: &Self) -> bool { self.str.as_str() == other.str.as_str() }
 }
 
-impl NbtString {
-	pub const ID: u8 = 8;
-	pub(super) fn from_str0(s: &str) -> Result<(&str, Self), usize> {
+impl Display for NbtString {
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result { if self.str.as_str().needs_escape() { write!(f, "{:?}", self.str.as_str()) } else { write!(f, "{}", self.str.as_str()) } }
+}
+
+impl NbtElementVariant for NbtString {
+	const ID: u8 = 8;
+	const UV: Vec2u = STRING_UV;
+	const GHOST_UV: Vec2u = STRING_GHOST_UV;
+
+	fn from_str0(s: &str) -> Result<(&str, Self), usize>
+	where Self: Sized {
 		let (str, s) = s.snbt_string_read()?;
 		Ok((s, Self { str: TwentyThree::new(str) }))
 	}
 
-	pub fn from_bytes<'a, D: Decoder<'a>>(decoder: &mut D) -> NbtParseResult<Self> {
+	fn from_bytes<'a, D: Decoder<'a>>(decoder: &mut D) -> NbtParseResult<Self>
+	where Self: Sized {
 		use super::result::*;
 
 		unsafe {
@@ -39,30 +50,15 @@ impl NbtString {
 		}
 	}
 
-	pub fn to_be_bytes(&self, writer: &mut UncheckedBufWriter) { writer.write_be_str(self.str.as_str()); }
+	fn to_be_bytes(&self, writer: &mut UncheckedBufWriter) { writer.write_be_str(self.str.as_str()); }
 
-	pub fn to_le_bytes(&self, writer: &mut UncheckedBufWriter) { writer.write_le_str(self.str.as_str()); }
-}
+	fn to_le_bytes(&self, writer: &mut UncheckedBufWriter) { writer.write_le_str(self.str.as_str()); }
 
-impl NbtString {
-	#[must_use]
-	pub fn new(str: CompactString) -> Self { Self { str: TwentyThree::new(str) } }
-}
-
-impl Display for NbtString {
-	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result { if self.str.as_str().needs_escape() { write!(f, "{:?}", self.str.as_str()) } else { write!(f, "{}", self.str.as_str()) } }
-}
-
-impl NbtString {
-	pub fn pretty_fmt(&self, f: &mut PrettyFormatter) { f.write_str(&self.to_string()) }
-}
-
-impl NbtString {
-	pub fn render(&self, builder: &mut VertexBufferBuilder, name: Option<&str>, ctx: &mut RenderContext) {
+	fn render(&self, builder: &mut VertexBufferBuilder, name: Option<&str>, _remaining_scroll: &mut usize, _tail: bool, ctx: &mut RenderContext) {
 		use std::fmt::Write as _;
 
 		ctx.line_number();
-		self.render_icon(ctx.pos(), BASE_Z, builder);
+		builder.draw_texture_z(ctx.pos(), BASE_Z, Self::UV, (16, 16));
 
 		ctx.render_errors(ctx.pos(), builder);
 		if ctx.forbid(ctx.pos()) {
@@ -78,13 +74,37 @@ impl NbtString {
 		ctx.offset_pos(0, 16);
 	}
 
-	pub fn render_icon(&self, pos: impl Into<(usize, usize)>, z: ZOffset, builder: &mut VertexBufferBuilder) { builder.draw_texture_z(pos, z, STRING_UV, (16, 16)); }
+	fn pretty_fmt(&self, f: &mut PrettyFormatter) { f.write_str(self.str.as_str()) }
+
+	fn value(&self) -> Cow<'_, str> { Cow::Borrowed(self.str.as_str()) }
+}
+
+impl PrimitiveNbtElementVariant for NbtString {
+	type InnerType = TwentyThree;
+
+	fn new(str: Self::InnerType) -> Self
+	where Self: Sized {
+		Self { str }
+	}
 }
 
 #[repr(C)]
 pub union TwentyThree {
 	heap: ManuallyDrop<HeapTwentyThree>,
 	stack: ManuallyDrop<StackTwentyThree>,
+}
+
+impl Default for TwentyThree {
+	fn default() -> Self {
+		const {
+			let mut data = [0; 23];
+			data[22] = 192;
+
+			Self {
+				stack: ManuallyDrop::new(StackTwentyThree { data }),
+			}
+		}
+	}
 }
 
 impl Clone for TwentyThree {
@@ -97,7 +117,7 @@ impl Clone for TwentyThree {
 					heap: ManuallyDrop::new(HeapTwentyThree {
 						ptr: NonNull::new_unchecked(ptr),
 						len: self.heap.len,
-						_pad: [const { MaybeUninit::<u8>::uninit() }; 22 - core::mem::size_of::<usize>() - core::mem::size_of::<NonNull<u8>>()],
+						_pad: [const { MaybeUninit::<u8>::uninit() }; 22 - size_of::<usize>() - size_of::<NonNull<u8>>()],
 						variant: 254,
 					}),
 				}
@@ -123,7 +143,7 @@ impl TwentyThree {
 					heap: ManuallyDrop::new(HeapTwentyThree {
 						ptr: NonNull::new_unchecked(owned.as_mut_ptr()),
 						len,
-						_pad: [const { MaybeUninit::<u8>::uninit() }; 22 - core::mem::size_of::<usize>() - core::mem::size_of::<NonNull<u8>>()],
+						_pad: [const { MaybeUninit::<u8>::uninit() }; 22 - size_of::<usize>() - size_of::<NonNull<u8>>()],
 						variant: 254,
 					}),
 				};
@@ -163,6 +183,10 @@ impl TwentyThree {
 	}
 }
 
+impl<T: Into<CompactString>> From<T> for TwentyThree {
+	fn from(value: T) -> Self { Self::new(value.into()) }
+}
+
 impl Deref for TwentyThree {
 	type Target = str;
 
@@ -183,7 +207,7 @@ impl Drop for TwentyThree {
 struct HeapTwentyThree {
 	ptr: NonNull<u8>,
 	len: usize,
-	_pad: [MaybeUninit<u8>; 22 - core::mem::size_of::<usize>() - core::mem::size_of::<NonNull<u8>>()],
+	_pad: [MaybeUninit<u8>; 22 - size_of::<usize>() - size_of::<NonNull<u8>>()],
 	variant: u8,
 }
 

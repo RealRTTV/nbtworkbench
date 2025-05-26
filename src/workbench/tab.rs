@@ -4,23 +4,21 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use anyhow::{Context, Result, anyhow, ensure};
+use anyhow::{anyhow, ensure, Context, Result};
 use flate2::Compression;
 use uuid::Uuid;
 use zune_inflate::DeflateDecoder;
 
 use super::{HeldEntry, MarkedLines, WorkbenchAction};
 use crate::assets::{
-	BASE_Z, BYTE_ARRAY_GHOST_UV, BYTE_ARRAY_UV, BYTE_GRAYSCALE_UV, BYTE_UV, CHUNK_GHOST_UV, CHUNK_UV, COMPOUND_GHOST_UV, COMPOUND_ROOT_UV, COMPOUND_UV, DOUBLE_GRAYSCALE_UV, DOUBLE_UV, FLOAT_GRAYSCALE_UV, FLOAT_UV, GZIP_FILE_TYPE_UV, HEADER_SIZE,
-	HELD_SCROLLBAR_UV, INT_ARRAY_GHOST_UV, INT_ARRAY_UV, INT_GRAYSCALE_UV, INT_UV, JUST_OVERLAPPING_BASE_Z, LINE_NUMBER_SEPARATOR_UV, LIST_GHOST_UV, LIST_UV, LITTLE_ENDIAN_HEADER_NBT_FILE_TYPE_UV, LITTLE_ENDIAN_NBT_FILE_TYPE_UV, LONG_ARRAY_GHOST_UV,
-	LONG_ARRAY_UV, LONG_GRAYSCALE_UV, LONG_UV, MCA_FILE_TYPE_UV, NBT_FILE_TYPE_UV, REGION_UV, SCROLLBAR_Z, SHORT_GRAYSCALE_UV, SHORT_UV, SNBT_FILE_TYPE_UV, STEAL_ANIMATION_OVERLAY_UV, STRING_GHOST_UV, STRING_UV, UNHELD_SCROLLBAR_UV,
-	UNKNOWN_NBT_GHOST_UV, UNKNOWN_NBT_UV, ZLIB_FILE_TYPE_UV, ZOffset,
+	ZOffset, BASE_Z, GZIP_FILE_TYPE_UV, HEADER_SIZE, HELD_SCROLLBAR_UV, JUST_OVERLAPPING_BASE_Z, LINE_NUMBER_SEPARATOR_UV, LITTLE_ENDIAN_HEADER_NBT_FILE_TYPE_UV, LITTLE_ENDIAN_NBT_FILE_TYPE_UV, MCA_FILE_TYPE_UV, NBT_FILE_TYPE_UV,
+	SCROLLBAR_Z, SNBT_FILE_TYPE_UV, STEAL_ANIMATION_OVERLAY_UV, UNHELD_SCROLLBAR_UV, FROM_CLIPBOARD_GHOST_UV, FROM_CLIPBOARD_UV, ZLIB_FILE_TYPE_UV,
 };
-use crate::elements::{NbtCompound, NbtElement, NbtList, NbtRegion};
+use crate::elements::{ComplexNbtElementVariant, NbtByte, NbtByteArray, NbtChunk, NbtCompound, NbtDouble, NbtElement, NbtElementVariant, NbtFloat, NbtInt, NbtIntArray, NbtList, NbtLong, NbtLongArray, NbtRegion, NbtShort, NbtString};
 use crate::render::{RenderContext, TextColor, VertexBufferBuilder, WindowProperties};
 use crate::tree::rename_element;
-use crate::util::{LinkedQueue, StrExt, Vec2u, drop_on_separate_thread, now};
-use crate::widget::{SelectedText, SelectedTextAdditional, TEXT_DOUBLE_CLICK_INTERVAL, Text, get_cursor_left_jump_idx, get_cursor_right_jump_idx};
+use crate::util::{drop_on_separate_thread, now, LinkedQueue, StrExt, Vec2u};
+use crate::widget::{get_cursor_left_jump_idx, get_cursor_right_jump_idx, SelectedText, SelectedTextAdditional, Text, TEXT_DOUBLE_CLICK_INTERVAL};
 
 pub struct Tab {
 	pub value: Box<NbtElement>,
@@ -98,7 +96,7 @@ impl Tab {
 		let window_dims = window_dims.into();
 
 		Self {
-			value: Box::new(if region { NbtElement::Region(NbtRegion::new()) } else { NbtElement::Compound(NbtCompound::new()) }),
+			value: Box::new(if region { NbtElement::Region(NbtRegion::default()) } else { NbtElement::Compound(NbtCompound::default()) }),
 			name: "new.nbt".into(),
 			path: None,
 			format: FileFormat::Nbt,
@@ -189,11 +187,11 @@ impl Tab {
 		let horizontal_scroll_before = core::mem::replace(&mut builder.horizontal_scroll, self.horizontal_scroll());
 		// let start = std::time::Instant::now();
 		if let Some(compound) = self.value.as_compound() {
-			compound.render_root(builder, &self.name, ctx);
+			compound.render(builder, Some(&self.name), &mut (builder.scroll() / 16), true, ctx);
 		} else if let Some(region) = self.value.as_region() {
-			region.render_root(builder, &self.name, ctx);
+			region.render(builder, Some(&self.name), &mut (builder.scroll() / 16), true, ctx);
 		} else if let Some(list) = self.value.as_list() {
-			list.render_root(builder, &self.name, ctx);
+			list.render(builder, Some(&self.name), &mut (builder.scroll() / 16), true, ctx);
 		}
 		// println!("Tree Only: {}ms", start.elapsed().as_millis_f64());
 		builder.color = TextColor::White.to_raw();
@@ -239,20 +237,20 @@ impl Tab {
 		builder.draw_texture_region_z((260, 22), BASE_Z, LINE_NUMBER_SEPARATOR_UV, (2, 23), (2, 16));
 
 		{
-			let mx = if (24..46).contains(&mouse_y) && mouse_x >= 16 + 16 + 4 { Some((mouse_x - (16 + 16 + 4)) & !15) } else { None };
+			let mx = ((24..46).contains(&mouse_y) && mouse_x >= 16 + 16 + 4).then(|| (mouse_x - (16 + 16 + 4)) & !15);
 			for (idx, (selected, unselected, name)) in [
-				(BYTE_UV, BYTE_GRAYSCALE_UV, "Byte (1)"),
-				(SHORT_UV, SHORT_GRAYSCALE_UV, "Short (2)"),
-				(INT_UV, INT_GRAYSCALE_UV, "Int (3)"),
-				(LONG_UV, LONG_GRAYSCALE_UV, "Long (4)"),
-				(FLOAT_UV, FLOAT_GRAYSCALE_UV, "Float (5)"),
-				(DOUBLE_UV, DOUBLE_GRAYSCALE_UV, "Double (6)"),
-				(BYTE_ARRAY_UV, BYTE_ARRAY_GHOST_UV, "Byte Array (7)"),
-				(INT_ARRAY_UV, INT_ARRAY_GHOST_UV, "Int Array (8)"),
-				(LONG_ARRAY_UV, LONG_ARRAY_GHOST_UV, "Long Array (9)"),
-				(STRING_UV, STRING_GHOST_UV, "String (0)"),
-				(LIST_UV, LIST_GHOST_UV, "List (-)"),
-				(COMPOUND_UV, COMPOUND_GHOST_UV, "Compound (=)"),
+				(NbtByte::UV, NbtByte::GHOST_UV, "Byte (1)"),
+				(NbtShort::UV, NbtShort::GHOST_UV, "Short (2)"),
+				(NbtInt::UV, NbtInt::GHOST_UV, "Int (3)"),
+				(NbtLong::UV, NbtLong::GHOST_UV, "Long (4)"),
+				(NbtFloat::UV, NbtFloat::GHOST_UV, "Float (5)"),
+				(NbtDouble::UV, NbtDouble::GHOST_UV, "Double (6)"),
+				(NbtByteArray::UV, NbtByteArray::GHOST_UV, "Byte Array (7)"),
+				(NbtIntArray::UV, NbtIntArray::GHOST_UV, "Int Array (8)"),
+				(NbtLongArray::UV, NbtLongArray::GHOST_UV, "Long Array (9)"),
+				(NbtString::UV, NbtString::GHOST_UV, "String (0)"),
+				(NbtList::UV, NbtList::GHOST_UV, "List (-)"),
+				(NbtCompound::UV, NbtCompound::GHOST_UV, "Compound (=)"),
 			]
 			.into_iter()
 			.enumerate()
@@ -270,9 +268,9 @@ impl Tab {
 			{
 				let uv = if mx == Some(192) && self.value.id() == NbtRegion::ID && !skip_tooltips {
 					builder.draw_tooltip(&["Chunk (`)"], (192, 26 + 16), false);
-					CHUNK_UV
+					NbtChunk::UV
 				} else {
-					CHUNK_GHOST_UV
+					NbtChunk::GHOST_UV
 				};
 				builder.draw_texture((192 + 16 + 16 + 4, 26), uv, (16, 16));
 			}
@@ -280,9 +278,9 @@ impl Tab {
 			{
 				let uv = if mx == Some(208) && !skip_tooltips {
 					builder.draw_tooltip(&["Clipboard (V)"], (208, 26 + 16), false);
-					UNKNOWN_NBT_UV
+					FROM_CLIPBOARD_UV
 				} else {
-					UNKNOWN_NBT_GHOST_UV
+					FROM_CLIPBOARD_GHOST_UV
 				};
 				builder.draw_texture((208 + 16 + 16 + 4, 26), uv, (16, 16));
 			}
@@ -304,11 +302,11 @@ impl Tab {
 	pub fn draw_icon(&self, builder: &mut VertexBufferBuilder, pos: impl Into<(usize, usize)>, z: ZOffset) {
 		let id = self.value.id();
 		if id == NbtCompound::ID {
-			builder.draw_texture_z(pos, z, COMPOUND_ROOT_UV, (16, 16));
+			builder.draw_texture_z(pos, z, NbtCompound::ROOT_UV, (16, 16));
 		} else if id == NbtRegion::ID {
-			builder.draw_texture_z(pos, z, REGION_UV, (16, 16));
+			builder.draw_texture_z(pos, z, NbtRegion::UV, (16, 16));
 		} else if id == NbtList::ID {
-			builder.draw_texture_z(pos, z, LIST_UV, (16, 16));
+			builder.draw_texture_z(pos, z, NbtList::UV, (16, 16));
 		}
 	}
 
@@ -628,12 +626,12 @@ impl FileFormat {
 			Self::Nbt | Self::Mca => data.to_be_file(),
 			Self::Gzip => {
 				let mut vec = vec![];
-				let _ = flate2::read::GzEncoder::new(data.to_be_file(), Compression::best()).read_to_end(&mut vec);
+				let _ = flate2::read::GzEncoder::new(data.to_be_file().as_slice(), Compression::best()).read_to_end(&mut vec);
 				vec
 			}
 			Self::Zlib => {
 				let mut vec = vec![];
-				let _ = flate2::read::ZlibEncoder::new(data.to_be_file(), Compression::best()).read_to_end(&mut vec);
+				let _ = flate2::read::ZlibEncoder::new(data.to_be_file().as_slice(), Compression::best()).read_to_end(&mut vec);
 				vec
 			}
 			Self::Lz4 => lz4_flex::compress(&data.to_be_file()),

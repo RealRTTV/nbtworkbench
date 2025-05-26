@@ -1,11 +1,10 @@
-#[cfg(not(target_arch = "wasm32"))] use std::thread::{Scope, scope};
+#[cfg(not(target_arch = "wasm32"))] use std::thread::scope;
 
-use crate::assets::{HEADER_SIZE, HIDDEN_BOOKMARK_UV};
 use crate::elements::NbtElement;
 use crate::tree::{Indices, NavigationInformationMut};
 #[cfg(target_arch = "wasm32")]
-use crate::wasm::{FakeScope as Scope, fake_scope as scope};
-use crate::workbench::{MarkedLine, MarkedLines};
+use crate::wasm::{fake_scope as scope, FakeScope as Scope};
+use crate::workbench::MarkedLines;
 
 #[must_use]
 pub fn close_element(root: &mut NbtElement, indices: &Indices, bookmarks: &mut MarkedLines) -> Option<()> {
@@ -20,7 +19,8 @@ pub fn close_element(root: &mut NbtElement, indices: &Indices, bookmarks: &mut M
 	if !element.is_open() {
 		return Some(())
 	};
-	scope(|scope| element.shut(scope));
+	// SAFETY: we are literally updating all the relevant information
+	scope(|scope| unsafe { element.shut(scope) });
 	let height_after = element.height();
 	let height_lost = height_before - height_after;
 

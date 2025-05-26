@@ -1,4 +1,4 @@
-use crate::elements::{NbtElement, NbtElementAndKey};
+use crate::elements::{NbtElement, NbtElementAndKey, ComplexNbtElementVariant};
 use crate::tree::{MutableIndices, OwnedIndices, ParentNavigationInformationMut};
 use crate::workbench::{MarkedLines, WorkbenchAction};
 
@@ -7,16 +7,16 @@ pub fn add_element<'m1, 'm2: 'm1>(root: &mut NbtElement, kv: NbtElementAndKey, i
 	let ParentNavigationInformationMut {
 		true_line_number, parent, idx, parent_indices, ..
 	} = root.navigate_parent_mut(&indices)?;
-	let (old_parent_height, old_parent_true_height) = (parent.height(), parent.true_height());
+	let (old_parent_height, old_parent_true_height) = parent.heights();
 	// SAFETY: we have updated all the relevant data
 	let old_value = match unsafe { parent.insert(idx, kv) } {
 		Ok(Some(old)) => Some(old),
 		Ok(None) => None,
 		Err(_) => return None,
 	};
-	let (parent_height, parent_true_height) = (parent.height(), parent.true_height());
+	let (parent_height, parent_true_height) = parent.heights();
 	let (diff, true_diff) = (parent_height.wrapping_sub(old_parent_height), parent_true_height.wrapping_sub(old_parent_true_height));
-	let (_old_height, old_true_height) = (old_value.as_ref().map(NbtElement::height), old_value.as_ref().map(NbtElement::true_height));
+	let (_old_height, old_true_height) = match old_value.as_ref().map(|kv| kv.1.heights()) { Some((a, b)) => (Some(a), Some(b)), None => (None, None) };
 	let been_replaced = old_true_height.is_some();
 
 	bookmarks.remove(true_line_number..true_line_number + old_true_height.unwrap_or(0));
@@ -32,19 +32,19 @@ pub fn add_element<'m1, 'm2: 'm1>(root: &mut NbtElement, kv: NbtElementAndKey, i
 
 	root.recache_along_indices(&parent_indices);
 
-	Some(AddElementResult { indices, old_value })
+	Some(AddElementResult { indices, old_kv: old_value })
 }
 
 pub struct AddElementResult {
 	pub indices: OwnedIndices,
-	pub old_value: Option<NbtElement>,
+	pub old_kv: Option<NbtElementAndKey>,
 }
 
 impl AddElementResult {
 	pub fn into_action(self) -> WorkbenchAction {
-		let Self { indices, old_value } = self;
-		if let Some(old_value) = old_value {
-			WorkbenchAction::Replace { indices, value: (None, old_value) }
+		let Self { indices, old_kv } = self;
+		if let Some(kv) = old_kv {
+			WorkbenchAction::Replace { indices, kv }
 		} else {
 			WorkbenchAction::Add { indices }
 		}

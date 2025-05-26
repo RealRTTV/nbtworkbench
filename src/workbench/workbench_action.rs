@@ -1,11 +1,11 @@
 use std::path::PathBuf;
 
-use anyhow::{Context, Result, ensure};
-use compact_str::{CompactString, ToCompactString};
+use anyhow::{ensure, Context, Result};
+use compact_str::CompactString;
 
 use crate::elements::{NbtElement, NbtElementAndKey};
 use crate::render::WindowProperties;
-use crate::tree::{AddElementResult, MutableIndices, OwnedIndices, RemoveElementResult, ReplaceElementResult, add_element, remove_element, rename_element, reorder_element, replace_element, swap_element_same_depth};
+use crate::tree::{add_element, remove_element, rename_element, reorder_element, replace_element, swap_element_same_depth, AddElementResult, MutableIndices, OwnedIndices, RemoveElementResult, ReplaceElementResult};
 use crate::util::LinkedQueue;
 use crate::workbench::{HeldEntry, MarkedLines};
 
@@ -22,7 +22,7 @@ pub enum WorkbenchAction {
 	Rename {
 		indices: OwnedIndices,
 		key: Option<CompactString>,
-		value: Option<CompactString>,
+		value: Option<String>,
 	},
 	Swap {
 		parent: OwnedIndices,
@@ -31,7 +31,7 @@ pub enum WorkbenchAction {
 	},
 	Replace {
 		indices: OwnedIndices,
-		value: NbtElementAndKey,
+		kv: NbtElementAndKey,
 	},
 	Reorder {
 		indices: OwnedIndices,
@@ -44,11 +44,8 @@ pub enum WorkbenchAction {
 		/// The held entry's indices history
 		indices_history: LinkedQueue<OwnedIndices>,
 
-		/// The key of the [held entry](HeldEntry) before it was added to the [tab](super::Tab)'s value
-		old_key: Option<CompactString>,
-
-		/// The value of the
-		old_value: Option<NbtElement>,
+		/// The value of the [held entry](HeldEntry) before it was added to the [tab](super::Tab)'s value
+		old_kv: Option<NbtElementAndKey>,
 	},
 	/// Uses the [held entry](HeldEntry)'s history to get the indices to insert at
 	RemoveToHeldEntry,
@@ -98,7 +95,7 @@ impl WorkbenchAction {
 			Self::Remove { kv, indices } => add_element(root, kv, indices, bookmarks, mutable_indices)
 				.context("Couldn't add element")?
 				.into_action(),
-			Self::Replace { indices, value } => replace_element(root, value, indices, bookmarks, mutable_indices)
+			Self::Replace { indices, kv: value } => replace_element(root, value, indices, bookmarks, mutable_indices)
 				.context("Could not replace element")?
 				.into_action(),
 			Self::Rename { indices, key, value } => rename_element(root, indices, key, value, path, name, window_properties)
@@ -113,13 +110,12 @@ impl WorkbenchAction {
 			Self::AddFromHeldEntry {
 				indices,
 				mut indices_history,
-				old_key,
-				old_value,
+				old_kv
 			} => {
 				ensure!(held_entry.is_none(), "To remove an element and make a held entry out of it, one cannot have an pre-existing held entry.");
 
-				let (indices, kv) = if let Some(old_value) = old_value {
-					let ReplaceElementResult { indices, kv } = replace_element(root, (old_key, old_value), indices, bookmarks, mutable_indices).context("Could not remove element")?;
+				let (indices, kv) = if let Some(old_kv) = old_kv {
+					let ReplaceElementResult { indices, kv } = replace_element(root, old_kv, indices, bookmarks, mutable_indices).context("Could not remove element")?;
 					(indices, kv)
 				} else {
 					let RemoveElementResult { indices, kv, replaces } = remove_element(root, indices, bookmarks, mutable_indices).context("Could not remove element")?;
@@ -135,12 +131,8 @@ impl WorkbenchAction {
 					.take()
 					.context("Expected a held entry to add to the tab")?;
 				if let Some(indices) = indices_history.pop() {
-					let AddElementResult { indices, old_value } = add_element(root, kv, indices, bookmarks, mutable_indices).context("Couldn't add element from held entry")?;
-					let old_kv = root
-						.get_kv_under_indices(&indices)
-						.context("We just added an element to these indices, it for sure is valid")?;
-					let old_key = old_kv.0.map(|key| key.to_compact_string());
-					Self::AddFromHeldEntry { indices, indices_history, old_key, old_value }
+					let AddElementResult { indices, old_kv } = add_element(root, kv, indices, bookmarks, mutable_indices).context("Couldn't add element from held entry")?;
+					Self::AddFromHeldEntry { indices, indices_history, old_kv }
 				} else {
 					Self::DiscardHeldEntry { held_entry: HeldEntry::from_aether(kv) }
 				}

@@ -5,7 +5,7 @@ use std::ops::{BitAndAssign, BitOrAssign, BitXorAssign, Deref, DerefMut, Index, 
 
 use crate::assets::{BOOKMARK_UV, HIDDEN_BOOKMARK_UV};
 use crate::elements::NbtElement;
-use crate::util::{Vec2u, intersection_two_sorted_no_duplicates, symmetric_difference_two_sorted_no_duplicates, union_two_sorted_no_duplicates};
+use crate::util::{intersection_two_sorted_no_duplicates, symmetric_difference_two_sorted_no_duplicates, union_two_sorted_no_duplicates, Vec2u};
 
 macro_rules! slice {
     ($($t:tt)*) => {

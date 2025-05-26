@@ -5,7 +5,7 @@ use crate::assets::{BASE_Z, HOVERED_WIDGET_UV};
 use crate::config;
 use crate::render::{TextColor, VertexBufferBuilder};
 use crate::util::{AxisAlignedBoundingBox, Vec2u};
-use crate::widget::{ButtonWidget, ButtonWidgetContext, ButtonWidgetContextMut, SEARCH_BOX_END_X, SearchMode};
+use crate::widget::{ButtonWidget, ButtonWidgetContext, ButtonWidgetContextMut, SearchMode, SEARCH_BOX_END_X};
 
 pub struct SearchModeButton;
 

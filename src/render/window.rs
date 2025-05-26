@@ -15,13 +15,13 @@ use winit::platform::windows::WindowAttributesExtWindows;
 use winit::window::{Icon, Theme, Window, WindowAttributes, WindowId};
 use zune_inflate::DeflateOptions;
 
-use crate::assets::{ATLAS_HEIGHT, ATLAS_WIDTH, HEADER_SIZE, ICON_HEIGHT, ICON_WIDTH, UNICODE_LEN, atlas, icon};
+use crate::assets::{atlas, icon, ATLAS_HEIGHT, ATLAS_WIDTH, HEADER_SIZE, ICON_HEIGHT, ICON_WIDTH, UNICODE_LEN};
 use crate::config::get_theme;
 use crate::render::VertexBufferBuilder;
 use crate::util::now;
 use crate::widget::{SEARCH_BOX_END_X, SEARCH_BOX_START_X};
 use crate::workbench::Workbench;
-use crate::{WINDOW_PROPERTIES, WORKBENCH, error};
+use crate::{error, WINDOW_PROPERTIES, WORKBENCH};
 
 pub const WINDOW_HEIGHT: usize = 420;
 pub const WINDOW_WIDTH: usize = 720;
@@ -167,10 +167,10 @@ pub async fn run() -> ! {
 	};
 	let state = State::new(&window, window_size).await;
 	unsafe {
-		std::ptr::write(std::ptr::addr_of_mut!(WINDOW_PROPERTIES), WindowProperties::new(Rc::clone(&window)));
+		std::ptr::write(&raw mut WINDOW_PROPERTIES, WindowProperties::new(Rc::clone(&window)));
 	}
 	unsafe {
-		std::ptr::write(std::ptr::addr_of_mut!(WORKBENCH), Workbench::new(&mut WINDOW_PROPERTIES, Some(window_size)));
+		std::ptr::write(&raw mut WORKBENCH, Workbench::new(&mut WINDOW_PROPERTIES, Some(window_size)));
 	}
 	let mut handler = unsafe {
 		Handler {

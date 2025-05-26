@@ -1,359 +1,389 @@
 macro_rules! array {
-	($element_field:ident, $constructor:ident, $name:ident, $t:ty, $my_id:literal, $id:literal, $char:literal, $uv:ident, $element_uv:ident, $default_snbt_integer:ident, $try_into_element:ident) => {
-		#[repr(C)]
-		pub struct $name {
-			pub(super) values: Box<Vec<NbtElement>>,
-			max_depth: u32,
-			open: bool,
-		}
+	($module:ident, $name:ident, $id:literal, $element:ty, $get_inner_unchecked:path, $constructor:path, $char:literal, $uv:path, $ghost_uv:path, $default_snbt_integer:path, $try_into_element:path) => {
+		mod $module {
+			#[cfg(not(target_arch = "wasm32"))] use ::std::thread::Scope;
+			#[cfg(target_arch = "wasm32")] use $crate::wasm::FakeScope as Scope;
+			use crate::elements::{NbtElementVariant, ComplexNbtElementVariant, NbtElement};
 
-		impl $name {
-			pub fn matches(&self, other: &Self) -> bool {
-				if self.values.len() != other.values.len() {
-					return false
-				}
-
-				for (a, b) in self.values.iter().zip(other.values.iter()) {
-					if !a.matches(b) {
-						return false
-					}
-				}
-
-				true
+			#[repr(C)]
+			pub struct $name {
+				pub(in $crate::elements) values: Box<Vec<NbtElement>>,
+				max_depth: u32,
+				open: bool,
 			}
-		}
 
-		impl PartialEq for $name {
-			fn eq(&self, other: &Self) -> bool { self.values.eq(&other.values) }
-		}
-
-		impl Clone for $name {
-			fn clone(&self) -> Self {
-				let mut vec = unsafe { Vec::try_with_capacity(self.values.len()).unwrap_unchecked() };
-				for src in self.values.iter() {
-					unsafe {
-						vec.push_within_capacity(src.clone())
-							.unwrap_unchecked()
-					};
-				}
-				Self {
-					values: unsafe { Box::try_new(vec).unwrap_unchecked() },
-					max_depth: self.max_depth,
-					open: self.open,
-				}
-			}
-		}
-
-		impl $name {
-			#[must_use]
-			pub fn new() -> Self {
-				Self {
-					values: Box::<Vec<NbtElement>>::default(),
-					open: false,
-					max_depth: 0,
+			impl $crate::elements::Matches for $name {
+				fn matches(&self, other: &Self) -> bool {
+					self.eq(other)
 				}
 			}
 
-			pub const ID: u8 = $my_id;
-
-			pub(in $crate::elements) fn from_str0(mut s: &str) -> Result<(&str, Self), usize> {
-				s = s.strip_prefix('[').ok_or(s.len())?.trim_start();
-				s = s
-					.strip_prefix(concat!($char, ";"))
-					.ok_or(s.len())?
-					.trim_start();
-				let mut array = Self::new();
-				while !s.starts_with(']') {
-					let (s2, element) = NbtElement::from_str0(s, NbtElement::$default_snbt_integer)?;
-					let element = element.$try_into_element().ok_or(s.len())?;
-					array
-						.insert(array.len(), element)
-						.map_err(|_| s.len())?;
-					s = s2.trim_start();
-					if let Some(s2) = s.strip_prefix(',') {
-						s = s2.trim_start();
-					} else if s.starts_with(']') {
-						break;
-					}
-				}
-				array.values.shrink_to_fit();
-				Ok((s.strip_prefix(']').ok_or(s.len())?, array))
-			}
-
-			pub fn from_bytes<'a, D: Decoder<'a>>(decoder: &mut D) -> NbtParseResult<Self> {
-				use super::result::*;
-
-				decoder.assert_len(4)?;
-				let len = unsafe { decoder.u32() } as usize;
-				decoder.assert_len(len * core::mem::size_of::<$t>())?;
-				let mut vec = from_opt(Vec::try_with_capacity(len).ok(), "Could not allocate enough memory for Vec")?;
-				for _ in 0..len {
-					let mut element = NbtElement::$constructor(unsafe { core::mem::transmute(<$t>::from_ne_bytes(decoder.read_ne_bytes::<{ core::mem::size_of::<$t>() }>())) });
-					from_opt(vec.push_within_capacity(element).ok(), "Vec was longer than originally stated")?;
-				}
-				ok(Self {
-					values: unsafe { Box::try_new(vec).unwrap_unchecked() },
-					open: false,
-					max_depth: 0,
-				})
-			}
-
-			pub fn to_be_bytes(&self, writer: &mut UncheckedBufWriter) {
-				writer.write(&(self.len() as u32).to_be_bytes());
-				for entry in self.values.iter() {
-					writer.write(&Self::transmute(entry).to_be_bytes());
+			impl PartialEq for $name {
+				fn eq(&self, other: &Self) -> bool {
+					let a = unsafe { ::std::slice::from_raw_parts(self.values.as_ptr().cast::<u8>(), self.values.len() * ::std::mem::size_of::<NbtElement>()) };
+					let b = unsafe { ::std::slice::from_raw_parts(other.values.as_ptr().cast::<u8>(), other.values.len() * ::std::mem::size_of::<NbtElement>()) };
+					a == b
 				}
 			}
 
-			pub fn to_le_bytes(&self, writer: &mut UncheckedBufWriter) {
-				writer.write(&(self.len() as u32).to_le_bytes());
-				for entry in self.values.iter() {
-					writer.write(&Self::transmute(entry).to_le_bytes());
-				}
-			}
-		}
-
-		impl $name {
-			fn transmute(element: &NbtElement) -> $t { unsafe { element.$element_field.value } }
-
-			pub fn increment(&mut self, _: usize, _: usize) {}
-
-			pub fn decrement(&mut self, _: usize, _: usize) {}
-
-			#[must_use]
-			pub fn height(&self) -> usize { if self.open { self.len() + 1 } else { 1 } }
-
-			#[must_use]
-			pub fn true_height(&self) -> usize { self.len() + 1 }
-
-			pub fn toggle(&mut self) { self.open = !self.open && !self.is_empty(); }
-
-			#[must_use]
-			pub const fn open(&self) -> bool { self.open }
-
-			#[must_use]
-			pub fn len(&self) -> usize { self.values.len() }
-
-			#[must_use]
-			pub fn is_empty(&self) -> bool { self.values.is_empty() }
-
-			/// # Errors
-			///
-			/// * Element type was not supported for `$name`
-			pub fn insert(&mut self, idx: usize, value: NbtElement) -> Result<Option<NbtElement>, NbtElement> {
-				if value.id() == $id {
-					// the time complexity is fine here
-					unsafe {
-						self.values
-							.try_reserve_exact(1)
-							.unwrap_unchecked();
-					}
-					self.values.insert(idx, value);
-					self.increment(1, 1);
-					Ok(None)
-				} else {
-					Err(value)
-				}
-			}
-
-			pub fn remove(&mut self, idx: usize) -> NbtElement {
-				let removed = self.values.remove(idx);
-				self.decrement(removed.height(), removed.true_height());
-				self.values.shrink_to_fit();
-				removed
-			}
-
-			pub fn replace(&mut self, idx: usize, value: NbtElement) -> Option<NbtElement> {
-				if !self.can_insert(&value) || idx >= self.len() {
-					return None;
-				}
-				self.increment(value.height(), value.true_height());
-				let old = core::mem::replace(&mut self.values[idx], value);
-				self.decrement(old.height(), old.true_height());
-				Some(old)
-			}
-
-			pub fn render(&self, builder: &mut VertexBufferBuilder, key: Option<&str>, remaining_scroll: &mut usize, tail: bool, ctx: &mut RenderContext) {
-				'head: {
-					if *remaining_scroll > 0 {
-						*remaining_scroll -= 1;
-						ctx.skip_line_numbers(1);
-						break 'head;
-					}
-
-					let pos = ctx.pos();
-
-					ctx.line_number();
-					self.render_icon(pos, BASE_Z, builder);
-					if !self.is_empty() {
-						ctx.draw_toggle(pos - (16, 0), self.open, builder);
-					}
-					ctx.render_errors(pos, builder);
-					if ctx.forbid(pos) {
-						builder.settings(pos + (20, 0), false, JUST_OVERLAPPING_BASE_TEXT_Z);
-						if let Some(key) = key {
-							builder.color = TextColor::TreeKey.to_raw();
-							let _ = write!(builder, "{key}: ");
+			impl Clone for $name {
+				fn clone(&self) -> Self {
+					let mut vec = unsafe { Vec::try_with_capacity(self.values.len()).unwrap_unchecked() };
+					for src in self.values.iter() {
+						unsafe {
+							vec.push_within_capacity(src.clone())
+								.unwrap_unchecked()
 						};
-
-						builder.color = TextColor::TreeKey.to_raw();
-						let _ = write!(builder, "{}", self.value());
 					}
-
-					if ctx.draw_held_entry_bar(pos + (16, 16), builder, |x, y| pos == (x - 16, y - 8), |x| self.can_insert(x)) {
-					} else if self.height() == 1 && ctx.draw_held_entry_bar(pos + (16, 16), builder, |x, y| pos == (x - 16, y - 16), |x| self.can_insert(x)) {
+					Self {
+						values: unsafe { Box::try_new(vec).unwrap_unchecked() },
+						max_depth: self.max_depth,
+						open: self.open,
 					}
-
-					ctx.offset_pos(0, 16);
 				}
+			}
 
-				if self.open {
-					ctx.offset_pos(16, 0);
+			impl Default for $name {
+				fn default() -> Self {
+					Self {
+						values: Box::<Vec<NbtElement>>::default(),
+						open: false,
+						max_depth: 0,
+					}
+				}
+			}
 
+			impl ::std::fmt::Display for $name {
+				fn fmt(&self, f: &mut ::std::fmt::Formatter) -> ::std::fmt::Result {
+					write!(f, "[{};", $char)?;
 					for (idx, element) in self.children().enumerate() {
-						let pos = ctx.pos();
-						if pos.y > builder.window_height() {
+						write!(f, "{element}")?;
+						if ::std::hint::likely(idx < self.len() - 1) {
+							write!(f, ",")?;
+						}
+					}
+					write!(f, "]")
+				}
+			}
+
+			impl $name {
+				pub const CHILD_ID: u8 = <$element>::ID;
+
+				pub type ChildType = $element;
+
+				fn transmute(element: &NbtElement) -> <Self::ChildType as $crate::elements::PrimitiveNbtElementVariant>::InnerType { unsafe { $get_inner_unchecked(element).value } }
+			}
+
+			impl NbtElementVariant for $name {
+				const ID: u8 = $id;
+
+				const UV: $crate::util::Vec2u = $uv;
+
+				const GHOST_UV: $crate::util::Vec2u = $ghost_uv;
+
+				fn from_str0(mut s: &str) -> Result<(&str, Self), usize> {
+					s = s.strip_prefix('[').ok_or(s.len())?.trim_start();
+					s = s
+						.strip_prefix(concat!($char, ";"))
+						.ok_or(s.len())?
+						.trim_start();
+					let mut array = Self::default();
+					while !s.starts_with(']') {
+						let (s2, element) = NbtElement::from_str0(s, $default_snbt_integer)?;
+						let element = $try_into_element(element).ok_or(s.len())?;
+						// SAFETY: there is nothing to update
+						unsafe {
+							array
+								.insert(array.len(), element)
+								.map_err(|_| s.len())?;
+						}
+						s = s2.trim_start();
+						if let Some(s2) = s.strip_prefix(',') {
+							s = s2.trim_start();
+						} else if s.starts_with(']') {
 							break;
 						}
+					}
+					array.values.shrink_to_fit();
+					array.recache();
+					Ok((s.strip_prefix(']').ok_or(s.len())?, array))
+				}
 
+				fn from_bytes<'a, D: $crate::serialization::Decoder<'a>>(decoder: &mut D) -> $crate::elements::result::NbtParseResult<Self> {
+					use $crate::elements::result::*;
+
+					decoder.assert_len(4)?;
+					let len = unsafe { decoder.u32() } as usize;
+					decoder.assert_len(len * core::mem::size_of::<<Self::ChildType as $crate::elements::PrimitiveNbtElementVariant>::InnerType>())?;
+					let mut vec = from_opt(Vec::try_with_capacity(len).ok(), "Could not allocate enough memory for Vec")?;
+					for _ in 0..len {
+						let element = $constructor(unsafe { core::mem::transmute(<<Self::ChildType as $crate::elements::PrimitiveNbtElementVariant>::InnerType>::from_ne_bytes(decoder.read_ne_bytes::<{ core::mem::size_of::<<Self::ChildType as $crate::elements::PrimitiveNbtElementVariant>::InnerType>() }>())) });
+						from_opt(vec.push_within_capacity(element).ok(), "Vec was longer than originally stated")?;
+					}
+					let mut array = Self {
+						values: unsafe { Box::try_new(vec).unwrap_unchecked() },
+						open: false,
+						max_depth: 0,
+					};
+					array.recache();
+					ok(array)
+				}
+
+				fn to_be_bytes(&self, writer: &mut $crate::serialization::UncheckedBufWriter) {
+					writer.write(&(self.len() as u32).to_be_bytes());
+					for entry in self.values.iter() {
+						writer.write(&Self::transmute(entry).to_be_bytes());
+					}
+				}
+
+				fn to_le_bytes(&self, writer: &mut $crate::serialization::UncheckedBufWriter) {
+					writer.write(&(self.len() as u32).to_le_bytes());
+					for entry in self.values.iter() {
+						writer.write(&Self::transmute(entry).to_le_bytes());
+					}
+				}
+
+				fn render(&self, builder: &mut $crate::render::VertexBufferBuilder, key: Option<&str>, remaining_scroll: &mut usize, tail: bool, ctx: &mut $crate::render::RenderContext) {
+					use ::std::fmt::Write as _;
+
+					'head: {
 						if *remaining_scroll > 0 {
 							*remaining_scroll -= 1;
 							ctx.skip_line_numbers(1);
-							continue;
+							break 'head;
 						}
 
-						ctx.draw_held_entry_bar(pos, builder, |x, y| pos == (x, y), |x| self.can_insert(x));
-
-						builder.draw_texture(pos - (16, 0), CONNECTION_UV, (16, (idx != self.len() - 1) as usize * 7 + 9));
-						if !tail {
-							builder.draw_texture(pos - (32, 0), CONNECTION_UV, (8, 16));
-						}
+						let pos = ctx.pos();
 
 						ctx.line_number();
-						Self::render_element_icon(pos, builder);
-						ctx.check_for_invalid_value(|value| value.parse::<$t>().is_err());
+						builder.draw_texture_z(pos, $crate::assets::BASE_Z, Self::UV, (16, 16));
+						if !self.is_empty() {
+							ctx.draw_toggle(pos - (16, 0), self.open, builder);
+						}
 						ctx.render_errors(pos, builder);
-						let str = Self::transmute(element).to_compact_string();
 						if ctx.forbid(pos) {
-							builder.settings(pos + (20, 0), false, JUST_OVERLAPPING_BASE_TEXT_Z);
-							builder.color = TextColor::TreePrimitive.to_raw();
-							let _ = write!(builder, "{str}");
+							builder.settings(pos + (20, 0), false, $crate::assets::JUST_OVERLAPPING_BASE_TEXT_Z);
+							if let Some(key) = key {
+								builder.color = $crate::render::TextColor::TreeKey.to_raw();
+								let _ = write!(builder, "{key}: ");
+							};
+
+							builder.color = $crate::render::TextColor::TreeKey.to_raw();
+							let _ = write!(builder, "{}", self.value());
+						}
+
+						if ctx.draw_held_entry_bar(pos + (16, 16), builder, |x, y| pos == (x - 16, y - 8), |x| self.can_insert(x)) {
+						} else if self.height() == 1 && ctx.draw_held_entry_bar(pos + (16, 16), builder, |x, y| pos == (x - 16, y - 16), |x| self.can_insert(x)) {
 						}
 
 						ctx.offset_pos(0, 16);
-
-						let pos = ctx.pos();
-						ctx.draw_held_entry_bar(pos, builder, |x, y| pos == (x, y + 8), |x| self.can_insert(x));
 					}
 
-					ctx.offset_pos(-16, 0);
-				} else {
-					ctx.skip_line_numbers(self.len());
-				}
-			}
+					if self.open {
+						ctx.offset_pos(16, 0);
 
-			#[must_use]
-			pub fn get(&self, idx: usize) -> Option<&NbtElement> { self.values.get(idx) }
+						for (idx, element) in self.children().enumerate() {
+							let pos = ctx.pos();
+							if pos.y > builder.window_height() {
+								break;
+							}
 
-			#[must_use]
-			pub unsafe fn get_unchecked(&self, idx: usize) -> &NbtElement { unsafe { self.values.get_unchecked(idx) } }
+							if *remaining_scroll > 0 {
+								*remaining_scroll -= 1;
+								ctx.skip_line_numbers(1);
+								continue;
+							}
 
-			#[must_use]
-			pub fn get_mut(&mut self, idx: usize) -> Option<&mut NbtElement> { self.values.get_mut(idx) }
+							ctx.draw_held_entry_bar(pos, builder, |x, y| pos == (x, y), |x| self.can_insert(x));
 
-			#[must_use]
-			pub unsafe fn get_unchecked_mut(&mut self, idx: usize) -> &mut NbtElement { unsafe { self.values.get_unchecked_mut(idx) } }
+							builder.draw_texture(pos - (16, 0), $crate::assets::CONNECTION_UV, (16, (idx != self.len() - 1) as usize * 7 + 9));
+							if !tail {
+								builder.draw_texture(pos - (32, 0), $crate::assets::CONNECTION_UV, (8, 16));
+							}
 
-			#[must_use]
-			pub fn value(&self) -> CompactString {
-				let item = id_to_string_name($id, self.len());
-				format_compact!("{} {item}", self.len())
-			}
+							ctx.line_number();
+							builder.draw_texture_z(pos, $crate::assets::BASE_Z, Self::ChildType::UV, (16, 16));
+							ctx.check_for_invalid_value(|value| value.parse::<<Self::ChildType as $crate::elements::PrimitiveNbtElementVariant>::InnerType>().is_err());
+							ctx.render_errors(pos, builder);
+							let str = ::compact_str::format_compact!("{}", Self::transmute(element));
+							if ctx.forbid(pos) {
+								builder.settings(pos + (20, 0), false, $crate::assets::JUST_OVERLAPPING_BASE_TEXT_Z);
+								builder.color = $crate::render::TextColor::TreePrimitive.to_raw();
+								let _ = write!(builder, "{str}");
+							}
 
-			// ret type is #[must_use]
-			pub fn children(&self) -> Iter<'_, NbtElement> { self.values.iter() }
+							ctx.offset_pos(0, 16);
 
-			// ret type is #[must_use]
-			pub fn children_mut(&mut self) -> IterMut<'_, NbtElement> { self.values.iter_mut() }
+							let pos = ctx.pos();
+							ctx.draw_held_entry_bar(pos, builder, |x, y| pos == (x, y + 8), |x| self.can_insert(x));
+						}
 
-			pub fn shut(&mut self) { self.open = false; }
-
-			pub fn expand(&mut self) { self.open = !self.is_empty(); }
-
-			pub fn recache(&mut self) {
-				let mut max_depth = 0;
-				if self.open() {
-					for child in self.children() {
-						max_depth = usize::max(max_depth, 16 + 4 + child.value().0.width());
+						ctx.offset_pos(-16, 0);
+					} else {
+						ctx.skip_line_numbers(self.len());
 					}
 				}
-				self.max_depth = max_depth as u32;
-			}
 
-			#[must_use]
-			pub const fn max_depth(&self) -> usize { self.max_depth as usize }
-
-			pub fn render_icon(&self, pos: impl Into<(usize, usize)>, z: ZOffset, builder: &mut VertexBufferBuilder) { builder.draw_texture_z(pos, z, $uv, (16, 16)); }
-
-			pub fn render_element_icon(pos: impl Into<(usize, usize)>, builder: &mut VertexBufferBuilder) { builder.draw_texture(pos, $element_uv, (16, 16)); }
-
-			#[must_use]
-			pub fn can_insert(&self, value: &NbtElement) -> bool { value.id() == $id }
-		}
-
-		impl Display for $name {
-			fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-				write!(f, "[{};", $char)?;
-				for (idx, element) in self.children().enumerate() {
-					write!(f, "{element}")?;
-					if likely(idx < self.len() - 1) {
-						write!(f, ",")?;
-					}
-				}
-				write!(f, "]")
-			}
-		}
-
-		impl $name {
-			pub fn pretty_fmt(&self, f: &mut PrettyFormatter) {
-				if self.is_empty() {
-					f.write_str(concat!("[", $char, ";]"))
-				} else {
-					let len = self.len();
-					f.write_str(concat!("[", $char, ";\n"));
-					f.increase();
-					for (idx, element) in self.children().enumerate() {
+				fn pretty_fmt(&self, f: &mut $crate::serialization::PrettyFormatter) {
+					if self.is_empty() {
+						f.write_str(concat!("[", $char, ";]"))
+					} else {
+						let len = self.len();
+						f.write_str(concat!("[", $char, ";\n"));
+						f.increase();
+						for (idx, element) in self.children().enumerate() {
+							f.indent();
+							element.pretty_fmt(f);
+							if idx + 1 < len {
+								f.write_str(",\n");
+							} else {
+								f.write_str("\n");
+							}
+						}
+						f.decrease();
 						f.indent();
-						element.pretty_fmt(f);
-						if idx + 1 < len {
-							f.write_str(",\n");
-						} else {
-							f.write_str("\n");
+						f.write_str("]");
+					}
+				}
+
+				fn value(&self) -> ::std::borrow::Cow<'_, str> {
+					let item = $crate::elements::id_to_string_name(Self::CHILD_ID, self.len());
+					::std::borrow::Cow::Owned(format!("{} {item}", self.len()))
+				}
+			}
+
+			impl ComplexNbtElementVariant for $name {
+				type Entry = NbtElement;
+
+				fn new(entries: Vec<Self::Entry>) -> Self
+				where Self: Sized {
+					Self {
+                        values: Box::new(entries.into_iter().filter(|entry| entry.id() == Self::CHILD_ID).collect::<Vec<_>>()),
+						max_depth: 0,
+						open: false,
+					}
+				}
+
+				fn height(&self) -> usize { if self.open { self.len() + 1 } else { 1 } }
+
+				fn true_height(&self) -> usize { self.len() + 1 }
+
+				fn len(&self) -> usize { self.values.len() }
+
+				fn can_insert(&self, value: &NbtElement) -> bool { value.id() == Self::CHILD_ID }
+
+				fn is_open(&self) -> bool { self.open }
+
+				fn max_depth(&self) -> usize { self.max_depth as usize }
+
+				unsafe fn toggle(&mut self) {
+					self.open = !self.open && !self.is_empty();
+				}
+
+				unsafe fn insert(&mut self, idx: usize, entry: Self::Entry) -> Result<Option<Self::Entry>, Self::Entry> {
+					if self.can_insert(&entry) {
+						// the time complexity is fine here
+						unsafe {
+							self.values
+								.try_reserve_exact(1)
+								.unwrap_unchecked();
+						}
+						self.values.insert(idx, entry);
+						Ok(None)
+					} else {
+						Err(entry)
+					}
+				}
+
+				unsafe fn remove(&mut self, idx: usize) -> Option<Self::Entry> {
+					if idx >= self.values.len() {
+						return None
+					}
+					let removed = self.values.remove(idx);
+					self.values.shrink_to_fit();
+					Some(removed)
+				}
+
+				unsafe fn replace(&mut self, idx: usize, entry: Self::Entry) -> Result<Option<Self::Entry>, Self::Entry> {
+					if !self.can_insert(&entry) || idx >= self.len() {
+						return Err(entry)
+					}
+					Ok(Some(core::mem::replace(&mut self.values[idx], entry)))
+				}
+
+				unsafe fn swap(&mut self, a: usize, b: usize) {
+					self.values.swap(a, b);
+				}
+
+				unsafe fn shut<'a, 'b>(&mut self, _scope: &'a Scope<'a, 'b>) { self.open = false; }
+
+				unsafe fn expand<'a, 'b>(&mut self, _scope: &'a Scope<'a, 'b>) { self.open = !self.is_empty(); }
+
+				fn recache(&mut self) {
+					let mut max_depth = 0;
+					if self.is_open() {
+						for child in self.children() {
+							max_depth = usize::max(max_depth, 16 + 4 + $crate::util::StrExt::width(child.value().0.as_ref()));
 						}
 					}
-					f.decrease();
-					f.indent();
-					f.write_str("]");
+					self.max_depth = max_depth as u32;
 				}
+
+				fn children(&self) -> ::std::slice::Iter<'_, Self::Entry> { self.values.iter() }
+
+				fn children_mut(&mut self) -> ::std::slice::IterMut<'_, Self::Entry> { self.values.iter_mut() }
+
+				fn get(&self, idx: usize) -> Option<&Self::Entry> { self.values.get(idx) }
+
+				fn get_mut(&mut self, idx: usize) -> Option<&mut Self::Entry> { self.values.get_mut(idx) }
+
+				unsafe fn get_unchecked(&self, idx: usize) -> &Self::Entry { unsafe { self.values.get_unchecked(idx) } }
+
+				unsafe fn get_unchecked_mut(&mut self, idx: usize) -> &mut Self::Entry { unsafe { self.values.get_unchecked_mut(idx) } }
 			}
 		}
+		pub use $module::*;
 	};
 }
 
-use std::fmt;
-use std::fmt::{Display, Write};
-use std::hint::likely;
-use std::slice::{Iter, IterMut};
+array!(
+	byte_array,
+	NbtByteArray,
+	7,
+	crate::elements::NbtByte,
+	crate::elements::NbtElement::as_byte_unchecked,
+	crate::elements::NbtElement::Byte,
+	'B',
+	crate::assets::BYTE_ARRAY_UV,
+	crate::assets::BYTE_ARRAY_GHOST_UV,
+	crate::elements::NbtElement::parse_byte,
+	crate::elements::NbtElement::array_try_into_byte
+);
 
-use compact_str::{CompactString, ToCompactString, format_compact};
+array!(
+	int_array,
+	NbtIntArray,
+	11,
+	crate::elements::NbtInt,
+	crate::elements::NbtElement::as_int_unchecked,
+	crate::elements::NbtElement::Int,
+	'I',
+	crate::assets::INT_ARRAY_UV,
+	crate::assets::INT_ARRAY_GHOST_UV,
+	crate::elements::NbtElement::parse_int,
+	crate::elements::NbtElement::array_try_into_int
+);
 
-use crate::assets::{BASE_Z, BYTE_ARRAY_UV, BYTE_UV, CONNECTION_UV, INT_ARRAY_UV, INT_UV, JUST_OVERLAPPING_BASE_TEXT_Z, LONG_ARRAY_UV, LONG_UV, ZOffset};
-use crate::elements::result::NbtParseResult;
-use crate::elements::{NbtElement, id_to_string_name};
-use crate::render::{RenderContext, TextColor, VertexBufferBuilder};
-use crate::serialization::{Decoder, PrettyFormatter, UncheckedBufWriter};
-use crate::util::StrExt;
-
-array!(byte, Byte, NbtByteArray, i8, 7, 1, 'B', BYTE_ARRAY_UV, BYTE_UV, parse_byte, array_try_into_byte);
-array!(int, Int, NbtIntArray, i32, 11, 3, 'I', INT_ARRAY_UV, INT_UV, parse_int, array_try_into_int);
-array!(long, Long, NbtLongArray, i64, 12, 4, 'L', LONG_ARRAY_UV, LONG_UV, parse_long, array_try_into_long);
+array!(
+	long_array,
+	NbtLongArray,
+	12,
+	crate::elements::NbtLong,
+	crate::elements::NbtElement::as_long_unchecked,
+	crate::elements::NbtElement::Long,
+	'L',
+	crate::assets::LONG_ARRAY_UV,
+	crate::assets::LONG_ARRAY_GHOST_UV,
+	crate::elements::NbtElement::parse_long,
+	crate::elements::NbtElement::array_try_into_long
+);

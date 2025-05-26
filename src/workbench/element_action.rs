@@ -9,11 +9,11 @@ use uuid::Uuid;
 use crate::assets::{ACTION_WHEEL_Z, COPY_FORMATTED_UV, COPY_RAW_UV, INSERT_FROM_CLIPBOARD_UV, INVERT_BOOKMARKS_UV, SORT_COMPOUND_BY_NAME_UV, SORT_COMPOUND_BY_TYPE_UV};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::assets::{OPEN_ARRAY_IN_HEX_UV, OPEN_IN_TXT_UV};
-use crate::elements::{NbtByte, NbtByteArray, NbtChunk, NbtCompound, NbtDouble, NbtElement, NbtFloat, NbtInt, NbtIntArray, NbtList, NbtLong, NbtLongArray, NbtPattern, NbtShort, NbtString};
+use crate::elements::{CompoundEntry, NbtByte, NbtByteArray, NbtChunk, NbtCompound, NbtDouble, NbtElement, NbtElementVariant, NbtFloat, NbtInt, NbtIntArray, NbtList, NbtLong, NbtLongArray, NbtPattern, NbtShort, NbtString};
 use crate::render::VertexBufferBuilder;
 use crate::serialization::UncheckedBufWriter;
-use crate::tree::{MutableIndices, NavigationInformation, OwnedIndices, ReorderElementResult, add_element, reorder_element};
-use crate::util::{StrExt, get_clipboard, now, set_clipboard};
+use crate::tree::{add_element, reorder_element, MutableIndices, NavigationInformation, OwnedIndices, ReorderElementResult};
+use crate::util::{get_clipboard, now, set_clipboard, StrExt};
 use crate::widget::Alert;
 use crate::workbench::{FileUpdateSubscription, FileUpdateSubscriptionType, MarkedLine, MarkedLines, WorkbenchAction};
 
@@ -89,37 +89,39 @@ impl ElementAction {
 	}
 
 	#[must_use]
-	pub fn by_name(a: (&str, &NbtElement), b: (&str, &NbtElement)) -> Ordering {
-		let (a_str, _) = a;
-		let (b_str, _) = b;
-		a_str.cmp(b_str)
-	}
+	pub fn by_name(a: &CompoundEntry, b: &CompoundEntry) -> Ordering { a.key.cmp(&b.key) }
 
 	#[must_use]
-	pub fn by_type(a: (&str, &NbtElement), b: (&str, &NbtElement)) -> Ordering {
+	pub fn by_type(a: &CompoundEntry, b: &CompoundEntry) -> Ordering {
 		const ORDERING: [usize; 256] = {
+			const PREFERENCE: [u8; 13] = [
+				NbtChunk::ID,
+				NbtCompound::ID,
+				NbtList::ID,
+				NbtLongArray::ID,
+				NbtIntArray::ID,
+				NbtByteArray::ID,
+				NbtString::ID,
+				NbtDouble::ID,
+				NbtFloat::ID,
+				NbtLong::ID,
+				NbtInt::ID,
+				NbtShort::ID,
+				NbtByte::ID,
+			];
+
 			let mut array = [usize::MAX; 256];
-			array[NbtChunk::ID as usize] = 0;
-			array[NbtCompound::ID as usize] = 1;
-			array[NbtList::ID as usize] = 2;
-			array[NbtLongArray::ID as usize] = 3;
-			array[NbtIntArray::ID as usize] = 4;
-			array[NbtByteArray::ID as usize] = 5;
-			array[NbtString::ID as usize] = 6;
-			array[NbtDouble::ID as usize] = 7;
-			array[NbtFloat::ID as usize] = 8;
-			array[NbtLong::ID as usize] = 9;
-			array[NbtInt::ID as usize] = 10;
-			array[NbtShort::ID as usize] = 11;
-			array[NbtByte::ID as usize] = 12;
+			let mut idx = 0;
+			while idx < PREFERENCE.len() {
+				array[PREFERENCE[idx] as usize] = idx;
+				idx += 1;
+			}
 			array
 		};
 
-		let (a_str, a_nbt) = a;
-		let (b_str, b_nbt) = b;
-		ORDERING[a_nbt.id() as usize]
-			.cmp(&ORDERING[b_nbt.id() as usize])
-			.then_with(|| a_str.cmp(b_str))
+		ORDERING[a.value.id() as usize]
+			.cmp(&ORDERING[b.value.id() as usize])
+			.then_with(|| a.key.cmp(&b.key))
 	}
 
 	// todo: add more alerts for errors (potentially have anyhow::Result)
@@ -248,10 +250,10 @@ impl ElementAction {
 
 				let mapping = match element.as_pattern() {
 					NbtPattern::Compound(compound) => compound
-						.entries
+						.map
 						.create_sort_mapping(if action == Self::SortCompoundByName { Self::by_name } else { Self::by_type }),
 					NbtPattern::Chunk(chunk) => chunk
-						.entries
+						.map
 						.create_sort_mapping(if action == Self::SortCompoundByName { Self::by_name } else { Self::by_type }),
 					_ => return None,
 				};

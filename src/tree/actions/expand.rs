@@ -9,7 +9,8 @@ pub fn expand_element(root: &mut NbtElement, indices: &Indices, bookmarks: &mut 
 	let true_height = element.true_height();
 	let height_before = element.height();
 	#[cfg(not(target_arch = "wasm32"))]
-	std::thread::scope(|scope| element.expand(scope));
+	// SAFETY: we are literally updating all the relevant information
+	std::thread::scope(|scope| unsafe { element.expand(scope) });
 	#[cfg(target_arch = "wasm32")]
 	element.expand();
 	let height_after = element.height();

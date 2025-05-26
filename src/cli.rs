@@ -1,5 +1,5 @@
 use std::fmt::Formatter;
-use std::fs::{File, read};
+use std::fs::{read, File};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -384,7 +384,7 @@ pub fn reformat() -> ! {
 
 	let extension = if let Some(extension) = get_argument_any(&["--out-ext", "-e"], &mut args) { extension } else { extension.to_owned() };
 
-	let out_dir = if let Some(out_dir) = get_argument_any(&["--out-dir", "-d"], &mut args) { Some(PathBuf::from(out_dir)) } else { None };
+	let out_dir = get_argument_any(&["--out-dir", "-d"], &mut args).map(PathBuf::from);
 
 	let (root, paths) = get_paths(args);
 

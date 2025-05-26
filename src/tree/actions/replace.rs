@@ -18,11 +18,11 @@ pub fn replace_element<'m1, 'm2: 'm1>(root: &mut NbtElement, value: NbtElementAn
 		}
 	};
 
-	let (old_parent_height, old_parent_true_height) = (parent.height(), parent.true_height());
+	let (old_parent_height, old_parent_true_height) = parent.heights();
 	// SAFETY: we have updated all the relevant data
-	let (old_key, old_value) = unsafe { parent.replace_key_value(idx, value) }?;
-	let (_old_height, old_true_height) = (old_value.height(), old_value.true_height());
-	let (parent_height, parent_true_height) = (parent.height(), parent.true_height());
+	let (old_key, old_value) = unsafe { parent.replace_key_value(idx, value) }.ok()??;
+	let (_old_height, old_true_height) = old_value.heights();
+	let (parent_height, parent_true_height) = parent.heights();
 	let (diff, true_diff) = (parent_height.wrapping_sub(old_parent_height), parent_true_height.wrapping_sub(old_parent_true_height));
 	bookmarks.remove(true_line_number..true_line_number + old_true_height);
 	bookmarks[true_line_number..].increment(diff, true_diff);
@@ -46,5 +46,5 @@ pub struct ReplaceElementResult {
 
 impl ReplaceElementResult {
 	#[must_use]
-	pub fn into_action(self) -> WorkbenchAction { WorkbenchAction::Replace { indices: self.indices, value: self.kv } }
+	pub fn into_action(self) -> WorkbenchAction { WorkbenchAction::Replace { indices: self.indices, kv: self.kv } }
 }

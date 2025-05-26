@@ -24,8 +24,8 @@ pub fn swap_element_same_depth<'m1, 'm2: 'm1>(root: &mut NbtElement, parent_indi
 		line_number: mut b_line_number,
 		..
 	} = parent.navigate(Indices::from_slice(&[b]))?;
-	let (a_height, a_true_height) = (child_a.height(), child_a.true_height());
-	let (b_height, b_true_height) = (child_b.height(), child_b.true_height());
+	let (a_height, a_true_height) = child_a.heights();
+	let (b_height, b_true_height) = child_b.heights();
 	a_true_line_number += parent_true_line_number;
 	a_line_number += parent_line_number;
 	b_true_line_number += parent_true_line_number;

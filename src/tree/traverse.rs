@@ -1,13 +1,13 @@
 use itertools::Itertools;
 
-use crate::elements::NbtElement;
+use crate::elements::{ComplexNbtElementVariant, NbtElement};
 use crate::tree::OwnedIndices;
 
 fn find_traversal_child_idx(element: &NbtElement, y: &mut usize, line_number: &mut usize, true_line_number: &mut usize) -> Option<usize> {
 	(0..element.len()?)
 		.map(|idx| &element[idx])
 		.find_position(|child| {
-			let (height, true_height) = (child.height(), child.true_height());
+			let (height, true_height) = child.heights();
 			if *y > height {
 				*y -= height;
 				*line_number += height;
@@ -53,7 +53,7 @@ impl<'a> TraversalInformation<'a> {
 					let idx = y * 16 + *x;
 					depth += *x;
 					for child in (0..idx).filter_map(|idx| region.get(idx)) {
-						let (height, true_height) = (child.height(), child.true_height());
+						let (height, true_height) = child.heights();
 						line_number += height;
 						true_line_number += true_height;
 					}
@@ -73,7 +73,7 @@ impl<'a> TraversalInformation<'a> {
 				true_line_number += 1;
 				indices.push(idx);
 				depth += 1;
-				let kv = element.get_kv(idx)?;
+				let kv = element.get(idx)?;
 				key = kv.0;
 				element = kv.1;
 			}
@@ -124,7 +124,7 @@ impl<'a> TraversalInformationMut<'a> {
 					let idx = y * 16 + *x;
 					depth += *x;
 					for child in (0..idx).filter_map(|idx| region.get(idx)) {
-						let (height, true_height) = (child.height(), child.true_height());
+						let (height, true_height) = child.heights();
 						line_number += height;
 						true_line_number += true_height;
 					}

@@ -6,8 +6,8 @@ use std::sync::mpsc::TryRecvError;
 #[cfg(not(target_arch = "wasm32"))] use std::thread::scope;
 use std::time::Duration;
 
-use anyhow::{Context, Result, anyhow, bail, ensure};
-use compact_str::{CompactString, ToCompactString, format_compact};
+use anyhow::{anyhow, bail, ensure, Context, Result};
+use compact_str::{format_compact, CompactString, ToCompactString};
 use enum_map::EnumMap;
 use fxhash::{FxBuildHasher, FxHashSet};
 use uuid::Uuid;
@@ -17,22 +17,24 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::Theme;
 
 use crate::assets::{
-	ACTION_WHEEL_Z, BASE_TEXT_Z, BASE_Z, CLOSED_WIDGET_UV, DARK_STRIPE_UV, HEADER_SIZE, HELD_ENTRY_Z, HORIZONTAL_SEPARATOR_UV, HOVERED_STRIPE_UV, HOVERED_WIDGET_UV, JUST_OVERLAPPING_BASE_TEXT_Z, LIGHT_STRIPE_UV, LINE_NUMBER_SEPARATOR_UV,
-	REPLACE_BOX_Z, SAVE_GRAYSCALE_UV, SAVE_UV, SELECTED_ACTION_WHEEL, SELECTED_WIDGET_UV, TRAY_UV, UNSELECTED_ACTION_WHEEL, UNSELECTED_WIDGET_UV, ZOffset,
+	ZOffset, ACTION_WHEEL_Z, BASE_TEXT_Z, BASE_Z, CLOSED_WIDGET_UV, DARK_STRIPE_UV, HEADER_SIZE, HELD_ENTRY_Z, HORIZONTAL_SEPARATOR_UV, HOVERED_STRIPE_UV, HOVERED_WIDGET_UV, JUST_OVERLAPPING_BASE_TEXT_Z, LIGHT_STRIPE_UV,
+	LINE_NUMBER_SEPARATOR_UV, REPLACE_BOX_Z, SAVE_GRAYSCALE_UV, SAVE_UV, SELECTED_ACTION_WHEEL, SELECTED_WIDGET_UV, TRAY_UV, UNSELECTED_ACTION_WHEEL, UNSELECTED_WIDGET_UV,
 };
-use crate::elements::{CompoundMap, NbtByte, NbtByteArray, NbtChunk, NbtCompound, NbtDouble, NbtElement, NbtElementAndKey, NbtFloat, NbtInt, NbtIntArray, NbtList, NbtLong, NbtLongArray, NbtRegion, NbtShort, NbtString};
-use crate::render::{MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH, RenderContext, TextColor, VertexBufferBuilder, WINDOW_HEIGHT, WINDOW_WIDTH, WindowProperties};
+use crate::elements::{
+	CompoundMap, NbtByte, NbtByteArray, NbtChunk, NbtCompound, NbtDouble, NbtElement, NbtElementAndKey, NbtElementVariant, NbtFloat, NbtInt, NbtIntArray, NbtList, NbtLong, NbtLongArray, NbtRegion, NbtShort, NbtString,
+};
+use crate::render::{RenderContext, TextColor, VertexBufferBuilder, WindowProperties, MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH, WINDOW_HEIGHT, WINDOW_WIDTH};
 use crate::serialization::{BigEndianDecoder, Decoder, UncheckedBufWriter};
 use crate::tree::{
-	AddElementResult, Indices, MutableIndices, NavigationInformation, OwnedIndices, ParentNavigationInformationMut, RemoveElementResult, TraversalInformation, TraversalInformationMut, add_element, close_element, expand_element, open_element,
-	remove_element, replace_element, swap_element_same_depth,
+	add_element, close_element, expand_element, expand_element_to_indices, open_element, remove_element, replace_element, swap_element_same_depth, AddElementResult, Indices, MutableIndices, NavigationInformation,
+	OwnedIndices, ParentNavigationInformationMut, RemoveElementResult, TraversalInformation, TraversalInformationMut,
 };
-use crate::util::{LinkedQueue, StrExt, Vec2u, drop_on_separate_thread, get_clipboard, now, nth, set_clipboard};
+use crate::util::{drop_on_separate_thread, get_clipboard, now, nth, set_clipboard, LinkedQueue, StrExt, Vec2u};
 #[cfg(target_arch = "wasm32")] use crate::wasm::fake_scope as scope;
 use crate::widget::{
-	Alert, ButtonWidget, ButtonWidgetAccumulatedResult, ButtonWidgetContext, ButtonWidgetContextMut, ExactMatchButton, FreehandModeButton, NewTabButton, Notification, NotificationKind, OpenFileButton, RefreshButton, ReplaceBox, ReplaceBoxKeyResult,
-	ReplaceByButton, SEARCH_BOX_END_X, SEARCH_BOX_START_X, SearchBox, SearchBoxKeyResult, SearchFlagsButton, SearchModeButton, SearchOperationButton, SelectedText, SelectedTextAdditional, SelectedTextKeyResult, SortAlgorithmButton,
-	TEXT_DOUBLE_CLICK_INTERVAL, Text, ThemeButton, get_cursor_idx, get_cursor_left_jump_idx, get_cursor_right_jump_idx,
+	get_cursor_idx, get_cursor_left_jump_idx, get_cursor_right_jump_idx, Alert, ButtonWidget, ButtonWidgetAccumulatedResult, ButtonWidgetContext, ButtonWidgetContextMut, ExactMatchButton, FreehandModeButton, NewTabButton, Notification, NotificationKind, OpenFileButton,
+	RefreshButton, ReplaceBox, ReplaceBoxKeyResult, ReplaceByButton, SearchBox, SearchBoxKeyResult, SearchFlagsButton, SearchModeButton, SearchOperationButton, SelectedText, SelectedTextAdditional, SelectedTextKeyResult,
+	SortAlgorithmButton, Text, ThemeButton, SEARCH_BOX_END_X, SEARCH_BOX_START_X, TEXT_DOUBLE_CLICK_INTERVAL,
 };
 use crate::workbench::{ElementAction, FileFormat, MarkedLine, MarkedLines, Tab, WorkbenchAction};
 use crate::{config, flags, get_interaction_information, hash, mutable_indices, tab, tab_mut};
@@ -696,7 +698,8 @@ impl Workbench {
 				}
 			};
 
-			scope(|scope| value.shut(scope));
+			// SAFETY: value is detached from all caches
+			scope(|scope| unsafe { value.shut(scope) });
 			tab.append_to_history(WorkbenchAction::RemoveToHeldEntry);
 			tab.held_entry = Some(HeldEntry::from_indices((key, value), indices));
 			true
@@ -772,11 +775,11 @@ impl Workbench {
 			let key = key.map(|key| if key.needs_escape() { format_compact!("{key:?}") } else { key });
 			let key_exists = key.is_some();
 			if debug {
-				if write!(&mut buf, "{}{}{value:#?}", key.unwrap_or(CompactString::const_new("")), if key_exists { ": " } else { "" }).is_err() {
+				if write!(&mut buf, "{}{}{value:#?}", key.as_deref().unwrap_or(""), if key_exists { ": " } else { "" }).is_err() {
 					return false;
 				}
 			} else {
-				if write!(&mut buf, "{}{}{value}", key.unwrap_or(CompactString::const_new("")), if key_exists { ":" } else { "" }).is_err() {
+				if write!(&mut buf, "{}{}{value}", key.as_deref().unwrap_or(""), if key_exists { ":" } else { "" }).is_err() {
 					return false;
 				}
 			}
@@ -832,18 +835,16 @@ impl Workbench {
 			.value
 			.create_drop_indices((kv.0.as_deref(), &kv.1), y, x)
 		{
-			match add_element(&mut tab.value, kv, indices, &mut tab.bookmarks, mutable_indices!(self, tab)) {
-				Some(AddElementResult { indices, old_value }) => {
-					tab.value.expand_to_indices(&indices);
-					let Some(old_kv) = tab.value.get_kv_under_indices(&indices) else { return false };
-					let old_key = old_kv.0.map(|key| key.to_compact_string());
-					tab.append_to_history(WorkbenchAction::AddFromHeldEntry { indices, old_key, old_value, indices_history });
-					true
+			if let Some(AddElementResult { indices, old_kv }) = add_element(&mut tab.value, kv, indices, &mut tab.bookmarks, mutable_indices!(self, tab)) {
+				if expand_element_to_indices(&mut tab.value, &indices, &mut tab.bookmarks).is_none() {
+					self.alert(Alert::error("Failed to expand element indices"));
+					return false
 				}
-				None => {
-					self.alert(Alert::error("Failed to drop held entry"));
-					false
-				}
+				tab.append_to_history(WorkbenchAction::AddFromHeldEntry { indices, old_kv, indices_history });
+				true
+			} else {
+				self.alert(Alert::error("Failed to drop held entry"));
+				false
 			}
 		} else {
 			tab.append_to_history(WorkbenchAction::DiscardHeldEntry { held_entry: HeldEntry { kv, indices_history } });
@@ -874,22 +875,22 @@ impl Workbench {
 			} else {
 				let old_held_entry = tab.held_entry.replace(HeldEntry::from_aether((
 					None,
-					NbtElement::from_id(match x / 16 {
-						0 => NbtByte::ID,
-						1 => NbtShort::ID,
-						2 => NbtInt::ID,
-						3 => NbtLong::ID,
-						4 => NbtFloat::ID,
-						5 => NbtDouble::ID,
-						6 => NbtByteArray::ID,
-						7 => NbtIntArray::ID,
-						8 => NbtLongArray::ID,
-						9 => NbtString::ID,
-						10 => NbtList::ID,
-						11 => NbtCompound::ID,
-						12 if tab.value.id() == NbtRegion::ID => NbtChunk::ID,
+					match x / 16 {
+						0 => NbtElement::Byte(NbtByte::default()),
+						1 => NbtElement::Short(NbtShort::default()),
+						2 => NbtElement::Int(NbtInt::default()),
+						3 => NbtElement::Long(NbtLong::default()),
+						4 => NbtElement::Float(NbtFloat::default()),
+						5 => NbtElement::Double(NbtDouble::default()),
+						6 => NbtElement::ByteArray(NbtByteArray::default()),
+						7 => NbtElement::IntArray(NbtIntArray::default()),
+						8 => NbtElement::LongArray(NbtLongArray::default()),
+						9 => NbtElement::String(NbtString::default()),
+						10 => NbtElement::List(NbtList::default()),
+						11 => NbtElement::Compound(NbtCompound::default()),
+						12 if tab.value.id() == NbtRegion::ID => NbtElement::Chunk(NbtChunk::default()),
 						_ => return Ok(false),
-					}),
+					}
 				)));
 				if let Some(held_entry) = old_held_entry {
 					tab.append_to_history(WorkbenchAction::DiscardHeldEntry { held_entry })
@@ -1077,7 +1078,7 @@ impl Workbench {
 		if !(x == 1 && y == 0) {
 			return false
 		}
-		tab.value.on_root_style_change(&mut tab.bookmarks);
+		tab.value.on_style_change(&mut tab.bookmarks);
 		tab.value.recache_along_indices(Indices::EMPTY);
 		tab.refresh_scrolls();
 		true
@@ -1231,7 +1232,7 @@ impl Workbench {
 			return false
 		}
 		let k = key.map(|x| (x.to_owned().into_boxed_str(), TextColor::TreeKey, true));
-		let v = Some(element.value()).map(|(a, c)| (a.into_string().into_boxed_str(), c, c != TextColor::TreeKey));
+		let v = Some(element.value()).map(|(a, c)| (a.into_owned().into_boxed_str(), c, c != TextColor::TreeKey));
 		let mouse_x = if snap_to_ends {
 			let min_x = target_x;
 			let max_x = k
@@ -1352,7 +1353,7 @@ impl Workbench {
 		};
 		let ParentNavigationInformationMut { parent, idx: a_idx, parent_indices, .. } = tab.value.navigate_parent_mut(indices)?;
 		let b_idx = sibling_idx(a_idx)?;
-		if parent.get_kv(a_idx).is_none() || parent.get_kv(b_idx).is_none() {
+		if parent.get(a_idx).is_none() || parent.get(b_idx).is_none() {
 			return None
 		};
 		let result = match swap_element_same_depth(&mut tab.value, parent_indices.to_owned(), a_idx, b_idx, &mut tab.bookmarks, mutable_indices!(self, tab)) {
@@ -1474,7 +1475,9 @@ impl Workbench {
 		} else {
 			open_element(&mut tab.value, indices, &mut tab.bookmarks)
 		};
-		let alert = if let None = result { Some(Alert::error("Failed to open selected element")) } else { None };
+		let alert = result
+			.is_none()
+			.then(|| Alert::error("Failed to open the selected element"));
 		tab.refresh_scrolls();
 		if let Some(alert) = alert {
 			self.alert(alert);
@@ -1830,31 +1833,31 @@ impl Workbench {
 				if flags == flags!() {
 					let tab = tab_mut!(self);
 					let kv = if key == KeyCode::Digit1 {
-						(None, NbtElement::from_id(NbtByte::ID))
+						(None, NbtElement::Byte(NbtByte::default()))
 					} else if key == KeyCode::Digit2 {
-						(None, NbtElement::from_id(NbtShort::ID))
+						(None, NbtElement::Short(NbtShort::default()))
 					} else if key == KeyCode::Digit3 {
-						(None, NbtElement::from_id(NbtInt::ID))
+						(None, NbtElement::Int(NbtInt::default()))
 					} else if key == KeyCode::Digit4 {
-						(None, NbtElement::from_id(NbtLong::ID))
+						(None, NbtElement::Long(NbtLong::default()))
 					} else if key == KeyCode::Digit5 {
-						(None, NbtElement::from_id(NbtFloat::ID))
+						(None, NbtElement::Float(NbtFloat::default()))
 					} else if key == KeyCode::Digit6 {
-						(None, NbtElement::from_id(NbtDouble::ID))
+						(None, NbtElement::Double(NbtDouble::default()))
 					} else if key == KeyCode::Digit7 {
-						(None, NbtElement::from_id(NbtByteArray::ID))
+						(None, NbtElement::ByteArray(NbtByteArray::default()))
 					} else if key == KeyCode::Digit8 {
-						(None, NbtElement::from_id(NbtIntArray::ID))
+						(None, NbtElement::IntArray(NbtIntArray::default()))
 					} else if key == KeyCode::Digit9 {
-						(None, NbtElement::from_id(NbtLongArray::ID))
+						(None, NbtElement::LongArray(NbtLongArray::default()))
 					} else if key == KeyCode::Digit0 {
-						(None, NbtElement::from_id(NbtString::ID))
+						(None, NbtElement::String(NbtString::default()))
 					} else if key == KeyCode::Minus {
-						(None, NbtElement::from_id(NbtList::ID))
+						(None, NbtElement::List(NbtList::default()))
 					} else if key == KeyCode::Equal {
-						(None, NbtElement::from_id(NbtCompound::ID))
+						(None, NbtElement::Compound(NbtCompound::default()))
 					} else if key == KeyCode::Backquote && tab.value.id() == NbtRegion::ID {
-						(None, NbtElement::from_id(NbtChunk::ID))
+						(None, NbtElement::Chunk(NbtChunk::default()))
 					} else if key == KeyCode::KeyV {
 						let Some(clipboard) = get_clipboard() else {
 							self.alert(Alert::error("Failed to get clipboard"));
@@ -2221,7 +2224,7 @@ impl Workbench {
 
 		if let Some(held_entry) = &tab!(self).held_entry {
 			let element = &held_entry.kv.1;
-			element.render_icon((self.mouse_x.saturating_sub(8), self.mouse_y.saturating_sub(8)), HELD_ENTRY_Z, builder);
+			builder.draw_texture_z((self.mouse_x.saturating_sub(8), self.mouse_y.saturating_sub(8)), HELD_ENTRY_Z, element.uv(), (16, 16));
 
 			if (!element.is_primitive() || !element.is_default_state()) && element.should_render_description() || shift {
 				let (text, color) = element.value();
@@ -2866,34 +2869,32 @@ impl SortAlgorithm {
 	///
 	/// * Data must be created before any modifications as to eliminate the possibility of bookmarks, history, etc.
 	pub unsafe fn sort(self, map: &mut CompoundMap) {
-		if let Self::None = self {
-			return;
+		let mapping = match self {
+			Self::None => return,
+			Self::Name => map.create_sort_mapping(ElementAction::by_name),
+			Self::Type => map.create_sort_mapping(ElementAction::by_type),
+		};
+
+		let len = map.len();
+
+		let previous_entries = core::mem::replace(&mut map.entries, Vec::with_capacity(len));
+		let current_entries = map.entries.spare_capacity_mut();
+
+		for ((new_idx, idx), entry) in mapping
+			.into_iter()
+			.enumerate()
+			.zip(previous_entries.into_iter())
+		{
+			*unsafe {
+				map.indices
+					.find_mut(hash!(entry.key), |&x| x == idx)
+					.unwrap_unchecked()
+			} = new_idx;
+			current_entries[new_idx].write(entry);
 		}
-		// yeah, it's hacky... but there's not much else I *can* do. plus: it works extremely well.
-		for (idx, entry) in map.entries.iter_mut().enumerate() {
-			entry.additional = idx;
-		}
-		match self {
-			Self::Name => map
-				.entries
-				.sort_by(|a, b| ElementAction::by_name((&a.key, &a.value), (&b.key, &b.value))),
-			_ => map
-				.entries
-				.sort_by(|a, b| ElementAction::by_type((&a.key, &a.value), (&b.key, &b.value))),
-		}
-		let indices = map
-			.entries
-			.iter()
-			.map(|entry| entry.additional)
-			.collect::<Vec<_>>();
-		for (new_idx, &idx) in indices.iter().enumerate() {
-			// SAFETY: these indices are valid since the length did not change and since the values written were indexes
-			unsafe {
-				let entry = map.entries.get_unchecked_mut(new_idx);
-				*map.indices
-					.find_mut(hash!(entry.key), |&target_idx| target_idx == idx)
-					.expect("index obviously exists") = new_idx;
-			}
+
+		unsafe {
+			map.entries.set_len(len);
 		}
 	}
 }

@@ -3,22 +3,21 @@
 #![feature(
 	allocator_api,
 	cold_path,
-	const_manually_drop,
 	duration_millis_float,
+	inherent_associated_types,
 	let_chains,
 	likely_unlikely,
 	maybe_uninit_array_assume_init,
 	panic_update_hook,
+	ptr_as_ref_unchecked,
 	try_with_capacity,
 	vec_push_within_capacity,
 	array_chunks,
 	box_patterns,
-	core_intrinsics,
 	iter_array_chunks,
 	iter_next_chunk,
 	stmt_expr_attributes
 )]
-#![feature(ptr_as_ref_unchecked)]
 #![windows_subsystem = "windows"]
 
 extern crate core;
@@ -34,7 +33,6 @@ pub mod util;
 pub mod workbench;
 
 pub use render::{assets, widget};
-use static_assertions::const_assert_eq;
 
 #[macro_export]
 macro_rules! flags {
@@ -132,7 +130,10 @@ pub static mut WINDOW_PROPERTIES: render::WindowProperties = render::WindowPrope
 /// # Refactor
 /// * render trees using [`RenderLine`](RenderLine) struct/enum
 /// * rendering code is duplicated af
-/// * rename line_number and true_line_number to y and line_number respectively
+/// * rename `line_number` and `true_line_number` to `y` and `line_number` respectively
+/// * add high-quality Safety rustdoc to **all** created unsafe fns
+/// * if you want to optimize something, optimize [`NbtElement::recache`]
+/// * change to Box<Inner> for all complex types and get down to 16 bytes (?)
 /// # Long-Term Goals
 /// * smart screen
 /// * add multi-cursor
@@ -140,7 +141,7 @@ pub static mut WINDOW_PROPERTIES: render::WindowProperties = render::WindowPrope
 /// # Minor Features
 /// * [`last_modified`](elements::chunk::NbtChunk) field actually gets the ability to be set
 /// * add set intersection operations for line number searching (+ dedicated negate button)
-/// * add option for [ReplaceBox](render::widget::ReplaceBox) to use existing highlighted line numbers or hits for search box
+/// * add option for [`ReplaceBox`](widget::ReplaceBox) to use existing highlighted line numbers or hits for search box
 /// # Major Features
 /// * macros
 #[cfg(not(target_arch = "wasm32"))]
@@ -151,22 +152,18 @@ pub fn main() -> ! {
 		winapi::um::wincon::AttachConsole(winapi::um::wincon::ATTACH_PARENT_PROCESS);
 	}
 
-	let first_arg = std::env::args().nth(1);
-	if let Some("find") = first_arg.as_deref() {
-		cli::find()
-	} else if let Some("replace") = first_arg.as_deref() {
-		cli::replace()
-	} else if let Some("reformat") = first_arg.as_deref() {
-		cli::reformat()
-	} else if let Some("--version" | "-v") = first_arg.as_deref() {
-		println!("{}", env!("CARGO_PKG_VERSION"));
-		std::process::exit(0);
-	} else if let Some("-?" | "/?" | "--help" | "-h") = first_arg.as_deref() {
-		cli::help();
-	} else {
-		pollster::block_on(render::run())
+	match std::env::args().nth(1).as_deref() {
+		Some("find") => cli::find(),
+		Some("replace") => cli::replace(),
+		Some("reformat") => cli::reformat(),
+		Some("--version" | "-v") => {
+			println!("{}", env!("CARGO_PKG_VERSION"));
+			std::process::exit(0);
+		}
+		Some("-?" | "/?" | "--help" | "-h") => cli::help(),
+		_ => pollster::block_on(render::run()),
 	}
 }
 
 // required so chunk coordinates function with the hardcoded spacing offset
-const_assert_eq!(render::VertexBufferBuilder::CHAR_WIDTH[b':' as usize], render::VertexBufferBuilder::CHAR_WIDTH[b',' as usize]);
+static_assertions::const_assert_eq!(render::VertexBufferBuilder::CHAR_WIDTH[b':' as usize], render::VertexBufferBuilder::CHAR_WIDTH[b',' as usize]);
