@@ -415,20 +415,19 @@ impl ComplexNbtElementVariant for NbtList {
 	fn recache(&mut self) {
 		let mut height = 1;
 		let mut true_height = 1;
+		let mut max_depth = 0;
+		
 		for child in self.children() {
 			height += child.height() as u32;
 			true_height += child.true_height() as u32;
+			max_depth = usize::max(max_depth, 16 + 4 + child.value_width());
+			max_depth = usize::max(max_depth, 16 + child.max_depth());
 		}
+		
+		self.height = if self.is_open() { height } else { 1 };
 		self.true_height = true_height;
-		self.height = height;
-		let mut max_depth = 0;
-		if self.is_open() {
-			for child in self.children() {
-				max_depth = usize::max(max_depth, 16 + 4 + child.value_width());
-				max_depth = usize::max(max_depth, 16 + child.max_depth());
-			}
-		}
-		self.max_depth = max_depth as u32;
+		self.max_depth = if self.is_open() { max_depth as u32 } else { 0 };
+		
 		self.recache_elements_bitset();
 	}
 

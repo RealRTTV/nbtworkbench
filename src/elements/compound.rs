@@ -413,20 +413,18 @@ impl ComplexNbtElementVariant for NbtCompound {
 	fn recache(&mut self) {
 		let mut height = 1;
 		let mut true_height = 1;
-		for CompoundEntry { key: _, value: child } in self.children() {
+		let mut max_depth = 0;
+		
+		for CompoundEntry { key, value: child } in self.children() {
 			height += child.height() as u32;
 			true_height += child.true_height() as u32;
+			max_depth = max_depth.max(16 + 4 + key.width() + const { width_ascii(": ") } + child.value_width());
+			max_depth = max_depth.max(16 + child.max_depth());
 		}
-		self.height = height;
+		
+		self.height = if self.is_open() { height } else { 1 };
 		self.true_height = true_height;
-		let mut max_depth = 0;
-		if self.is_open() {
-			for CompoundEntry { key, value: child } in self.children() {
-				max_depth = max_depth.max(16 + 4 + key.width() + const { width_ascii(": ") } + child.value_width());
-				max_depth = max_depth.max(16 + child.max_depth());
-			}
-		}
-		self.max_depth = max_depth as u32;
+		self.max_depth = if self.is_open() { max_depth as u32 } else { 0 };
 	}
 
 	fn get(&self, idx: usize) -> Option<&Self::Entry> { self.map.entries.get(idx) }

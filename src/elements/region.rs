@@ -486,33 +486,25 @@ impl ComplexNbtElementVariant for NbtRegion {
 		let mut true_height = 1;
 		let mut height = 1;
 		let mut loaded_chunks = 0_usize;
+		let mut max_depth = 0;
+		
 		for child in self.children() {
-			if child
-				.as_chunk()
-				.is_some_and(|chunk| chunk.is_loaded())
-			{
+			if child.as_chunk().is_some_and(|chunk| chunk.is_loaded()) {
 				loaded_chunks += 1;
 			}
 			true_height += child.true_height() as u32;
 			height += child.height() as u32;
 		}
-		self.true_height = true_height;
-		self.height = height;
-		self.loaded_chunks = loaded_chunks as u16;
-
-		let mut max_depth = 0;
-		if self.is_open() {
-			if self.is_grid_layout() {
-				max_depth = 16 + 32 * 16;
-				self.height = 33;
-			} else {
-				for child in self.children() {
-					max_depth = usize::max(max_depth, 16 + 4 + child.value_width());
-					max_depth = usize::max(max_depth, 16 + child.max_depth());
-				}
-			}
+		
+		if self.is_grid_layout() {
+			max_depth = 16 + 32 * 16;
+			height = 33;
 		}
-		self.max_depth = max_depth as u32;
+		
+		self.true_height = true_height;
+		self.height = if self.is_open() { height } else { 1 };
+		self.loaded_chunks = loaded_chunks as u16;
+		self.max_depth = if self.is_open() { max_depth as u32 } else { 0 };
 	}
 
 	fn on_style_change(&mut self, bookmarks: &mut MarkedLines) -> bool {
