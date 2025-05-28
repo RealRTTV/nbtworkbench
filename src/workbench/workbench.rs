@@ -225,7 +225,7 @@ impl Workbench {
 				#[cfg(debug_assertions)]
 				name: "test.nbt".into(),
 				#[cfg(not(debug_assertions))]
-				value: Box::new(NbtElement::Compound(NbtCompound::new())),
+				value: Box::new(NbtElement::Compound(NbtCompound::default())),
 				#[cfg(not(debug_assertions))]
 				name: "new.nbt".into(),
 				path: None,
@@ -246,6 +246,7 @@ impl Workbench {
 				last_double_click_interaction: (0, Duration::ZERO),
 				held_entry: None,
 				cache_cursor_x: None,
+				subscription: None,
 			});
 		}
 		workbench
