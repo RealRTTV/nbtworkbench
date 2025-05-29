@@ -93,6 +93,8 @@ impl DerefMut for NbtChunk {
 }
 
 impl NbtElementVariant for NbtChunk {
+	type ExtraParseInfo = usize;
+
 	const ID: u8 = 64 | 1;
 	const UV: Vec2u = CHUNK_UV;
 	const GHOST_UV: Vec2u = CHUNK_GHOST_UV;
@@ -121,9 +123,8 @@ impl NbtElementVariant for NbtChunk {
 		Ok((s, Self::new(compound, (x, z), FileFormat::Zlib, now().as_secs() as u32)))
 	}
 
-	fn from_bytes<'a, D: Decoder<'a>>(decoder: &mut D) -> NbtParseResult<Self>
+	fn from_bytes<'a, D: Decoder<'a>>(decoder: &mut D, idx: usize) -> NbtParseResult<Self>
 	where Self: Sized {
-		let idx = from_opt(decoder.extra_data().write().take(), "Expected an index supplied as an extra field")?;
 		let bytes = decoder.rest();
 		let (offsets, bytes) = from_opt(bytes.split_first_chunk::<4096>(), "header wasn't big enough")?;
 		let (last_modifieds, bytes) = from_opt(bytes.split_first_chunk::<4096>(), "header wasn't big enough")?;
@@ -140,20 +141,21 @@ impl NbtElementVariant for NbtChunk {
 				.read()
 		});
 		if offset < 512 {
-			return ok(NbtChunk::unloaded_from_pos(idx))
+			return ok(NbtChunk::unloaded_from_pos(idx));
 		}
 		let pos = ((idx % 16) as u8, (idx / 16) as u8);
 		let len = (offset as usize & 0xFF) * 4096;
+		// value does include header so we must offset against that
 		let offset = ((offset >> 8) - 2) as usize * 4096;
 		if bytes.len() < offset + len {
-			return err("Offset goes outside bytes")
+			return err("Offset goes outside bytes");
 		}
 		let data = &bytes[offset..offset + len];
 
 		if let &[a, b, c, d, compression, ref data @ ..] = data {
 			let chunk_len = from_opt((u32::from_be_bytes([a, b, c, d]) as usize).checked_sub(1), "Chunk was inside header.")?;
 			if data.len() < chunk_len {
-				return err("Offset is invalid")
+				return err("Offset is invalid");
 			}
 			let data = &data[..chunk_len];
 			let (compression, element) = match compression {

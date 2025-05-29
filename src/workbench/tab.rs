@@ -9,10 +9,7 @@ use flate2::Compression;
 use zune_inflate::DeflateDecoder;
 
 use super::{FileUpdateSubscription, HeldEntry, MarkedLines, WorkbenchAction};
-use crate::assets::{
-	BASE_Z, FROM_CLIPBOARD_GHOST_UV, FROM_CLIPBOARD_UV, GZIP_FILE_TYPE_UV, HEADER_SIZE, HELD_SCROLLBAR_UV, JUST_OVERLAPPING_BASE_Z, LINE_NUMBER_SEPARATOR_UV, LITTLE_ENDIAN_HEADER_NBT_FILE_TYPE_UV, LITTLE_ENDIAN_NBT_FILE_TYPE_UV, MCA_FILE_TYPE_UV,
-	NBT_FILE_TYPE_UV, SCROLLBAR_Z, SNBT_FILE_TYPE_UV, STEAL_ANIMATION_OVERLAY_UV, UNHELD_SCROLLBAR_UV, ZLIB_FILE_TYPE_UV, ZOffset,
-};
+use crate::assets::{BASE_Z, FROM_CLIPBOARD_GHOST_UV, FROM_CLIPBOARD_UV, GZIP_FILE_TYPE_UV, HEADER_SIZE, HELD_SCROLLBAR_UV, JUST_OVERLAPPING_BASE_Z, LINE_NUMBER_SEPARATOR_UV, LITTLE_ENDIAN_HEADER_NBT_FILE_TYPE_UV, LITTLE_ENDIAN_NBT_FILE_TYPE_UV, MCA_FILE_TYPE_UV, NBT_FILE_TYPE_UV, SCROLLBAR_Z, SNBT_FILE_TYPE_UV, STEAL_ANIMATION_OVERLAY_UV, UNHELD_SCROLLBAR_UV, ZLIB_FILE_TYPE_UV, ZOffset, CONNECTION_UV};
 use crate::elements::{ComplexNbtElementVariant, NbtByte, NbtByteArray, NbtChunk, NbtCompound, NbtDouble, NbtElement, NbtElementVariant, NbtFloat, NbtInt, NbtIntArray, NbtList, NbtLong, NbtLongArray, NbtRegion, NbtShort, NbtString};
 use crate::render::{RenderContext, TextColor, VertexBufferBuilder, WindowProperties};
 use crate::tree::rename_element;
@@ -185,12 +182,18 @@ impl Tab {
 
 		let horizontal_scroll_before = core::mem::replace(&mut builder.horizontal_scroll, self.horizontal_scroll());
 		// let start = std::time::Instant::now();
-		if let Some(compound) = self.value.as_compound() {
-			compound.render(builder, Some(&self.name), &mut (builder.scroll() / 16), true, ctx);
-		} else if let Some(region) = self.value.as_region() {
-			region.render(builder, Some(&self.name), &mut (builder.scroll() / 16), true, ctx);
-		} else if let Some(list) = self.value.as_list() {
-			list.render(builder, Some(&self.name), &mut (builder.scroll() / 16), true, ctx);
+		{
+			let mut remaining_scroll = builder.scroll() / 16;
+			if remaining_scroll == 0 {
+				builder.draw_texture(ctx.pos() - (16, 0), CONNECTION_UV, (16, 9));
+			}
+			if let Some(compound) = self.value.as_compound() {
+				compound.render(builder, Some(&self.name), &mut remaining_scroll, true, ctx);
+			} else if let Some(region) = self.value.as_region() {
+				region.render(builder, Some(&self.name), &mut remaining_scroll, true, ctx);
+			} else if let Some(list) = self.value.as_list() {
+				list.render(builder, Some(&self.name), &mut remaining_scroll, true, ctx);
+			}
 		}
 		// println!("Tree Only: {}ms", start.elapsed().as_millis_f64());
 		builder.color = TextColor::White.to_raw();

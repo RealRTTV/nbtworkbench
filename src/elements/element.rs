@@ -444,18 +444,18 @@ impl NbtElement {
 		use super::result::*;
 
 		ok(match element {
-			NbtByte::ID => Self::Byte(NbtByte::from_bytes(decoder)?),
-			NbtShort::ID => Self::Short(NbtShort::from_bytes(decoder)?),
-			NbtInt::ID => Self::Int(NbtInt::from_bytes(decoder)?),
-			NbtLong::ID => Self::Long(NbtLong::from_bytes(decoder)?),
-			NbtFloat::ID => Self::Float(NbtFloat::from_bytes(decoder)?),
-			NbtDouble::ID => Self::Double(NbtDouble::from_bytes(decoder)?),
-			NbtByteArray::ID => Self::ByteArray(NbtByteArray::from_bytes(decoder)?),
-			NbtString::ID => Self::String(NbtString::from_bytes(decoder)?),
-			NbtList::ID => Self::List(NbtList::from_bytes(decoder)?),
-			NbtCompound::ID => Self::Compound(NbtCompound::from_bytes(decoder)?),
-			NbtIntArray::ID => Self::IntArray(NbtIntArray::from_bytes(decoder)?),
-			NbtLongArray::ID => Self::LongArray(NbtLongArray::from_bytes(decoder)?),
+			NbtByte::ID => Self::Byte(NbtByte::from_bytes(decoder, ())?),
+			NbtShort::ID => Self::Short(NbtShort::from_bytes(decoder, ())?),
+			NbtInt::ID => Self::Int(NbtInt::from_bytes(decoder, ())?),
+			NbtLong::ID => Self::Long(NbtLong::from_bytes(decoder, ())?),
+			NbtFloat::ID => Self::Float(NbtFloat::from_bytes(decoder, ())?),
+			NbtDouble::ID => Self::Double(NbtDouble::from_bytes(decoder, ())?),
+			NbtByteArray::ID => Self::ByteArray(NbtByteArray::from_bytes(decoder, ())?),
+			NbtString::ID => Self::String(NbtString::from_bytes(decoder, ())?),
+			NbtList::ID => Self::List(NbtList::from_bytes(decoder, ())?),
+			NbtCompound::ID => Self::Compound(NbtCompound::from_bytes(decoder, ())?),
+			NbtIntArray::ID => Self::IntArray(NbtIntArray::from_bytes(decoder, ())?),
+			NbtLongArray::ID => Self::LongArray(NbtLongArray::from_bytes(decoder, ())?),
 			_ => return err("Invalid NBT type"),
 		})
 	}
@@ -493,7 +493,7 @@ impl NbtElement {
 		if is_ok(&decoder.assert_len(2)) && unsafe { decoder.u16() } != 0_u16.to_be() {
 			decoder.skip(-2_isize as usize);
 		}
-		let nbt = Self::Compound(NbtCompound::from_bytes(&mut decoder)?);
+		let nbt = Self::Compound(NbtCompound::from_bytes(&mut decoder, ())?);
 		if is_ok(&decoder.assert_len(1)) {
 			return err("Format should take all the bytes");
 		}
@@ -502,7 +502,7 @@ impl NbtElement {
 
 	pub fn from_be_mca(bytes: &[u8]) -> NbtParseResult<Self> {
 		let mut decoder = BigEndianDecoder::new(bytes);
-		NbtRegion::from_bytes(&mut decoder).map(Self::Region)
+		NbtRegion::from_bytes(&mut decoder, ()).map(Self::Region)
 	}
 
 	#[must_use]
@@ -517,13 +517,13 @@ impl NbtElement {
 				decoder.assert_len(2)?;
 				let skip = unsafe { decoder.u16() } as usize;
 				decoder.skip(skip);
-				ok((Self::Compound(NbtCompound::from_bytes(&mut decoder)?), decoder.has_header()))
+				ok((Self::Compound(NbtCompound::from_bytes(&mut decoder, ())?), decoder.has_header()))
 			}
 			NbtList::ID => {
 				decoder.assert_len(2)?;
 				let skip = unsafe { decoder.u16() } as usize;
 				decoder.skip(skip);
-				ok((Self::List(NbtList::from_bytes(&mut decoder)?), decoder.has_header()))
+				ok((Self::List(NbtList::from_bytes(&mut decoder, ())?), decoder.has_header()))
 			}
 			_ => err("Little-endian should start with either Compound or List"),
 		};

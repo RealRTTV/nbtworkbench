@@ -1,8 +1,10 @@
 use crate::elements::{CompoundEntry, CompoundMap, NbtElement, NbtPatternMut};
-use crate::hash;
+use crate::{hash, util};
 use crate::tree::{MutableIndices, NavigationInformationMut, OwnedIndices};
+use crate::util::invert_mapping;
 use crate::workbench::{MarkedLines, WorkbenchAction};
 
+#[allow(non_snake_case)]
 #[must_use]
 pub fn reorder_element<'m1, 'm2: 'm1>(root: &mut NbtElement, indices: OwnedIndices, mapping: impl Into<Box<[usize]>>, bookmarks: &mut MarkedLines, mutable_indices: &'m1 mut MutableIndices<'m2>) -> Option<ReorderElementResult> {
 	let NavigationInformationMut { element, line_number, true_line_number, .. } = root.navigate_mut(&indices)?;
@@ -18,6 +20,7 @@ pub fn reorder_element<'m1, 'm2: 'm1>(root: &mut NbtElement, indices: OwnedIndic
 		NbtPatternMut::Chunk(chunk) => &mut *chunk.map,
 		_ => return None,
 	};
+	let inverted_mapping = invert_mapping(&mapping)?;
 	// line numbers for the nth child under the new order
 	let new_idx__line_numbers = {
 		let mut new_idx_line_number = line_number + 1;
@@ -36,18 +39,15 @@ pub fn reorder_element<'m1, 'm2: 'm1>(root: &mut NbtElement, indices: OwnedIndic
 	};
 
 	let mut new_bookmarks = Vec::with_capacity(bookmarks[true_line_number..true_line_number + parent_true_height].len());
-	let previous_entries = core::mem::take(entries);
-	let mut new_entries = vec![None; previous_entries.len()];
-	let mut inverted_mapping = vec![0; previous_entries.len()];
 
-	// line numbers for the current child under the old order
+	// line numbers for the current child under the old ordering
 	let mut old_idx__line_number = line_number + 1;
 	let mut old_idx__true_line_number = true_line_number + 1;
 
-	for (((new_idx, &idx), entry), (new_idx__line_number, new_idx__true_line_number)) in mapping
+	for (((idx, &new_idx), entry), (new_idx__line_number, new_idx__true_line_number)) in mapping
 		.iter()
 		.enumerate()
-		.zip(previous_entries.into_iter())
+		.zip(entries.iter())
 		.zip(new_idx__line_numbers)
 	{
 		let child_height = entry.value.height();
@@ -59,9 +59,8 @@ pub fn reorder_element<'m1, 'm2: 'm1>(root: &mut NbtElement, indices: OwnedIndic
 			new_bookmarks.push(bookmark.offset(offset, true_offset));
 		}
 
+		dbg!();
 		*map_indices.find_mut(hash!(entry.key), |&x| x == idx)? = new_idx;
-		new_entries[new_idx] = Some(entry);
-		inverted_mapping[new_idx] = idx;
 
 		old_idx__line_number += child_height;
 		old_idx__true_line_number += child_true_height;
@@ -77,13 +76,13 @@ pub fn reorder_element<'m1, 'm2: 'm1>(root: &mut NbtElement, indices: OwnedIndic
 	let bookmark_slice = &mut bookmarks[true_line_number..true_line_number + parent_true_height];
 	let new_bookmarks = MarkedLines::from(new_bookmarks);
 	bookmark_slice.copy_from_slice(&new_bookmarks);
-	*entries = new_entries
-		.into_iter()
-		.collect::<Option<Vec<CompoundEntry>>>()?;
+
+	dbg!();
+	if !util::reorder(entries, &*mapping) { return None }
 
 	Some(ReorderElementResult {
 		indices,
-		mapping: inverted_mapping.into_boxed_slice(),
+		mapping: inverted_mapping,
 	})
 }
 

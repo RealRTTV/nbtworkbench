@@ -37,7 +37,7 @@ macro_rules! primitive {
 					Err(s.len())
 				}
 
-				fn from_bytes<'a, D: $crate::serialization::Decoder<'a>>(decoder: &mut D) -> $crate::elements::result::NbtParseResult<Self> {
+				fn from_bytes<'a, D: $crate::serialization::Decoder<'a>>(decoder: &mut D, _: Self::ExtraParseInfo) -> $crate::elements::result::NbtParseResult<Self> {
 					use $crate::elements::result::*;
 
 					unsafe {

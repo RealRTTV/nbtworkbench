@@ -34,7 +34,7 @@ use crate::widget::{
 	TEXT_DOUBLE_CLICK_INTERVAL, Text, ThemeButton, get_cursor_idx, get_cursor_left_jump_idx, get_cursor_right_jump_idx,
 };
 use crate::workbench::{ElementAction, FileFormat, MarkedLine, MarkedLines, Tab, WorkbenchAction};
-use crate::{config, flags, get_interaction_information, hash, mutable_indices, tab, tab_mut};
+use crate::{config, flags, get_interaction_information, hash, mutable_indices, tab, tab_mut, util};
 
 #[derive(Debug)]
 pub enum InteractionInformation<'a> {
@@ -207,8 +207,9 @@ impl Workbench {
 			if let Some(path) = &std::env::args()
 				.nth(1)
 				.and_then(|x| PathBuf::from_str(&x).ok())
+				&& let Ok(buf) = std::fs::read(path)
 			{
-				if let Err(e) = workbench.on_open_file(path, std::fs::read(path).unwrap_or(vec![]), window_properties) {
+				if let Err(e) = workbench.on_open_file(path, buf, window_properties) {
 					workbench.alert(e.into())
 				} else {
 					break 'create_tab;
@@ -2853,27 +2854,15 @@ impl SortAlgorithm {
 			Self::Type => map.create_sort_mapping(ElementAction::by_type),
 		};
 
-		let len = map.len();
-
-		let previous_entries = core::mem::replace(&mut map.entries, Vec::with_capacity(len));
-		let current_entries = map.entries.spare_capacity_mut();
-
-		for ((new_idx, idx), entry) in mapping
-			.into_iter()
-			.enumerate()
-			.zip(previous_entries.into_iter())
-		{
+		for (idx, &new_idx) in mapping.iter().enumerate() {
 			*unsafe {
 				map.indices
-					.find_mut(hash!(entry.key), |&x| x == idx)
+					.find_mut(hash!(map.entries.get_unchecked(idx).key), |&x| x == idx)
 					.unwrap_unchecked()
 			} = new_idx;
-			current_entries[new_idx].write(entry);
 		}
 
-		unsafe {
-			map.entries.set_len(len);
-		}
+		util::reorder(&mut map.entries, mapping);
 	}
 }
 
