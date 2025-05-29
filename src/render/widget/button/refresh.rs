@@ -30,7 +30,11 @@ impl ButtonWidget for RefreshButton {
 	fn is_clickable(&self, _ctx: &ButtonWidgetContext) -> bool { !cfg!(target_arch = "wasm32") }
 
 	fn render(&self, builder: &mut VertexBufferBuilder, mouse: Vec2u, window_dims: Vec2u, ctx: &ButtonWidgetContext, held_mouse_keys: &FxHashSet<MouseButton>) {
-		let has_path = ctx.tab.path().is_some_and(|path| path.exists());
+		let has_path = ctx
+			.tab
+			.path
+			.path()
+			.is_some_and(|path| path.exists());
 		let aabb = self.bounds(window_dims);
 		let widget_uv = if !has_path || !self.is_clickable(ctx) {
 			UNSELECTED_WIDGET_UV

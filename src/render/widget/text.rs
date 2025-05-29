@@ -13,6 +13,7 @@ use crate::widget::KeyResult::{Escape, Failed, Finish, NothingSpecial};
 pub const TEXT_DOUBLE_CLICK_INTERVAL: Duration = Duration::from_millis(250);
 pub const CURSOR_BLINK_RATE: Duration = Duration::from_millis(500);
 
+// todo: remove
 #[repr(u8)]
 #[derive(PartialEq, Eq)]
 pub enum SelectedTextKeyResult {
@@ -24,8 +25,8 @@ pub enum SelectedTextKeyResult {
 	MoveToValuefix,
 	Up(bool),
 	Down(bool),
-	ForceClose,
-	ForceOpen,
+	ForceCloseElement,
+	ForceOpenElement,
 	ShiftUp,
 	ShiftDown,
 }

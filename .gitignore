@@ -1,3 +1,5 @@
 /target
+/vendor
+/.idea
 Cargo.lock
 flamegraph.svg

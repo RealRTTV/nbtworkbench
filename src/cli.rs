@@ -10,8 +10,8 @@ use crate::render::WindowProperties;
 use crate::tree::MutableIndices;
 use crate::util::create_regex;
 use crate::widget::{ReplaceBox, SearchBox, SearchFlags, SearchMode, SearchPredicate, SearchPredicateInner, SearchReplacement};
-use crate::workbench::{FileFormat, MarkedLines, Workbench, WorkbenchAction};
-use crate::{config, error, log};
+use crate::workbench::{FileFormat, MarkedLines, PathWithName, Workbench, WorkbenchAction};
+use crate::{config, error, log, mutable_indices};
 
 struct SearchResult {
 	path: PathBuf,
@@ -322,8 +322,8 @@ pub fn replace() -> ! {
 				}
 
 				let mut tab = workbench.tabs.remove(0);
-				let (bulk, _failures) = ReplaceBox::replace_by_search_box0(&mut MarkedLines::new(), MutableIndices::empty(), &mut tab.value, &replacement);
-				let actions = if let WorkbenchAction::Bulk { actions } = &bulk { actions.len() } else { 0 };
+				let (bulk, _failures) = ReplaceBox::replace_by_search_box0(&mut tab.path, &mut tab.bookmarks, mutable_indices!(tab), &mut tab.value, &replacement);
+				let actions = if let Some(WorkbenchAction::Bulk { actions }) = &bulk { actions.len() } else { 0 };
 
 				if let Err(e) = tab.save(false, &mut WindowProperties::Fake) {
 					error!("File write error: {e}");

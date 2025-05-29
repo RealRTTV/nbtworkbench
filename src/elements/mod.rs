@@ -14,6 +14,7 @@ use std::slice;
 
 pub use array::*;
 pub use chunk::*;
+use compact_str::CompactString;
 pub use compound::*;
 pub use element::*;
 pub use list::*;
@@ -23,12 +24,12 @@ pub use string::*;
 
 use crate::elements::result::NbtParseResult;
 use crate::render::{RenderContext, VertexBufferBuilder};
-use crate::serialization::{Decoder, PrettyDisplay, PrettyFormatter, UncheckedBufWriter};
+use crate::serialization::{Decoder, PrettyDisplay, UncheckedBufWriter};
 use crate::util::Vec2u;
 #[cfg(target_arch = "wasm32")] use crate::wasm::FakeScope as Scope;
 use crate::workbench::MarkedLines;
 
-pub type NbtElementAndKey = (Option<compact_str::CompactString>, NbtElement);
+pub type NbtElementAndKey = (Option<CompactString>, NbtElement);
 
 pub type NbtElementAndKeyRef<'a> = (Option<&'a str>, &'a NbtElement);
 

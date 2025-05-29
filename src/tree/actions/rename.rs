@@ -6,10 +6,10 @@ use compact_str::{CompactString, ToCompactString};
 use crate::elements::NbtElement;
 use crate::render::WindowProperties;
 use crate::tree::{OwnedIndices, ParentNavigationInformationMut};
-use crate::workbench::WorkbenchAction;
+use crate::workbench::{PathWithName, WorkbenchAction};
 
 #[must_use]
-pub fn rename_element(root: &mut NbtElement, indices: OwnedIndices, key: Option<CompactString>, value: Option<String>, path: &mut Option<PathBuf>, name: &mut Box<str>, window_properties: &mut WindowProperties) -> Option<RenameElementResult> {
+pub fn rename_element(root: &mut NbtElement, indices: OwnedIndices, key: Option<CompactString>, value: Option<String>, path: &mut PathWithName, window_properties: &mut WindowProperties) -> Option<RenameElementResult> {
 	if key.is_none() && value.is_none() {
 		return None;
 	}
@@ -42,41 +42,26 @@ pub fn rename_element(root: &mut NbtElement, indices: OwnedIndices, key: Option<
 		&& value.is_none()
 		&& indices.is_root()
 	{
-		if path
-			.as_ref()
-			.map(|path| path.as_os_str().to_string_lossy())
-			.as_deref()
-			.unwrap_or(name)
-			== key
-		{
+		if path.path_str().unwrap_or(path.name()) == key {
 			return None;
 		}
-		let buf = PathBuf::from(key);
-		if let Some(new_name) = buf
-			.file_name()
-			.and_then(OsStr::to_str)
-			.map(ToOwned::to_owned)
-		{
-			window_properties.set_window_title(&format!("{new_name} - NBT Workbench"));
-			let old_name = core::mem::replace(name, new_name.into_boxed_str());
-			Some(RenameElementResult {
-				indices: OwnedIndices::new(),
-				key: None,
-				value: Some(
-					path.replace(buf)
-						.as_deref()
-						.and_then(|path| path.to_str())
-						.map_or_else(|| old_name.into_string(), |str| str.to_owned()),
-				),
-			})
-		} else {
-			None
-		}
+
+		let old_path = path
+			.set_path(PathBuf::from(key))
+			.map(|s| s.to_string_lossy().into_owned())
+			.unwrap_or_else(|| path.name().to_owned());
+		window_properties.set_window_title(&format!("{} - NBT Workbench", path.name()));
+		Some(RenameElementResult {
+			indices: OwnedIndices::new(),
+			key: None,
+			value: Some(old_path),
+		})
 	} else {
 		None
 	}
 }
 
+// todo: add trait for these
 #[derive(Clone)]
 pub struct RenameElementResult {
 	pub indices: OwnedIndices,

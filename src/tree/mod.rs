@@ -9,7 +9,7 @@ pub use navigate::*;
 pub use traverse::*;
 
 use crate::elements::NbtElement;
-use crate::widget::SelectedText;
+use crate::widget::{SelectedText, SelectedTexts};
 use crate::workbench::FileUpdateSubscription;
 
 #[must_use]
@@ -58,17 +58,17 @@ pub fn indices_for_true(true_line_number: usize, mut root: &NbtElement) -> Optio
 pub struct MutableIndices<'m2> {
 	is_empty: bool,
 	subscription: &'m2 mut Option<FileUpdateSubscription>,
-	selected_text: &'m2 mut Option<SelectedText>,
+	selected_texts: &'m2 mut SelectedTexts,
 	pub temp: Vec<&'m2 mut Option<OwnedIndices>>,
 }
 
 impl<'m1, 'm2: 'm1> MutableIndices<'m2> {
 	#[must_use]
-	pub fn new(subscription: &'m2 mut Option<FileUpdateSubscription>, selected_text: &'m2 mut Option<SelectedText>) -> Self {
+	pub fn new(subscription: &'m2 mut Option<FileUpdateSubscription>, selected_text: &'m2 mut SelectedTexts) -> Self {
 		Self {
 			is_empty: false,
 			subscription,
-			selected_text,
+			selected_texts: selected_text,
 			temp: Vec::new(),
 		}
 	}
@@ -76,12 +76,12 @@ impl<'m1, 'm2: 'm1> MutableIndices<'m2> {
 	#[must_use]
 	pub fn empty() -> &'static mut Self {
 		static mut EMPTY_SUBSCRIPTION: Option<FileUpdateSubscription> = None;
-		static mut EMPTY_SELECTED_TEXT: Option<SelectedText> = None;
+		static mut EMPTY_SELECTED_TEXT: SelectedTexts = SelectedTexts::new();
 		#[allow(static_mut_refs)]
 		static mut EMPTY: MutableIndices<'static> = MutableIndices {
 			is_empty: true,
 			subscription: unsafe { &mut EMPTY_SUBSCRIPTION },
-			selected_text: unsafe { &mut EMPTY_SELECTED_TEXT },
+			selected_texts: unsafe { &mut EMPTY_SELECTED_TEXT },
 			temp: Vec::new(),
 		};
 
@@ -104,11 +104,16 @@ impl<'m1, 'm2: 'm1> MutableIndices<'m2> {
 			}
 		}
 
-		if let Some(selected_text) = self.selected_text.as_mut() {
-			let mut ci = CallbackInfo::new();
-			f(&mut selected_text.indices, &mut ci);
-			if ci.removed() {
-				self.subscription.take();
+		{
+			let mut idx = 0;
+			while let Some(selected_text) = self.selected_texts.get_mut(idx) {
+				let mut ci = CallbackInfo::new();
+				f(&mut selected_text.indices, &mut ci);
+				if ci.removed() {
+					self.selected_texts.remove(idx);
+					continue
+				}
+				idx += 1;
 			}
 		}
 
@@ -133,7 +138,7 @@ impl<'m1, 'm2: 'm1> MutableIndices<'m2> {
 	}
 
 	#[must_use]
-	pub fn as_inner_mut(&'m1 mut self) -> (&'m1 mut &'m2 mut Option<FileUpdateSubscription>, &'m1 mut &'m2 mut Option<SelectedText>, &'m1 mut Vec<&'m2 mut Option<OwnedIndices>>) { (&mut self.subscription, &mut self.selected_text, &mut self.temp) }
+	pub fn as_inner_mut(&'m1 mut self) -> (&'m1 mut &'m2 mut Option<FileUpdateSubscription>, &'m1 mut &'m2 mut SelectedTexts, &'m1 mut Vec<&'m2 mut Option<OwnedIndices>>) { (&mut self.subscription, &mut self.selected_texts, &mut self.temp) }
 }
 
 mod callback_info {

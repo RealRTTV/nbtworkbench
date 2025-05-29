@@ -7,7 +7,7 @@ use crate::elements::{NbtElement, NbtElementAndKey};
 use crate::render::WindowProperties;
 use crate::tree::{AddElementResult, MutableIndices, OwnedIndices, RemoveElementResult, ReplaceElementResult, add_element, remove_element, rename_element, reorder_element, replace_element, swap_element_same_depth};
 use crate::util::LinkedQueue;
-use crate::workbench::{HeldEntry, MarkedLines};
+use crate::workbench::{HeldEntry, MarkedLines, PathWithName};
 
 #[derive(Debug)]
 #[must_use]
@@ -78,13 +78,20 @@ impl WorkbenchAction {
 		}
 	}
 
+	pub fn bulk(actions: impl Into<Box<[Self]>>) -> Option<Self> {
+		let actions = actions.into();
+		if actions.is_empty() {
+			return None
+		};
+		Some(Self::Bulk { actions })
+	}
+
 	pub fn undo<'m1, 'm2: 'm1>(
 		self,
 		root: &mut NbtElement,
 		bookmarks: &mut MarkedLines,
 		mutable_indices: &'m1 mut MutableIndices<'m2>,
-		path: &mut Option<PathBuf>,
-		name: &mut Box<str>,
+		path: &mut PathWithName,
 		held_entry: &mut Option<HeldEntry>,
 		window_properties: &mut WindowProperties,
 	) -> Result<Self> {
@@ -98,7 +105,7 @@ impl WorkbenchAction {
 			Self::Replace { indices, kv: value } => replace_element(root, value, indices, bookmarks, mutable_indices)
 				.context("Could not replace element")?
 				.into_action(),
-			Self::Rename { indices, key, value } => rename_element(root, indices, key, value, path, name, window_properties)
+			Self::Rename { indices, key, value } => rename_element(root, indices, key, value, path, window_properties)
 				.context("Could not rename element")?
 				.into_action(),
 			Self::Swap { parent, a, b } => swap_element_same_depth(root, parent, a, b, bookmarks, mutable_indices)
@@ -144,15 +151,15 @@ impl WorkbenchAction {
 					.context("Expected a held entry that was created")?;
 				Self::DiscardHeldEntry { held_entry }
 			}
-			Self::Bulk { actions } => Self::Bulk {
-				actions: actions
+			Self::Bulk { actions } => Self::bulk(
+				actions
 					.into_vec()
 					.into_iter()
 					.rev()
-					.map(|action| action.undo(root, bookmarks, mutable_indices, path, name, held_entry, window_properties))
-					.collect::<Result<Vec<_>>>()?
-					.into_boxed_slice(),
-			},
+					.map(|action| action.undo(root, bookmarks, mutable_indices, path, held_entry, window_properties))
+					.collect::<Result<Vec<_>>>()?,
+			)
+			.unwrap_or_else(|| Self::Bulk { actions: Box::new([]) }),
 		})
 	}
 }

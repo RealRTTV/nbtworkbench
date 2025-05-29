@@ -30,11 +30,11 @@ use crate::util::{LinkedQueue, StrExt, Vec2u, drop_on_separate_thread, get_clipb
 #[cfg(target_arch = "wasm32")] use crate::wasm::fake_scope as scope;
 use crate::widget::{
 	Alert, ButtonWidget, ButtonWidgetAccumulatedResult, ButtonWidgetContext, ButtonWidgetContextMut, ExactMatchButton, FreehandModeButton, NewTabButton, Notification, NotificationKind, OpenFileButton, RefreshButton, ReplaceBox, ReplaceBoxKeyResult,
-	ReplaceByButton, SEARCH_BOX_END_X, SEARCH_BOX_START_X, SearchBox, SearchBoxKeyResult, SearchFlagsButton, SearchModeButton, SearchOperationButton, SelectedText, SelectedTextAdditional, SelectedTextKeyResult, SortAlgorithmButton,
+	ReplaceByButton, SEARCH_BOX_END_X, SEARCH_BOX_START_X, SearchBox, SearchBoxKeyResult, SearchFlagsButton, SearchModeButton, SearchOperationButton, SelectedText, SelectedTextAdditional, SelectedTextKeyResult, SelectedTexts, SortAlgorithmButton,
 	TEXT_DOUBLE_CLICK_INTERVAL, Text, ThemeButton, get_cursor_idx, get_cursor_left_jump_idx, get_cursor_right_jump_idx,
 };
-use crate::workbench::{ElementAction, FileFormat, MarkedLine, MarkedLines, Tab, WorkbenchAction};
-use crate::{config, flags, get_interaction_information, hash, mutable_indices, tab, tab_mut};
+use crate::workbench::{ElementAction, FileFormat, MarkedLine, MarkedLines, PathWithName, Tab, WorkbenchAction};
+use crate::{config, flags, get_interaction_information, hash, mutable_indices, tab, tab_mut, util};
 
 #[derive(Debug)]
 pub enum InteractionInformation<'a> {
@@ -225,7 +225,7 @@ impl Workbench {
 				#[cfg(debug_assertions)]
 				name: "test.nbt".into(),
 				#[cfg(not(debug_assertions))]
-				value: Box::new(NbtElement::Compound(NbtCompound::default())),
+				value: Box::new(NbtElement::Compound(NbtCompound::new())),
 				#[cfg(not(debug_assertions))]
 				name: "new.nbt".into(),
 				path: None,
@@ -246,7 +246,6 @@ impl Workbench {
 				last_double_click_interaction: (0, Duration::ZERO),
 				held_entry: None,
 				cache_cursor_x: None,
-				subscription: None,
 			});
 		}
 		workbench

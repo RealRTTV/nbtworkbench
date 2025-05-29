@@ -119,8 +119,8 @@ macro_rules! log {
 
 #[macro_export]
 macro_rules! mutable_indices {
-	($workbench:ident, $tab:ident) => {
-		&mut MutableIndices::new(&mut $tab.subscription, &mut $tab.selected_text)
+	($tab:ident) => {
+		&mut MutableIndices::new(&mut $tab.subscription, &mut $tab.selected_texts)
 	};
 }
 
@@ -134,6 +134,7 @@ pub static mut WINDOW_PROPERTIES: render::WindowProperties = render::WindowPrope
 /// * add high-quality Safety rustdoc to **all** created unsafe fns
 /// * if you want to optimize something, optimize [`NbtElement::recache`]
 /// * change to Box<Inner> for all complex types and get down to 16 bytes (?)
+/// * move lots of stuff from [`workbench`] over to [`workbench::tab`]
 /// # Long-Term Goals
 /// * smart screen
 /// * add multi-cursor
