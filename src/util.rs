@@ -2,6 +2,7 @@ use std::alloc::{Allocator, Layout};
 use std::cmp::Ordering;
 use std::fmt::{Debug, Formatter};
 use std::hint::likely;
+use std::iter;
 use std::mem::MaybeUninit;
 
 use compact_str::{CompactString, ToCompactString};
@@ -769,6 +770,57 @@ pub const fn width_ascii(s: &str) -> usize {
 	width
 }
 
+pub fn reorder<T>(data: &mut [T], mapping: impl Into<Box<[usize]>>) -> bool {
+	let mut mapping = mapping.into();
+	if data.len() != mapping.len() { return false }
+	let len = data.len();
+
+	for &mapped_idx in &mapping {
+		if mapped_idx >= len {
+			return false;
+		}
+	}
+
+	for current_idx in 0..len {
+		let old_idx = current_idx;
+		let new_idx = mapping[current_idx];
+
+		unsafe { core::hint::assert_unchecked(new_idx < len) }
+		unsafe { core::hint::assert_unchecked(old_idx < len) }
+
+		data.swap(old_idx, new_idx);
+		mapping.swap(old_idx, new_idx);
+	}
+
+	true
+}
+
+/// Mappings are defined such that `mapping[n]` is where the `n`th element should be moved to.\
+/// The human intuition is that the `n`th element should be moved to the `mapping[n]`th index.\
+/// Therefore, we invert it for you.
+#[must_use]
+pub fn invert_mapping(mapping: &[usize]) -> Option<Box<[usize]>> {
+	let mut new_mapping = iter::repeat_n(None, mapping.len()).collect::<Box<[Option<usize>]>>();
+	for (new_idx, &old_idx) in mapping.iter().enumerate() {
+		let reference = new_mapping.get_mut(old_idx)?;
+		if reference.is_some() {
+			return None
+		} else {
+			*reference = Some(new_idx);
+		}
+	}
+	new_mapping.into_iter().collect::<Option<Box<[usize]>>>()
+}
+
+#[must_use]
+pub unsafe fn invert_mapping_unchecked(mapping: &[usize]) -> Box<[usize]> {
+	let mut new_mapping = Box::<[usize]>::new_uninit_slice(mapping.len());
+	for (new_idx, &old_idx) in mapping.iter().enumerate() {
+		unsafe { new_mapping.get_mut(old_idx).unwrap_unchecked() }.write(new_idx);
+	}
+	unsafe { new_mapping.assume_init() }
+}
+
 macro_rules! unsigned_num_width {
 	($name:ident, $ty:ty) => {
 		#[allow(dead_code)]
@@ -956,6 +1008,22 @@ pub fn find_last_index_of_element_in_subset<T, U, V: PartialEq, F1: FnMut(&T) ->
 			}
 		}
 	}
-	
+
 	0
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn test_reorder() {
+        fn reorder<T>(mut data: Vec<T>, mapping: &[usize]) -> Vec<T> {
+            let result = super::reorder(&mut data, mapping);
+            assert!(result, "Reordering was unsuccessful");
+            data
+        }
+
+        assert_eq!(reorder(vec![1, 2, 3], &[2, 0, 1]), vec![3, 1, 2]);
+        assert_eq!(reorder(vec![1, 2, 3, 4, 5], &[0, 1, 2, 3, 4]), vec![1, 2, 3, 4, 5]);
+        assert_eq!(reorder(vec![1, 2, 3, 4], &[3, 2, 1, 0]), vec![4, 3, 2, 1]);
+    }
 }

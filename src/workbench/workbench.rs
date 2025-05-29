@@ -207,8 +207,9 @@ impl Workbench {
 			if let Some(path) = &std::env::args()
 				.nth(1)
 				.and_then(|x| PathBuf::from_str(&x).ok())
+				&& let Ok(buf) = std::fs::read(path)
 			{
-				if let Err(e) = workbench.on_open_file(path, std::fs::read(path).unwrap_or(vec![]), window_properties) {
+				if let Err(e) = workbench.on_open_file(path, buf, window_properties) {
 					workbench.alert(e.into())
 				} else {
 					break 'create_tab;
@@ -223,12 +224,11 @@ impl Workbench {
 					result
 				}),
 				#[cfg(debug_assertions)]
-				name: "test.nbt".into(),
+				path: PathWithName::without_path("test.nbt"),
 				#[cfg(not(debug_assertions))]
 				value: Box::new(NbtElement::Compound(NbtCompound::new())),
 				#[cfg(not(debug_assertions))]
-				name: "new.nbt".into(),
-				path: None,
+				path: PathWithName::without_path("new.nbt"),
 				format: FileFormat::Nbt,
 				undos: LinkedQueue::new(),
 				redos: LinkedQueue::new(),
@@ -239,13 +239,13 @@ impl Workbench {
 				window_width: WINDOW_WIDTH,
 				bookmarks: MarkedLines::new(),
 				freehand_mode: false,
-				selected_text: None,
+                subscription: None,
+                selected_texts: SelectedTexts::new(),
 				last_close_attempt: Duration::ZERO,
 				last_selected_text_interaction: (0, 0, Duration::ZERO),
 				last_interaction: now(),
 				last_double_click_interaction: (0, Duration::ZERO),
 				held_entry: None,
-				cache_cursor_x: None,
 			});
 		}
 		workbench
@@ -2852,27 +2852,15 @@ impl SortAlgorithm {
 			Self::Type => map.create_sort_mapping(ElementAction::by_type),
 		};
 
-		let len = map.len();
-
-		let previous_entries = core::mem::replace(&mut map.entries, Vec::with_capacity(len));
-		let current_entries = map.entries.spare_capacity_mut();
-
-		for ((new_idx, idx), entry) in mapping
-			.into_iter()
-			.enumerate()
-			.zip(previous_entries.into_iter())
-		{
+		for (idx, &new_idx) in mapping.iter().enumerate() {
 			*unsafe {
 				map.indices
-					.find_mut(hash!(entry.key), |&x| x == idx)
+					.find_mut(hash!(map.entries.get_unchecked(idx).key), |&x| x == idx)
 					.unwrap_unchecked()
 			} = new_idx;
-			current_entries[new_idx].write(entry);
 		}
 
-		unsafe {
-			map.entries.set_len(len);
-		}
+		util::reorder(&mut map.entries, mapping);
 	}
 }
 

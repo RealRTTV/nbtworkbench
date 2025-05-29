@@ -44,7 +44,7 @@ impl NbtElementVariant for NbtString {
 		Ok((s, Self { str: TwentyThree::new(str) }))
 	}
 
-	fn from_bytes<'a, D: Decoder<'a>>(decoder: &mut D) -> NbtParseResult<Self>
+	fn from_bytes<'a, D: Decoder<'a>>(decoder: &mut D, _: Self::ExtraParseInfo) -> NbtParseResult<Self>
 	where Self: Sized {
 		use super::result::*;
 

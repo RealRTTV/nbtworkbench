@@ -49,10 +49,7 @@ pub async fn run() -> ! {
 			if self.workbench.should_ignore_event() || !State::input(&event, self.workbench, self.window_properties) {
 				match event {
 					WindowEvent::RedrawRequested => {
-						match self
-							.state
-							.render(self.workbench, self.window.as_ref(), self.window_properties)
-						{
+						match self.state.render(self.workbench, self.window.as_ref(), self.window_properties) { 
 							Ok(()) => {}
 							Err(SurfaceError::Lost | SurfaceError::Outdated) => self
 								.state
@@ -66,12 +63,15 @@ pub async fn run() -> ! {
 								error!("Failed to acquire texture")
 							}
 						}
-					}
+					},
 					WindowEvent::CloseRequested =>
 						if self.workbench.close() == 0 {
 							std::process::exit(0)
 						},
-					WindowEvent::Resized(new_size) => self.state.resize(self.workbench, new_size),
+					WindowEvent::Resized(new_size) => {
+						self.state.resize(self.workbench, new_size);
+						// self.window.request_redraw();
+					},
 					_ => {}
 				}
 			}
@@ -822,6 +822,8 @@ impl<'window> State<'window> {
 				render_pass.draw_indexed(0..builder.indices_len(), 0, 0..1);
 			}
 		}
+		
+		window.pre_present_notify();
 
 		self.queue.submit(Some(encoder.finish()));
 		surface_texture.present();

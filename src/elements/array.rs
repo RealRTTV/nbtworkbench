@@ -132,20 +132,23 @@ macro_rules! array {
 					Ok((s.strip_prefix(']').ok_or(s.len())?, array))
 				}
 
-				fn from_bytes<'a, D: $crate::serialization::Decoder<'a>>(decoder: &mut D) -> $crate::elements::result::NbtParseResult<Self> {
+				fn from_bytes<'a, D: $crate::serialization::Decoder<'a>>(decoder: &mut D, _: Self::ExtraParseInfo) -> $crate::elements::result::NbtParseResult<Self> {
 					use $crate::elements::result::*;
 
 					decoder.assert_len(4)?;
 					let len = unsafe { decoder.u32() } as usize;
 					decoder.assert_len(len * core::mem::size_of::<<Self::ChildType as $crate::elements::PrimitiveNbtElementVariant>::InnerType>())?;
-					let mut vec = from_opt(Vec::try_with_capacity(len).ok(), "Could not allocate enough memory for Vec")?;
+					let mut vec = from_result(Vec::try_with_capacity(len))?;
 					for _ in 0..len {
 						let element = $constructor(unsafe {
 							core::mem::transmute(<<Self::ChildType as $crate::elements::PrimitiveNbtElementVariant>::InnerType>::from_ne_bytes(
 								decoder.read_ne_bytes::<{ core::mem::size_of::<<Self::ChildType as $crate::elements::PrimitiveNbtElementVariant>::InnerType>() }>(),
 							))
 						});
-						from_opt(vec.push_within_capacity(element).ok(), "Vec was longer than originally stated")?;
+						match vec.push_within_capacity(element) {
+							Ok(()) => {},
+							Err(_) => return err("Vec was longer than originally stated"),
+						}
 					}
 					let mut array = Self {
 						values: unsafe { Box::try_new(vec).unwrap_unchecked() },

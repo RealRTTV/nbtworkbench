@@ -121,6 +121,8 @@ pub trait Matches {
 }
 
 pub trait NbtElementVariant: Clone + PartialEq + Display + Matches + Default + PrettyDisplay {
+	type ExtraParseInfo = ();
+	
 	const ID: u8;
 	const UV: Vec2u;
 	const GHOST_UV: Vec2u;
@@ -128,7 +130,7 @@ pub trait NbtElementVariant: Clone + PartialEq + Display + Matches + Default + P
 	fn from_str0(s: &str) -> Result<(&str, Self), usize>
 	where Self: Sized;
 
-	fn from_bytes<'a, D: Decoder<'a>>(decoder: &mut D) -> NbtParseResult<Self>
+	fn from_bytes<'a, D: Decoder<'a>>(decoder: &mut D, extra: Self::ExtraParseInfo) -> NbtParseResult<Self>
 	where Self: Sized;
 
 	fn to_be_bytes(&self, writer: &mut UncheckedBufWriter);
@@ -205,7 +207,7 @@ pub trait ComplexNbtElementVariant: NbtElementVariant {
 
 	fn recache(&mut self);
 
-	fn on_style_change(&mut self, bookmarks: &mut MarkedLines) -> bool { false }
+	fn on_style_change(&mut self, _bookmarks: &mut MarkedLines) -> bool { false }
 
 	#[must_use]
 	fn get(&self, idx: usize) -> Option<&Self::Entry>;

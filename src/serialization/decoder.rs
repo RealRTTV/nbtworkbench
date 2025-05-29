@@ -2,7 +2,6 @@ use std::hint::likely;
 use std::marker::PhantomData;
 
 use compact_str::CompactString;
-use parking_lot::RwLock;
 
 use crate::config;
 use crate::elements::CompoundMap;
@@ -45,15 +44,11 @@ pub trait Decoder<'a>: Send {
 	fn skip(&mut self, amount: usize);
 
 	unsafe fn string(&mut self) -> NbtParseResult<CompactString>;
-
-	fn extra_data(&self) -> &RwLock<Option<usize>>;
 }
 
 pub struct BigEndianDecoder<'a> {
 	data: *const u8,
 	end: *const u8,
-	// todo: potentially just add a param for region-file parsing
-	extra_data: RwLock<Option<usize>>,
 	_marker: PhantomData<&'a ()>,
 }
 
@@ -64,7 +59,6 @@ impl<'a> Decoder<'a> for BigEndianDecoder<'a> {
 		Self {
 			end: unsafe { data.as_ptr().add(data.len()) },
 			data: data.as_ptr(),
-			extra_data: RwLock::new(None),
 			_marker: PhantomData,
 		}
 	}
@@ -133,14 +127,11 @@ impl<'a> Decoder<'a> for BigEndianDecoder<'a> {
 		self.data = self.data.add(len);
 		ok(out)
 	}
-
-	fn extra_data(&self) -> &RwLock<Option<usize>> { &self.extra_data }
 }
 
 pub struct LittleEndianDecoder<'a> {
 	data: *const u8,
 	end: *const u8,
-	extra_data: RwLock<Option<usize>>,
 	_marker: PhantomData<&'a ()>,
 	has_header: bool,
 }
@@ -163,7 +154,6 @@ impl<'a> Decoder<'a> for LittleEndianDecoder<'a> {
 		let mut this = Self {
 			end: unsafe { data.as_ptr().add(data.len()) },
 			data: data.as_ptr(),
-			extra_data: RwLock::new(None),
 			_marker: PhantomData,
 			has_header: false,
 		};
@@ -238,6 +228,4 @@ impl<'a> Decoder<'a> for LittleEndianDecoder<'a> {
 		self.data = self.data.add(len);
 		ok(out)
 	}
-
-	fn extra_data(&self) -> &RwLock<Option<usize>> { &self.extra_data }
 }

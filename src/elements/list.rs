@@ -175,16 +175,14 @@ impl NbtElementVariant for NbtList {
 		Ok((s, list))
 	}
 
-	fn from_bytes<'a, D: Decoder<'a>>(decoder: &mut D) -> NbtParseResult<Self>
+	fn from_bytes<'a, D: Decoder<'a>>(decoder: &mut D, _: Self::ExtraParseInfo) -> NbtParseResult<Self>
 	where Self: Sized {
 		use super::result::*;
 
 		decoder.assert_len(5)?;
 		let element = unsafe { decoder.u8() };
 		let len = unsafe { decoder.u32() } as usize;
-		let mut vec = from_opt(Vec::try_with_capacity(len).ok(), "Could not allocate enough memory for Vec")?;
-		let mut true_height = 1;
-		let mut extracted_inner_element = false;
+		let mut vec = from_result(Vec::try_with_capacity(len))?;
 		for _ in 0..len {
 			let mut element = NbtElement::from_bytes(element, decoder)?;
 			// SAFETY: no caches have been made
@@ -193,13 +191,12 @@ impl NbtElementVariant for NbtList {
 					.try_compound_singleton_into_inner()
 					.unwrap_or_else(|element| element)
 			};
-			true_height += element.true_height() as u32;
 			from_opt(vec.push_within_capacity(element).ok(), "Vec was larger that stated")?;
 		}
 		let mut list = Self {
 			elements: unsafe { Box::try_new(vec).unwrap_unchecked() },
-			height: 1 + len as u32,
-			true_height,
+			height: 1,
+			true_height: 1,
 			max_depth: 0,
 			elements_bitset: 1 << element,
 			open: false,

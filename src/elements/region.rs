@@ -170,7 +170,7 @@ impl NbtElementVariant for NbtRegion {
 		Ok((s, region))
 	}
 
-	fn from_bytes<'a, D: Decoder<'a>>(decoder: &mut D) -> NbtParseResult<Self>
+	fn from_bytes<'a, D: Decoder<'a>>(decoder: &mut D, _: Self::ExtraParseInfo) -> NbtParseResult<Self>
 	where Self: Sized {
 		use super::result::*;
 
@@ -183,17 +183,12 @@ impl NbtElementVariant for NbtRegion {
 			let mut threads = Vec::with_capacity(1024);
 
 			for idx in 0..1024 {
-				while decoder.extra_data().read().is_some() {
-					core::hint::spin_loop();
-				}
-				*decoder.extra_data().write() = Some(idx);
-
 				let d2: &mut D = unsafe {
 					(decoder as *const D)
 						.cast_mut()
 						.as_mut_unchecked()
 				};
-				threads.push(s.spawn(move || NbtChunk::from_bytes(d2)));
+				threads.push(s.spawn(move || NbtChunk::from_bytes(d2, idx)));
 			}
 
 			for (idx, thread) in threads.into_iter().enumerate() {

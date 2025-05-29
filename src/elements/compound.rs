@@ -18,7 +18,7 @@ use crate::serialization::{Decoder, PrettyDisplay, PrettyFormatter, UncheckedBuf
 use crate::util::{StrExt, Vec2u, width_ascii};
 #[cfg(target_arch = "wasm32")]
 use crate::wasm::{FakeScope as Scope, fake_scope as scope};
-use crate::{config, hash};
+use crate::{config, hash, util};
 
 #[repr(C)]
 pub struct NbtCompound {
@@ -148,7 +148,7 @@ impl NbtElementVariant for NbtCompound {
 		Ok((s, compound))
 	}
 
-	fn from_bytes<'a, D: Decoder<'a>>(decoder: &mut D) -> NbtParseResult<Self>
+	fn from_bytes<'a, D: Decoder<'a>>(decoder: &mut D, _: Self::ExtraParseInfo) -> NbtParseResult<Self>
 	where Self: Sized {
 		use super::result::*;
 
@@ -683,12 +683,13 @@ impl CompoundMap {
 		Some(entry)
 	}
 
-	/// This function creates a mapping such that the `mapping[n]`th entry should move to the `n`th index to be sorted.
+	/// This function creates a mapping such that the `n`th entry should move to the `mapping[n]`th index to be sorted.\
 	#[must_use]
 	pub fn create_sort_mapping<F: FnMut(&CompoundEntry, &CompoundEntry) -> Ordering>(&self, mut f: F) -> Box<[usize]> {
 		let mut mapping = (0..self.len()).collect::<Vec<_>>();
 		mapping.sort_unstable_by(|&a, &b| f(unsafe { self.entries.get_unchecked(a) }, unsafe { self.entries.get_unchecked(b) }));
-		mapping.into_boxed_slice()
+		// SAFETY: definitely a valid mapping that was generated
+		unsafe{ util::invert_mapping_unchecked(&mapping) }
 	}
 
 	pub fn update_key(&mut self, idx: usize, key: CompactString) -> Option<CompactString> {

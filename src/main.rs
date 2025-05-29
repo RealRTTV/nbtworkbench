@@ -1,7 +1,9 @@
 #![allow(semicolon_in_expressions_from_macros, internal_features, incomplete_features)]
 #![warn(clippy::pedantic)]
+#![allow(unsafe_op_in_unsafe_fn)] // todo, fix
 #![feature(
 	allocator_api,
+	associated_type_defaults,
 	cold_path,
 	duration_millis_float,
 	inherent_associated_types,
