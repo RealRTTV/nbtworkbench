@@ -1,6 +1,6 @@
 use std::fmt::Write;
 use std::ops::{Deref, DerefMut};
-
+use anyhow::Context;
 use itertools::Itertools;
 use uuid::Uuid;
 use winit::keyboard::KeyCode;
@@ -8,14 +8,13 @@ use winit::keyboard::KeyCode;
 use crate::assets::{BASE_TEXT_Z, HEADER_SIZE, SELECTED_TEXT_SELECTION_Z, SELECTED_TEXT_Z, SELECTION_UV};
 use crate::elements::NbtElement;
 use crate::render::{TextColor, VertexBufferBuilder, WindowProperties};
-use crate::tree::{Indices, NavigationInformation, OwnedIndices, RenameElementResult, TraversalInformation, line_number_at, rename_element};
+use crate::tree::{Indices, NavigationInformation, OwnedIndices, RenameElementResult, TraversalInformation, line_number_at, rename_element, ParentNavigationInformationMut, swap_element_same_depth, MutableIndices, expand_element, open_element, close_element};
 use crate::util::{CharExt, StrExt};
-use crate::widget::SelectedTextKeyResult::{Down, ForceCloseElement, ForceOpenElement, MoveToKeyfix, MoveToValuefix, ShiftDown, ShiftUp, Up};
 use crate::widget::{Cachelike, SelectedTextKeyResult, Text};
-use crate::workbench::{PathWithName, WorkbenchAction};
-use crate::flags;
+use crate::workbench::{MarkedLines, PathWithName, TabConstants, WorkbenchAction};
+use crate::{flags, mutable_indices};
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 #[allow(clippy::module_name_repetitions)] // yeah no, it's better like this
 pub struct SelectedTextCache {
 	keyfix: Option<(Box<str>, TextColor)>,
@@ -275,8 +274,9 @@ impl SelectedText {
 	}
 
 	#[must_use]
-	pub fn for_y(left_margin: usize, horizontal_scroll: usize, root: &NbtElement, path: &PathWithName, y: usize, mouse_x: usize, snap_to_ends: bool, cached_cursor_x: Option<usize>) -> Option<SelectedText> {
-		fn header(left_margin: usize, root: &NbtElement, path: &PathWithName, offset: usize, cached_cursor_x: Option<usize>) -> Option<SelectedText> {
+	pub fn for_y(consts: TabConstants, root: &NbtElement, path: &PathWithName, y: usize, mouse_x: usize, snap_to_ends: bool, cached_cursor_x: Option<usize>) -> Option<SelectedText> {
+		fn header(consts: TabConstants, root: &NbtElement, path: &PathWithName, offset: usize, cached_cursor_x: Option<usize>) -> Option<SelectedText> {
+			let TabConstants { left_margin, .. } = consts;
 			let name = path.name();
 			let name_width = name.width();
 			let path_minus_name_width = path
@@ -292,10 +292,12 @@ impl SelectedText {
 				cached_cursor_x,
 			)
 		}
+		
+		let TabConstants { left_margin, horizontal_scroll, .. } = consts;
 
 		if y == 0 {
 			let max = path.name().width() + 32 + 4 + left_margin;
-			return header(left_margin, root, path, mouse_x.min(max), cached_cursor_x)
+			return header(consts, root, path, mouse_x.min(max), cached_cursor_x)
 		}
 
 		if y >= root.height() {
@@ -348,40 +350,44 @@ impl SelectedText {
 	}
 
 	#[cfg_attr(not(debug_assertions), inline)]
-	#[allow(clippy::cognitive_complexity, clippy::too_many_lines)] // I handled this fn well
 	#[must_use]
-	pub fn on_key_press(&mut self, key: KeyCode, char: Option<char>, flags: u8) -> SelectedTextKeyResult {
+	pub fn on_key_press<'m1, 'm2: 'm1>(&mut self, key: KeyCode, char: Option<char>, flags: u8, consts: TabConstants, window_properties: &mut WindowProperties, root: &mut NbtElement, path: &mut PathWithName, bookmarks: &mut MarkedLines, mutable_indices: &'m1 mut MutableIndices<'m2>) -> SelectedTextKeyResult {
 		if key == KeyCode::ArrowUp {
 			if flags & !flags!(Ctrl) == 0 {
-				return Up(flags == flags!(Ctrl));
+				let ctrl = flags == flags!(Ctrl);
+				return SelectedTextKeyResult::Action(self.move_up(consts, ctrl, window_properties, root, path).map(Some).context("Failed to move element up"));
 			} else if flags == flags!(Ctrl + Shift) {
-				return ShiftUp;
+				return SelectedTextKeyResult::Action(self.shift_up(consts, root, bookmarks, mutable_indices).map(Some).context("Failed to shift element up"));
 			}
 		}
 
 		if key == KeyCode::ArrowDown {
 			if flags & !flags!(Ctrl) == 0 {
-				return Down(flags == flags!(Ctrl));
+				let ctrl = flags == flags!(Ctrl);
+				return SelectedTextKeyResult::Action(self.move_down(consts, ctrl, window_properties, root, path).map(Some).context("Failed to move element down"));
 			} else if flags == flags!(Ctrl + Shift) {
-				return ShiftDown;
+				return SelectedTextKeyResult::Action(self.shift_down(consts, root, bookmarks, mutable_indices).map(Some).context("Failed to shift element down"));
+
 			}
 		}
 
 		if key == KeyCode::ArrowLeft {
 			if flags & !flags!(Ctrl) == 0 && self.selection.is_none() && self.cursor == 0 && self.keyfix.is_some() {
-				return MoveToKeyfix
+				return SelectedTextKeyResult::Action(self.move_to_keyfix(consts, window_properties, root, path).map(Some).context("Failed to move to keyfix"));
 			}
 			if flags & !flags!(Shift) == flags!(Alt) {
-				return ForceCloseElement
+				let shift = (flags & !flags!(Alt)) == flags!(Shift);
+				return SelectedTextKeyResult::Action(self.force_close(root, bookmarks).map(None).context("Failed to force close element"))
 			}
 		}
 
 		if key == KeyCode::ArrowRight {
 			if flags & !flags!(Ctrl) == 0 && self.selection.is_none() && self.cursor == self.value.len() && self.valuefix.is_some() {
-				return MoveToValuefix
+				return SelectedTextKeyResult::Action(self.move_to_valuefix(consts, window_properties, root, path).map(Some).context("Failed to move to valuefix"));
 			}
 			if (flags) & !flags!(Shift) == flags!(Alt) {
-				return ForceOpenElement
+				let shift = (flags & !flags!(Alt)) == flags!(Shift);
+				return SelectedTextKeyResult::Action(self.force_open(shift, root, bookmarks).map(None).context("Failed to force open element"))
 			}
 		}
 
@@ -391,12 +397,16 @@ impl SelectedText {
 	#[must_use]
 	pub fn cursor_x(&self, left_margin: usize) -> usize { left_margin + self.indices.len() * 16 + 32 + 4 + self.prefix.0.width() + self.keyfix.as_ref().map_or(0, |x| x.0.width()) + self.value.split_at(self.cursor).0.width() }
 
-	pub fn post_input(&mut self, left_margin: usize) {
-		self.recache_cached_cursor_x(left_margin);
+	pub fn post_input(&mut self, consts: TabConstants) {
+		self.recache_cached_cursor_x(consts);
 		self.0.post_input()
 	}
 
-	pub fn recache_cached_cursor_x(&mut self, left_margin: usize) { self.cached_cursor_x = Some(self.cursor_x(left_margin)); }
+	pub fn recache_cached_cursor_x(&mut self, consts: TabConstants) {
+		let TabConstants { left_margin, .. } = consts;
+		
+		self.cached_cursor_x = Some(self.cursor_x(left_margin));
+	}
 
 	pub fn recache_y(&mut self, root: &NbtElement) {
 		let line_number = line_number_at(&self.indices, root);
@@ -409,7 +419,7 @@ impl SelectedText {
 	}
 
 	#[must_use]
-	pub fn write(&self, window_properties: &mut WindowProperties, root: &mut NbtElement, path: &mut PathWithName) -> Option<WorkbenchAction> {
+	pub fn write(&self, _consts: TabConstants, window_properties: &mut WindowProperties, root: &mut NbtElement, path: &mut PathWithName) -> Option<WorkbenchAction> {
 		let SelectedText(Text {
 			value,
 			editable: true,
@@ -425,7 +435,7 @@ impl SelectedText {
 	}
 
 	#[must_use]
-	pub fn move_to_keyfix(&mut self, window_properties: &mut WindowProperties, left_margin: usize, root: &mut NbtElement, path: &mut PathWithName) -> Option<WorkbenchAction> {
+	pub fn move_to_keyfix(&mut self, consts: TabConstants, window_properties: &mut WindowProperties, root: &mut NbtElement, path: &mut PathWithName) -> Option<WorkbenchAction> {
 		if !self.editable {
 			return None
 		}
@@ -442,7 +452,7 @@ impl SelectedText {
 		// has to be here because of side effects from `self.write`
 		let (keyfix, keyfix_color) = self.keyfix.clone()?;
 
-		let action = self.write(window_properties, root, path)?;
+		let action = self.write(consts, window_properties, root, path)?;
 
 		let old_prefix = core::mem::take(&mut self.prefix);
 
@@ -453,13 +463,13 @@ impl SelectedText {
 		self.suffix = old_prefix;
 		self.valuefix = Some((old_value, old_value_color));
 
-		self.recache_cached_cursor_x(left_margin);
+		self.recache_cached_cursor_x(consts);
 
 		Some(action)
 	}
 
 	#[must_use]
-	pub fn move_to_valuefix(&mut self, window_properties: &mut WindowProperties, left_margin: usize, root: &mut NbtElement, path: &mut PathWithName) -> Option<WorkbenchAction> {
+	pub fn move_to_valuefix(&mut self, consts: TabConstants, window_properties: &mut WindowProperties, root: &mut NbtElement, path: &mut PathWithName) -> Option<WorkbenchAction> {
 		if !self.editable {
 			return None
 		}
@@ -476,7 +486,7 @@ impl SelectedText {
 		// has to be here because of side effects from `self.write`
 		let (valuefix, valuefix_color) = self.valuefix.clone()?;
 
-		let action = self.write(window_properties, root, path)?;
+		let action = self.write(consts, window_properties, root, path)?;
 
 		let old_suffix = core::mem::take(&mut self.suffix);
 
@@ -487,20 +497,22 @@ impl SelectedText {
 		self.prefix = old_suffix;
 		self.keyfix = Some((old_value, old_value_color));
 
-		self.recache_cached_cursor_x(left_margin);
+		self.recache_cached_cursor_x(consts);
 
 		Some(action)
 	}
 
-	fn r#move(
+	#[must_use]
+	fn move_text(
 		&mut self,
+		consts: TabConstants,
 		window_properties: &mut WindowProperties,
-		left_margin: usize,
-		horizontal_scroll: usize,
 		root: &mut NbtElement,
 		path: &mut PathWithName,
 		mut f: impl FnMut(usize, &NbtElement, &Indices) -> Option<usize>,
 	) -> Option<WorkbenchAction> {
+		let TabConstants { left_margin, horizontal_scroll, .. } = consts;
+		
 		let y = (self.y - HEADER_SIZE) / 16;
 		let Some(new_y) = f(y, root, &self.indices) else { return None };
 
@@ -512,7 +524,7 @@ impl SelectedText {
 			return None;
 		};
 
-		let Some(action) = self.write(window_properties, root, path) else {
+		let Some(action) = self.write(consts, window_properties, root, path) else {
 			return None;
 		};
 
@@ -521,8 +533,9 @@ impl SelectedText {
 		Some(action)
 	}
 
-	pub fn move_up(&mut self, ctrl: bool, window_properties: &mut WindowProperties, left_margin: usize, horizontal_scroll: usize, root: &mut NbtElement, path: &mut PathWithName) -> Option<WorkbenchAction> {
-		self.r#move(window_properties, left_margin, horizontal_scroll, root, path, |y, root, indices| {
+	#[must_use]
+	pub fn move_up(&mut self, consts: TabConstants, ctrl: bool, window_properties: &mut WindowProperties, root: &mut NbtElement, path: &mut PathWithName) -> Option<WorkbenchAction> {
+		self.move_text(consts, window_properties, root, path, |y, root, indices| {
 			Some(
 				if ctrl
 					&& let Some(last_idx) = indices.last()
@@ -537,8 +550,9 @@ impl SelectedText {
 		})
 	}
 
-	pub fn move_down(&mut self, ctrl: bool, window_properties: &mut WindowProperties, left_margin: usize, horizontal_scroll: usize, root: &mut NbtElement, path: &mut PathWithName) -> Option<WorkbenchAction> {
-		self.r#move(window_properties, left_margin, horizontal_scroll, root, path, |y, root, indices| {
+	#[must_use]
+	pub fn move_down(&mut self, consts: TabConstants, ctrl: bool, window_properties: &mut WindowProperties, root: &mut NbtElement, path: &mut PathWithName) -> Option<WorkbenchAction> {
+		self.move_text(consts, window_properties, root, path, |y, root, indices| {
 			Some(if ctrl && let Some((last_idx, parent_indices)) = indices.split_last() {
 				let NavigationInformation { element: parent, line_number, .. } = root.navigate(&parent_indices)?;
 				let len = parent.len()?;
@@ -547,6 +561,37 @@ impl SelectedText {
 				y.wrapping_add(1)
 			})
 		})
+	}
+
+	#[must_use]
+	pub fn shift<'m1, 'm2: 'm1>(&mut self, _consts: TabConstants, root: &mut NbtElement, bookmarks: &mut MarkedLines, mutable_indices: &'m1 mut MutableIndices<'m2>, sibling_idx: impl FnOnce(usize) -> Option<usize>) -> Option<WorkbenchAction> {
+		let ParentNavigationInformationMut { idx: a_idx, parent_indices, .. } = root.navigate_parent_mut(&self.indices)?;
+		let b_idx = sibling_idx(a_idx)?;
+		Some(swap_element_same_depth(root, parent_indices.to_owned(), a_idx, b_idx, bookmarks, mutable_indices)?.into_action())
+	}
+
+	#[must_use]
+	pub fn shift_up<'m1, 'm2: 'm1>(&mut self, consts: TabConstants, root: &mut NbtElement, bookmarks: &mut MarkedLines, mutable_indices: &'m1 mut MutableIndices<'m2>) -> Option<WorkbenchAction> {
+		self.shift(consts, root, bookmarks, mutable_indices, |idx| idx.checked_sub(1))
+	}
+	
+	#[must_use]
+	pub fn shift_down<'m1, 'm2: 'm1>(&mut self, consts: TabConstants, root: &mut NbtElement, bookmarks: &mut MarkedLines, mutable_indices: &'m1 mut MutableIndices<'m2>) -> Option<WorkbenchAction> {
+		self.shift(consts, root, bookmarks, mutable_indices, |idx| idx.checked_add(1))
+	}
+	
+	#[must_use]
+	pub fn force_close(&self, root: &mut NbtElement, bookmarks: &mut MarkedLines) -> Option<()> {
+		close_element(root, &self.indices, bookmarks)
+	}
+
+	#[must_use]
+	pub fn force_open(&self, expand: bool, root: &mut NbtElement, bookmarks: &mut MarkedLines) -> Option<()> {
+		if expand {
+			expand_element(root, &self.indices, bookmarks)
+		} else {
+			open_element(root, &self.indices, bookmarks)
+		}
 	}
 
 	pub fn render(&self, builder: &mut VertexBufferBuilder, left_margin: usize) {
@@ -592,32 +637,14 @@ pub struct SelectedTexts {
 }
 
 impl SelectedTexts {
-	pub fn set(&mut self, idx: usize, selected_text: SelectedText) {
-		if let Some((older_selected_text_idx, older_selected_text)) = self
-			.iter_mut()
-			.find_position(|s| s.y == selected_text.y)
-		{
-			if older_selected_text_idx != idx {
-				let Some(previous) = self.get_mut(idx) else { return };
-				*previous = selected_text;
-				self.remove(older_selected_text_idx);
-			} else {
-				*older_selected_text = selected_text;
-			}
-		} else {
-			let Some(previous) = self.get_mut(idx) else { return };
-			*previous = selected_text;
-		}
-	}
-
-	pub fn push(&mut self, selected_text: SelectedText) -> &mut SelectedText {
+	pub fn push(&mut self, value: SelectedText) -> &mut SelectedText {
 		if let Some((older_selected_text, _)) = self
 			.iter()
-			.find_position(|s| s.y == selected_text.y)
+			.find_position(|s| s.y == value.y)
 		{
 			self.remove(older_selected_text);
 		}
-		self.inner.push(selected_text);
+		self.inner.push(value);
 		// SAFETY: just pushed an element
 		unsafe { self.inner.last_mut().unwrap_unchecked() }
 	}

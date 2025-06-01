@@ -1,4 +1,4 @@
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
+#[derive(Copy, Clone, PartialEq, Eq, Default)]
 pub enum TextColor {
 	Black,
 	DarkBlue,

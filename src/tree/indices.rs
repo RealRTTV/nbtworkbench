@@ -19,7 +19,7 @@ impl Indices {
 }
 
 #[repr(transparent)]
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct OwnedIndices(Vec<usize>);
 
 impl Debug for OwnedIndices {

@@ -2,6 +2,7 @@ use std::hint::{likely, unlikely};
 use std::ops::{Deref, DerefMut};
 use std::time::Duration;
 
+use anyhow::Result;
 use winit::keyboard::KeyCode;
 
 use crate::assets::{SELECTION_UV, ZOffset};
@@ -9,33 +10,26 @@ use crate::flags;
 use crate::render::{TextColor, VertexBufferBuilder};
 use crate::util::{CharExt, LinkedQueue, StrExt, Vec2u, get_clipboard, is_jump_char_boundary, is_utf8_char_boundary, now, set_clipboard};
 use crate::widget::KeyResult::{Escape, Failed, Finish, NothingSpecial};
+use crate::workbench::WorkbenchAction;
 
 pub const TEXT_DOUBLE_CLICK_INTERVAL: Duration = Duration::from_millis(250);
 pub const CURSOR_BLINK_RATE: Duration = Duration::from_millis(500);
 
 // todo: remove
 #[repr(u8)]
-#[derive(PartialEq, Eq)]
 pub enum SelectedTextKeyResult {
-	Failed,
-	NothingSpecial,
+    NoAction,
+	GenericAction,
+	Action(Result<Option<WorkbenchAction>>),
 	Escape,
 	Finish,
-	MoveToKeyfix,
-	MoveToValuefix,
-	Up(bool),
-	Down(bool),
-	ForceCloseElement,
-	ForceOpenElement,
-	ShiftUp,
-	ShiftDown,
 }
 
 #[derive(PartialEq, Eq)]
 #[repr(u8)]
 pub enum SearchBoxKeyResult {
-	Failed,
-	NothingSpecial,
+	NoAction,
+	GenericAction,
 	Escape,
 	MoveToReplaceBox,
 	Search,
@@ -45,8 +39,8 @@ pub enum SearchBoxKeyResult {
 #[derive(PartialEq, Eq)]
 #[repr(u8)]
 pub enum ReplaceBoxKeyResult {
-	Failed,
-	NothingSpecial,
+	NoAction,
+	GenericAction,
 	Escape,
 	MoveToSearchBox,
 	ReplaceAll,
@@ -64,8 +58,8 @@ pub enum KeyResult {
 impl From<KeyResult> for SelectedTextKeyResult {
 	fn from(value: KeyResult) -> Self {
 		match value {
-			Failed => Self::Failed,
-			NothingSpecial => Self::NothingSpecial,
+			Failed => Self::NoAction,
+			NothingSpecial => Self::GenericAction,
 			Escape => Self::Escape,
 			Finish => Self::Finish,
 		}
@@ -75,8 +69,8 @@ impl From<KeyResult> for SelectedTextKeyResult {
 impl From<KeyResult> for SearchBoxKeyResult {
 	fn from(value: KeyResult) -> Self {
 		match value {
-			Failed => Self::Failed,
-			NothingSpecial => Self::NothingSpecial,
+			Failed => Self::NoAction,
+			NothingSpecial => Self::GenericAction,
 			Escape => Self::Escape,
 			Finish => Self::Search,
 		}
@@ -86,8 +80,8 @@ impl From<KeyResult> for SearchBoxKeyResult {
 impl From<KeyResult> for ReplaceBoxKeyResult {
 	fn from(value: KeyResult) -> Self {
 		match value {
-			Failed => Self::Failed,
-			NothingSpecial => Self::NothingSpecial,
+			Failed => Self::NoAction,
+			NothingSpecial => Self::GenericAction,
 			Escape => Self::Escape,
 			Finish => Self::ReplaceAll,
 		}

@@ -995,23 +995,6 @@ impl AxisAlignedBoundingBox {
 	pub fn high(self) -> Vec2u { self.high }
 }
 
-// O(n^2) approach, maybe use a hashmap of indices to get the O(n) approach? profile to check or add an if condition for size constraint stuff
-// might not be that useful since typically the last element in the subset matches
-#[must_use]
-pub fn find_last_index_of_element_in_subset<T, U, V: PartialEq, F1: FnMut(&T) -> &V, F2: FnMut(&U) -> &V>(superset: &[T], subset: &[U], mut f1: F1, mut f2: F2) -> usize {
-	for b in subset.iter().rev() {
-		let b = f2(b);
-		for (idx, a) in superset.iter().enumerate().rev() {
-			let a = f1(a);
-			if a == b {
-				return idx
-			}
-		}
-	}
-
-	0
-}
-
 #[cfg(test)]
 mod tests {
     #[test]

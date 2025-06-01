@@ -15,9 +15,10 @@ use crate::assets::{
 };
 use crate::elements::{ComplexNbtElementVariant, NbtByte, NbtByteArray, NbtChunk, NbtCompound, NbtDouble, NbtElement, NbtElementVariant, NbtFloat, NbtInt, NbtIntArray, NbtList, NbtLong, NbtLongArray, NbtRegion, NbtShort, NbtString};
 use crate::render::{RenderContext, TextColor, VertexBufferBuilder, WindowProperties};
-use crate::tab_mut;
+use crate::{mutable_indices, tab_mut};
+use crate::tree::{swap_element_same_depth, OwnedIndices, ParentNavigationInformationMut};
 use crate::util::{LinkedQueue, StrExt, Vec2u, drop_on_separate_thread, now};
-use crate::widget::{SelectedText, SelectedTexts, TEXT_DOUBLE_CLICK_INTERVAL, get_cursor_left_jump_idx, get_cursor_right_jump_idx};
+use crate::widget::{SelectedText, SelectedTexts, TEXT_DOUBLE_CLICK_INTERVAL, get_cursor_left_jump_idx, get_cursor_right_jump_idx, Alert};
 
 pub struct Tab {
 	pub value: Box<NbtElement>,
@@ -325,37 +326,9 @@ impl Tab {
 		self.scroll = self.scroll();
 	}
 
-	#[must_use]
-	pub fn scroll(&self) -> usize {
-		let height = self.value.height() * 16 + 32 + 15;
-		let scroll = self.scroll;
-		let max = (height + HEADER_SIZE).saturating_sub(self.window_height);
-		scroll.min(max) & !15
-	}
-
 	pub fn modify_horizontal_scroll(&mut self, f: impl FnOnce(usize) -> usize) {
 		self.horizontal_scroll = f(self.horizontal_scroll);
 		self.horizontal_scroll = self.horizontal_scroll();
-	}
-
-	#[must_use]
-	pub fn horizontal_scroll(&self) -> usize {
-		let left_margin = self.left_margin();
-		let max_selected_text_width = self
-			.selected_texts
-			.iter()
-			.map(|selected_text| selected_text.indices.len() * 16 + 32 + 4 + selected_text.width())
-			.max()
-			.unwrap_or(0);
-		let width = self
-			.value
-			.max_depth()
-			.max(self.path.name().width())
-			.max(max_selected_text_width)
-			+ 32 + 48;
-		let scroll = self.horizontal_scroll;
-		let max = (width + left_margin).saturating_sub(self.window_width);
-		scroll.min(max)
 	}
 
 	pub fn refresh_selected_text_horizontal_scroll(&mut self) {
@@ -377,6 +350,11 @@ impl Tab {
 			}
 		}
 	}
+	
+	pub fn visual_recache(&mut self) {
+		self.refresh_scrolls();
+		self.refresh_selected_text_horizontal_scroll();
+	}
 
 	pub fn refresh_scrolls(&mut self) {
 		self.scroll = self.scroll();
@@ -390,6 +368,7 @@ impl Tab {
 	}
 
 	#[must_use]
+	#[deprecated = "use Tab::consts instead"]
 	pub fn left_margin(&self) -> usize {
 		((self.value.true_height()
 			+ self
@@ -399,6 +378,45 @@ impl Tab {
 		.ilog10() as usize
 			+ 1) * 8 + 4
 			+ 8
+	}
+
+	#[must_use]
+	#[deprecated = "use Tab::consts instead"]
+	pub fn scroll(&self) -> usize {
+		let height = self.value.height() * 16 + 32 + 15;
+		let scroll = self.scroll;
+		let max = (height + HEADER_SIZE).saturating_sub(self.window_height);
+		scroll.min(max) & !15
+	}
+
+	#[must_use]
+	#[deprecated = "use Tab::consts instead"]
+	pub fn horizontal_scroll(&self) -> usize {
+		let left_margin = self.left_margin();
+		let max_selected_text_width = self
+			.selected_texts
+			.iter()
+			.map(|selected_text| selected_text.indices.len() * 16 + 32 + 4 + selected_text.width())
+			.max()
+			.unwrap_or(0);
+		let width = self
+			.value
+			.max_depth()
+			.max(self.path.name().width())
+			.max(max_selected_text_width)
+			+ 32 + 48;
+		let scroll = self.horizontal_scroll;
+		let max = (width + left_margin).saturating_sub(self.window_width);
+		scroll.min(max)
+	}
+	
+	#[must_use]
+	pub fn consts(&self) -> TabConstants {
+		TabConstants {
+			left_margin: self.left_margin(),
+			scroll: self.scroll(),
+			horizontal_scroll: self.horizontal_scroll(),
+		}
 	}
 
 	#[must_use]
@@ -678,4 +696,11 @@ impl PathWithName {
 
 	#[must_use]
 	pub fn name(&self) -> &str { &self.cached_name }
+}
+
+#[derive(Copy, Clone)]
+pub struct TabConstants {
+	pub left_margin: usize,
+	pub scroll: usize,
+	pub horizontal_scroll: usize,
 }

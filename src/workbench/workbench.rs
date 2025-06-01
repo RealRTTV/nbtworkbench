@@ -10,6 +10,7 @@ use anyhow::{Context, Result, anyhow, bail, ensure};
 use compact_str::{CompactString, ToCompactString, format_compact};
 use enum_map::EnumMap;
 use fxhash::{FxBuildHasher, FxHashSet};
+use itertools::Itertools;
 use winit::dpi::{PhysicalPosition, PhysicalSize};
 use winit::event::{ElementState, KeyEvent, MouseButton, MouseScrollDelta};
 use winit::keyboard::{KeyCode, PhysicalKey};
@@ -33,10 +34,9 @@ use crate::widget::{
 	ReplaceByButton, SEARCH_BOX_END_X, SEARCH_BOX_START_X, SearchBox, SearchBoxKeyResult, SearchFlagsButton, SearchModeButton, SearchOperationButton, SelectedText, SelectedTextAdditional, SelectedTextKeyResult, SelectedTexts, SortAlgorithmButton,
 	TEXT_DOUBLE_CLICK_INTERVAL, Text, ThemeButton, get_cursor_idx, get_cursor_left_jump_idx, get_cursor_right_jump_idx,
 };
-use crate::workbench::{ElementAction, FileFormat, MarkedLine, MarkedLines, PathWithName, Tab, WorkbenchAction};
+use crate::workbench::{ElementAction, FileFormat, MarkedLine, MarkedLines, PathWithName, Tab, TabConstants, WorkbenchAction};
 use crate::{config, flags, get_interaction_information, hash, mutable_indices, tab, tab_mut, util};
 
-#[derive(Debug)]
 pub enum InteractionInformation<'a> {
 	Header,
 	InvalidContent {
@@ -286,7 +286,7 @@ impl Workbench {
 				{
 					let mut tabs_width = 3_usize;
 					for tab in &self.tabs {
-						tabs_width += tab.name.width() + 32 + 6 + 6;
+						tabs_width += tab.path.name().width() + 32 + 6 + 6;
 					}
 					tabs_width
 				}
@@ -316,10 +316,13 @@ impl Workbench {
 			ElementState::Pressed => {
 				self.held_mouse_keys.insert(button);
 
-				if let MouseButton::Left | MouseButton::Right = button
-					&& self.try_deselect_selected_text(window_properties)
-				{
-					// do not exit early
+				if let MouseButton::Left | MouseButton::Right = button {
+					let tab = tab_mut!(self);
+					let consts = tab.consts();
+
+					if let Some(bulk) = WorkbenchAction::bulk(tab.selected_texts.iter_mut().filter_map(|selected_text| selected_text.write(consts, window_properties, &mut tab.value, &mut tab.path)).collect::<Vec<_>>()) {
+						tab.append_to_history(bulk);
+					}
 				}
 
 				{
@@ -482,10 +485,10 @@ impl Workbench {
 				}
 			}
 			ElementState::Released => {
-				if let MouseButton::Right = button
-					&& let Some(selected_text) = tab_mut!(self).selected_text.as_mut()
-				{
-					selected_text.set_drag_selectable(false);
+				if let MouseButton::Right = button {
+					for selected_text in tab_mut!(self).selected_texts.iter_mut() {
+						selected_text.set_drag_selectable(false);
+					}
 				}
 
 				if self.process_action_wheel() {
@@ -522,9 +525,7 @@ impl Workbench {
 		else {
 			return true
 		};
-		if let Some(action) = element.actions().get(highlight_idx).copied()
-			&& let Some(action) = action.apply(&mut tab.value, indices, &mut tab.bookmarks, mutable_indices!(self, tab), &mut self.alerts)
-		{
+		if let Some(action) = element.actions().get(highlight_idx).copied() && let Some(action) = action.apply(&mut tab.value, indices, &mut tab.bookmarks, mutable_indices!(tab), &mut self.alerts) {
 			tab.append_to_history(action);
 		}
 		true
@@ -579,11 +580,11 @@ impl Workbench {
 							(key, value)
 						}
 					};
-					let action = replace_element(&mut tab.value, kv, subscription.indices.clone(), &mut tab.bookmarks, mutable_indices!(self, tab))
+					let action = replace_element(&mut tab.value, kv, subscription.indices.clone(), &mut tab.bookmarks, mutable_indices!(tab))
 						.context("Failed to replace element")?
 						.into_action();
 					tab.append_to_history(action);
-					tab.refresh_scrolls();
+					tab.visual_recache();
 				}
 				Err(TryRecvError::Disconnected) => {
 					tab.subscription = None;
@@ -675,7 +676,7 @@ impl Workbench {
 		{
 			let tab = tab_mut!(self);
 
-			let RemoveElementResult { indices, kv: (key, mut value), replaces: _ } = match remove_element(&mut tab.value, indices, &mut tab.bookmarks, mutable_indices!(self, tab)) {
+			let RemoveElementResult { indices, kv: (key, mut value), replaces: _ } = match remove_element(&mut tab.value, indices, &mut tab.bookmarks, mutable_indices!(tab)) {
 				Some(result) => result,
 				None => {
 					self.alert(Alert::error("Failed to remove element"));
@@ -693,38 +694,6 @@ impl Workbench {
 		}
 	}
 
-	fn rename(&mut self, offset: usize) -> bool {
-		let left_margin = self.left_margin();
-		let tab = tab_mut!(self);
-		let path_minus_name_width = if let Some(path) = tab
-			.path
-			.as_ref()
-			.and_then(|path| path.as_os_str().to_str())
-		{
-			path.width() - tab.name.width()
-		} else {
-			0
-		};
-		let name = tab
-			.path
-			.as_ref()
-			.and_then(|x| x.to_str())
-			.map_or_else(|| tab.name.clone(), Into::into);
-		let suffix = format!("[{}]", tab.value.value().0).into_boxed_str();
-		tab.set_selected_text(
-			Some(0),
-			SelectedText::new(
-				36 + left_margin,
-				offset + path_minus_name_width,
-				HEADER_SIZE,
-				Some((name, TextColor::TreeKey, true)),
-				Some((suffix, TextColor::TreeKey, false)),
-				OwnedIndices::new(),
-			),
-		);
-		tab.selected_text.is_some()
-	}
-
 	fn duplicate(&mut self) -> bool {
 		if let InteractionInformation::Content {
 			is_in_left_margin: false,
@@ -739,7 +708,7 @@ impl Workbench {
 			*indices.last_mut().expect("y > 0") += 1;
 			let duplicate = value.clone();
 			let tab = tab_mut!(self);
-			let action = match add_element(&mut tab.value, (key, duplicate), indices, &mut tab.bookmarks, mutable_indices!(self, tab)) {
+			let action = match add_element(&mut tab.value, (key, duplicate), indices, &mut tab.bookmarks, mutable_indices!(tab)) {
 				Some(action) => action.into_action(),
 				None => {
 					self.alert(Alert::error("Failed to duplicate element"));
@@ -747,7 +716,7 @@ impl Workbench {
 				}
 			};
 			tab.append_to_history(action);
-			tab.refresh_scrolls();
+			tab.visual_recache();
 			true
 		} else {
 			false
@@ -787,7 +756,7 @@ impl Workbench {
 				}
 			}
 			let tab = tab_mut!(self);
-			let result = match remove_element(&mut tab.value, indices, &mut tab.bookmarks, mutable_indices!(self, tab)) {
+			let result = match remove_element(&mut tab.value, indices, &mut tab.bookmarks, mutable_indices!(tab)) {
 				Some(result) => result,
 				None => {
 					self.alert(Alert::error("Failed to remove element"));
@@ -820,7 +789,7 @@ impl Workbench {
 			.value
 			.create_drop_indices((kv.0.as_deref(), &kv.1), y, x)
 		{
-			if let Some(AddElementResult { indices, old_kv }) = add_element(&mut tab.value, kv, indices, &mut tab.bookmarks, mutable_indices!(self, tab)) {
+			if let Some(AddElementResult { indices, old_kv }) = add_element(&mut tab.value, kv, indices, &mut tab.bookmarks, mutable_indices!(tab)) {
 				if expand_element_to_indices(&mut tab.value, &indices, &mut tab.bookmarks).is_none() {
 					self.alert(Alert::error("Failed to expand element indices"));
 					return false
@@ -896,7 +865,7 @@ impl Workbench {
 		let mut x = mouse_x - 2;
 		'a: {
 			for (idx, tab) in self.tabs.iter_mut().enumerate() {
-				let width = tab.name.width() + 48 + 5;
+				let width = tab.path.name().width() + 48 + 5;
 
 				if x <= width {
 					if button == MouseButton::Middle {
@@ -996,7 +965,16 @@ impl Workbench {
 	fn open_file(&mut self, _: &mut WindowProperties) { crate::wasm::try_open_dialog(); }
 
 	#[must_use]
+	#[deprecated = "use tab.left_margin() instead"]
 	pub fn left_margin(&self) -> usize { tab!(self).left_margin() }
+
+	#[must_use]
+	#[deprecated = "use tab.scroll() instead"]
+	pub fn scroll(&self) -> usize { tab!(self).scroll() }
+
+	#[must_use]
+	#[deprecated = "use tab.horizontal_scroll() instead"]
+	pub fn horizontal_scroll(&self) -> usize { tab!(self).horizontal_scroll() }
 
 	#[must_use]
 	#[cfg(target_os = "macos")]
@@ -1064,7 +1042,7 @@ impl Workbench {
 		}
 		tab.value.on_style_change(&mut tab.bookmarks);
 		tab.value.recache_along_indices(Indices::EMPTY);
-		tab.refresh_scrolls();
+		tab.visual_recache();
 		true
 	}
 
@@ -1168,8 +1146,8 @@ impl Workbench {
 	}
 
 	fn try_select_text(&mut self, snap_to_ends: bool) -> bool {
-		let left_margin = self.left_margin();
-		let horizontal_scroll = self.horizontal_scroll();
+		let tab = tab_mut!(self);
+		let consts @ TabConstants { left_margin, horizontal_scroll, scroll } = tab.consts();
 
 		if self.mouse_x + horizontal_scroll < left_margin {
 			return false
@@ -1178,60 +1156,14 @@ impl Workbench {
 			return false
 		}
 
-		let y = (self.mouse_y - HEADER_SIZE) / 16 + self.scroll() / 16;
+		let y = (self.mouse_y - HEADER_SIZE) / 16 + scroll / 16;
 
-		self.set_selected_text_at_y(y, self.mouse_x, snap_to_ends)
-	}
-
-	fn try_deselect_selected_text(&mut self, window_properties: &mut WindowProperties) -> bool {
-		let tab = tab_mut!(self);
-		tab.write_selected_text(true, window_properties, true, true)
-	}
-
-	pub fn set_selected_text_at_y(&mut self, y: usize, mouse_x: usize, snap_to_ends: bool) -> bool {
-		let left_margin = self.left_margin();
-		let horizontal_scroll = self.horizontal_scroll();
-
-		let tab = tab_mut!(self);
-
-		if y == 0 {
-			let max = tab.name.width() + 32 + 4 + self.left_margin();
-			return self.rename(mouse_x.min(max))
-		}
-
-		if y >= tab.value.height() {
-			return false
-		}
-		if tab
-			.value
-			.as_region()
-			.is_some_and(|region| region.is_grid_layout())
-		{
-			return false
-		}
-
-		let Some(TraversalInformation { indices, depth, key, element, .. }) = tab.value.traverse(y, None) else { return false };
-		let target_x = depth * 16 + 32 + 4 + left_margin;
-		if element.as_chunk().is_some() && self.mouse_x < target_x - 4 {
-			return false
-		}
-		let k = key.map(|x| (x.to_owned().into_boxed_str(), TextColor::TreeKey, true));
-		let v = Some(element.value()).map(|(a, c)| (a.into_owned().into_boxed_str(), c, c != TextColor::TreeKey));
-		let mouse_x = if snap_to_ends {
-			let min_x = target_x;
-			let max_x = k
-				.as_ref()
-				.map_or(0, |(k, _, b)| (*b as usize) * (k.width() + ": ".width() * v.is_some() as usize))
-				+ v.as_ref()
-					.map_or(0, |(v, _, b)| (*b as usize) * v.width())
-				+ target_x;
-			(mouse_x + horizontal_scroll).clamp(min_x, max_x)
+		if let Some(selected_text) = SelectedText::for_y(consts, &mut tab.value, &mut tab.path, y, self.mouse_x, snap_to_ends, None) {
+			tab.selected_texts.push(selected_text);
+			true
 		} else {
-			mouse_x + horizontal_scroll
-		};
-
-		tab.set_selected_text(Some(y), SelectedText::new(target_x, mouse_x, y * 16 + HEADER_SIZE, k, v, indices));
-		tab.selected_text.is_some()
+			false
+		}
 	}
 
 	fn bookmark_line(&mut self, require_left_margin_cursor: bool) -> bool {
@@ -1246,262 +1178,10 @@ impl Workbench {
 		}
 	}
 
-	pub fn move_to_keyfix(&mut self, window_properties: &mut WindowProperties) {
-		let tab = tab_mut!(self);
-		if let Some(SelectedText(Text {
-			value,
-			cursor,
-			editable: true,
-			additional: SelectedTextAdditional {
-				y,
-				indices,
-				value_color,
-				keyfix,
-				prefix,
-				suffix,
-				valuefix,
-			},
-			..
-		})) = tab.selected_text.clone()
-			&& let Some((keyfix, keyfix_color)) = keyfix
-			&& valuefix.is_none()
-			&& suffix.0.is_empty()
-			&& cursor == 0
-		{
-			if !tab.write_selected_text(false, window_properties, true, false) {
-				return
-			}
-			tab.set_selected_text(
-				None,
-				Some(SelectedText(Text::new(keyfix.clone(), keyfix.len(), true, SelectedTextAdditional {
-					y,
-					indices,
-					value_color: keyfix_color,
-					keyfix: None,
-					prefix: (String::new(), TextColor::White),
-					suffix: prefix,
-					valuefix: Some((value, value_color)),
-				}))),
-			);
-		}
-	}
-
-	pub fn move_to_valuefix(&mut self, window_properties: &mut WindowProperties) {
-		let tab = tab_mut!(self);
-		if let Some(SelectedText(Text {
-			value,
-			cursor,
-			editable: true,
-			additional: SelectedTextAdditional {
-				y,
-				indices,
-				value_color,
-				keyfix,
-				prefix,
-				suffix,
-				valuefix,
-			},
-			..
-		})) = tab.selected_text.clone()
-			&& let Some((valuefix, valuefix_color)) = valuefix
-			&& keyfix.is_none()
-			&& prefix.0.is_empty()
-			&& cursor == value.len()
-		{
-			if !tab.write_selected_text(false, window_properties, true, false) {
-				return
-			}
-			tab.set_selected_text(
-				None,
-				Some(SelectedText(Text::new(valuefix, 0, true, SelectedTextAdditional {
-					y,
-					indices,
-					value_color: valuefix_color,
-					keyfix: Some((value, value_color)),
-					prefix: suffix,
-					suffix: (String::new(), TextColor::White),
-					valuefix: None,
-				}))),
-			);
-		}
-	}
-
-	pub fn shift_selected_text_same_depth(&mut self, sibling_idx: impl FnOnce(usize) -> Option<usize>) -> Option<()> {
-		let tab = tab_mut!(self);
-		let Some(SelectedText(Text {
-			additional: SelectedTextAdditional { indices, .. },
-			..
-		})) = &tab.selected_text
-		else {
-			return None
-		};
-		let ParentNavigationInformationMut { parent, idx: a_idx, parent_indices, .. } = tab.value.navigate_parent_mut(indices)?;
-		let b_idx = sibling_idx(a_idx)?;
-		if parent.get(a_idx).is_none() || parent.get(b_idx).is_none() {
-			return None
-		};
-		let result = match swap_element_same_depth(&mut tab.value, parent_indices.to_owned(), a_idx, b_idx, &mut tab.bookmarks, mutable_indices!(self, tab)) {
-			Some(action) => action,
-			None => {
-				self.alert(Alert::error("Failed to swap elements"));
-				return None
-			}
-		};
-
-		let mut result_indices = result.parent.clone();
-		result_indices.push(b_idx);
-		tab.refresh_scrolls();
-		tab.append_to_history(result.into_action());
-
-		if let Some(selected_text) = &mut tab.selected_text {
-			selected_text.set_indices(result_indices, &tab.value);
-		}
-
-		Some(())
-	}
-
-	pub fn shift_selected_text_up(&mut self) -> Option<()> { self.shift_selected_text_same_depth(|idx| idx.checked_sub(1)) }
-
-	pub fn shift_selected_text_down(&mut self) -> Option<()> { self.shift_selected_text_same_depth(|idx| idx.checked_add(1)) }
-
-	fn move_selected_text(&mut self, window_properties: &mut WindowProperties, f: impl FnOnce(usize, &NbtElement, OwnedIndices) -> Option<usize>) -> bool {
-		let left_margin = self.left_margin();
-		let tab = tab_mut!(self);
-
-		let Some(SelectedText(Text {
-			additional: SelectedTextAdditional { y, indices, keyfix, prefix, .. },
-			value: str_value,
-			cursor,
-			..
-		})) = tab.selected_text.clone()
-		else {
-			return false
-		};
-		if !tab.write_selected_text(false, window_properties, true, false) {
-			return false
-		}
-
-		let cache_cursor_x = tab.cache_cursor_x;
-		let depth = indices.len();
-		let y = (y - HEADER_SIZE) / 16;
-		let mouse_x = cache_cursor_x.unwrap_or(depth * 16 + 32 + 4 + left_margin + keyfix.as_ref().map_or(0, |x| x.0.width()) + prefix.0.width() + str_value.split_at(cursor).0.width());
-
-		let Some(new_y) = f(y, &tab.value, indices) else { return false };
-
-		tab.cache_cursor_x.get_or_insert(mouse_x);
-		tab.modify_scroll(|scroll| scroll.min(new_y * 16));
-		tab.refresh_scrolls();
-
-		self.set_selected_text_at_y(new_y, mouse_x, true);
-		true
-	}
-
-	pub fn selected_text_up(&mut self, ctrl: bool, window_properties: &mut WindowProperties) -> bool {
-		self.move_selected_text(window_properties, |y, root, mut indices| {
-			Some(
-				if ctrl
-					&& let Some(last_idx) = indices.last_mut()
-					&& *last_idx > 0
-				{
-					*last_idx -= 1;
-					root.navigate(&indices)?.line_number
-				} else {
-					y - 1
-				},
-			)
-		})
-	}
-
-	pub fn selected_text_down(&mut self, ctrl: bool, window_properties: &mut WindowProperties) -> bool {
-		self.move_selected_text(window_properties, |y, root, indices| {
-			Some(if ctrl && let Some((last_idx, parent_indices)) = indices.split_last() {
-				let NavigationInformation { element: parent, line_number, .. } = root.navigate(&parent_indices)?;
-				let len = parent.len()?;
-				if last_idx + 1 == len { y + 1 } else { line_number + 1 }
-			} else {
-				y + 1
-			})
-		})
-	}
-
-	pub fn force_close(&mut self) {
-		let tab = tab_mut!(self);
-		let Some(SelectedText(Text {
-			additional: SelectedTextAdditional { indices, .. },
-			..
-		})) = tab.selected_text.as_ref()
-		else {
-			return
-		};
-		let alert = if let None = close_element(&mut tab.value, indices, &mut tab.bookmarks) {
-			Some(Alert::error("Failed to close selected element"))
-		} else {
-			None
-		};
-		tab.refresh_scrolls();
-		if let Some(alert) = alert {
-			self.alert(alert);
-		}
-	}
-
-	pub fn force_open(&mut self) {
-		let expand = self.shift();
-		let tab = tab_mut!(self);
-		let Some(SelectedText(Text {
-			additional: SelectedTextAdditional { indices, .. },
-			..
-		})) = tab.selected_text.as_ref()
-		else {
-			return
-		};
-		let result = if expand {
-			expand_element(&mut tab.value, indices, &mut tab.bookmarks)
-		} else {
-			open_element(&mut tab.value, indices, &mut tab.bookmarks)
-		};
-		let alert = result
-			.is_none()
-			.then(|| Alert::error("Failed to open the selected element"));
-		tab.refresh_scrolls();
-		if let Some(alert) = alert {
-			self.alert(alert);
-		}
-	}
-
-	pub fn refresh_selected_text_horizontal_scroll(&mut self) {
-		let left_margin = self.left_margin();
-		let tab = tab_mut!(self);
-
-		let free_space = 48 + left_margin;
-		if let Some(selected_text) = tab.selected_text.as_ref() {
-			let horizontal_scroll = tab.horizontal_scroll();
-			let pos = left_margin
-				+ selected_text.indices.len() * 16
-				+ 32 + 4 + selected_text.prefix.0.width()
-				+ selected_text
-					.keyfix
-					.as_ref()
-					.map_or(0, |x| x.0.width())
-				+ selected_text
-					.value
-					.split_at(selected_text.cursor)
-					.0
-					.width();
-			if pos + free_space < self.window_width {
-				tab.horizontal_scroll = 0;
-				tab.horizontal_scroll = tab.horizontal_scroll();
-			} else if pos + free_space >= self.window_width + horizontal_scroll {
-				tab.horizontal_scroll = pos + free_space - self.window_width;
-				tab.horizontal_scroll = tab.horizontal_scroll();
-			} else if pos < horizontal_scroll + free_space {
-				tab.horizontal_scroll = pos.saturating_sub(free_space);
-				tab.horizontal_scroll = tab.horizontal_scroll();
-			}
-		}
-	}
-
 	#[allow(clippy::collapsible_if, clippy::too_many_lines, clippy::cognitive_complexity)]
 	pub fn on_key_input(&mut self, key: &KeyEvent, window_properties: &mut WindowProperties) -> bool {
+		let consts = tab!(self).consts();
+
 		tab_mut!(self).last_interaction = now();
 		if key.state == ElementState::Pressed {
 			if let PhysicalKey::Code(key) = key.physical_key {
@@ -1511,8 +1191,8 @@ impl Workbench {
 				let tab = tab_mut!(self);
 				if self.search_box.is_selected() {
 					match self.search_box.on_key_press(key, char, flags) {
-						SearchBoxKeyResult::Failed => {} // next thing, please
-						SearchBoxKeyResult::NothingSpecial => {
+						SearchBoxKeyResult::NoAction => {} // next thing, please
+						SearchBoxKeyResult::GenericAction => {
 							self.search_box
 								.post_input((self.window_width, self.window_height));
 							return true;
@@ -1550,8 +1230,8 @@ impl Workbench {
 					}
 				} else if self.replace_box.is_selected() {
 					match self.replace_box.on_key_press(key, char, flags) {
-						ReplaceBoxKeyResult::Failed => {} // next thing, please
-						ReplaceBoxKeyResult::NothingSpecial => {
+						ReplaceBoxKeyResult::NoAction => {} // next thing, please
+						ReplaceBoxKeyResult::GenericAction => {
 							self.replace_box
 								.post_input((self.window_width, self.window_height));
 							return true;
@@ -1580,7 +1260,7 @@ impl Workbench {
 						ReplaceBoxKeyResult::ReplaceAll => {
 							let (notification, bulk) = self
 								.replace_box
-								.replace(&mut tab.bookmarks, mutable_indices!(self, tab), &mut tab.value, &self.search_box);
+								.replace(&mut tab.path, &mut tab.bookmarks, mutable_indices!(tab), &mut tab.value, &self.search_box);
 							if let Some(bulk) = bulk {
 								tab.append_to_history(bulk);
 							}
@@ -1591,68 +1271,51 @@ impl Workbench {
 						}
 					}
 				}
-				if let Some(selected_text) = &mut tab.selected_text {
-					match selected_text.on_key_press(key, char, flags) {
-						SelectedTextKeyResult::NothingSpecial => {
-							selected_text.post_input();
-							tab.cache_cursor_x = None;
-							self.refresh_selected_text_horizontal_scroll();
-							return true;
+				{
+					let mut any_applied = false;
+					let mut alerts = Vec::new();
+					let mut completed_uuids = FxHashSet::default();
+					while let Some(mut selected_text) = tab.selected_texts.iter().find(|text| !completed_uuids.contains(&text.uuid)).cloned() {
+						let result = selected_text.on_key_press(key, char, flags, consts, window_properties, &mut tab.value, &mut tab.path, &mut tab.bookmarks, mutable_indices!(tab));
+						let idx = tab.selected_texts.iter().find_position(|text| text.uuid == selected_text.uuid).map(|(idx, _)| idx);
+						completed_uuids.insert(selected_text.uuid);
+						if let &SelectedTextKeyResult::GenericAction | &SelectedTextKeyResult::Action(_) | &SelectedTextKeyResult::Escape | &SelectedTextKeyResult::Finish = &result {
+							any_applied |= true;
+							selected_text.post_input(consts);
 						}
-						SelectedTextKeyResult::Escape => {
-							tab.selected_text = None;
-							tab.cache_cursor_x = None;
-							return true;
+						match result {
+							SelectedTextKeyResult::NoAction => {}
+							SelectedTextKeyResult::GenericAction => {}
+							SelectedTextKeyResult::Action(action) => {
+								match action {
+									Ok(Some(action)) => tab.append_to_history(action),
+									Ok(None) => (),
+									Err(e) => alerts.push(Alert::from(e)),
+								}
+							}
+							SelectedTextKeyResult::Escape => {
+								if let Some(idx) = idx {
+									tab.selected_texts.remove(idx);
+								}
+								continue;
+							}
+							SelectedTextKeyResult::Finish => {
+								if let Some(action) = selected_text.write(consts, window_properties, &mut tab.value, &mut tab.path) {
+									tab.append_to_history(action);
+									if let Some(idx) = idx {
+										tab.selected_texts.remove(idx);
+									}
+									continue;
+								}
+							}
 						}
-						SelectedTextKeyResult::Finish => {
-							tab.cache_cursor_x = None;
-							// we just won't let you leave if you didn't fix it ;)
-							tab.write_selected_text(false, window_properties, true, false);
-							return true;
+						if let Some(idx) = idx && let Some(slot) = tab.selected_texts.get_mut(idx) {
+							*slot = selected_text;
 						}
-						SelectedTextKeyResult::MoveToKeyfix => {
-							tab.cache_cursor_x = None;
-							self.move_to_keyfix(window_properties);
-							self.refresh_selected_text_horizontal_scroll();
-							return true;
-						}
-						SelectedTextKeyResult::MoveToValuefix => {
-							tab.cache_cursor_x = None;
-							self.move_to_valuefix(window_properties);
-							self.refresh_selected_text_horizontal_scroll();
-							return true;
-						}
-						SelectedTextKeyResult::Up(ctrl) => {
-							self.selected_text_up(ctrl, window_properties);
-							self.refresh_selected_text_horizontal_scroll();
-							return true;
-						}
-						SelectedTextKeyResult::Down(ctrl) => {
-							self.selected_text_down(ctrl, window_properties);
-							self.refresh_selected_text_horizontal_scroll();
-							return true;
-						}
-						SelectedTextKeyResult::ForceClose => {
-							selected_text.post_input();
-							self.force_close();
-							return true;
-						}
-						SelectedTextKeyResult::ForceOpen => {
-							selected_text.post_input();
-							self.force_open();
-							return true;
-						}
-						SelectedTextKeyResult::ShiftUp => {
-							selected_text.post_input();
-							self.shift_selected_text_up();
-							return true;
-						}
-						SelectedTextKeyResult::ShiftDown => {
-							selected_text.post_input();
-							self.shift_selected_text_down();
-							return true;
-						}
-						SelectedTextKeyResult::Failed => {} // next thing pls
+					}
+					if any_applied {
+						tab.visual_recache();
+						return true;
 					}
 				}
 				if key == KeyCode::KeyF && flags == flags!(Ctrl) {
@@ -1684,7 +1347,7 @@ impl Workbench {
 					tab.append_to_history(WorkbenchAction::DiscardHeldEntry { held_entry });
 					return true;
 				}
-				if (key == KeyCode::Enter || key == KeyCode::NumpadEnter) && tab.selected_text.is_none() && flags == flags!() {
+				if (key == KeyCode::Enter || key == KeyCode::NumpadEnter) && tab.selected_texts.is_empty() && flags == flags!() {
 					return if tab.held_entry.is_some() {
 						self.drop_held_entry()
 					} else {
@@ -1773,7 +1436,7 @@ impl Workbench {
 				if key == KeyCode::KeyZ && flags == flags!(Ctrl) {
 					if let Some(action) = tab.undos.pop() {
 						match action
-							.undo(&mut tab.value, &mut tab.bookmarks, mutable_indices!(self, tab), &mut tab.path, &mut tab.name, &mut tab.held_entry, window_properties)
+							.undo(&mut tab.value, &mut tab.bookmarks, mutable_indices!(tab), &mut tab.path, &mut tab.held_entry, window_properties)
 							.context("Failed undo")
 						{
 							Ok(action) => tab.redos.push(action),
@@ -1785,7 +1448,7 @@ impl Workbench {
 				if key == KeyCode::KeyY && flags == flags!(Ctrl) || key == KeyCode::KeyZ && flags == flags!(Ctrl + Shift) {
 					if let Some(action) = tab.redos.pop() {
 						match action
-							.undo(&mut tab.value, &mut tab.bookmarks, mutable_indices!(self, tab), &mut tab.path, &mut tab.name, &mut tab.held_entry, window_properties)
+							.undo(&mut tab.value, &mut tab.bookmarks, mutable_indices!(tab), &mut tab.path, &mut tab.held_entry, window_properties)
 							.context("Failed redo")
 						{
 							Ok(action) => tab.undos.push(action),
@@ -1898,30 +1561,30 @@ impl Workbench {
 	}
 
 	pub fn try_extend_drag_selection(&mut self) {
-		let horizontal_scroll = self.horizontal_scroll();
-		let left_margin = self.left_margin();
 		let tab = tab_mut!(self);
+		let TabConstants { left_margin, horizontal_scroll, .. } = tab.consts();
 		if self.last_mouse_state == ElementState::Pressed {
-			if let Some(selected_text) = tab.selected_text.as_mut()
-				&& tab.last_selected_text_interaction.1 == 0
-				&& selected_text.is_drag_selectable()
-			{
-				let cursor = selected_text
-					.selection
-					.unwrap_or(selected_text.cursor);
-				let selection = get_cursor_idx(
-					&selected_text.value,
-					(self.mouse_x + horizontal_scroll) as isize
-						- (selected_text.indices.len() * 16 + 32 + 4 + left_margin) as isize
-						- selected_text.prefix.0.width() as isize
-						- selected_text
+			for selected_text in tab.selected_texts.iter_mut() {
+				if tab.last_selected_text_interaction.1 == 0
+					&& selected_text.is_drag_selectable()
+				{
+					let cursor = selected_text
+						.selection
+						.unwrap_or(selected_text.cursor);
+					let selection = get_cursor_idx(
+						&selected_text.value,
+						(self.mouse_x + horizontal_scroll) as isize
+							- (selected_text.indices.len() * 16 + 32 + 4 + left_margin) as isize
+							- selected_text.prefix.0.width() as isize
+							- selected_text
 							.keyfix
 							.as_ref()
 							.map_or(0, |(a, _)| a.width()) as isize,
-				);
-				selected_text.cursor = selection;
-				selected_text.selection = Some(cursor).filter(|cursor| *cursor != selected_text.cursor);
-				selected_text.interact();
+					);
+					selected_text.cursor = selection;
+					selected_text.selection = Some(cursor).filter(|cursor| *cursor != selected_text.cursor);
+					selected_text.interact();
+				}
 			}
 
 			if self.search_box.is_selected() && self.search_box.last_interaction.0 == 0 {
@@ -1969,17 +1632,11 @@ impl Workbench {
 		}
 	}
 
-	#[must_use]
-	pub fn scroll(&self) -> usize { tab!(self).scroll() }
-
-	#[must_use]
-	pub fn horizontal_scroll(&self) -> usize { tab!(self).horizontal_scroll() }
-
 	fn set_tab(&mut self, idx: usize, window_properties: &mut WindowProperties) {
 		self.tab = idx.min(self.tabs.len() - 1);
 		// on any tab switch this should be discarded.
 		self.steal_animation_data = None;
-		window_properties.set_window_title(format!("{} - NBT Workbench", tab!(self).name).as_str());
+		window_properties.set_window_title(format!("{} - NBT Workbench", tab!(self).path.name()).as_str());
 	}
 
 	// todo: replace commented std::time::Instant::now() with debug pie for ms to complete and pct
@@ -2793,7 +2450,6 @@ impl Workbench {
 
 pub const LINE_DOUBLE_CLICK_INTERVAL: Duration = Duration::from_millis(250);
 
-#[derive(Debug)]
 pub struct HeldEntry {
 	pub(super) kv: NbtElementAndKey,
 	pub(super) indices_history: LinkedQueue<OwnedIndices>,

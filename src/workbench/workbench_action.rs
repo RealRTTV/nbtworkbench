@@ -1,5 +1,3 @@
-use std::path::PathBuf;
-
 use anyhow::{Context, Result, ensure};
 use compact_str::CompactString;
 
@@ -9,7 +7,6 @@ use crate::tree::{AddElementResult, MutableIndices, OwnedIndices, RemoveElementR
 use crate::util::LinkedQueue;
 use crate::workbench::{HeldEntry, MarkedLines, PathWithName};
 
-#[derive(Debug)]
 #[must_use]
 pub enum WorkbenchAction {
 	Add {

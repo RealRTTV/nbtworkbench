@@ -213,7 +213,6 @@ impl BitXorAssign for MarkedLines {
 }
 
 #[repr(transparent)]
-#[derive(Debug)]
 pub struct MarkedLineSlice([MarkedLine]);
 
 impl MarkedLineSlice {

@@ -137,6 +137,7 @@ pub static mut WINDOW_PROPERTIES: render::WindowProperties = render::WindowPrope
 /// * if you want to optimize something, optimize [`NbtElement::recache`]
 /// * change to Box<Inner> for all complex types and get down to 16 bytes (?)
 /// * move lots of stuff from [`workbench`] over to [`workbench::tab`]
+/// * remove anyhow and replace with own error type
 /// # Long-Term Goals
 /// * smart screen
 /// * add multi-cursor
