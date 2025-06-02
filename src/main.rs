@@ -146,11 +146,12 @@ pub static mut WINDOW_PROPERTIES: render::WindowProperties = render::WindowPrope
 /// * macros
 #[cfg(not(target_arch = "wasm32"))]
 pub fn main() -> ! {
-	config::read();
 	#[cfg(target_os = "windows")]
 	unsafe {
 		winapi::um::wincon::AttachConsole(winapi::um::wincon::ATTACH_PARENT_PROCESS)
 	};
+	
+	config::read();
 
 	match std::env::args().nth(1).as_deref() {
 		Some("find") => cli::find(),

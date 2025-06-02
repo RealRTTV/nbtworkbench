@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 use std::fmt::{Debug, Display, Error, Formatter};
-use std::mem::ManuallyDrop;
+use std::mem::{ManuallyDrop, MaybeUninit};
 use std::ops::{Index, IndexMut};
 use std::slice::{Iter, IterMut};
 #[cfg(not(target_arch = "wasm32"))] use std::thread::Scope;
@@ -735,13 +735,25 @@ impl NbtElement {
 		}
 	}
 
-	pub fn recache_along_indices(&mut self, indices: &Indices) {
-		let mut this = self;
-		this.recache();
-		for idx in indices {
-			this = &mut this[idx];
-			this.recache();
+	pub fn recache_along_indices<'a>(&'a mut self, indices: &Indices) {
+		// SAFETY: all recache does not change the children indices, this is just an optimization over using the stack with recursion
+		let mut children: Box<[MaybeUninit<&'a mut NbtElement>]> = unsafe { Box::try_new_uninit_slice(indices.len()).unwrap_unchecked() };
+
+		let mut current_child = unsafe { core::ptr::read(core::ptr::addr_of!(self)) };
+		for (child_slot, idx) in children.iter_mut().zip(indices.iter()) {
+			let child: &'a mut NbtElement = unsafe { core::mem::transmute(&mut current_child[idx]) };
+			let child_clone: &'a mut NbtElement = unsafe { core::ptr::read(core::ptr::addr_of!(child)) };
+			child_slot.write(child);
+			current_child = child_clone;
 		}
+
+		for child in children.into_iter().rev() {
+			// SAFETY: all values are initialized
+			let child = unsafe { child.assume_init() };
+			child.recache();
+		}
+
+		self.recache();
 	}
 }
 

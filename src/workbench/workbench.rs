@@ -10,17 +10,17 @@ use anyhow::{Context, Result, anyhow, bail, ensure};
 use compact_str::{CompactString, ToCompactString, format_compact};
 use enum_map::EnumMap;
 use fxhash::{FxBuildHasher, FxHashSet};
+use serde::{Deserialize, Serialize};
 use winit::dpi::{PhysicalPosition, PhysicalSize};
 use winit::event::{ElementState, KeyEvent, MouseButton, MouseScrollDelta};
 use winit::keyboard::{KeyCode, PhysicalKey};
-use winit::window::Theme;
 
 use crate::assets::{
 	ACTION_WHEEL_Z, BASE_TEXT_Z, BASE_Z, CLOSED_WIDGET_UV, DARK_STRIPE_UV, HEADER_SIZE, HELD_ENTRY_Z, HORIZONTAL_SEPARATOR_UV, HOVERED_STRIPE_UV, HOVERED_WIDGET_UV, JUST_OVERLAPPING_BASE_TEXT_Z, LIGHT_STRIPE_UV, LINE_NUMBER_SEPARATOR_UV,
 	REPLACE_BOX_Z, SAVE_GRAYSCALE_UV, SAVE_UV, SELECTED_ACTION_WHEEL, SELECTED_WIDGET_UV, TRAY_UV, UNSELECTED_ACTION_WHEEL, UNSELECTED_WIDGET_UV, ZOffset,
 };
 use crate::elements::{CompoundMap, NbtByte, NbtByteArray, NbtChunk, NbtCompound, NbtDouble, NbtElement, NbtElementAndKey, NbtElementVariant, NbtFloat, NbtInt, NbtIntArray, NbtList, NbtLong, NbtLongArray, NbtRegion, NbtShort, NbtString};
-use crate::render::{MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH, RenderContext, TextColor, VertexBufferBuilder, WINDOW_HEIGHT, WINDOW_WIDTH, WindowProperties};
+use crate::render::{MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH, RenderContext, TextColor, VertexBufferBuilder, WINDOW_HEIGHT, WINDOW_WIDTH, WindowProperties, Theme};
 use crate::serialization::{BigEndianDecoder, Decoder, UncheckedBufWriter};
 use crate::tree::{
 	AddElementResult, Indices, MutableIndices, NavigationInformation, OwnedIndices, ParentNavigationInformationMut, RemoveElementResult, TraversalInformation, TraversalInformationMut, add_element, close_element, expand_element,
@@ -2291,6 +2291,17 @@ impl Workbench {
 					"null".to_owned()
 				}
 			),
+			format!("select txt val: {data}", data = if let Some(txt) = tab.selected_text.as_ref() && let Some((key, value)) = tab.value.get_kv_under_indices(&txt.indices) {
+				format!(
+					"key={key:?}, value={}, h={}, th={}, depth={}",
+					value.value().0,
+					value.height(),
+					value.true_height(),
+					value.max_depth(),
+				)
+			} else {
+				"null".to_owned()
+			}),
 			format!(
 				"held entry: {data}",
 				data = if let Some(held) = &tab.held_entry {
@@ -2818,10 +2829,11 @@ impl HeldEntry {
 	}
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Default, Serialize, Deserialize)]
 pub enum SortAlgorithm {
 	None,
 	Name,
+	#[default]
 	Type,
 }
 

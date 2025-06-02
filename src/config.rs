@@ -1,21 +1,38 @@
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
-
+use anyhow::{ensure, Result};
 use fxhash::FxHashMap;
 use parking_lot::RwLock;
-use winit::window::Theme;
-
+use serde::{Deserialize, Serialize};
+use crate::error;
+use crate::render::Theme;
 use crate::widget::{ReplaceBy, SearchFlags, SearchMode, SearchOperation};
 use crate::workbench::SortAlgorithm;
 
-// todo: use serde
+#[derive(Serialize, Deserialize, Default)]
 struct Config {
+	#[serde(default)]
 	theme: Theme,
+
+	#[serde(default)]
 	sort_algorithm: SortAlgorithm,
+
+	#[serde(default)]
 	search_mode: SearchMode,
+
+	#[serde(default)]
 	search_flags: SearchFlags,
+
+	#[serde(default)]
 	search_operation: SearchOperation,
+
+	#[serde(default)]
 	replace_by: ReplaceBy,
+
+	#[serde(default)]
 	search_exact_match: bool,
+
+	#[serde(default)]
 	scale: Option<f32>,
 }
 
@@ -26,57 +43,86 @@ static CONFIG: RwLock<Config> = RwLock::new(Config {
 	sort_algorithm: SortAlgorithm::Type,
 	search_mode: SearchMode::String,
 	search_flags: SearchFlags::Values,
-	search_operation: SearchOperation::Or,
+	search_operation: SearchOperation::B,
 	replace_by: ReplaceBy::SearchHits,
-	search_exact_match: true,
+	search_exact_match: false,
 	scale: None,
 });
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn read() -> bool {
 	let Some(config_dir) = dirs::config_dir() else { return false };
-	let path = config_dir.join("nbtworkbench/config.txt");
-	let Some(map) = std::fs::read(path)
-		.ok()
-		.and_then(|vec| String::from_utf8(vec).ok())
-		.map(|str| parse_lines(&str))
-	else {
-		return false
-	};
-	read0(&map);
-	true
+	let txt_config = config_dir.join("nbtworkbench/config.txt");
+	let toml_config = config_dir.join("nbtworkbench/config.toml");
+	
+	match try_read_string(&toml_config).and_then(|str| try_parse_toml(&str)) {
+		Ok(config) => {
+			*CONFIG.write() = config;
+			return true
+		},
+		Err(e) => error!("Error reading TOML config file: {e}"),
+	}
+
+	match try_read_string(&txt_config).and_then(|str| try_parse_txt(&str)) {
+		Ok(config) => {
+			*CONFIG.write() = config;
+			return true
+		},
+		Err(e) => error!("Error reading TXT config file: {e}"),
+	}
+
+	false
 }
 
 #[cfg(target_arch = "wasm32")]
 pub fn read() -> bool {
-	let Some(map) = web_sys::window()
-		.and_then(|window| window.local_storage().ok())
-		.flatten()
-		.and_then(|storage| storage.get_item("config").ok())
-		.flatten()
-		.map(|str| parse_lines(&str))
-	else {
-		return false
-	};
-	read0(&map);
-	true
+	let local_storage = web_sys::window().and_then(|window| window.local_storage().ok()).flatten();
+
+	match local_storage.get_item("config_toml").context("Could not find config toml local storage").and_then(|str| try_parse_toml(&str)) {
+		Ok(config) => {
+			*CONFIG.write() = config;
+			return true
+		},
+		Err(e) => error!("Error reading TOML config: {e}"),
+	}
+
+	match local_storage.get_item("config").context("Could not find config txt local storage").and_then(|str| try_parse_toml(&str)) {
+		Ok(config) => {
+			*CONFIG.write() = config;
+			return true
+		},
+		Err(e) => error!("Error reading TXT config: {e}"),
+	}
+
+	false
 }
 
-#[must_use]
-fn parse_lines(str: &str) -> FxHashMap<String, String> {
-	str.lines()
+fn try_read_string(path: &Path) -> Result<String> {
+	ensure!(std::fs::exists(path)?, "TOML file does not exist");
+	let data = std::fs::read(path)?;
+	let data = String::from_utf8(data)?;
+	Ok(data)
+}
+
+fn try_parse_toml(str: &str) -> Result<Config> {
+	let config: Config = toml::from_str(str)?;
+	Ok(config)
+}
+
+fn try_parse_txt(str: &str) -> Result<Config> {
+	let map = str.lines()
 		.filter_map(|line| line.split_once('='))
 		.map(|(a, b)| (a.to_owned(), b.to_owned()))
-		.collect::<FxHashMap<String, String>>()
-}
+		.collect::<FxHashMap<String, String>>();
 
-fn read0(map: &FxHashMap<String, String>) {
+	let mut config = Config::default();
+
 	if let Some(theme) = map.get("theme").and_then(|s| match s.as_str() {
 		"dark" => Some(Theme::Dark),
 		"light" => Some(Theme::Light),
 		_ => None,
 	}) {
-		set_theme(theme);
+		config.theme = theme;
 	}
 	if let Some(sort_algorithm) = map
 		.get("sort_algorithm")
@@ -86,7 +132,7 @@ fn read0(map: &FxHashMap<String, String>) {
 			"type" => Some(SortAlgorithm::Type),
 			_ => None,
 		}) {
-		set_sort_algorithm(sort_algorithm);
+		config.sort_algorithm = sort_algorithm;
 	}
 	if let Some(search_mode) = map
 		.get("search_mode")
@@ -96,7 +142,7 @@ fn read0(map: &FxHashMap<String, String>) {
 			"snbt" => Some(SearchMode::Snbt),
 			_ => None,
 		}) {
-		set_search_mode(search_mode);
+		config.search_mode = search_mode;
 	}
 	if let Some(search_flags) = map
 		.get("search_flags")
@@ -106,7 +152,7 @@ fn read0(map: &FxHashMap<String, String>) {
 			"all" => Some(SearchFlags::KeysValues),
 			_ => None,
 		}) {
-		set_search_flags(search_flags);
+		config.search_flags = search_flags;
 	}
 	if let Some(search_operation) = map
 		.get("search_operation")
@@ -117,7 +163,7 @@ fn read0(map: &FxHashMap<String, String>) {
 			"b" => Some(SearchOperation::B),
 			_ => None,
 		}) {
-		set_search_operation(search_operation);
+		config.search_operation = search_operation;
 	}
 	if let Some(replace_by) = map
 		.get("replace_by")
@@ -126,13 +172,13 @@ fn read0(map: &FxHashMap<String, String>) {
 			"bookmarked_lines" => Some(ReplaceBy::BookmarkedLines),
 			_ => None,
 		}) {
-		set_replace_by(replace_by);
+		config.replace_by = replace_by;
 	}
 	if let Some(search_exact_match) = map
 		.get("search_exact_match")
 		.and_then(|s| s.parse::<bool>().ok())
 	{
-		set_search_exact_match(search_exact_match);
+		config.search_exact_match = search_exact_match;
 	}
 	if let Some(scale) = map
 		.get("scale")
@@ -140,8 +186,10 @@ fn read0(map: &FxHashMap<String, String>) {
 		.and_then(|s| s.strip_suffix(")"))
 		.and_then(|s| s.parse::<f32>().ok())
 	{
-		set_scale(Some(scale));
+		config.scale = Some(scale);
 	}
+
+	Ok(config)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -152,66 +200,21 @@ pub fn write() -> bool {
 
 	let Some(config_dir) = dirs::config_dir() else { return false };
 	let _ = std::fs::create_dir(config_dir.join("nbtworkbench"));
-	let path = config_dir.join("nbtworkbench/config.txt");
-	let Ok(()) = std::fs::write(path, write0()) else { return false };
+	let path = config_dir.join("nbtworkbench/config.toml");
+	let Ok(data) = toml::to_string_pretty(&*CONFIG.read()) else { return false };
+	let Ok(()) = std::fs::write(path, data) else { return false };
 	true
 }
 
 #[cfg(target_arch = "wasm32")]
 pub fn write() -> bool {
-	let Some(local_storage) = web_sys::window()
-		.and_then(|window| window.local_storage().ok())
-		.flatten()
-	else {
-		return false
-	};
-	let value = write0();
-	local_storage.set_item("config", &value).is_ok()
-}
-
-#[must_use]
-fn write0() -> String {
-	use std::fmt::Write as _;
-
-	let mut builder = String::new();
-	writeln!(&mut builder, "theme={}", match get_theme() {
-		Theme::Light => "light",
-		Theme::Dark => "dark",
-	})
-	.unwrap_or(());
-	writeln!(&mut builder, "sort_algorithm={}", match get_sort_algorithm() {
-		SortAlgorithm::None => "none",
-		SortAlgorithm::Name => "name",
-		SortAlgorithm::Type => "type",
-	})
-	.unwrap_or(());
-	writeln!(&mut builder, "search_mode={}", match get_search_mode() {
-		SearchMode::String => "string",
-		SearchMode::Regex => "regex",
-		SearchMode::Snbt => "snbt",
-	})
-	.unwrap_or(());
-	writeln!(&mut builder, "search_flags={}", match get_search_flags() {
-		SearchFlags::Keys => "key",
-		SearchFlags::Values => "value",
-		SearchFlags::KeysValues => "all",
-	})
-	.unwrap_or(());
-	writeln!(&mut builder, "search_operation={}", match get_search_operation() {
-		SearchOperation::And => "and",
-		SearchOperation::Or => "or",
-		SearchOperation::Xor => "xor",
-		SearchOperation::B => "b",
-	})
-	.unwrap_or(());
-	writeln!(&mut builder, "search_exact_match={}", get_search_exact_match()).unwrap_or(());
-	writeln!(&mut builder, "replace_by={}", match get_replace_by() {
-		ReplaceBy::SearchHits => "search_hits",
-		ReplaceBy::BookmarkedLines => "bookmarked_lines",
-	})
-	.unwrap_or(());
-	writeln!(&mut builder, "scale={:?}", get_scale()).unwrap_or(());
-	builder
+	if DISABLE_FILE_WRITES.load(Ordering::Relaxed) {
+		return true
+	}
+	
+	let Some(local_storage) = web_sys::window().and_then(|window| window.local_storage().ok()).flatten() else { return false };
+	let Ok(value) = toml::to_string(&*CONFIG.read()) else { return false };
+	local_storage.set_item("config_toml", &value).is_ok()
 }
 
 #[must_use]

@@ -1,10 +1,9 @@
 use fxhash::FxHashSet;
 use winit::event::MouseButton;
-use winit::window::Theme;
 
 use crate::assets::{DIM_LIGHTBULB_UV, LIGHTBULB_UV};
 use crate::config;
-use crate::render::{TextColor, VertexBufferBuilder};
+use crate::render::{TextColor, Theme, VertexBufferBuilder};
 use crate::util::{AxisAlignedBoundingBox, Vec2u};
 use crate::widget::{ButtonWidget, ButtonWidgetContext, ButtonWidgetContextMut};
 

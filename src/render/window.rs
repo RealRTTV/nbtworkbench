@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 use std::rc::Rc;
 use std::time::Duration;
-
+use serde::{Deserialize, Serialize};
 #[cfg(target_arch = "wasm32")] use wasm_bindgen::JsValue;
 use wgpu::util::{BufferInitDescriptor, DeviceExt};
 use wgpu::*;
@@ -12,7 +12,7 @@ use winit::event_loop::{ActiveEventLoop, EventLoop};
 #[cfg(target_arch = "wasm32")] use winit::platform::web::WindowExtWebSys;
 #[cfg(target_os = "windows")]
 use winit::platform::windows::WindowAttributesExtWindows;
-use winit::window::{Icon, Theme, Window, WindowAttributes, WindowId};
+use winit::window::{Icon, Window, WindowAttributes, WindowId};
 use zune_inflate::DeflateOptions;
 
 use crate::assets::{ATLAS_HEIGHT, ATLAS_WIDTH, HEADER_SIZE, ICON_HEIGHT, ICON_WIDTH, UNICODE_LEN, atlas, icon};
@@ -184,6 +184,22 @@ pub async fn run() -> ! {
 		.run_app(&mut handler)
 		.expect("Event loop failed");
 	loop {}
+}
+
+#[derive(Copy, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub enum Theme {
+	#[default]
+	Dark,
+	Light,
+}
+
+impl From<::winit::window::Theme> for Theme {
+	fn from(value: ::winit::window::Theme) -> Self {
+		match value {
+			::winit::window::Theme::Light => Self::Light,
+			::winit::window::Theme::Dark => Self::Dark,
+		}
+	}
 }
 
 pub struct State<'window> {

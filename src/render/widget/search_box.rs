@@ -3,9 +3,9 @@ use std::ops::{Deref, DerefMut};
 use std::time::Duration;
 
 use regex::Regex;
+use serde::{Deserialize, Serialize};
 use winit::event::MouseButton;
 use winit::keyboard::KeyCode;
-use winit::window::Theme;
 
 use crate::assets::{
 	AND_SELECTION_OPERATION_UV, BOOKMARK_UV, DARK_STRIPE_UV, HIDDEN_BOOKMARK_UV, OR_SELECTION_OPERATION_UV, REGEX_SEARCH_MODE_UV, REPLACE_SELECTION_OPERATION_UV, SEARCH_BOX_SELECTION_Z, SEARCH_BOX_Z, SEARCH_KEYS_AND_VALUES_UV, SEARCH_KEYS_UV,
@@ -13,7 +13,7 @@ use crate::assets::{
 };
 use crate::elements::{CompoundEntry, Matches, NbtElement, NbtElementAndKey, NbtElementAndKeyRef};
 use crate::render::widget::text::get_cursor_idx;
-use crate::render::{TextColor, VertexBufferBuilder};
+use crate::render::{TextColor, Theme, VertexBufferBuilder};
 use crate::util::{StrExt, Vec2u, create_regex, now};
 use crate::widget::{Cachelike, Notification, NotificationKind, SearchBoxKeyResult, Text};
 use crate::workbench::{MarkedLine, MarkedLines, SortAlgorithm};
@@ -36,10 +36,12 @@ pub enum SearchPredicateInner {
 }
 
 #[repr(u8)]
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Default, Serialize, Deserialize)]
 pub enum SearchFlags {
+	#[default]
 	Values     = 0,
 	Keys       = 1,
+	#[serde(rename = "all")]
 	KeysValues = 2,
 }
 
@@ -88,11 +90,13 @@ impl SearchFlags {
 	pub fn has_value(self) -> bool { matches!(self, Self::Values | Self::KeysValues) }
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
 pub enum SearchOperation {
 	And,
 	Or,
 	Xor,
+	#[default]
 	B,
 }
 
@@ -147,8 +151,9 @@ impl SearchOperation {
 	}
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Default, Serialize, Deserialize)]
 pub enum SearchMode {
+	#[default]
 	String,
 	Regex,
 	Snbt,
