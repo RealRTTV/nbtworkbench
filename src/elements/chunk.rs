@@ -203,10 +203,7 @@ impl NbtElementVariant for NbtChunk {
 		writer.write(&pad);
 	}
 
-	fn to_le_bytes(&self, writer: &mut UncheckedBufWriter) {
-		// todo, better way to handle this?
-		self.to_be_bytes(writer);
-	}
+	fn to_le_bytes(&self, _writer: &mut UncheckedBufWriter) {}
 
 	fn render(&self, builder: &mut VertexBufferBuilder, _name: Option<&str>, remaining_scroll: &mut usize, tail: bool, ctx: &mut RenderContext) {
 		use std::fmt::Write as _;

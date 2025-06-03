@@ -1302,7 +1302,7 @@ impl NbtElement {
 	}
 
 	/// # Safety
-	/// - must be assured to update valid caches
+	/// * must be assured to update valid caches
 	pub unsafe fn insert(&mut self, idx: usize, kv: NbtElementAndKey) -> Result<Option<NbtElementAndKey>, NbtElementAndKey> {
 		use NbtPatternMut as Nbt;
 
@@ -1313,9 +1313,11 @@ impl NbtElement {
 					.map(NbtElement::into)
 			},
 			Nbt::List(list) => unsafe { list.insert(idx, kv.1)?.map(NbtElement::into) },
-			Nbt::Compound(compound) => compound
-				.insert(idx, CompoundEntry::new(kv.0.unwrap_or(CompactString::const_new("_")), kv.1))?
-				.map(CompoundEntry::into),
+			Nbt::Compound(compound) => unsafe {
+				compound
+					.insert(idx, CompoundEntry::new(kv.0.unwrap_or(CompactString::const_new("_")), kv.1))?
+					.map(CompoundEntry::into)
+			},
 			Nbt::IntArray(int_array) => unsafe { int_array.insert(idx, kv.1)?.map(NbtElement::into) },
 			Nbt::LongArray(long_array) => unsafe {
 				long_array
@@ -1323,9 +1325,11 @@ impl NbtElement {
 					.map(NbtElement::into)
 			},
 			Nbt::Region(region) => unsafe { region.insert(idx, kv.1)?.map(NbtElement::into) },
-			Nbt::Chunk(chunk) => chunk
-				.insert(idx, CompoundEntry::new(kv.0.unwrap_or(CompactString::const_new("_")), kv.1))?
-				.map(CompoundEntry::into),
+			Nbt::Chunk(chunk) => unsafe {
+				chunk
+					.insert(idx, CompoundEntry::new(kv.0.unwrap_or(CompactString::const_new("_")), kv.1))?
+					.map(CompoundEntry::into)
+			},
 			_ => return Err(kv),
 		})
 	}

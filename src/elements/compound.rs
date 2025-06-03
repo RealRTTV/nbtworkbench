@@ -643,7 +643,7 @@ impl CompoundMap {
 	/// * idx must be valid
 	pub unsafe fn update_key_idx_unchecked(&mut self, idx: usize, key: CompactString) -> CompactString {
 		let new_hash = hash!(key);
-		let old_key = core::mem::replace(&mut self.entries.get_unchecked_mut(idx).key, key);
+		let old_key = core::mem::replace(&mut unsafe { self.entries.get_unchecked_mut(idx) }.key, key);
 		if let Ok(entry) = self
 			.indices
 			.find_entry(hash!(old_key), |&target_idx| target_idx == idx)
@@ -654,7 +654,7 @@ impl CompoundMap {
 			unsafe { core::hint::unreachable_unchecked() };
 		}
 		self.indices
-			.insert_unique(new_hash, idx, |&idx| hash!(self.entries.get_unchecked(idx).key));
+			.insert_unique(new_hash, idx, |&idx| hash!(unsafe { self.entries.get_unchecked(idx) } .key));
 		old_key
 	}
 

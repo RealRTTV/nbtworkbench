@@ -113,7 +113,7 @@ pub async fn run() -> ! {
 		}
 	}
 
-	let event_loop = EventLoop::with_user_event()
+	let event_loop = EventLoop::builder()
 		.build()
 		.expect("Event loop was unconstructable");
 	#[allow(unused_mut)]
@@ -122,17 +122,10 @@ pub async fn run() -> ! {
 		.with_inner_size(PhysicalSize::new(7680, 4320))
 		.with_min_inner_size(PhysicalSize::new(MIN_WINDOW_WIDTH as u32, MIN_WINDOW_HEIGHT as u32))
 		.with_window_icon(Some(Icon::from_rgba(icon(), ICON_WIDTH as u32, ICON_HEIGHT as u32).expect("valid format")));
-	let window = Rc::new(
-		event_loop
-			.create_window({
-				#[cfg(target_os = "windows")]
-				{
-					builder = builder.with_drag_and_drop(true);
-				}
-				builder
-			})
-			.expect("Unable to construct window"),
-	);
+	#[cfg(target_os = "windows")] {
+		builder = builder.with_drag_and_drop(true);
+	}
+	let window = Rc::new(event_loop.create_window(builder).expect("Unable to construct window"));
 	#[cfg(target_arch = "wasm32")]
 	let window_size = {
 		web_sys::window()
@@ -188,9 +181,9 @@ pub async fn run() -> ! {
 
 #[derive(Copy, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Theme {
+	Light,
 	#[default]
 	Dark,
-	Light,
 }
 
 impl From<::winit::window::Theme> for Theme {

@@ -1,6 +1,5 @@
 #![allow(semicolon_in_expressions_from_macros, internal_features, incomplete_features)]
 #![warn(clippy::pedantic)]
-#![allow(unsafe_op_in_unsafe_fn)] // todo, fix
 #![feature(
 	allocator_api,
 	associated_type_defaults,
@@ -135,7 +134,7 @@ pub static mut WINDOW_PROPERTIES: render::WindowProperties = render::WindowPrope
 /// * rename `line_number` and `true_line_number` to `y` and `line_number` respectively
 /// * add high-quality Safety rustdoc to **all** created unsafe fns
 /// * if you want to optimize something, optimize [`NbtElement::recache`]
-/// * change to Box<Inner> for all complex types and get down to 16 bytes (?)
+/// * use `thiserror` for [`tree::actions`]
 /// # Long-Term Goals
 /// * smart screen
 /// * add multi-cursor
@@ -150,7 +149,7 @@ pub fn main() -> ! {
 	unsafe {
 		winapi::um::wincon::AttachConsole(winapi::um::wincon::ATTACH_PARENT_PROCESS)
 	};
-	
+
 	config::read();
 
 	match std::env::args().nth(1).as_deref() {

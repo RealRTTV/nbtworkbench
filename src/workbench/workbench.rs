@@ -524,10 +524,13 @@ impl Workbench {
 		else {
 			return true
 		};
-		if let Some(action) = element.actions().get(highlight_idx).copied()
-			&& let Some(action) = action.apply(&mut tab.value, indices, &mut tab.bookmarks, mutable_indices!(self, tab), &mut self.alerts)
-		{
-			tab.append_to_history(action);
+		if let Some(action) = element.actions().get(highlight_idx).copied() {
+			let result = action.apply(&mut tab.value, indices, &mut tab.bookmarks, mutable_indices!(self, tab));
+			match result {
+				Ok(Some(action)) => tab.append_to_history(action),
+				Ok(None) => {},
+				Err(e) => self.alert(e.into()),
+			}
 		}
 		true
 	}

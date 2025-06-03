@@ -4,7 +4,6 @@ use std::fmt::{Debug, Formatter};
 use std::hint::likely;
 use std::iter;
 use std::mem::MaybeUninit;
-
 use compact_str::{CompactString, ToCompactString};
 use regex::{Regex, RegexBuilder};
 
@@ -878,6 +877,16 @@ pub fn drop_on_separate_thread<T: 'static + Send>(t: T) {
 		.expect("Failed to spawn thread");
 	#[cfg(target_arch = "wasm32")]
 	drop(t)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn open_file(str: &str) -> ::anyhow::Result<::std::process::ExitCode> {
+	#[cfg(target_os = "windows")]
+	return ::std::process::Command::new("cmd").args(["/c", "start", str]).status().into();
+	#[cfg(target_os = "macos")]
+	return ::std::process::Command::new("open").arg(str).status().into();
+	#[cfg(target_os = "linux")]
+	return ::std::process::Command::new("xdg-open").arg(str).status().into();
 }
 
 #[derive(Copy, Clone, Eq)]

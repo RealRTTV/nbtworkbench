@@ -248,9 +248,7 @@ impl NbtElementVariant for NbtRegion {
 		});
 	}
 
-	fn to_le_bytes(&self, writer: &mut UncheckedBufWriter) {
-		self.to_be_bytes(writer); // todo, better way?
-	}
+	fn to_le_bytes(&self, _writer: &mut UncheckedBufWriter) {}
 
 	fn render(&self, builder: &mut VertexBufferBuilder, name: Option<&str>, remaining_scroll: &mut usize, tail: bool, ctx: &mut RenderContext) {
 		use std::fmt::Write as _;
