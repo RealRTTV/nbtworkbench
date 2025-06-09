@@ -6,7 +6,7 @@ use std::iter;
 use std::mem::MaybeUninit;
 use compact_str::{CompactString, ToCompactString};
 use regex::{Regex, RegexBuilder};
-
+use thiserror::Error;
 use crate::render::VertexBufferBuilder;
 #[cfg(target_arch = "wasm32")]
 pub use crate::wasm::{get_clipboard, now, set_clipboard};
@@ -768,14 +768,14 @@ pub const fn width_ascii(s: &str) -> usize {
 	width
 }
 
-pub fn reorder<T>(data: &mut [T], mapping: impl Into<Box<[usize]>>) -> bool {
+pub fn reorder<T>(data: &mut [T], mapping: impl Into<Box<[usize]>>) -> Result<(), ReorderMappingError> {
 	let mut mapping = mapping.into();
-	if data.len() != mapping.len() { return false }
+	if data.len() != mapping.len() { return Err(ReorderMappingError::InequalLength { mapping_len: mapping.len(), data_len: data.len() }) }
 	let len = data.len();
 
 	for &mapped_idx in &mapping {
 		if mapped_idx >= len {
-			return false;
+			return Err(ReorderMappingError::NumberOutOfBounds { num: mapped_idx, len });
 		}
 	}
 
@@ -790,24 +790,41 @@ pub fn reorder<T>(data: &mut [T], mapping: impl Into<Box<[usize]>>) -> bool {
 		mapping.swap(old_idx, new_idx);
 	}
 
-	true
+	Ok(())
+}
+
+#[derive(Error, Debug)]
+pub enum ReorderMappingError {
+	#[error("Mapping index ({num}) was out of bounds of length {len}.")]
+	NumberOutOfBounds { num: usize, len: usize },
+	#[error("Inequal length; mapping length ({mapping_len}) != data length ({data_len}).")]
+	InequalLength { mapping_len: usize, data_len: usize },
 }
 
 /// Mappings are defined such that `mapping[n]` is where the `n`th element should be moved to.\
 /// The human intuition is that the `n`th element should be moved to the `mapping[n]`th index.\
 /// Therefore, we invert it for you.
-#[must_use]
-pub fn invert_mapping(mapping: &[usize]) -> Option<Box<[usize]>> {
+pub fn invert_mapping(mapping: &[usize]) -> Result<Box<[usize]>, InvertMappingError> {
 	let mut new_mapping = iter::repeat_n(None, mapping.len()).collect::<Box<[Option<usize>]>>();
 	for (new_idx, &old_idx) in mapping.iter().enumerate() {
-		let reference = new_mapping.get_mut(old_idx)?;
+		let reference = new_mapping.get_mut(old_idx).ok_or_else(|| InvertMappingError::IndexOutOfBounds { idx: old_idx, len: mapping.len() })?;
 		if reference.is_some() {
-			return None
+			return Err(InvertMappingError::DuplicateNumber)
 		} else {
 			*reference = Some(new_idx);
 		}
 	}
-	new_mapping.into_iter().collect::<Option<Box<[usize]>>>()
+	new_mapping.into_iter().collect::<Option<Box<[usize]>>>().ok_or_else(|| InvertMappingError::MissingNumber)
+}
+
+#[derive(Error, Debug)]
+pub enum InvertMappingError {
+	#[error("Duplicate number found in invalid mapping.")]
+	DuplicateNumber,
+	#[error("Missing number in invalid mapping.")]
+	MissingNumber,
+	#[error("Index {idx} out of bounds for length {len}")]
+	IndexOutOfBounds { idx: usize, len: usize },
 }
 
 #[must_use]
@@ -880,7 +897,7 @@ pub fn drop_on_separate_thread<T: 'static + Send>(t: T) {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub fn open_file(str: &str) -> ::anyhow::Result<::std::process::ExitCode> {
+pub fn open_file(str: &str) -> ::anyhow::Result<::std::process::ExitStatus> {
 	#[cfg(target_os = "windows")]
 	return ::std::process::Command::new("cmd").args(["/c", "start", str]).status().into();
 	#[cfg(target_os = "macos")]
@@ -1005,11 +1022,13 @@ impl AxisAlignedBoundingBox {
 
 #[cfg(test)]
 mod tests {
+	use std::assert_matches::assert_matches;
+
 	#[test]
 	fn test_reorder() {
 		fn reorder<T>(mut data: Vec<T>, mapping: &[usize]) -> Vec<T> {
 			let result = super::reorder(&mut data, mapping);
-			assert!(result, "Reordering was unsuccessful");
+			assert_matches!(result, Ok(()), "Reordering was unsuccessful");
 			data
 		}
 

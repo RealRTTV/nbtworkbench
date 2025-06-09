@@ -1,9 +1,9 @@
+use thiserror::Error;
 use crate::elements::{ComplexNbtElementVariant, NbtElement, NbtElementAndKey};
-use crate::tree::{MutableIndices, OwnedIndices, ParentNavigationInformationMut};
+use crate::tree::{MutableIndices, OwnedIndices, ParentNavigationError, ParentNavigationInformationMut};
 use crate::workbench::{MarkedLines, WorkbenchAction};
 
-#[must_use]
-pub fn add_element<'m1, 'm2: 'm1>(root: &mut NbtElement, kv: NbtElementAndKey, indices: OwnedIndices, bookmarks: &mut MarkedLines, mutable_indices: &'m1 mut MutableIndices<'m2>) -> Option<AddElementResult> {
+pub fn add_element<'m1, 'm2: 'm1>(root: &mut NbtElement, kv: NbtElementAndKey, indices: OwnedIndices, bookmarks: &mut MarkedLines, mutable_indices: &'m1 mut MutableIndices<'m2>) -> Result<AddElementResult, AddElementError> {
 	let ParentNavigationInformationMut {
 		true_line_number, parent, idx, parent_indices, ..
 	} = root.navigate_parent_mut(&indices)?;
@@ -12,7 +12,7 @@ pub fn add_element<'m1, 'm2: 'm1>(root: &mut NbtElement, kv: NbtElementAndKey, i
 	let old_value = match unsafe { parent.insert(idx, kv) } {
 		Ok(Some(old)) => Some(old),
 		Ok(None) => None,
-		Err(_) => return None,
+		Err(kv) => return Err(AddElementError::FailedInsertion { idx, indices, parent: parent.display_name(), child: kv.1.display_name() }),
 	};
 	let (parent_height, parent_true_height) = parent.heights();
 	let (diff, true_diff) = (parent_height.wrapping_sub(old_parent_height), parent_true_height.wrapping_sub(old_parent_true_height));
@@ -35,9 +35,11 @@ pub fn add_element<'m1, 'm2: 'm1>(root: &mut NbtElement, kv: NbtElementAndKey, i
 
 	root.recache_along_indices(&parent_indices);
 
-	Some(AddElementResult { indices, old_kv: old_value })
+	Ok(AddElementResult { indices, old_kv: old_value })
 }
 
+#[must_use]
+#[derive(Clone)]
 pub struct AddElementResult {
 	pub indices: OwnedIndices,
 	pub old_kv: Option<NbtElementAndKey>,
@@ -48,4 +50,12 @@ impl AddElementResult {
 		let Self { indices, old_kv } = self;
 		if let Some(kv) = old_kv { WorkbenchAction::Replace { indices, kv } } else { WorkbenchAction::Add { indices } }
 	}
+}
+
+#[derive(Error, Debug)]
+pub enum AddElementError {
+	#[error(transparent)]
+	Navigation(#[from] ParentNavigationError),
+	#[error("Failed to insert {child} at index {idx} for parent {parent} under indices {indices}")]
+	FailedInsertion { idx: usize, indices: OwnedIndices, parent: &'static str, child: &'static str }
 }

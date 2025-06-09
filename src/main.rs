@@ -2,6 +2,7 @@
 #![warn(clippy::pedantic)]
 #![feature(
 	allocator_api,
+	assert_matches,
 	associated_type_defaults,
 	cold_path,
 	duration_millis_float,

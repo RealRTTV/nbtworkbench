@@ -136,7 +136,7 @@ impl<'a> ButtonWidgetContextMut<'a> {
 
 	pub fn notify(&mut self, notification: Notification) { self.accumulated.notifications.push(notification); }
 
-	pub fn alert(&mut self, alert: Alert) { self.accumulated.alerts.push(alert); }
+	pub fn alert(&mut self, alert: impl Into<Alert>) { self.accumulated.alerts.push(alert.into()); }
 
 	pub fn tab(&mut self, tab: Tab) { self.accumulated.tabs.push(tab); }
 

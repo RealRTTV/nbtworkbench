@@ -263,11 +263,21 @@ impl MarkedLineSlice {
 	#[must_use]
 	pub fn split_first(&self) -> Option<(MarkedLine, &MarkedLineSlice)> { if let [head, rest @ ..] = &self.0 { Some((*head, slice!(rest))) } else { None } }
 
-	#[must_use]
 	pub fn iter(&self) -> std::slice::Iter<'_, MarkedLine> { self.0.iter() }
 
-	#[must_use]
 	pub fn iter_mut(&mut self) -> std::slice::IterMut<'_, MarkedLine> { self.0.iter_mut() }
+	
+	#[must_use]
+	pub fn get(&self, true_line_number: usize) -> Option<&MarkedLine> {
+		let idx = self.0.binary_search(&MarkedLine::new(true_line_number, 0)).ok()?;
+		self.0.get(idx)
+	}
+
+	#[must_use]
+	pub fn get_mut(&mut self, true_line_number: usize) -> Option<&mut MarkedLine> {
+		let idx = self.0.binary_search(&MarkedLine::new(true_line_number, 0)).ok()?;
+		self.0.get_mut(idx)
+	}
 }
 
 impl Deref for MarkedLines {

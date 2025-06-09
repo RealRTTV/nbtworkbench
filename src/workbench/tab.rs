@@ -12,9 +12,9 @@ use super::{FileUpdateSubscription, HeldEntry, MarkedLines, WorkbenchAction};
 use crate::assets::{BASE_Z, FROM_CLIPBOARD_GHOST_UV, FROM_CLIPBOARD_UV, GZIP_FILE_TYPE_UV, HEADER_SIZE, HELD_SCROLLBAR_UV, JUST_OVERLAPPING_BASE_Z, LINE_NUMBER_SEPARATOR_UV, LITTLE_ENDIAN_HEADER_NBT_FILE_TYPE_UV, LITTLE_ENDIAN_NBT_FILE_TYPE_UV, MCA_FILE_TYPE_UV, NBT_FILE_TYPE_UV, SCROLLBAR_Z, SNBT_FILE_TYPE_UV, STEAL_ANIMATION_OVERLAY_UV, UNHELD_SCROLLBAR_UV, ZLIB_FILE_TYPE_UV, ZOffset, CONNECTION_UV};
 use crate::elements::{ComplexNbtElementVariant, NbtByte, NbtByteArray, NbtChunk, NbtCompound, NbtDouble, NbtElement, NbtElementVariant, NbtFloat, NbtInt, NbtIntArray, NbtList, NbtLong, NbtLongArray, NbtRegion, NbtShort, NbtString};
 use crate::render::{RenderContext, TextColor, VertexBufferBuilder, WindowProperties};
-use crate::tree::rename_element;
+use crate::tree::{rename_element, RenameElementError};
 use crate::util::{LinkedQueue, StrExt, Vec2u, drop_on_separate_thread, now};
-use crate::widget::{SelectedText, SelectedTextAdditional, TEXT_DOUBLE_CLICK_INTERVAL, Text, get_cursor_left_jump_idx, get_cursor_right_jump_idx};
+use crate::widget::{SelectedText, SelectedTextAdditional, TEXT_DOUBLE_CLICK_INTERVAL, Text, get_cursor_left_jump_idx, get_cursor_right_jump_idx, SaveSelectedTextError};
 
 pub struct Tab {
 	pub value: Box<NbtElement>,
@@ -118,7 +118,7 @@ impl Tab {
 
 	#[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
 	pub fn save(&mut self, force_dialog: bool, window_properties: &mut WindowProperties) -> Result<()> {
-		self.write_selected_text(true, window_properties, false, false);
+		self.write_selected_text(window_properties, false, false);
 		if let Some(path) = self.path.as_deref()
 			&& path.is_absolute()
 			&& !force_dialog
@@ -170,7 +170,7 @@ impl Tab {
 
 	#[cfg(target_arch = "wasm32")]
 	pub fn save(&mut self, _: bool, window_properties: &mut WindowProperties) -> Result<()> {
-		self.write_selected_text(true, window_properties, false, false);
+		self.write_selected_text(window_properties, false, false);
 		let bytes = self.format.encode(&self.value);
 		crate::wasm::save(self.name.as_ref(), bytes);
 		self.unsaved_changes = false;
@@ -448,7 +448,7 @@ impl Tab {
 		self.horizontal_scroll = self.horizontal_scroll();
 	}
 
-	pub fn write_selected_text(&mut self, result_on_failure: bool, window_properties: &mut WindowProperties, close_selected_text_on_success: bool, close_selected_text_on_failure: bool) -> bool {
+	pub fn write_selected_text(&mut self, window_properties: &mut WindowProperties, close_selected_text_on_success: bool, close_selected_text_on_failure: bool) -> Result<bool, SaveSelectedTextError> {
 		if let Some(SelectedText(Text {
 			value,
 			editable: true,
@@ -458,20 +458,24 @@ impl Tab {
 		{
 			let key = prefix.0.is_empty() && !suffix.0.is_empty();
 			let (key, value) = if key { (Some(value.into()), None) } else { (None, Some(value.into())) };
-			return if let Some(result) = rename_element(&mut self.value, indices, key, value, &mut self.path, &mut self.name, window_properties) {
-				if close_selected_text_on_success {
-					self.selected_text = None;
+			match rename_element(&mut self.value, indices, key, value, &mut self.path, &mut self.name, window_properties) {
+				Ok(result) => {
+					if close_selected_text_on_success {
+						self.selected_text = None;
+					}
+					self.append_to_history(result.into_action());
+					Ok(true)
 				}
-				self.append_to_history(result.into_action());
-				true
-			} else {
-				if close_selected_text_on_failure {
-					self.selected_text = None;
+				Err(e) => {
+					if close_selected_text_on_failure {
+						self.selected_text = None;
+					}
+					Err(e.into())
 				}
-				result_on_failure
 			}
+		} else {
+			Ok(false)
 		}
-		false
 	}
 
 	pub fn parse_raw(path: &Path, buf: Vec<u8>) -> Result<(NbtElement, FileFormat)> {

@@ -1,9 +1,9 @@
 #![allow(dead_code)]
 
 use compact_str::{CompactString, ToCompactString};
-
+use thiserror::Error;
 use crate::elements::NbtElement;
-use crate::tree::Indices;
+use crate::tree::{Indices, OwnedIndices};
 
 pub struct NavigationInformation<'a> {
 	pub idx: Option<usize>,
@@ -14,13 +14,18 @@ pub struct NavigationInformation<'a> {
 }
 
 impl<'a> NavigationInformation<'a> {
-	#[must_use]
-	pub fn from(mut element: &'a NbtElement, indices: &Indices) -> Option<Self> {
+	pub fn from(mut element: &'a NbtElement, indices: &Indices) -> Result<Self, NavigationError> {
 		let mut line_number = 0;
 		let mut true_line_number = 1;
 		let mut key = None;
 
 		for idx in indices {
+			let len = element.len().ok_or_else(|| NavigationError::ParentWasPrimitive { indices: indices.to_owned() })?;
+
+			if idx >= len {
+				return Err(NavigationError::IndexOutOfBounds { idx, indices: indices.to_owned() }.into());
+			}
+			
 			line_number += 1;
 			true_line_number += 1;
 			for jdx in 0..idx {
@@ -29,12 +34,12 @@ impl<'a> NavigationInformation<'a> {
 				true_line_number += sibling.true_height();
 			}
 
-			let (k, v) = element.get(idx)?;
+			let (k, v) = element.get(idx).ok_or_else(|| NavigationError::IndexOutOfBounds { idx, indices: indices.to_owned() })?;
 			key = k;
 			element = v;
 		}
 
-		Some(Self {
+		Ok(Self {
 			idx: indices.last(),
 			key,
 			element,
@@ -53,13 +58,18 @@ pub struct NavigationInformationMut<'a> {
 }
 
 impl<'a> NavigationInformationMut<'a> {
-	#[must_use]
-	pub fn from(mut element: &'a mut NbtElement, indices: &Indices) -> Option<Self> {
+	pub fn from(mut element: &'a mut NbtElement, indices: &Indices) -> Result<Self, NavigationError> {
 		let mut line_number = 0;
 		let mut true_line_number = 1;
 		let mut key = None;
 
 		for idx in indices {
+			let len = element.len().ok_or_else(|| NavigationError::ParentWasPrimitive { indices: indices.to_owned() })?;
+
+			if idx >= len {
+				return Err(NavigationError::IndexOutOfBounds { idx, indices: indices.to_owned() }.into());
+			}
+			
 			line_number += 1;
 			true_line_number += 1;
 			for jdx in 0..idx {
@@ -68,12 +78,12 @@ impl<'a> NavigationInformationMut<'a> {
 				true_line_number += sibling.true_height();
 			}
 
-			let (k, v) = element.get_mut(idx)?;
+			let (k, v) = element.get_mut(idx).ok_or_else(|| NavigationError::IndexOutOfBounds { idx, indices: indices.to_owned() })?;
 			key = k;
 			element = v;
 		}
 
-		Some(Self {
+		Ok(Self {
 			idx: indices.last(),
 			key,
 			element,
@@ -81,6 +91,14 @@ impl<'a> NavigationInformationMut<'a> {
 			true_line_number,
 		})
 	}
+}
+
+#[derive(Error, Debug)]
+pub enum NavigationError {
+	#[error("Tried to index parent node @ {indices} but found out it was primitive.")]
+	ParentWasPrimitive { indices: OwnedIndices },
+	#[error("Tried to index {nth} child node from parent @ {indices}.", nth = crate::util::nth(.idx + 1))]
+	IndexOutOfBounds { idx: usize, indices: OwnedIndices },
 }
 
 pub struct ParentNavigationInformation<'nbt, 'indices> {
@@ -93,34 +111,47 @@ pub struct ParentNavigationInformation<'nbt, 'indices> {
 }
 
 impl<'nbt, 'indices> ParentNavigationInformation<'nbt, 'indices> {
-	#[must_use]
-	pub fn from(mut parent: &'nbt NbtElement, indices: &'indices Indices) -> Option<Self> {
-		let (last, parent_indices) = indices.split_last()?;
+	pub fn from(mut parent: &'nbt NbtElement, indices: &'indices Indices) -> Result<Self, ParentNavigationError> {
+		let (last, parent_indices) = indices.split_last().ok_or(ParentNavigationError::EmptyIndices)?;
 
 		let mut line_number = 0;
 		let mut true_line_number = 1;
 
 		for idx in parent_indices {
+			let len = parent.len().ok_or_else(|| NavigationError::ParentWasPrimitive { indices: parent_indices.to_owned() })?;
+
+			if last >= len {
+				return Err(NavigationError::IndexOutOfBounds { idx: last, indices: parent_indices.to_owned() }.into());
+			}
+			
 			line_number += 1;
 			true_line_number += 1;
 			for jdx in 0..idx {
-				let sibling = parent[jdx].as_nonnull()?;
+				let sibling = &parent[jdx];
 				line_number += sibling.height();
 				true_line_number += sibling.true_height();
 			}
 
-			parent = parent[idx].as_nonnull()?;
+			parent = &parent[idx];
 		}
 
-		line_number += 1;
-		true_line_number += 1;
-		for jdx in 0..last {
-			let sibling = parent[jdx].as_nonnull()?;
-			line_number += sibling.height();
-			true_line_number += sibling.true_height();
+		{
+			let len = parent.len().ok_or_else(|| NavigationError::ParentWasPrimitive { indices: parent_indices.to_owned() })?;
+
+			if last >= len {
+				return Err(NavigationError::IndexOutOfBounds { idx: last, indices: parent_indices.to_owned() }.into());
+			}
+			
+			line_number += 1;
+			true_line_number += 1;
+			for jdx in 0..last {
+				let sibling = &parent[jdx];
+				line_number += sibling.height();
+				true_line_number += sibling.true_height();
+			}
 		}
 
-		Some(Self {
+		Ok(Self {
 			idx: last,
 			key: parent.get(last).and_then(|(a, _)| a),
 			parent,
@@ -141,34 +172,47 @@ pub struct ParentNavigationInformationMut<'nbt, 'indices> {
 }
 
 impl<'nbt, 'indices> ParentNavigationInformationMut<'nbt, 'indices> {
-	#[must_use]
-	pub fn from(mut parent: &'nbt mut NbtElement, indices: &'indices Indices) -> Option<Self> {
-		let (last, parent_indices) = indices.split_last()?;
+	pub fn from(mut parent: &'nbt mut NbtElement, indices: &'indices Indices) -> Result<Self, ParentNavigationError> {
+		let (last, parent_indices) = indices.split_last().ok_or(ParentNavigationError::EmptyIndices)?;
 
 		let mut line_number = 0;
 		let mut true_line_number = 1;
 
 		for idx in parent_indices {
+			let len = parent.len().ok_or_else(|| NavigationError::ParentWasPrimitive { indices: parent_indices.to_owned() })?;
+
+			if last >= len {
+				return Err(NavigationError::IndexOutOfBounds { idx: last, indices: parent_indices.to_owned() }.into());
+			}
+			
 			line_number += 1;
 			true_line_number += 1;
 			for jdx in 0..idx {
-				let sibling = parent[jdx].as_nonnull()?;
+				let sibling = &parent[jdx];
 				line_number += sibling.height();
 				true_line_number += sibling.true_height();
 			}
 
-			parent = parent[idx].as_nonnull_mut()?;
+			parent = &mut parent[idx];
 		}
 
-		line_number += 1;
-		true_line_number += 1;
-		for jdx in 0..last {
-			let sibling = parent[jdx].as_nonnull()?;
-			line_number += sibling.height();
-			true_line_number += sibling.true_height();
+		{
+			let len = parent.len().ok_or_else(|| NavigationError::ParentWasPrimitive { indices: parent_indices.to_owned() })?;
+			
+			if last >= len {
+				return Err(NavigationError::IndexOutOfBounds { idx: last, indices: parent_indices.to_owned() }.into());
+			}
+
+			line_number += 1;
+			true_line_number += 1;
+			for jdx in 0..last {
+				let sibling = &parent[jdx];
+				line_number += sibling.height();
+				true_line_number += sibling.true_height();
+			}
 		}
 
-		Some(Self {
+		Ok(Self {
 			idx: last,
 			key: parent
 				.get(last)
@@ -179,6 +223,14 @@ impl<'nbt, 'indices> ParentNavigationInformationMut<'nbt, 'indices> {
 			parent_indices,
 		})
 	}
+}
+
+#[derive(Error, Debug)]
+pub enum ParentNavigationError {
+	#[error("Indices were empty, root has no parent.")]
+	EmptyIndices,
+	#[error(transparent)]
+	NavigationError(#[from] NavigationError)
 }
 
 pub struct IterativeNavigationInformationMut<'nbt, 'indices> {

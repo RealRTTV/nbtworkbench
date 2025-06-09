@@ -1,10 +1,10 @@
+use thiserror::Error;
 use super::MutableIndices;
 use crate::elements::NbtElement;
-use crate::tree::{Indices, NavigationInformation, NavigationInformationMut, OwnedIndices};
+use crate::tree::{Indices, NavigationError, NavigationInformation, NavigationInformationMut, OwnedIndices};
 use crate::workbench::{MarkedLineSlice, MarkedLines, WorkbenchAction};
 
-#[must_use]
-pub fn swap_element_same_depth<'m1, 'm2: 'm1>(root: &mut NbtElement, parent_indices: OwnedIndices, a: usize, b: usize, bookmarks: &mut MarkedLines, mutable_indices: &'m1 mut MutableIndices<'m2>) -> Option<SwapElementResultSameDepth> {
+pub fn swap_element_same_depth<'m1, 'm2: 'm1>(root: &mut NbtElement, parent_indices: OwnedIndices, a: usize, b: usize, bookmarks: &mut MarkedLines, mutable_indices: &'m1 mut MutableIndices<'m2>) -> Result<SwapElementResultSameDepth, SwapElementErrorSameDepth> {
 	let (a, b) = if a <= b { (a, b) } else { (b, a) };
 	let NavigationInformationMut {
 		element: parent,
@@ -62,9 +62,10 @@ pub fn swap_element_same_depth<'m1, 'm2: 'm1>(root: &mut NbtElement, parent_indi
 
 	root.recache_along_indices(&parent_indices);
 
-	Some(SwapElementResultSameDepth { parent: parent_indices, a, b })
+	Ok(SwapElementResultSameDepth { parent: parent_indices, a, b })
 }
 
+#[must_use]
 #[derive(Clone)]
 pub struct SwapElementResultSameDepth {
 	pub parent: OwnedIndices,
@@ -74,6 +75,11 @@ pub struct SwapElementResultSameDepth {
 
 #[allow(dead_code)]
 impl SwapElementResultSameDepth {
-	#[must_use]
 	pub fn into_action(self) -> WorkbenchAction { WorkbenchAction::Swap { parent: self.parent, a: self.a, b: self.b } }
+}
+
+#[derive(Error, Debug)]
+pub enum SwapElementErrorSameDepth {
+	#[error(transparent)]
+	Navigation(#[from] NavigationError)
 }

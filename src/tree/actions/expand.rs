@@ -1,10 +1,10 @@
+use thiserror::Error;
 use crate::assets::HIDDEN_BOOKMARK_UV;
 use crate::elements::NbtElement;
-use crate::tree::{Indices, NavigationInformationMut};
+use crate::tree::{Indices, NavigationError, NavigationInformationMut, RecacheBookmarkError};
 use crate::workbench::MarkedLines;
 
-#[must_use]
-pub fn expand_element(root: &mut NbtElement, indices: &Indices, bookmarks: &mut MarkedLines) -> Option<()> {
+pub fn expand_element(root: &mut NbtElement, indices: &Indices, bookmarks: &mut MarkedLines) -> Result<(), ExpandElementError> {
 	let NavigationInformationMut { element, true_line_number, line_number, .. } = root.navigate_mut(&indices)?;
 	let true_height = element.true_height();
 	let height_before = element.height();
@@ -17,9 +17,6 @@ pub fn expand_element(root: &mut NbtElement, indices: &Indices, bookmarks: &mut 
 	let height_gained = height_after - height_before;
 
 	for bookmark in &mut bookmarks[true_line_number + 1..true_line_number + true_height] {
-		if bookmark.uv() != HIDDEN_BOOKMARK_UV {
-			return None
-		}
 		let bookmark_true_line_number = bookmark.true_line_number();
 		*bookmark = bookmark.open(line_number + bookmark_true_line_number - true_line_number);
 	}
@@ -27,5 +24,11 @@ pub fn expand_element(root: &mut NbtElement, indices: &Indices, bookmarks: &mut 
 
 	root.recache_along_indices(&indices);
 
-	Some(())
+	Ok(())
+}
+
+#[derive(Error, Debug)]
+pub enum ExpandElementError {
+	#[error(transparent)]
+	Navigation(#[from] NavigationError),
 }

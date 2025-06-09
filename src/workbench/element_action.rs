@@ -11,7 +11,7 @@ use crate::assets::{OPEN_ARRAY_IN_HEX_UV, OPEN_IN_TXT_UV};
 use crate::elements::{CompoundEntry, NbtByte, NbtByteArray, NbtChunk, NbtCompound, NbtDouble, NbtElement, NbtElementVariant, NbtFloat, NbtInt, NbtIntArray, NbtList, NbtLong, NbtLongArray, NbtPattern, NbtShort, NbtString};
 use crate::render::VertexBufferBuilder;
 use crate::serialization::UncheckedBufWriter;
-use crate::tree::{MutableIndices, NavigationInformation, OwnedIndices, ReorderElementResult, add_element, reorder_element};
+use crate::tree::{MutableIndices, NavigationInformation, OwnedIndices, add_element, reorder_element};
 use crate::util::{StrExt, get_clipboard, now, set_clipboard};
 use crate::workbench::{FileUpdateSubscription, FileUpdateSubscriptionType, MarkedLine, MarkedLines, WorkbenchAction};
 
@@ -233,7 +233,7 @@ impl ElementAction {
 					_ => bail!("Could not sort element"),
 				};
 
-				Ok(reorder_element(root, indices, mapping, bookmarks, mutable_indices).map(ReorderElementResult::into_action))
+				Ok(Some(reorder_element(root, indices, mapping, bookmarks, mutable_indices)?.into_action()))
 			}
 			Self::InsertFromClipboard => {
 				let clipboard = get_clipboard().context("Could not get clipboard")?;

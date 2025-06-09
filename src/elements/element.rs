@@ -14,10 +14,7 @@ use crate::elements::{
 };
 use crate::render::{RenderContext, TextColor, VertexBufferBuilder};
 use crate::serialization::{BigEndianDecoder, Decoder, LittleEndianDecoder, PrettyDisplay, PrettyFormatter, UncheckedBufWriter};
-use crate::tree::{
-	Indices, IterativeNavigationInformationMut, NavigationInformation, NavigationInformationMut, OwnedIndices, ParentIterativeNavigationInformationMut, ParentNavigationInformation, ParentNavigationInformationMut, TraversalInformation,
-	TraversalInformationMut,
-};
+use crate::tree::{Indices, IterativeNavigationInformationMut, NavigationError, NavigationInformation, NavigationInformationMut, OwnedIndices, ParentIterativeNavigationInformationMut, ParentNavigationError, ParentNavigationInformation, ParentNavigationInformationMut, TraversalError, TraversalInformation, TraversalInformationMut};
 use crate::util;
 use crate::util::{StrExt, Vec2u, width_ascii};
 #[cfg(target_arch = "wasm32")] use crate::wasm::FakeScope as Scope;
@@ -688,16 +685,16 @@ impl NbtElement {
 #[allow(dead_code)]
 impl NbtElement {
 	#[must_use]
-	pub fn navigate(&self, indices: &Indices) -> Option<NavigationInformation> { NavigationInformation::from(self, indices) }
+	pub fn navigate(&self, indices: &Indices) -> Result<NavigationInformation, NavigationError> { NavigationInformation::from(self, indices) }
 
 	#[must_use]
-	pub fn navigate_mut(&mut self, indices: &Indices) -> Option<NavigationInformationMut> { NavigationInformationMut::from(self, indices) }
+	pub fn navigate_mut(&mut self, indices: &Indices) -> Result<NavigationInformationMut, NavigationError> { NavigationInformationMut::from(self, indices) }
 
 	#[must_use]
-	pub fn navigate_parent<'nbt, 'indices>(&'nbt self, indices: &'indices Indices) -> Option<ParentNavigationInformation<'nbt, 'indices>> { ParentNavigationInformation::from(self, indices) }
+	pub fn navigate_parent<'nbt, 'indices>(&'nbt self, indices: &'indices Indices) -> Result<ParentNavigationInformation<'nbt, 'indices>, ParentNavigationError> { ParentNavigationInformation::from(self, indices) }
 
 	#[must_use]
-	pub fn navigate_parent_mut<'nbt, 'indices>(&'nbt mut self, indices: &'indices Indices) -> Option<ParentNavigationInformationMut<'nbt, 'indices>> { ParentNavigationInformationMut::from(self, indices) }
+	pub fn navigate_parent_mut<'nbt, 'indices>(&'nbt mut self, indices: &'indices Indices) -> Result<ParentNavigationInformationMut<'nbt, 'indices>, ParentNavigationError> { ParentNavigationInformationMut::from(self, indices) }
 
 	/// # Safety
 	///
@@ -712,10 +709,10 @@ impl NbtElement {
 	pub unsafe fn navigate_parents_iteratively_mut<'nbt, 'indices>(&'nbt mut self, indices: &'indices Indices) -> ParentIterativeNavigationInformationMut<'nbt, 'indices> { unsafe { ParentIterativeNavigationInformationMut::new(self, indices) } }
 
 	#[must_use]
-	pub fn traverse(&self, y: usize, x: Option<usize>) -> Option<TraversalInformation> { TraversalInformation::from(self, y, x) }
+	pub fn traverse(&self, y: usize, x: Option<usize>) -> Result<TraversalInformation, TraversalError> { TraversalInformation::from(self, y, x) }
 
 	#[must_use]
-	pub fn traverse_mut(&mut self, y: usize, x: Option<usize>) -> Option<TraversalInformationMut> { TraversalInformationMut::from(self, y, x) }
+	pub fn traverse_mut(&mut self, y: usize, x: Option<usize>) -> Result<TraversalInformationMut, TraversalError> { TraversalInformationMut::from(self, y, x) }
 }
 
 /// Mutable Indices-based operations
@@ -1377,13 +1374,13 @@ impl NbtElement {
 		use NbtPatternMut as Nbt;
 
 		Some(match self.as_pattern_mut() {
-			Nbt::ByteArray(byte_array) => byte_array.remove(idx)?.into(),
-			Nbt::IntArray(int_array) => int_array.remove(idx)?.into(),
-			Nbt::LongArray(long_array) => long_array.remove(idx)?.into(),
-			Nbt::List(list) => list.remove(idx)?.into(),
-			Nbt::Compound(compound) => compound.remove(idx)?.into(),
-			Nbt::Region(region) => region.remove(idx)?.into(),
-			Nbt::Chunk(chunk) => chunk.remove(idx)?.into(),
+			Nbt::ByteArray(byte_array) => unsafe { byte_array.remove(idx)?.into() },
+			Nbt::IntArray(int_array) => unsafe { int_array.remove(idx)?.into() },
+			Nbt::LongArray(long_array) => unsafe { long_array.remove(idx)?.into() },
+			Nbt::List(list) => unsafe { list.remove(idx)?.into() },
+			Nbt::Compound(compound) => unsafe { compound.remove(idx)?.into() },
+			Nbt::Region(region) => unsafe { region.remove(idx)?.into() },
+			Nbt::Chunk(chunk) => unsafe { chunk.remove(idx)?.into() },
 			_ => return None,
 		})
 	}
@@ -1425,52 +1422,69 @@ impl NbtElement {
 		})
 	}
 
-	pub fn set_value(&mut self, value: String) -> Option<(String, bool)> {
+	pub fn set_value(&mut self, value: String) -> Result<String, String> {
 		use NbtPatternMut as Nbt;
 
-		Some(match self.as_pattern_mut() {
+		match self.as_pattern_mut() {
 			Nbt::Byte(byte) => {
 				let before = byte.value().into_owned();
-				let success = value.parse().map(|x| byte.value = x).is_ok();
-				(before, success)
+				if value.parse().map(|x| byte.value = x).is_ok() {
+					Ok(before)
+				} else {
+					Err(value)
+				}
 			}
 			Nbt::Short(short) => {
 				let before = short.value().into_owned();
-				let success = value.parse().map(|x| short.value = x).is_ok();
-				(before, success)
+				if value.parse().map(|x| short.value = x).is_ok() {
+					Ok(before)
+				} else {
+					Err(value)
+				}
 			}
 			Nbt::Int(int) => {
 				let before = int.value().into_owned();
-				let success = value.parse().map(|x| int.value = x).is_ok();
-				(before, success)
+				if value.parse().map(|x| int.value = x).is_ok() {
+					Ok(before)
+				} else {
+					Err(value)
+				}
 			}
 			Nbt::Long(long) => {
 				let before = long.value().into_owned();
-				let success = value.parse().map(|x| long.value = x).is_ok();
-				(before, success)
+				if value.parse().map(|x| long.value = x).is_ok() {
+					Ok(before)
+				} else {
+					Err(value)
+				}
 			}
 			Nbt::Float(float) => {
 				let before = float.value().into_owned();
-				let success = value.parse().map(|x| float.value = x).is_ok();
-				(before, success)
+				if value.parse().map(|x| float.value = x).is_ok() {
+					Ok(before)
+				} else {
+					Err(value)
+				}
 			}
 			Nbt::Double(double) => {
 				let before = double.value().into_owned();
-				let success = value.parse().map(|x| double.value = x).is_ok();
-				(before, success)
+				if value.parse().map(|x| double.value = x).is_ok() {
+					Ok(before)
+				} else {
+					Err(value)
+				}
 			}
-			Nbt::String(string) => (
+			Nbt::String(string) => Ok(
 				core::mem::replace(string, NbtString::new(value.into()))
 					.str
 					.as_str()
 					.to_owned(),
-				true,
 			),
 			_ => {
 				std::hint::cold_path();
-				return None
+				return Err(value)
 			}
-		})
+		}
 	}
 
 	#[must_use]

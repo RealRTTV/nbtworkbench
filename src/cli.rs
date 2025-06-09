@@ -322,7 +322,10 @@ pub fn replace() -> ! {
 				}
 
 				let mut tab = workbench.tabs.remove(0);
-				let (bulk, _failures) = ReplaceBox::replace_by_search_box0(&mut MarkedLines::new(), MutableIndices::empty(), &mut tab.value, &replacement);
+				let (bulk, errors) = ReplaceBox::replace_by_search_box0(&mut MarkedLines::new(), MutableIndices::empty(), &mut tab.value, &replacement);
+				for e in errors {
+					error!("Error while replacing line: {e}");
+				}
 				let actions = if let WorkbenchAction::Bulk { actions } = &bulk { actions.len() } else { 0 };
 
 				if let Err(e) = tab.save(false, &mut WindowProperties::Fake) {

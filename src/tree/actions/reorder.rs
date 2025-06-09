@@ -1,24 +1,24 @@
+use thiserror::Error;
 use crate::elements::{CompoundEntry, CompoundMap, NbtElement, NbtPatternMut};
 use crate::{hash, util};
-use crate::tree::{MutableIndices, NavigationInformationMut, OwnedIndices};
-use crate::util::invert_mapping;
+use crate::tree::{MutableIndices, NavigationError, NavigationInformationMut, OwnedIndices};
+use crate::util::{invert_mapping, InvertMappingError, ReorderMappingError};
 use crate::workbench::{MarkedLines, WorkbenchAction};
 
 #[allow(non_snake_case)]
-#[must_use]
-pub fn reorder_element<'m1, 'm2: 'm1>(root: &mut NbtElement, indices: OwnedIndices, mapping: impl Into<Box<[usize]>>, bookmarks: &mut MarkedLines, mutable_indices: &'m1 mut MutableIndices<'m2>) -> Option<ReorderElementResult> {
+pub fn reorder_element<'m1, 'm2: 'm1>(root: &mut NbtElement, indices: OwnedIndices, mapping: impl Into<Box<[usize]>>, bookmarks: &mut MarkedLines, mutable_indices: &'m1 mut MutableIndices<'m2>) -> Result<ReorderElementResult, ReorderElementError> {
 	let NavigationInformationMut { element, line_number, true_line_number, .. } = root.navigate_mut(&indices)?;
-	let len = element.len()?;
+	let len = element.len().ok_or_else(|| ReorderElementError::ElementWasPrimitive { element: element.display_name() })?;
 	let mapping = mapping.into();
 	if mapping.len() != len {
-		return None
+		return Err(ReorderElementError::InvalidMappingLength { mapping_len: mapping.len(), parent_len: len })
 	}
 	let is_parent_open = element.is_open();
 	let parent_true_height = element.true_height();
 	let CompoundMap { indices: map_indices, entries } = match element.as_pattern_mut() {
 		NbtPatternMut::Compound(compound) => &mut *compound.map,
 		NbtPatternMut::Chunk(chunk) => &mut *chunk.map,
-		_ => return None,
+		_ => return Err(ReorderElementError::ElementWasNotMap { element: element.display_name() }),
 	};
 	let inverted_mapping = invert_mapping(&mapping)?;
 	// line numbers for the nth child under the new order
@@ -59,8 +59,7 @@ pub fn reorder_element<'m1, 'm2: 'm1>(root: &mut NbtElement, indices: OwnedIndic
 			new_bookmarks.push(bookmark.offset(offset, true_offset));
 		}
 
-		dbg!();
-		*map_indices.find_mut(hash!(entry.key), |&x| x == idx)? = new_idx;
+		*map_indices.find_mut(hash!(entry.key), |&x| x == idx).ok_or_else(|| ReorderElementError::NoEntryInIndices { idx })? = new_idx;
 
 		old_idx__line_number += child_height;
 		old_idx__true_line_number += child_true_height;
@@ -77,15 +76,15 @@ pub fn reorder_element<'m1, 'm2: 'm1>(root: &mut NbtElement, indices: OwnedIndic
 	let new_bookmarks = MarkedLines::from(new_bookmarks);
 	bookmark_slice.copy_from_slice(&new_bookmarks);
 
-	dbg!();
-	if !util::reorder(entries, &*mapping) { return None }
+	util::reorder(entries, &*mapping)?;
 
-	Some(ReorderElementResult {
+	Ok(ReorderElementResult {
 		indices,
 		mapping: inverted_mapping,
 	})
 }
 
+#[must_use]
 pub struct ReorderElementResult {
 	pub indices: OwnedIndices,
 	pub mapping: Box<[usize]>,
@@ -93,4 +92,22 @@ pub struct ReorderElementResult {
 
 impl ReorderElementResult {
 	pub fn into_action(self) -> WorkbenchAction { WorkbenchAction::Reorder { indices: self.indices, mapping: self.mapping } }
+}
+
+#[derive(Error, Debug)]
+pub enum ReorderElementError {
+	#[error(transparent)]
+	Navigation(#[from] NavigationError),
+	#[error(transparent)]
+	InvertMapping(#[from] InvertMappingError),
+	#[error(transparent)]
+	ReorderMapping(#[from] ReorderMappingError),
+	#[error("{element} is primitive when was expected to be complex.")]
+	ElementWasPrimitive { element: &'static str },
+	#[error("Mapping was of length {mapping_len} while expecting element length {parent_len}.")]
+	InvalidMappingLength { mapping_len: usize, parent_len: usize },
+	#[error("Expected a map-based element to reorder, but found {element}")]
+	ElementWasNotMap { element: &'static str },
+	#[error("No entry was found at index {idx} in indices")]
+	NoEntryInIndices { idx: usize },
 }

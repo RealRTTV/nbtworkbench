@@ -1,15 +1,18 @@
+use thiserror::Error;
 use crate::elements::{NbtElement, NbtElementAndKey};
-use crate::tree::{MutableIndices, OwnedIndices, ParentNavigationInformationMut};
+use crate::tree::{MutableIndices, OwnedIndices, ParentNavigationError, ParentNavigationInformationMut};
 use crate::workbench::{MarkedLines, WorkbenchAction};
 
-#[must_use]
-pub fn remove_element<'m1, 'm2: 'm1>(root: &mut NbtElement, indices: OwnedIndices, bookmarks: &mut MarkedLines, mutable_indices: &'m1 mut MutableIndices<'m2>) -> Option<RemoveElementResult> {
+pub fn remove_element<'m1, 'm2: 'm1>(root: &mut NbtElement, indices: OwnedIndices, bookmarks: &mut MarkedLines, mutable_indices: &'m1 mut MutableIndices<'m2>) -> Result<RemoveElementResult, RemoveElementError> {
 	let ParentNavigationInformationMut {
 		true_line_number, parent, idx, parent_indices, ..
 	} = root.navigate_parent_mut(&indices)?;
 	let (old_parent_height, old_parent_true_height) = parent.heights();
 	// SAFETY: we have updated all the relevant data
-	let (key, value) = unsafe { parent.remove(idx) }?;
+	let (key, value) = match unsafe { parent.remove(idx) } {
+		Some(x) => x,
+		None => return Err(RemoveElementError::FailedRemoval { idx, parent: parent.display_name(), indices })
+	};
 	let (height, true_height) = value.heights();
 	let (parent_height, parent_true_height) = parent.heights();
 	let (diff, true_diff) = (old_parent_height.wrapping_sub(parent_height), old_parent_true_height.wrapping_sub(parent_true_height));
@@ -30,13 +33,14 @@ pub fn remove_element<'m1, 'm2: 'm1>(root: &mut NbtElement, indices: OwnedIndice
 
 	root.recache_along_indices(&parent_indices);
 
-	Some(RemoveElementResult {
+	Ok(RemoveElementResult {
 		indices,
 		kv: (key, value),
 		replaces: been_replaced,
 	})
 }
 
+#[must_use]
 #[derive(Clone)]
 pub struct RemoveElementResult {
 	pub indices: OwnedIndices,
@@ -45,7 +49,6 @@ pub struct RemoveElementResult {
 }
 
 impl RemoveElementResult {
-	#[must_use]
 	pub fn into_action(self) -> WorkbenchAction {
 		if self.replaces {
 			WorkbenchAction::Replace { indices: self.indices, kv: self.kv }
@@ -53,4 +56,12 @@ impl RemoveElementResult {
 			WorkbenchAction::Remove { kv: self.kv, indices: self.indices }
 		}
 	}
+}
+
+#[derive(Error, Debug)]
+pub enum RemoveElementError {
+	#[error(transparent)]
+	Navigation(#[from] ParentNavigationError),
+	#[error("Could not remove {nth} element of {parent} @ {indices}", nth = crate::util::nth(.idx + 1))]
+	FailedRemoval { idx: usize, parent: &'static str, indices: OwnedIndices }
 }

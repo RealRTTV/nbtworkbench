@@ -1,9 +1,9 @@
 use std::borrow::{Borrow, BorrowMut};
-use std::fmt::{Debug, Formatter};
+use std::fmt::{Debug, Display, Formatter};
 use std::iter::Copied;
 use std::ops::{Deref, DerefMut, Index, IndexMut};
 use std::slice;
-
+use itertools::{Itertools, Position};
 use crate::elements::NbtElement;
 use crate::util;
 
@@ -28,6 +28,24 @@ impl Debug for OwnedIndices {
 
 impl Debug for Indices {
 	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result { write!(f, "Indices {{ {:?} }}", &self.0) }
+}
+
+impl Display for OwnedIndices {
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+		let inner: &Indices = &*self;
+		Display::fmt(inner, f)
+	}
+}
+
+impl Display for Indices {
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+		write!(f, "[")?;
+		for (pos, idx) in self.iter().with_position() {
+			write!(f, "{}{suffix}", util::nth(idx + 1), suffix = if let Position::Last | Position::Only = pos { "" } else { ", " })?
+		}
+		write!(f, "]")?;
+		Ok(())
+	}
 }
 
 impl OwnedIndices {

@@ -1,7 +1,8 @@
+use std::fmt::Debug;
 use std::time::Duration;
 
 use crate::assets::{ALERT_UV, NOTIFICATION_BAR_BACKDROP_UV, NOTIFICATION_BAR_UV, NOTIFICATION_TEXT_Z, NOTIFICATION_Z};
-use crate::error;
+use crate::{error, log};
 use crate::render::{TextColor, VertexBufferBuilder};
 use crate::util::{StrExt, Vec2u, now, smoothstep64, split_lines};
 
@@ -12,13 +13,15 @@ pub struct Alert {
 	lines: Box<[String]>,
 	message_len: usize,
 	width: usize,
+	original_message: String,
 }
 
 impl Alert {
 	#[must_use]
 	pub fn new(title: impl ToString, title_color: TextColor, message: impl ToString) -> Self {
+		let message = message.to_string();
 		let title = title.to_string();
-		let lines = split_lines::<256>(message.to_string());
+		let lines = split_lines::<256>(message.clone());
 		Self {
 			timestamp: None,
 			title_color: title_color.to_raw(),
@@ -26,11 +29,22 @@ impl Alert {
 			width: usize::max(title.width(), lines.iter().map(|s| s.width()).max().unwrap_or(0)),
 			title,
 			lines: lines.into_boxed_slice(),
+			original_message: message,
 		}
 	}
 
 	#[must_use]
-	pub fn error(error: impl ToString) -> Self { Self::new("Error!", TextColor::Red, error) }
+	pub fn error(error: impl Debug) -> Self {
+		Self::new("Error!", TextColor::Red, format!("{error:?}"))
+	}
+	
+	pub fn log(&self) {
+		if self.title == "Error!" && self.title_color == TextColor::Red.to_raw() {
+			error!("ALERT ERROR: {}", self.original_message)
+		} else {
+			log!("ALERT: {}", self.original_message)
+		}
+	}
 
 	pub fn render(&mut self, builder: &mut VertexBufferBuilder, y: usize) {
 		use core::fmt::Write;
@@ -106,23 +120,8 @@ impl Alert {
 	pub fn height(&mut self) -> usize { 30 + self.lines.len() * 16 }
 }
 
-impl From<anyhow::Error> for Alert {
-	fn from(value: anyhow::Error) -> Self {
-		error!("{value:?}");
-		Self::error(value)
-	}
-}
-
-impl From<native_dialog::Error> for Alert {
-	fn from(value: native_dialog::Error) -> Self {
-		error!("{value:?}");
-		Self::error(value)
-	}
-}
-
-impl From<std::io::Error> for Alert {
-	fn from(value: std::io::Error) -> Self {
-		error!("{value:?}");
+impl<E: Debug> From<E> for Alert {
+	fn from(value: E) -> Self {
 		Self::error(value)
 	}
 }

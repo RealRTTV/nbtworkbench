@@ -4,7 +4,7 @@ use winit::event::MouseButton;
 use crate::assets::{DISABLED_REFRESH_UV, REFRESH_UV, UNSELECTED_WIDGET_UV};
 use crate::render::{TextColor, VertexBufferBuilder};
 use crate::util::{AxisAlignedBoundingBox, Vec2u};
-use crate::widget::{Alert, ButtonWidget, ButtonWidgetContext, ButtonWidgetContextMut};
+use crate::widget::{ButtonWidget, ButtonWidgetContext, ButtonWidgetContextMut};
 
 pub struct RefreshButton;
 
@@ -22,7 +22,7 @@ impl ButtonWidget for RefreshButton {
 
 	fn on_mouse_down(&mut self, _button: MouseButton, ctx: &mut ButtonWidgetContextMut) -> bool {
 		if let Err(e) = ctx.tab.refresh() {
-			ctx.alert(Alert::from(e));
+			ctx.alert(e);
 		}
 		true
 	}

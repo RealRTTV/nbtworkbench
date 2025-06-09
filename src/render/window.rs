@@ -578,7 +578,7 @@ impl<'window> State<'window> {
 			WindowEvent::Destroyed => false,
 			WindowEvent::DroppedFile(file) => {
 				if let Err(e) = workbench.on_open_file(file, std::fs::read(file).unwrap_or(vec![]), window_properties) {
-					workbench.alert(e.into())
+					workbench.alert(e)
 				}
 				true
 			}
@@ -624,7 +624,7 @@ impl<'window> State<'window> {
 			self.last_tick = now();
 		}
 		if let Err(e) = workbench.try_subscription() {
-			workbench.alert(e.into())
+			workbench.alert(e)
 		}
 
 		if self.previous_theme != get_theme() {

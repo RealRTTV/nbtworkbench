@@ -5,6 +5,7 @@ use std::time::Duration;
 use compact_str::ToCompactString;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use thiserror::Error;
 use winit::event::MouseButton;
 use winit::keyboard::KeyCode;
 
@@ -12,11 +13,11 @@ use crate::assets::{DARK_STRIPE_UV, REPLACE_BOX_SELECTION_Z, REPLACE_BOX_Z, REPL
 use crate::elements::{CompoundEntry, Matches, NbtElement, NbtElementAndKey, NbtElementAndKeyRef};
 use crate::render::widget::text::get_cursor_idx;
 use crate::render::{TextColor, Theme, VertexBufferBuilder, WindowProperties};
-use crate::tree::{Indices, MutableIndices, OwnedIndices, RenameElementResult, ReplaceElementResult, indices_for_true, rename_element, replace_element};
+use crate::tree::{Indices, MutableIndices, OwnedIndices, indices_for_true, rename_element, replace_element, RenameElementError, ReplaceElementError};
 use crate::util::{StrExt, Vec2u, create_regex, now};
 use crate::widget::{Cachelike, Notification, NotificationKind, ReplaceBoxKeyResult, SEARCH_BOX_END_X, SEARCH_BOX_START_X, SearchBox, SearchFlags, SearchMode, Text};
 use crate::workbench::{MarkedLines, SortAlgorithm, WorkbenchAction};
-use crate::{config, flags};
+use crate::{config, error, flags};
 
 #[derive(Copy, Clone, Default, Serialize, Deserialize)]
 pub enum ReplaceBy {
@@ -243,16 +244,20 @@ impl ReplaceBox {
 		let Some(replacement) = SearchReplacement::new(search_box.value.clone(), self.value.clone()) else {
 			return (Notification::new(format!("Invalid replacement syntax ({})", self.value), TextColor::Red, NotificationKind::Replace), None)
 		};
-		let (bulk, failures) = Self::replace_by_search_box0(bookmarks, mutable_indices, root, &replacement);
+		let (bulk, errors) = Self::replace_by_search_box0(bookmarks, mutable_indices, root, &replacement);
 		let bulk_len = if let WorkbenchAction::Bulk { actions } = &bulk { actions.len() } else { 0 };
 		let ms = now() - start;
+		let errors_len = errors.len();
+		for e in errors {
+			error!("Error while replacing line: {e}");
+		}
 		(
 			Notification::new(
 				format!(
-					"{replacements} replacement{suffix} for \"{search}\" ({ms}ms) [{failures} failure{failure_suffix}]",
+					"{replacements} replacement{suffix} for \"{search}\" ({ms}ms) [{errors_len} failure{error_suffix}]",
 					replacements = bulk_len,
 					suffix = if bulk_len == 1 { "" } else { "s" },
-					failure_suffix = if failures == 1 { "" } else { "s" },
+					error_suffix = if errors_len == 1 { "" } else { "s" },
 					search = search_box.value,
 					ms = ms.as_millis()
 				),
@@ -264,7 +269,7 @@ impl ReplaceBox {
 	}
 
 	#[must_use]
-	pub fn replace_by_search_box0<'root, 'root2: 'root, 'm1, 'm2: 'm1>(bookmarks: &mut MarkedLines, mutable_indices: &'m1 mut MutableIndices<'m2>, root: &'root mut NbtElement, replacement: &SearchReplacement) -> (WorkbenchAction, usize) {
+	pub fn replace_by_search_box0<'root, 'root2: 'root, 'm1, 'm2: 'm1>(bookmarks: &mut MarkedLines, mutable_indices: &'m1 mut MutableIndices<'m2>, root: &'root mut NbtElement, replacement: &SearchReplacement) -> (WorkbenchAction, Vec<ReplacementError>) {
 		// SAFETY: the `alternative_root` ptr is used for writes in 2 different ways within `SearchReplacement::replace`:
 		// `rename_element`
 		// and `replace_element`
@@ -287,7 +292,7 @@ impl ReplaceBox {
 		let mut indices_max = vec![];
 		let mut actions = vec![];
 		let mut queue: Vec<NbtElementAndKeyRef> = vec![(None, root)];
-		let mut failures = 0;
+		let mut errors = Vec::new();
 
 		while let Some((key, element)) = queue.pop() {
 			let mut element_replaced = false;
@@ -302,7 +307,7 @@ impl ReplaceBox {
 				} else {
 					None
 				};
-				if let (Some(action), replaced) = replacement.replace(
+				match replacement.replace(
 					alternative_root,
 					key_str,
 					element_str
@@ -312,10 +317,11 @@ impl ReplaceBox {
 					mutable_indices,
 					&current_indices,
 				) {
-					actions.push(action);
-					element_replaced |= replaced;
-				} else {
-					failures += 1;
+					Ok((action, replaced)) => {
+						actions.push(action);
+						element_replaced = replaced;
+					}
+					Err(e) => errors.push(e),
 				}
 			}
 
@@ -365,7 +371,7 @@ impl ReplaceBox {
 				}
 			}
 		}
-		(WorkbenchAction::Bulk { actions: actions.into_boxed_slice() }, failures)
+		(WorkbenchAction::Bulk { actions: actions.into_boxed_slice() }, errors)
 	}
 
 	#[must_use]
@@ -374,16 +380,20 @@ impl ReplaceBox {
 		let Some(replacement) = BookmarkedBasedSearchReplacement::new(&self.value) else {
 			return (Notification::new(format!("Invalid replacement syntax ({})", self.value), TextColor::Red, NotificationKind::Replace), None)
 		};
-		let (bulk, failures) = Self::replace_by_bookmarked_lines0(bookmarks, mutable_indices, root, &replacement);
+		let (bulk, errors) = Self::replace_by_bookmarked_lines0(bookmarks, mutable_indices, root, &replacement);
 		let bulk_len = if let WorkbenchAction::Bulk { actions } = &bulk { actions.len() } else { 0 };
 		let ms = now() - start;
+		let errors_len = errors.len();
+		for e in errors {
+			error!("Error while replacing bookmarked line: {e}")
+		}
 		(
 			Notification::new(
 				format!(
-					"{replacements} replacement{suffix} ({ms}ms) [{failures} failure{failure_suffix}]",
+					"{replacements} replacement{suffix} ({ms}ms) [{errors_len} error{error_suffix}]",
 					replacements = bulk_len,
 					suffix = if bulk_len == 1 { "" } else { "s" },
-					failure_suffix = if failures == 1 { "" } else { "s" },
+					error_suffix = if errors_len == 1 { "" } else { "s" },
 					ms = ms.as_millis()
 				),
 				TextColor::White,
@@ -394,7 +404,7 @@ impl ReplaceBox {
 	}
 
 	#[must_use]
-	pub fn replace_by_bookmarked_lines0<'m1, 'm2: 'm1>(bookmarks: &mut MarkedLines, old_mutable_indices: &'m1 mut MutableIndices<'m2>, root: &mut NbtElement, replacement: &BookmarkedBasedSearchReplacement) -> (WorkbenchAction, usize) {
+	pub fn replace_by_bookmarked_lines0<'m1, 'm2: 'm1>(bookmarks: &mut MarkedLines, old_mutable_indices: &'m1 mut MutableIndices<'m2>, root: &mut NbtElement, replacement: &BookmarkedBasedSearchReplacement) -> (WorkbenchAction, Vec<ReplacementError>) {
 		// the `rev` is done so that pop (O(1) time) removes the first element rather than the last
 		let mut bookmark_indices = bookmarks
 			.iter()
@@ -407,18 +417,18 @@ impl ReplaceBox {
 
 		let mut fake_name = String::new().into_boxed_str();
 
-		let mut failures = 0;
 		let mut actions = Vec::new();
+		let mut errors = Vec::new();
 
 		while let Some(indices) = mutable_indices.temp.pop() {
 			let Some(indices) = indices.take() else { continue };
 			match replacement.replace(root, indices, &mut fake_name, &mut mutable_indices, bookmarks) {
-				Some(action) => actions.push(action),
-				None => failures += 1,
+				Ok(action) => actions.push(action),
+				Err(e) => errors.push(e),
 			}
 		}
 
-		(WorkbenchAction::Bulk { actions: actions.into_boxed_slice() }, failures)
+		(WorkbenchAction::Bulk { actions: actions.into_boxed_slice() }, errors)
 	}
 }
 
@@ -519,7 +529,7 @@ impl SearchReplacement {
 		(flags & 0b01) > 0 && !matches!(self.inner, SearchReplacementInner::Snbt { .. })
 	}
 
-	pub fn replace<'m1, 'm2: 'm1>(&self, root: &mut NbtElement, key: Option<String>, value: Option<String>, bookmarks: &mut MarkedLines, mutable_indices: &'m1 mut MutableIndices<'m2>, indices: &Indices) -> (Option<WorkbenchAction>, bool) {
+	pub fn replace<'m1, 'm2: 'm1>(&self, root: &mut NbtElement, key: Option<String>, value: Option<String>, bookmarks: &mut MarkedLines, mutable_indices: &'m1 mut MutableIndices<'m2>, indices: &Indices) -> Result<(WorkbenchAction, bool), ReplacementError> {
 		#[must_use]
 		fn replace_case_sensitivity(value: &str, find: &str, replacement: &str, case_sensitive: bool) -> String { if case_sensitive { value.replace(find, replacement) } else { value.replace_ignore_ascii_case(find, replacement) } }
 
@@ -528,14 +538,14 @@ impl SearchReplacement {
 			SearchReplacementInner::Substring { find, replacement, case_sensitive } => {
 				let key = key.map(|key| replace_case_sensitivity(&key, find, replacement, *case_sensitive).into());
 				let value = value.map(|value| replace_case_sensitivity(&value, find, replacement, *case_sensitive).into());
-				(rename_element(root, indices.to_owned(), key, value, &mut None, fake_name, &mut WindowProperties::Fake).map(RenameElementResult::into_action), false)
+				Ok((rename_element(root, indices.to_owned(), key, value, &mut None, fake_name, &mut WindowProperties::Fake)?.into_action(), false))
 			}
 			SearchReplacementInner::Regex { regex, replacement } => {
 				let key = key.map(|key| regex.replace_all(&key, replacement).into());
 				let value = value.map(|value| regex.replace_all(&value, replacement).into());
-				(rename_element(root, indices.to_owned(), key, value, &mut None, fake_name, &mut WindowProperties::Fake).map(RenameElementResult::into_action), false)
+				Ok((rename_element(root, indices.to_owned(), key, value, &mut None, fake_name, &mut WindowProperties::Fake)?.into_action(), false))
 			}
-			SearchReplacementInner::Snbt { replacement, .. } => (replace_element(root, replacement.clone(), indices.to_owned(), bookmarks, mutable_indices).map(ReplaceElementResult::into_action), true),
+			SearchReplacementInner::Snbt { replacement, .. } => Ok((replace_element(root, replacement.clone(), indices.to_owned(), bookmarks, mutable_indices)?.into_action(), true))
 		}
 	}
 }
@@ -564,7 +574,7 @@ impl BookmarkedBasedSearchReplacement {
 		Some(Self { search_flags, inner })
 	}
 
-	pub fn replace<'m1, 'm2: 'm1>(&self, root: &mut NbtElement, indices: OwnedIndices, fake_name: &mut Box<str>, mutable_indices: &'m1 mut MutableIndices<'m2>, bookmarks: &mut MarkedLines) -> Option<WorkbenchAction> {
+	pub fn replace<'m1, 'm2: 'm1>(&self, root: &mut NbtElement, indices: OwnedIndices, fake_name: &mut Box<str>, mutable_indices: &'m1 mut MutableIndices<'m2>, bookmarks: &mut MarkedLines) -> Result<WorkbenchAction, ReplacementError> {
 		match &self.inner {
 			BookmarkedBasedSearchReplacementInner::String(str) => {
 				let key = self
@@ -575,9 +585,17 @@ impl BookmarkedBasedSearchReplacement {
 					.search_flags
 					.has_value()
 					.then(|| str.to_owned());
-				rename_element(root, indices, key, value, &mut None, fake_name, &mut WindowProperties::Fake).map(RenameElementResult::into_action)
+				Ok(rename_element(root, indices, key, value, &mut None, fake_name, &mut WindowProperties::Fake)?.into_action())
 			}
-			BookmarkedBasedSearchReplacementInner::Snbt(replacement) => replace_element(root, replacement.clone(), indices, bookmarks, mutable_indices).map(ReplaceElementResult::into_action),
+			BookmarkedBasedSearchReplacementInner::Snbt(replacement) => Ok(replace_element(root, replacement.clone(), indices, bookmarks, mutable_indices)?.into_action()),
 		}
 	}
+}
+
+#[derive(Error, Debug)]
+pub enum ReplacementError {
+	#[error(transparent)]
+	Rename(#[from] RenameElementError),
+	#[error(transparent)]
+	Replace(#[from] ReplaceElementError),
 }
