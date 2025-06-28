@@ -1,11 +1,17 @@
 use itertools::Itertools;
 use thiserror::Error;
-use crate::elements::{ComplexNbtElementVariant, NbtElement};
-use crate::tree::{Indices, OwnedIndices};
+
+use crate::{
+	elements::{ComplexNbtElementVariant, element::NbtElement},
+	tree::{Indices, OwnedIndices},
+};
 
 fn find_traversal_child_idx(element: &NbtElement, indices: &Indices, y: &mut usize, line_number: &mut usize, true_line_number: &mut usize) -> Result<usize, TraversalError> {
 	let initial_remaining_y = *y;
-	(0..element.len().ok_or_else(|| TraversalError::ParentWasPrimitive { indices: indices.to_owned(), parent: element.display_name() })?)
+	(0..element.len().ok_or_else(|| TraversalError::ParentWasPrimitive {
+		indices: indices.to_owned(),
+		parent: element.display_name(),
+	})?)
 		.map(|idx| &element[idx])
 		.find_position(|child| {
 			let (height, true_height) = child.heights();
@@ -19,7 +25,10 @@ fn find_traversal_child_idx(element: &NbtElement, indices: &Indices, y: &mut usi
 			}
 		})
 		.map(|(idx, _)| idx)
-		.ok_or_else(|| TraversalError::BeyondParentHeight { indices: indices.to_owned(), remaining_y: initial_remaining_y })
+		.ok_or_else(|| TraversalError::BeyondParentHeight {
+			indices: indices.to_owned(),
+			remaining_y: initial_remaining_y,
+		})
 }
 
 pub struct TraversalInformation<'a> {
@@ -84,7 +93,7 @@ impl<'a> TraversalInformation<'a> {
 				depth += 1;
 				let kv = match element.get(idx) {
 					Some(x) => x,
-					None => return Err(TraversalError::IndexOutOfBounds { indices, idx, parent: display_name })
+					None => return Err(TraversalError::IndexOutOfBounds { indices, idx, parent: display_name }),
 				};
 				key = kv.0;
 				element = kv.1;
@@ -161,7 +170,7 @@ impl<'a> TraversalInformationMut<'a> {
 				let idx = find_traversal_child_idx(element, &indices, &mut y, &mut line_number, &mut true_line_number)?;
 				let kv = match element.get_mut(idx) {
 					Some(x) => x,
-					None => return Err(TraversalError::IndexOutOfBounds { indices, idx, parent: display_name })
+					None => return Err(TraversalError::IndexOutOfBounds { indices, idx, parent: display_name }),
 				};
 				y -= 1;
 				line_number += 1;

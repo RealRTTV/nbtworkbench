@@ -1,40 +1,38 @@
-use std::hint::{likely, unlikely};
-use std::ops::{Deref, DerefMut};
-use std::time::Duration;
+use std::{
+	hint::{likely, unlikely},
+	ops::{Deref, DerefMut},
+	time::Duration,
+};
 
 use winit::keyboard::KeyCode;
 
-use crate::assets::{SELECTION_UV, ZOffset};
-use crate::flags;
-use crate::render::{TextColor, VertexBufferBuilder};
-use crate::util::{CharExt, LinkedQueue, StrExt, Vec2u, get_clipboard, is_jump_char_boundary, is_utf8_char_boundary, now, set_clipboard};
-use crate::widget::KeyResult::{Escape, Failed, Finish, NothingSpecial};
+use crate::{
+	flags,
+	history::WorkbenchAction,
+	render::{
+		assets::{SELECTION_UV, ZOffset},
+		color::TextColor,
+		vertex_buffer_builder::VertexBufferBuilder,
+		widget::text::KeyResult::{Escape, Finish, GenericAction, NoAction},
+	},
+	util::{CharExt, LinkedQueue, StrExt, Timestamp, Vec2u, get_clipboard, is_jump_char_boundary, is_utf8_char_boundary, set_clipboard},
+};
 
 pub const TEXT_DOUBLE_CLICK_INTERVAL: Duration = Duration::from_millis(250);
 pub const CURSOR_BLINK_RATE: Duration = Duration::from_millis(500);
 
-#[repr(u8)]
-#[derive(PartialEq, Eq)]
 pub enum SelectedTextKeyResult {
-	Failed,
-	NothingSpecial,
+	NoAction,
+	GenericAction,
 	Escape,
 	Finish,
-	MoveToKeyfix,
-	MoveToValuefix,
-	Up(bool),
-	Down(bool),
-	ForceClose,
-	ForceOpen,
-	ShiftUp,
-	ShiftDown,
+	Action(Option<WorkbenchAction>),
 }
 
 #[derive(PartialEq, Eq)]
-#[repr(u8)]
 pub enum SearchBoxKeyResult {
-	Failed,
-	NothingSpecial,
+	NoAction,
+	GenericAction,
 	Escape,
 	MoveToReplaceBox,
 	Search,
@@ -42,20 +40,18 @@ pub enum SearchBoxKeyResult {
 }
 
 #[derive(PartialEq, Eq)]
-#[repr(u8)]
 pub enum ReplaceBoxKeyResult {
-	Failed,
-	NothingSpecial,
+	NoAction,
+	GenericAction,
 	Escape,
 	MoveToSearchBox,
 	ReplaceAll,
 }
 
-#[repr(u8)]
 #[derive(PartialEq, Eq)]
 pub enum KeyResult {
-	Failed,
-	NothingSpecial,
+	NoAction,
+	GenericAction,
 	Escape,
 	Finish,
 }
@@ -63,8 +59,8 @@ pub enum KeyResult {
 impl From<KeyResult> for SelectedTextKeyResult {
 	fn from(value: KeyResult) -> Self {
 		match value {
-			Failed => Self::Failed,
-			NothingSpecial => Self::NothingSpecial,
+			NoAction => Self::NoAction,
+			GenericAction => Self::GenericAction,
 			Escape => Self::Escape,
 			Finish => Self::Finish,
 		}
@@ -74,8 +70,8 @@ impl From<KeyResult> for SelectedTextKeyResult {
 impl From<KeyResult> for SearchBoxKeyResult {
 	fn from(value: KeyResult) -> Self {
 		match value {
-			Failed => Self::Failed,
-			NothingSpecial => Self::NothingSpecial,
+			NoAction => Self::NoAction,
+			GenericAction => Self::GenericAction,
 			Escape => Self::Escape,
 			Finish => Self::Search,
 		}
@@ -85,8 +81,8 @@ impl From<KeyResult> for SearchBoxKeyResult {
 impl From<KeyResult> for ReplaceBoxKeyResult {
 	fn from(value: KeyResult) -> Self {
 		match value {
-			Failed => Self::Failed,
-			NothingSpecial => Self::NothingSpecial,
+			NoAction => Self::NoAction,
+			GenericAction => Self::GenericAction,
 			Escape => Self::Escape,
 			Finish => Self::ReplaceAll,
 		}
@@ -170,7 +166,7 @@ pub struct Text<Additional: Clone, Cache: Cachelike<Additional>> {
 	pub editable: bool,
 	pub additional: Additional,
 	drag_selectable: bool,
-	last_interaction: Duration,
+	last_interaction: Timestamp,
 	undos: LinkedQueue<Cache>,
 	redos: LinkedQueue<Cache>,
 }
@@ -191,7 +187,7 @@ impl<Additional: Clone, Cache: Cachelike<Additional>> Text<Additional, Cache> {
 			value,
 			cursor,
 			selection: None,
-			last_interaction: now(),
+			last_interaction: Timestamp::now(),
 			editable,
 			undos: LinkedQueue::new(),
 			redos: LinkedQueue::new(),
@@ -207,7 +203,7 @@ impl<Additional: Clone, Cache: Cachelike<Additional>> Text<Additional, Cache> {
 			value: String::new(),
 			cursor: 0,
 			selection: None,
-			last_interaction: Duration::ZERO,
+			last_interaction: Timestamp::UNIX_EPOCH,
 			editable: true,
 			undos: LinkedQueue::new(),
 			redos: LinkedQueue::new(),
@@ -221,7 +217,7 @@ impl<Additional: Clone, Cache: Cachelike<Additional>> Text<Additional, Cache> {
 
 	pub fn set_drag_selectable(&mut self, drag_selectable: bool) { self.drag_selectable = drag_selectable; }
 
-	pub fn interact(&mut self) { self.last_interaction = now(); }
+	pub fn interact(&mut self) { self.last_interaction = Timestamp::now(); }
 
 	#[must_use]
 	pub fn on_key_press(&mut self, key: KeyCode, mut char: Option<char>, flags: u8) -> KeyResult {
@@ -245,13 +241,13 @@ impl<Additional: Clone, Cache: Cachelike<Additional>> Text<Additional, Cache> {
 						break 'a cache;
 					}
 				}
-				return Failed;
+				return NoAction;
 			};
 
 			self.redos.push(current);
-			self.last_interaction = Duration::ZERO;
+			self.last_interaction = Timestamp::UNIX_EPOCH;
 			cache.revert(self);
-			return NothingSpecial;
+			return GenericAction;
 		}
 
 		if (key == KeyCode::KeyY && flags == flags!(Ctrl) || key == KeyCode::KeyZ && flags == flags!(Ctrl + Shift)) && self.editable {
@@ -264,19 +260,19 @@ impl<Additional: Clone, Cache: Cachelike<Additional>> Text<Additional, Cache> {
 						break 'a cache;
 					}
 				}
-				return Failed;
+				return NoAction;
 			};
 
 			self.undos.push(current);
-			self.last_interaction = Duration::ZERO;
+			self.last_interaction = Timestamp::UNIX_EPOCH;
 			cache.revert(self);
-			return NothingSpecial;
+			return GenericAction;
 		}
 
 		if key == KeyCode::KeyA && flags == flags!(Ctrl) && self.editable && !self.value.is_empty() {
 			self.cursor = 0;
 			self.selection = Some(self.value.len());
-			return NothingSpecial;
+			return GenericAction;
 		}
 
 		if let Some(selection) = self.selection
@@ -291,7 +287,7 @@ impl<Additional: Clone, Cache: Cachelike<Additional>> Text<Additional, Cache> {
 				self.value = format!("{left}{right}");
 				self.selection = None;
 				self.cursor = low_selection;
-				return NothingSpecial;
+				return GenericAction;
 			}
 		}
 
@@ -305,7 +301,7 @@ impl<Additional: Clone, Cache: Cachelike<Additional>> Text<Additional, Cache> {
 					self.selection = None;
 				}
 				self.cursor = start;
-				return NothingSpecial;
+				return GenericAction;
 			}
 		}
 
@@ -315,7 +311,7 @@ impl<Additional: Clone, Cache: Cachelike<Additional>> Text<Additional, Cache> {
 				let (_, right) = self.value.split_at(start);
 				let (cut, _) = right.split_at(end - start);
 				set_clipboard(cut.to_owned());
-				return NothingSpecial;
+				return GenericAction;
 			}
 		}
 
@@ -332,34 +328,30 @@ impl<Additional: Clone, Cache: Cachelike<Additional>> Text<Additional, Cache> {
 					self.value = format!("{left}{clipboard}{right}");
 					self.cursor += clipboard.len();
 				}
-				return NothingSpecial;
+				return GenericAction;
 			}
 		}
 
 		if key == KeyCode::Home && flags & !flags!(Shift) == 0 && self.editable {
 			if flags == flags!(Shift) {
-				let new = self
-					.selection
-					.map_or(self.cursor, |x| x.min(self.cursor));
+				let new = self.selection.map_or(self.cursor, |x| x.min(self.cursor));
 				self.selection = (new != 0).then_some(new);
 			} else {
 				self.selection = None;
 			}
 			self.cursor = 0;
-			return NothingSpecial;
+			return GenericAction;
 		}
 
 		if key == KeyCode::End && flags & !flags!(Shift) == 0 && self.editable {
 			if flags == flags!(Shift) {
-				let new = self
-					.selection
-					.map_or(self.cursor, |x| x.max(self.cursor));
+				let new = self.selection.map_or(self.cursor, |x| x.max(self.cursor));
 				self.selection = (new != self.value.len()).then_some(new);
 			} else {
 				self.selection = None;
 			}
 			self.cursor = self.value.len();
-			return NothingSpecial;
+			return GenericAction;
 		}
 
 		if key == KeyCode::Backspace && flags < 2 && self.editable {
@@ -386,7 +378,7 @@ impl<Additional: Clone, Cache: Cachelike<Additional>> Text<Additional, Cache> {
 				}
 			}
 
-			return NothingSpecial;
+			return GenericAction;
 		}
 
 		if key == KeyCode::Delete && self.editable {
@@ -412,7 +404,7 @@ impl<Additional: Clone, Cache: Cachelike<Additional>> Text<Additional, Cache> {
 					self.value = format!("{left}{right}");
 				}
 			}
-			return NothingSpecial;
+			return GenericAction;
 		}
 
 		if key == KeyCode::ArrowLeft {
@@ -421,7 +413,7 @@ impl<Additional: Clone, Cache: Cachelike<Additional>> Text<Additional, Cache> {
 					&& let Some(selection) = self.selection.take()
 				{
 					self.cursor = selection.min(self.cursor);
-					return NothingSpecial;
+					return GenericAction;
 				}
 
 				let mut new = self.cursor;
@@ -454,7 +446,7 @@ impl<Additional: Clone, Cache: Cachelike<Additional>> Text<Additional, Cache> {
 					self.selection = None;
 				}
 			}
-			return NothingSpecial;
+			return GenericAction;
 		}
 
 		if key == KeyCode::ArrowRight {
@@ -463,7 +455,7 @@ impl<Additional: Clone, Cache: Cachelike<Additional>> Text<Additional, Cache> {
 					&& let Some(selection) = self.selection.take()
 				{
 					self.cursor = selection.max(self.cursor);
-					return NothingSpecial;
+					return GenericAction;
 				}
 
 				let mut new = self.cursor;
@@ -495,7 +487,7 @@ impl<Additional: Clone, Cache: Cachelike<Additional>> Text<Additional, Cache> {
 					self.selection = None;
 				}
 			}
-			return NothingSpecial;
+			return GenericAction;
 		}
 
 		if let KeyCode::Enter | KeyCode::NumpadEnter = key
@@ -521,10 +513,10 @@ impl<Additional: Clone, Cache: Cachelike<Additional>> Text<Additional, Cache> {
 				self.cursor += char.len_utf8();
 			}
 
-			return NothingSpecial;
+			return GenericAction;
 		}
 
-		Failed
+		NoAction
 	}
 
 	pub fn render(&self, builder: &mut VertexBufferBuilder, color: TextColor, pos: Vec2u, z: ZOffset, selection_z: ZOffset) {
@@ -539,7 +531,7 @@ impl<Additional: Clone, Cache: Cachelike<Additional>> Text<Additional, Cache> {
 
 		if self.editable {
 			let cursor_prefixing = self.value.split_at(self.cursor).0;
-			let duration_from_last_interaction = now() - self.last_interaction;
+			let time_since_last_interaction = self.last_interaction.elapsed();
 			if let Some(selection) = self.selection
 				&& self.editable
 			{
@@ -547,11 +539,11 @@ impl<Additional: Clone, Cache: Cachelike<Additional>> Text<Additional, Cache> {
 				let start = self.value.split_at(start).0.width();
 				let end = self.value.split_at(end).0.width();
 				builder.draw_texture_region_z((start + x, y), selection_z, SELECTION_UV + (1, 1), (end - start - 1, 16), (14, 14));
-				if duration_from_last_interaction < CURSOR_BLINK_RATE || duration_from_last_interaction.subsec_millis() < CURSOR_BLINK_RATE.subsec_micros() {
+				if time_since_last_interaction < CURSOR_BLINK_RATE || time_since_last_interaction.subsec_millis() < CURSOR_BLINK_RATE.subsec_micros() {
 					builder.draw_texture_region_z((x + cursor_prefixing.width() - 1, y), selection_z, SELECTION_UV, (2, 16), (1, 16));
 				}
 			} else {
-				if duration_from_last_interaction < CURSOR_BLINK_RATE || duration_from_last_interaction.subsec_millis() < CURSOR_BLINK_RATE.subsec_millis() {
+				if time_since_last_interaction < CURSOR_BLINK_RATE || time_since_last_interaction.subsec_millis() < CURSOR_BLINK_RATE.subsec_millis() {
 					builder.draw_texture_region_z((x + cursor_prefixing.width(), y), selection_z, SELECTION_UV, (2, 16), (1, 16));
 				}
 			}
@@ -565,7 +557,7 @@ impl<Additional: Clone, Cache: Cachelike<Additional>> Text<Additional, Cache> {
 	pub fn cache(&mut self) {
 		let current = Cache::new(self);
 
-		let should_cache = core::mem::replace(&mut self.last_interaction, now()).as_millis() >= 1_500;
+		let should_cache = core::mem::replace(&mut self.last_interaction, Timestamp::now()).elapsed() >= Duration::from_millis(1_500);
 		if should_cache && self.editable && self.undos.get().is_none_or(|x| x.ne(&current)) {
 			if self.redos.pop().is_none_or(|x| x.ne(&current)) {
 				self.redos = LinkedQueue::new();
@@ -587,7 +579,7 @@ impl<Additional: Clone, Cache: Cachelike<Additional>> Text<Additional, Cache> {
 		self.redos.clear();
 		self.undos.clear();
 		self.selection = None;
-		self.last_interaction = now();
+		self.last_interaction = Timestamp::now();
 	}
 }
 

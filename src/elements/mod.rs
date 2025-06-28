@@ -1,37 +1,36 @@
-mod array;
-mod chunk;
-mod compound;
-mod element;
-mod list;
-mod primitive;
-mod region;
-mod string;
+pub mod array;
+pub mod chunk;
+pub mod compound;
+pub mod element;
+pub mod list;
+pub mod primitive;
+pub mod region;
+pub mod string;
 
-use std::borrow::Cow;
-use std::fmt::Display;
-use std::slice;
 #[cfg(not(target_arch = "wasm32"))] use std::thread::Scope;
+use std::{borrow::Cow, fmt::Display, slice};
 
-pub use array::*;
-pub use chunk::*;
-pub use compound::*;
-pub use element::*;
-pub use list::*;
 pub use primitive::*;
-pub use region::*;
-pub use string::*;
 
-use crate::elements::result::NbtParseResult;
-use crate::render::{RenderContext, VertexBufferBuilder};
-use crate::serialization::{Decoder, PrettyDisplay, UncheckedBufWriter};
-use crate::util::Vec2u;
 #[cfg(target_arch = "wasm32")] use crate::wasm::FakeScope as Scope;
-use crate::workbench::MarkedLines;
+use crate::{
+	elements::{element::NbtElement, result::NbtParseResult},
+	render::{RenderContext, vertex_buffer_builder::VertexBufferBuilder},
+	serialization::{decoder::Decoder, encoder::UncheckedBufWriter, formatter::PrettyDisplay},
+	util::Vec2u,
+	workbench::marked_line::MarkedLines,
+};
 
+/// # Shorthands
+/// * `kv`
 pub type NbtElementAndKey = (Option<compact_str::CompactString>, NbtElement);
 
+/// # Shorthands
+/// * `kv`
 pub type NbtElementAndKeyRef<'a> = (Option<&'a str>, &'a NbtElement);
 
+/// # Shorthands
+/// * `kv`
 pub type NbtElementAndKeyRefMut<'a> = (Option<&'a str>, &'a mut NbtElement);
 
 impl From<NbtElement> for NbtElementAndKey {
@@ -121,7 +120,7 @@ pub trait Matches {
 
 pub trait NbtElementVariant: Clone + PartialEq + Display + Matches + Default + PrettyDisplay {
 	type ExtraParseInfo = ();
-	
+
 	const ID: u8;
 	const UV: Vec2u;
 	const GHOST_UV: Vec2u;
@@ -187,7 +186,7 @@ pub trait ComplexNbtElementVariant: NbtElementVariant {
 	fn is_open(&self) -> bool;
 
 	#[must_use]
-	fn max_depth(&self) -> usize;
+	fn end_x(&self) -> usize;
 
 	unsafe fn toggle(&mut self);
 

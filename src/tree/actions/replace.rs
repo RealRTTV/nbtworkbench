@@ -1,22 +1,40 @@
 use thiserror::Error;
-use super::MutableIndices;
-use crate::elements::{NbtElement, NbtElementAndKey};
-use crate::tree::{OwnedIndices, ParentNavigationError, ParentNavigationInformationMut};
-use crate::workbench::{MarkedLines, WorkbenchAction};
 
-pub fn replace_element<'m1, 'm2: 'm1>(root: &mut NbtElement, value: NbtElementAndKey, indices: OwnedIndices, bookmarks: &mut MarkedLines, mutable_indices: &'m1 mut MutableIndices<'m2>) -> Result<ReplaceElementResult, ReplaceElementError> {
+use crate::{
+	elements::{NbtElementAndKey, element::NbtElement},
+	history::WorkbenchAction,
+	tree::{
+		MutableIndices,
+		indices::OwnedIndices,
+		navigate::{ParentNavigationError, ParentNavigationInformationMut},
+	},
+};
+
+#[rustfmt::skip]
+pub fn replace_element<'m1, 'm2: 'm1>(
+	root: &mut NbtElement,
+	value: NbtElementAndKey,
+	indices: OwnedIndices,
+	mi: &'m1 mut MutableIndices<'m2>
+) -> Result<ReplaceElementResult, ReplaceElementError> {
 	match root.navigate_parent_mut(&indices) {
 		Ok(ParentNavigationInformationMut { parent, true_line_number, idx, .. }) => {
 			let (old_parent_height, old_parent_true_height) = parent.heights();
 			// SAFETY: we have updated all the relevant data
-			let (old_key, old_value) = unsafe { parent.replace_key_value(idx, value) }.map_err(|value| ReplaceElementError::FailedReplacement { parent: parent.display_name(), idx, value: value.1.display_name() })?.ok_or_else(|| ReplaceElementError::NoOldValue { parent: parent.display_name(), idx })?;
+			let (old_key, old_value) = unsafe { parent.replace_key_value(idx, value) }
+				.map_err(|value| ReplaceElementError::FailedReplacement {
+					parent: parent.display_name(),
+					idx,
+					value: value.1.display_name(),
+				})?
+				.ok_or_else(|| ReplaceElementError::NoOldValue { parent: parent.display_name(), idx })?;
 			let (_old_height, old_true_height) = old_value.heights();
 			let (parent_height, parent_true_height) = parent.heights();
 			let (diff, true_diff) = (parent_height.wrapping_sub(old_parent_height), parent_true_height.wrapping_sub(old_parent_true_height));
-			bookmarks.remove(true_line_number..true_line_number + old_true_height);
-			bookmarks[true_line_number..].increment(diff, true_diff);
+			mi.bookmarks.remove(true_line_number..true_line_number + old_true_height);
+			mi.bookmarks[true_line_number..].increment(diff, true_diff);
 
-			mutable_indices.apply(|mutable_indices, ci| {
+			mi.apply(|mutable_indices, ci| {
 				if indices.encompasses_or_equal(mutable_indices) {
 					ci.remove();
 				}
@@ -26,23 +44,24 @@ pub fn replace_element<'m1, 'm2: 'm1>(root: &mut NbtElement, value: NbtElementAn
 
 			Ok(ReplaceElementResult { indices, kv: (old_key, old_value) })
 		}
-		Err(ParentNavigationError::EmptyIndices) => {
+		Err(ParentNavigationError::EmptyIndices) =>
 			if root.id() == value.1.id() {
-				bookmarks.remove(..);
+				mi.bookmarks.remove(..);
 
 				Ok(ReplaceElementResult {
 					indices,
 					kv: (None, core::mem::replace(root, value.1)),
 				})
 			} else {
-				Err(ReplaceElementError::DifferentRootVariants { old: root.display_name(), new: value.1.display_name() })
-			}
-		}
-		Err(e) => Err(e.into())
+				Err(ReplaceElementError::DifferentRootVariants {
+					old: root.display_name(),
+					new: value.1.display_name(),
+				})
+			},
+		Err(e) => Err(e.into()),
 	}
 }
 
-#[must_use]
 #[derive(Clone)]
 pub struct ReplaceElementResult {
 	pub indices: OwnedIndices,

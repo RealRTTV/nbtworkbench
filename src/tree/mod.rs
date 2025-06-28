@@ -1,16 +1,7 @@
-mod actions;
-mod indices;
-mod navigate;
-mod traverse;
-
-pub use actions::*;
-pub use indices::*;
-pub use navigate::*;
-pub use traverse::*;
-
-use crate::elements::NbtElement;
-use crate::widget::SelectedText;
-use crate::workbench::FileUpdateSubscription;
+pub mod actions;
+pub mod indices;
+pub mod navigate;
+pub mod traverse;
 
 #[must_use]
 pub fn line_number_at(indices: &Indices, mut root: &NbtElement) -> usize {
@@ -55,39 +46,25 @@ pub fn indices_for_true(true_line_number: usize, mut root: &NbtElement) -> Optio
 	Some(indices)
 }
 
+/// # Shorthands
+/// * `mi`
 pub struct MutableIndices<'m2> {
 	is_empty: bool,
-	subscription: &'m2 mut Option<FileUpdateSubscription>,
-	selected_text: &'m2 mut Option<SelectedText>,
+	pub subscription: &'m2 mut Option<FileUpdateSubscription>,
+	pub selected_text: &'m2 mut Option<SelectedText>,
+	pub bookmarks: &'m2 mut MarkedLines,
 	pub temp: Vec<&'m2 mut Option<OwnedIndices>>,
 }
 
 impl<'m1, 'm2: 'm1> MutableIndices<'m2> {
 	#[must_use]
-	pub fn new(subscription: &'m2 mut Option<FileUpdateSubscription>, selected_text: &'m2 mut Option<SelectedText>) -> Self {
+	pub fn new(subscription: &'m2 mut Option<FileUpdateSubscription>, selected_text: &'m2 mut Option<SelectedText>, bookmarks: &'m2 mut MarkedLines) -> Self {
 		Self {
 			is_empty: false,
 			subscription,
 			selected_text,
+			bookmarks,
 			temp: Vec::new(),
-		}
-	}
-
-	#[must_use]
-	pub fn empty() -> &'static mut Self {
-		static mut EMPTY_SUBSCRIPTION: Option<FileUpdateSubscription> = None;
-		static mut EMPTY_SELECTED_TEXT: Option<SelectedText> = None;
-		#[allow(static_mut_refs)]
-		static mut EMPTY: MutableIndices<'static> = MutableIndices {
-			is_empty: true,
-			subscription: unsafe { &mut EMPTY_SUBSCRIPTION },
-			selected_text: unsafe { &mut EMPTY_SELECTED_TEXT },
-			temp: Vec::new(),
-		};
-
-		#[allow(static_mut_refs)]
-		unsafe {
-			&mut EMPTY
 		}
 	}
 
@@ -123,15 +100,6 @@ impl<'m1, 'm2: 'm1> MutableIndices<'m2> {
 		}
 	}
 
-	/// required to be here because it is the only mutable reference to `FileUpdateSubscription` available when *_element-ing
-	pub fn set_subscription(&'m1 mut self, subscription: Option<FileUpdateSubscription>) {
-		if self.is_empty {
-			return;
-		}
-
-		*self.subscription = subscription;
-	}
-
 	#[must_use]
 	pub fn as_inner_mut(&'m1 mut self) -> (&'m1 mut &'m2 mut Option<FileUpdateSubscription>, &'m1 mut &'m2 mut Option<SelectedText>, &'m1 mut Vec<&'m2 mut Option<OwnedIndices>>) { (&mut self.subscription, &mut self.selected_text, &mut self.temp) }
 }
@@ -157,3 +125,10 @@ mod callback_info {
 }
 
 pub use callback_info::CallbackInfo;
+
+use crate::{
+	elements::element::NbtElement,
+	render::widget::selected_text::SelectedText,
+	tree::indices::{Indices, OwnedIndices},
+	workbench::{marked_line::MarkedLines, FileUpdateSubscription},
+};

@@ -1,23 +1,39 @@
-use std::fmt::{Display, Formatter};
-use std::ops::{Deref, DerefMut};
-use std::time::Duration;
+use std::{
+	fmt::{Display, Formatter},
+	ops::{Deref, DerefMut},
+};
 
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use winit::event::MouseButton;
-use winit::keyboard::KeyCode;
-
-use crate::assets::{
-	AND_SELECTION_OPERATION_UV, BOOKMARK_UV, DARK_STRIPE_UV, HIDDEN_BOOKMARK_UV, OR_SELECTION_OPERATION_UV, REGEX_SEARCH_MODE_UV, REPLACE_SELECTION_OPERATION_UV, SEARCH_BOX_SELECTION_Z, SEARCH_BOX_Z, SEARCH_KEYS_AND_VALUES_UV, SEARCH_KEYS_UV,
-	SEARCH_VALUES_UV, SNBT_SEARCH_MODE_UV, STRING_SEARCH_MODE_UV, XOR_SELECTION_OPERATION_UV,
+use winit::{event::MouseButton, keyboard::KeyCode};
+use winit::dpi::PhysicalSize;
+use crate::{
+	action_result::ActionResult,
+	config,
+	elements::{Matches, NbtElementAndKey, NbtElementAndKeyRef, compound::CompoundEntry, element::NbtElement},
+	flags,
+	render::{
+		assets::{
+			AND_SELECTION_OPERATION_UV, BOOKMARK_UV, DARK_STRIPE_UV, HIDDEN_BOOKMARK_UV, OR_SELECTION_OPERATION_UV, REGEX_SEARCH_MODE_UV, REPLACE_SELECTION_OPERATION_UV, SEARCH_BOX_SELECTION_Z, SEARCH_BOX_Z, SEARCH_KEYS_AND_VALUES_UV,
+			SEARCH_KEYS_UV, SEARCH_VALUES_UV, SNBT_SEARCH_MODE_UV, STRING_SEARCH_MODE_UV, XOR_SELECTION_OPERATION_UV,
+		},
+		color::TextColor,
+		vertex_buffer_builder::VertexBufferBuilder,
+		widget::{
+			alert::manager::AlertManager,
+			notification::{Notification, NotificationKind, manager::NotificationManager},
+			replace_box::ReplaceBox,
+			text::{Cachelike, SearchBoxKeyResult, Text, get_cursor_idx},
+		},
+		window::Theme,
+	},
+	util::{StrExt, Timestamp, Vec2u, create_regex},
+	workbench::{
+		marked_line::{MarkedLine, MarkedLines},
+		tab::Tab,
+		SortAlgorithm,
+	},
 };
-use crate::elements::{CompoundEntry, Matches, NbtElement, NbtElementAndKey, NbtElementAndKeyRef};
-use crate::render::widget::text::get_cursor_idx;
-use crate::render::{TextColor, Theme, VertexBufferBuilder};
-use crate::util::{StrExt, Vec2u, create_regex, now};
-use crate::widget::{Cachelike, Notification, NotificationKind, SearchBoxKeyResult, Text};
-use crate::workbench::{MarkedLine, MarkedLines, SortAlgorithm};
-use crate::{config, flags};
 
 pub const SEARCH_BOX_START_X: usize = 332;
 pub const SEARCH_BOX_END_X: usize = 2;
@@ -268,11 +284,7 @@ impl SearchPredicate {
 			}
 			SearchPredicateInner::StringCaseInsensitive(matcher) => {
 				let (value, color) = kv.1.value();
-				((flags & 0b01) > 0 && color != TextColor::TreeKey && value.contains_ignore_ascii_case(matcher))
-					|| ((flags & 0b10) > 0
-						&& kv
-							.0
-							.is_some_and(|k| k.contains_ignore_ascii_case(matcher)))
+				((flags & 0b01) > 0 && color != TextColor::TreeKey && value.contains_ignore_ascii_case(matcher)) || ((flags & 0b10) > 0 && kv.0.is_some_and(|k| k.contains_ignore_ascii_case(matcher)))
 			}
 			SearchPredicateInner::Regex(regex) => {
 				let (value, color) = kv.1.value();
@@ -317,7 +329,8 @@ impl Cachelike<SearchBoxAdditional> for SearchBoxCache {
 pub struct SearchBoxAdditional {
 	selected: bool,
 	pub horizontal_scroll: usize,
-	pub last_interaction: (usize, Duration),
+	// todo: make `MutliclickSelectionData` struct
+	pub last_interaction: (usize, Timestamp),
 }
 
 pub struct SearchBox(Text<SearchBoxAdditional, SearchBoxCache>);
@@ -337,7 +350,7 @@ impl SearchBox {
 		Self(Text::new(String::new(), 0, true, SearchBoxAdditional {
 			selected: false,
 			horizontal_scroll: 0,
-			last_interaction: (0, Duration::ZERO),
+			last_interaction: (0, Timestamp::UNIX_EPOCH),
 		}))
 	}
 
@@ -367,8 +380,7 @@ impl SearchBox {
 			Theme::Dark => TextColor::White,
 		};
 		if self.is_selected() {
-			self.0
-				.render(builder, color, pos + (0, 3), SEARCH_BOX_Z, SEARCH_BOX_SELECTION_Z);
+			self.0.render(builder, color, pos + (0, 3), SEARCH_BOX_Z, SEARCH_BOX_SELECTION_Z);
 		} else {
 			builder.settings(pos + (0, 3), false, SEARCH_BOX_Z);
 			builder.color = color.to_raw();
@@ -379,11 +391,10 @@ impl SearchBox {
 	}
 
 	#[must_use]
-	pub fn is_within_bounds(mouse: (usize, usize), window_width: usize) -> bool {
-		let (mouse_x, mouse_y) = mouse;
+	pub fn is_within_bounds(mouse: Vec2u, window_dims: PhysicalSize<u32>) -> bool {
 		let pos = Vec2u::new(SEARCH_BOX_START_X, 23);
 
-		(pos.x..window_width - SEARCH_BOX_END_X).contains(&mouse_x) && (23..45).contains(&mouse_y)
+		(pos.x..window_dims.width as usize - SEARCH_BOX_END_X).contains(&mouse.x) && (23..45).contains(&mouse.y)
 	}
 
 	pub fn deselect(&mut self) {
@@ -409,7 +420,7 @@ impl SearchBox {
 
 	#[must_use]
 	pub fn search(&self, bookmarks: &mut MarkedLines, root: &NbtElement, count_only: bool) -> Notification {
-		let start = now();
+		let start = Timestamp::now();
 		let new_bookmarks = if self.value.is_empty() {
 			MarkedLines::new()
 		} else {
@@ -418,7 +429,7 @@ impl SearchBox {
 			};
 			Self::search0(root, &predicate)
 		};
-		let ms = now() - start;
+		let ms = start.elapsed();
 
 		let hits = new_bookmarks.len();
 		if !count_only {
@@ -471,36 +482,65 @@ impl SearchBox {
 	#[must_use]
 	pub fn is_selected(&self) -> bool { self.selected }
 
-	pub fn post_input(&mut self, window_dims: (usize, usize)) {
-		let (window_width, _) = window_dims;
+	pub fn post_input(&mut self, window_dims: PhysicalSize<u32>) {
 		self.0.post_input();
-		let field_width = window_width - SEARCH_BOX_END_X - SEARCH_BOX_START_X - 17 - 16 - 16;
+		let field_width = window_dims.width as usize - SEARCH_BOX_END_X - SEARCH_BOX_START_X - 17 - 16 - 16;
 		let precursor_width = self.value.split_at(self.cursor).0.width();
 		// 8px space just to look cleaner
 		let horizontal_scroll = (precursor_width + 8).saturating_sub(field_width);
 		self.horizontal_scroll = horizontal_scroll;
 	}
 
-	#[must_use]
-	pub fn on_key_press(&mut self, key: KeyCode, char: Option<char>, flags: u8) -> SearchBoxKeyResult {
-		if let KeyCode::ArrowDown | KeyCode::Tab = key
-			&& flags == flags!()
-		{
-			return SearchBoxKeyResult::MoveToReplaceBox;
+	pub fn on_key_press(&mut self, key: KeyCode, ch: Option<char>, flags: u8, replace_box: &mut ReplaceBox, tab: &mut Tab, _alerts: &mut AlertManager, notifications: &mut NotificationManager, window_dims: PhysicalSize<u32>) -> ActionResult {
+		#[must_use]
+		fn on_key_press0(this: &mut SearchBox, key: KeyCode, ch: Option<char>, flags: u8) -> SearchBoxKeyResult {
+			if !this.is_selected() {
+				return SearchBoxKeyResult::NoAction
+			}
+			if let KeyCode::ArrowDown | KeyCode::Tab = key
+				&& flags == flags!()
+			{
+				return SearchBoxKeyResult::MoveToReplaceBox;
+			}
+
+			if let KeyCode::Enter | KeyCode::NumpadEnter = key
+				&& flags == flags!(Shift)
+			{
+				return SearchBoxKeyResult::Search;
+			}
+
+			if let KeyCode::Enter | KeyCode::NumpadEnter = key
+				&& flags == flags!(Alt)
+			{
+				return SearchBoxKeyResult::SearchCountOnly;
+			}
+
+			this.0.on_key_press(key, ch, flags).into()
 		}
 
-		if let KeyCode::Enter | KeyCode::NumpadEnter = key
-			&& flags == flags!(Shift)
-		{
-			return SearchBoxKeyResult::Search;
+		match on_key_press0(self, key, ch, flags) {
+			SearchBoxKeyResult::NoAction => ActionResult::Pass,
+			SearchBoxKeyResult::GenericAction => {
+				self.post_input(window_dims);
+				ActionResult::Success(())
+			}
+			SearchBoxKeyResult::Escape => {
+				self.post_input(window_dims);
+				self.deselect();
+				ActionResult::Success(())
+			}
+			SearchBoxKeyResult::MoveToReplaceBox => {
+				self.post_input(window_dims);
+				replace_box.select(self.value.split_at(self.cursor).0.width().saturating_sub(self.horizontal_scroll), MouseButton::Left);
+				self.deselect();
+				ActionResult::Success(())
+			}
+			result @ (SearchBoxKeyResult::Search | SearchBoxKeyResult::SearchCountOnly) => {
+				let notification = self.search(&mut tab.bookmarks, &tab.root, result == SearchBoxKeyResult::SearchCountOnly);
+				notifications.notify(notification);
+				self.post_input(window_dims);
+				ActionResult::Success(())
+			}
 		}
-
-		if let KeyCode::Enter | KeyCode::NumpadEnter = key
-			&& flags == flags!(Alt)
-		{
-			return SearchBoxKeyResult::SearchCountOnly;
-		}
-
-		self.0.on_key_press(key, char, flags).into()
 	}
 }

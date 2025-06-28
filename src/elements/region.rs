@@ -1,27 +1,38 @@
-use std::array;
-use std::borrow::Cow;
-use std::fmt::{Display, Formatter};
-use std::hint::likely;
-use std::mem::MaybeUninit;
-use std::slice::{Iter, IterMut};
 #[cfg(not(target_arch = "wasm32"))] use std::thread::{Scope, scope};
+use std::{
+	array,
+	borrow::Cow,
+	fmt::{Display, Formatter},
+	hint::likely,
+	mem::MaybeUninit,
+	slice::{Iter, IterMut},
+};
 
-use crate::assets::{CONNECTION_UV, HEADER_SIZE, JUST_OVERLAPPING_BASE_TEXT_Z, JUST_OVERLAPPING_BOOKMARK_Z, LINE_NUMBER_CONNECTOR_Z, LINE_NUMBER_SEPARATOR_UV, REGION_GRID_UV, REGION_UV};
-use crate::elements::result::NbtParseResult;
-use crate::elements::{ComplexNbtElementVariant, Matches, NbtChunk, NbtElement, NbtElementVariant};
-use crate::render::{RenderContext, TextColor, VertexBufferBuilder};
-use crate::serialization::{Decoder, PrettyDisplay, PrettyFormatter, UncheckedBufWriter};
-use crate::util::Vec2u;
 #[cfg(target_arch = "wasm32")]
 use crate::wasm::{FakeScope as Scope, fake_scope as scope};
-use crate::workbench::MarkedLines;
+use crate::{
+	elements::{ComplexNbtElementVariant, Matches, NbtElement, NbtElementVariant, chunk::NbtChunk, result::NbtParseResult},
+	render::{
+		RenderContext,
+		assets::{CONNECTION_UV, HEADER_SIZE, JUST_OVERLAPPING_BASE_TEXT_Z, JUST_OVERLAPPING_BOOKMARK_Z, LINE_NUMBER_CONNECTOR_Z, LINE_NUMBER_SEPARATOR_UV, REGION_GRID_UV, REGION_UV},
+		color::TextColor,
+		vertex_buffer_builder::VertexBufferBuilder,
+	},
+	serialization::{
+		decoder::Decoder,
+		encoder::UncheckedBufWriter,
+		formatter::{PrettyDisplay, PrettyFormatter},
+	},
+	util::Vec2u,
+	workbench::marked_line::MarkedLines,
+};
 
 #[repr(C)]
 pub struct NbtRegion {
 	pub chunks: Box<[NbtElement; 32 * 32]>,
 	height: u32,
 	true_height: u32,
-	max_depth: u32,
+	end_x: u32,
 	loaded_chunks: u16,
 	flags: u8,
 }
@@ -52,7 +63,7 @@ impl Clone for NbtRegion {
 			chunks: unsafe { Box::try_new(MaybeUninit::array_assume_init(chunks)).unwrap_unchecked() },
 			height: self.height,
 			true_height: self.true_height,
-			max_depth: self.max_depth,
+			end_x: self.end_x,
 			loaded_chunks: self.loaded_chunks,
 			flags: self.flags,
 		}
@@ -67,7 +78,7 @@ impl Default for NbtRegion {
 			true_height: 1024 + 1,
 			flags: 0b00,
 			loaded_chunks: 0,
-			max_depth: 0,
+			end_x: 0,
 		}
 	}
 }
@@ -75,12 +86,7 @@ impl Default for NbtRegion {
 impl Display for NbtRegion {
 	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
 		write!(f, "Region{{")?;
-		for (idx, chunk) in self
-			.children()
-			.filter_map(NbtElement::as_chunk)
-			.filter(|chunk| chunk.is_loaded())
-			.enumerate()
-		{
+		for (idx, chunk) in self.children().filter_map(NbtElement::as_chunk).filter(|chunk| chunk.is_loaded()).enumerate() {
 			write!(f, "{chunk}")?;
 			if likely(idx + 1 < self.loaded_chunks()) {
 				write!(f, ",")?;
@@ -99,12 +105,7 @@ impl PrettyDisplay for NbtRegion {
 			f.write_str("Region {\n");
 			f.increase();
 			let len = self.loaded_chunks();
-			for (idx, chunk) in self
-				.children()
-				.filter_map(NbtElement::as_chunk)
-				.filter(|chunk| chunk.is_loaded())
-				.enumerate()
-			{
+			for (idx, chunk) in self.children().filter_map(NbtElement::as_chunk).filter(|chunk| chunk.is_loaded()).enumerate() {
 				f.indent();
 				chunk.pretty_fmt(f);
 				if idx + 1 < len {
@@ -140,10 +141,7 @@ impl NbtElementVariant for NbtRegion {
 
 	fn from_str0(mut s: &str) -> Result<(&str, Self), usize>
 	where Self: Sized {
-		s = s
-			.strip_prefix("Region")
-			.ok_or(s.len())?
-			.trim_start();
+		s = s.strip_prefix("Region").ok_or(s.len())?.trim_start();
 		s = s.strip_prefix('{').ok_or(s.len())?.trim_start();
 		let mut region = Self::default();
 		while !s.starts_with('}') {
@@ -183,11 +181,7 @@ impl NbtElementVariant for NbtRegion {
 			let mut threads = Vec::with_capacity(1024);
 
 			for idx in 0..1024 {
-				let d2: &mut D = unsafe {
-					(decoder as *const D)
-						.cast_mut()
-						.as_mut_unchecked()
-				};
+				let d2: &mut D = unsafe { (decoder as *const D).cast_mut().as_mut_unchecked() };
 				threads.push(s.spawn(move || NbtChunk::from_bytes(d2, idx)));
 			}
 
@@ -222,10 +216,7 @@ impl NbtElementVariant for NbtRegion {
 			let mut offsets = [0; 1024];
 			let mut timestamps = [0; 1024];
 			let mut new_chunks = Vec::with_capacity(chunks.len());
-			for (chunk, (offset, timestamp)) in chunks
-				.into_iter()
-				.zip(offsets.iter_mut().zip(timestamps.iter_mut()))
-			{
+			for (chunk, (offset, timestamp)) in chunks.into_iter().zip(offsets.iter_mut().zip(timestamps.iter_mut())) {
 				let Ok((chunk, last_modified)) = chunk.join() else {
 					return;
 				};
@@ -312,18 +303,16 @@ impl NbtElementVariant for NbtRegion {
 					}
 
 					for x in 0..32 {
-						let chunk = self.chunks[z * 32 + x]
-							.as_chunk()
-							.expect("All region children are chunks");
+						let chunk = self.chunks[z * 32 + x].as_chunk().expect("All region children are chunks");
 
 						ctx.line_number();
 						ctx.skip_line_numbers(chunk.true_height() - 1);
 
 						builder.draw_texture_z(ctx.pos(), JUST_OVERLAPPING_BOOKMARK_Z, chunk.uv(), (16, 16));
 
-						if ctx.mouse_pos().x > ctx.left_margin() && ctx.mouse_pos().y > HEADER_SIZE {
-							let mx = ((ctx.mouse_pos().x - ctx.left_margin()) & !15) + ctx.left_margin();
-							let my = ((ctx.mouse_pos().y - HEADER_SIZE) & !15) + HEADER_SIZE;
+						if ctx.mouse.x > ctx.left_margin() && ctx.mouse.y > HEADER_SIZE {
+							let mx = ((ctx.mouse.x - ctx.left_margin()) & !15) + ctx.left_margin();
+							let my = ((ctx.mouse.y - HEADER_SIZE) & !15) + HEADER_SIZE;
 							if ctx.pos() == (mx, my) {
 								let text = chunk.value();
 								builder.color = TextColor::White.to_raw();
@@ -395,7 +384,7 @@ impl ComplexNbtElementVariant for NbtRegion {
 
 	fn is_open(&self) -> bool { (self.flags & 0b1) > 0 }
 
-	fn max_depth(&self) -> usize { self.max_depth as usize }
+	fn end_x(&self) -> usize { self.end_x as usize }
 
 	unsafe fn toggle(&mut self) {
 		let open = !self.is_open() && !self.is_empty();
@@ -429,9 +418,7 @@ impl ComplexNbtElementVariant for NbtRegion {
 	unsafe fn shut<'a, 'b>(&'b mut self, scope: &'a Scope<'a, 'b>) {
 		self.set_open(false);
 
-		let mut iter = self
-			.children_mut()
-			.array_chunks::<{ Self::CHUNK_BANDWIDTH }>();
+		let mut iter = self.children_mut().array_chunks::<{ Self::CHUNK_BANDWIDTH }>();
 		for elements in iter.by_ref() {
 			scope.spawn(|| {
 				for element in elements {
@@ -455,9 +442,7 @@ impl ComplexNbtElementVariant for NbtRegion {
 	unsafe fn expand<'a, 'b>(&'b mut self, scope: &'a Scope<'a, 'b>) {
 		self.set_open(!self.is_empty());
 		if !self.is_grid_layout() {
-			let mut iter = self
-				.children_mut()
-				.array_chunks::<{ Self::CHUNK_BANDWIDTH }>();
+			let mut iter = self.children_mut().array_chunks::<{ Self::CHUNK_BANDWIDTH }>();
 			for elements in iter.by_ref() {
 				scope.spawn(|| {
 					for element in elements {
@@ -479,8 +464,8 @@ impl ComplexNbtElementVariant for NbtRegion {
 		let mut true_height = 1;
 		let mut height = 1;
 		let mut loaded_chunks = 0_usize;
-		let mut max_depth = 0;
-		
+		let mut end_x = 0;
+
 		for child in self.children() {
 			if child.as_chunk().is_some_and(|chunk| chunk.is_loaded()) {
 				loaded_chunks += 1;
@@ -488,16 +473,16 @@ impl ComplexNbtElementVariant for NbtRegion {
 			true_height += child.true_height() as u32;
 			height += child.height() as u32;
 		}
-		
+
 		if self.is_grid_layout() {
-			max_depth = 16 + 32 * 16;
+			end_x = 16 + 32 * 16;
 			height = 33;
 		}
-		
+
 		self.true_height = true_height;
 		self.height = if self.is_open() { height } else { 1 };
 		self.loaded_chunks = loaded_chunks as u16;
-		self.max_depth = if self.is_open() { max_depth as u32 } else { 0 };
+		self.end_x = if self.is_open() { end_x as u32 } else { 0 };
 	}
 
 	fn on_style_change(&mut self, bookmarks: &mut MarkedLines) -> bool {

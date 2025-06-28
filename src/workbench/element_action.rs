@@ -1,19 +1,47 @@
 use std::cmp::Ordering;
-#[cfg(not(target_arch = "wasm32"))]
-use std::fs::OpenOptions;
-use anyhow::{anyhow, bail, Context};
+#[cfg(not(target_arch = "wasm32"))] use std::fs::OpenOptions;
+
+use anyhow::{Context, anyhow, bail};
 #[cfg(not(target_arch = "wasm32"))]
 use notify::{EventKind, PollWatcher, RecursiveMode, Watcher};
 
-use crate::assets::{ACTION_WHEEL_Z, COPY_FORMATTED_UV, COPY_RAW_UV, INSERT_FROM_CLIPBOARD_UV, INVERT_BOOKMARKS_UV, SORT_COMPOUND_BY_NAME_UV, SORT_COMPOUND_BY_TYPE_UV};
 #[cfg(not(target_arch = "wasm32"))]
-use crate::assets::{OPEN_ARRAY_IN_HEX_UV, OPEN_IN_TXT_UV};
-use crate::elements::{CompoundEntry, NbtByte, NbtByteArray, NbtChunk, NbtCompound, NbtDouble, NbtElement, NbtElementVariant, NbtFloat, NbtInt, NbtIntArray, NbtList, NbtLong, NbtLongArray, NbtPattern, NbtShort, NbtString};
-use crate::render::VertexBufferBuilder;
-use crate::serialization::UncheckedBufWriter;
-use crate::tree::{MutableIndices, NavigationInformation, OwnedIndices, add_element, reorder_element};
-use crate::util::{StrExt, get_clipboard, now, set_clipboard};
-use crate::workbench::{FileUpdateSubscription, FileUpdateSubscriptionType, MarkedLine, MarkedLines, WorkbenchAction};
+use crate::render::assets::{OPEN_ARRAY_IN_HEX_UV, OPEN_IN_TXT_UV};
+use crate::{
+	elements::{
+		NbtElementVariant,
+		array::{NbtByteArray, NbtIntArray, NbtLongArray},
+		byte::NbtByte,
+		chunk::NbtChunk,
+		compound::{CompoundEntry, NbtCompound},
+		double::NbtDouble,
+		element::{NbtElement, NbtPattern},
+		float::NbtFloat,
+		int::NbtInt,
+		list::NbtList,
+		long::NbtLong,
+		short::NbtShort,
+		string::NbtString,
+	},
+	history::WorkbenchAction,
+	render::{
+		assets::{ACTION_WHEEL_Z, COPY_FORMATTED_UV, COPY_RAW_UV, INSERT_FROM_CLIPBOARD_UV, INVERT_BOOKMARKS_UV, SORT_COMPOUND_BY_NAME_UV, SORT_COMPOUND_BY_TYPE_UV},
+		vertex_buffer_builder::VertexBufferBuilder,
+	},
+	serialization::encoder::UncheckedBufWriter,
+	tree::{
+		MutableIndices,
+		actions::{add::add_element, reorder::reorder_element},
+		indices::OwnedIndices,
+		navigate::NavigationInformation,
+	},
+	util::{StrExt, Timestamp, get_clipboard, set_clipboard},
+	workbench::{
+		marked_line::MarkedLine,
+		FileUpdateSubscription,
+		FileUpdateSubscriptionType,
+	},
+};
 
 #[derive(Copy, Clone, PartialEq, Eq)]
 pub enum ElementAction {
@@ -117,12 +145,10 @@ impl ElementAction {
 			array
 		};
 
-		ORDERING[a.value.id() as usize]
-			.cmp(&ORDERING[b.value.id() as usize])
-			.then_with(|| a.key.cmp(&b.key))
+		ORDERING[a.value.id() as usize].cmp(&ORDERING[b.value.id() as usize]).then_with(|| a.key.cmp(&b.key))
 	}
 
-	pub fn apply<'m1, 'm2: 'm1>(self, root: &mut NbtElement, mut indices: OwnedIndices, bookmarks: &mut MarkedLines, mutable_indices: &'m1 mut MutableIndices<'m2>) -> anyhow::Result<Option<WorkbenchAction>> {
+	pub fn apply<'m1, 'm2: 'm1>(self, root: &mut NbtElement, mut indices: OwnedIndices, mi: &'m1 mut MutableIndices<'m2>) -> anyhow::Result<Option<WorkbenchAction>> {
 		match self {
 			action @ (Self::CopyRaw | Self::CopyFormatted) => {
 				use core::fmt::Write;
@@ -152,10 +178,11 @@ impl ElementAction {
 			#[cfg(not(target_arch = "wasm32"))]
 			action @ (Self::OpenArrayInHex | Self::OpenInTxt) => {
 				use std::io::Write;
+				use NbtPattern as Nbt;
 
 				let NavigationInformation { key, element, .. } = root.navigate(&indices).context("Could not navigate indices")?;
 
-				let hash = (now().as_millis() as usize).wrapping_mul(element as *const NbtElement as usize);
+				let hash = (Timestamp::now().elapsed().as_millis() as usize).wrapping_mul(element as *const NbtElement as usize);
 				let path = std::env::temp_dir().join(format!("nbtworkbench-{hash:0width$x}.{ext}", width = usize::BITS as usize / 8, ext = if action == Self::OpenArrayInHex { "bin" } else { "txt" }));
 				let (tx, rx) = std::sync::mpsc::channel();
 				let mut watcher = PollWatcher::new(
@@ -168,27 +195,22 @@ impl ElementAction {
 							}
 						}
 					},
-					notify::Config::default()
-						.with_manual_polling()
-						.with_compare_contents(true),
+					notify::Config::default().with_manual_polling().with_compare_contents(true),
 				)?;
 				let subscription_type = {
-					let mut file = OpenOptions::new()
-						.write(true)
-						.create(true)
-						.open(&path)?;
+					let mut file = OpenOptions::new().write(true).create(true).open(&path)?;
 					if action == Self::OpenArrayInHex {
 						let mut buffer = UncheckedBufWriter::new();
 						element.to_le_bytes(&mut buffer);
 						let contents = buffer.finish();
-						let (subscription_type, bytes) = match (element.id(), contents.as_slice()) {
-							(NbtByteArray::ID, [_, _, _, _, bytes @ ..]) => (FileUpdateSubscriptionType::ByteArray, bytes),
-							(NbtIntArray::ID, [_, _, _, _, bytes @ ..]) => (FileUpdateSubscriptionType::IntArray, bytes),
-							(NbtLongArray::ID, [_, _, _, _, bytes @ ..]) => (FileUpdateSubscriptionType::LongArray, bytes),
-							(NbtList::ID, [NbtByte::ID, _, _, _, _, bytes @ ..]) => (FileUpdateSubscriptionType::ByteList, bytes),
-							(NbtList::ID, [NbtInt::ID, _, _, _, _, bytes @ ..]) => (FileUpdateSubscriptionType::IntList, bytes),
-							(NbtList::ID, [NbtShort::ID, _, _, _, _, bytes @ ..]) => (FileUpdateSubscriptionType::ShortList, bytes),
-							(NbtList::ID, [NbtLong::ID, _, _, _, _, bytes @ ..]) => (FileUpdateSubscriptionType::LongList, bytes),
+						let (subscription_type, bytes) = match (element.as_pattern(), contents.as_slice()) {
+							(Nbt::ByteArray(_), [_, _, _, _, bytes @ ..]) => (FileUpdateSubscriptionType::ByteArray, bytes),
+							(Nbt::IntArray(_), [_, _, _, _, bytes @ ..]) => (FileUpdateSubscriptionType::IntArray, bytes),
+							(Nbt::LongArray(_), [_, _, _, _, bytes @ ..]) => (FileUpdateSubscriptionType::LongArray, bytes),
+							(Nbt::List(_), [NbtByte::ID, _, _, _, _, bytes @ ..]) => (FileUpdateSubscriptionType::ByteList, bytes),
+							(Nbt::List(_), [NbtInt::ID, _, _, _, _, bytes @ ..]) => (FileUpdateSubscriptionType::IntList, bytes),
+							(Nbt::List(_), [NbtShort::ID, _, _, _, _, bytes @ ..]) => (FileUpdateSubscriptionType::ShortList, bytes),
+							(Nbt::List(_), [NbtLong::ID, _, _, _, _, bytes @ ..]) => (FileUpdateSubscriptionType::LongList, bytes),
 							_ => return Ok(None),
 						};
 						file.write_all(bytes)?;
@@ -217,29 +239,25 @@ impl ElementAction {
 				};
 				watcher.watch(&path, RecursiveMode::NonRecursive)?;
 				crate::util::open_file(&path.display().to_string())?;
-				mutable_indices.set_subscription(Some(FileUpdateSubscription::new(subscription_type, indices, rx, watcher)));
+				*mi.subscription = Some(FileUpdateSubscription::new(subscription_type, indices, rx, watcher));
 				Ok(None)
 			}
 			action @ (Self::SortCompoundByName | Self::SortCompoundByType) => {
 				let NavigationInformation { element, .. } = root.navigate(&indices).context("Could not navigate indices")?;
 
 				let mapping = match element.as_pattern() {
-					NbtPattern::Compound(compound) => compound
-						.map
-						.create_sort_mapping(if action == Self::SortCompoundByName { Self::by_name } else { Self::by_type }),
-					NbtPattern::Chunk(chunk) => chunk
-						.map
-						.create_sort_mapping(if action == Self::SortCompoundByName { Self::by_name } else { Self::by_type }),
+					NbtPattern::Compound(compound) => compound.map.create_sort_mapping(if action == Self::SortCompoundByName { Self::by_name } else { Self::by_type }),
+					NbtPattern::Chunk(chunk) => chunk.map.create_sort_mapping(if action == Self::SortCompoundByName { Self::by_name } else { Self::by_type }),
 					_ => bail!("Could not sort element"),
 				};
 
-				Ok(Some(reorder_element(root, indices, mapping, bookmarks, mutable_indices)?.into_action()))
+				Ok(Some(reorder_element(root, indices, mapping, mi)?.into_action()))
 			}
 			Self::InsertFromClipboard => {
 				let clipboard = get_clipboard().context("Could not get clipboard")?;
 				let kv = NbtElement::from_str(&clipboard).map_err(|idx| anyhow!("Could not parse clipboard as SNBT (failed at index {idx})"))?;
 				indices.push(0);
-				Ok(Some(add_element(root, kv, indices, bookmarks, mutable_indices).context("Failed to insert element")?.into_action()))
+				Ok(Some(add_element(root, kv, indices, mi).context("Failed to insert element")?.into_action()))
 			}
 			Self::InvertBookmarks => {
 				let NavigationInformation {
@@ -251,7 +269,7 @@ impl ElementAction {
 				let mut queue = Vec::new();
 				queue.push(element);
 				while let Some(element) = queue.pop() {
-					let _ = bookmarks.toggle(MarkedLine::new(true_line_number, line_number));
+					let _ = mi.bookmarks.toggle(MarkedLine::new(true_line_number, line_number));
 
 					if element.is_open() {
 						if let Some(iter) = element.values() {

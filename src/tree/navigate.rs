@@ -2,8 +2,11 @@
 
 use compact_str::{CompactString, ToCompactString};
 use thiserror::Error;
-use crate::elements::NbtElement;
-use crate::tree::{Indices, OwnedIndices};
+
+use crate::{
+	elements::element::NbtElement,
+	tree::{Indices, OwnedIndices},
+};
 
 pub struct NavigationInformation<'a> {
 	pub idx: Option<usize>,
@@ -25,7 +28,7 @@ impl<'a> NavigationInformation<'a> {
 			if idx >= len {
 				return Err(NavigationError::IndexOutOfBounds { idx, indices: indices.to_owned() }.into());
 			}
-			
+
 			line_number += 1;
 			true_line_number += 1;
 			for jdx in 0..idx {
@@ -69,7 +72,7 @@ impl<'a> NavigationInformationMut<'a> {
 			if idx >= len {
 				return Err(NavigationError::IndexOutOfBounds { idx, indices: indices.to_owned() }.into());
 			}
-			
+
 			line_number += 1;
 			true_line_number += 1;
 			for jdx in 0..idx {
@@ -123,7 +126,7 @@ impl<'nbt, 'indices> ParentNavigationInformation<'nbt, 'indices> {
 			if last >= len {
 				return Err(NavigationError::IndexOutOfBounds { idx: last, indices: parent_indices.to_owned() }.into());
 			}
-			
+
 			line_number += 1;
 			true_line_number += 1;
 			for jdx in 0..idx {
@@ -141,7 +144,7 @@ impl<'nbt, 'indices> ParentNavigationInformation<'nbt, 'indices> {
 			if last >= len {
 				return Err(NavigationError::IndexOutOfBounds { idx: last, indices: parent_indices.to_owned() }.into());
 			}
-			
+
 			line_number += 1;
 			true_line_number += 1;
 			for jdx in 0..last {
@@ -184,7 +187,7 @@ impl<'nbt, 'indices> ParentNavigationInformationMut<'nbt, 'indices> {
 			if last >= len {
 				return Err(NavigationError::IndexOutOfBounds { idx: last, indices: parent_indices.to_owned() }.into());
 			}
-			
+
 			line_number += 1;
 			true_line_number += 1;
 			for jdx in 0..idx {
@@ -198,7 +201,7 @@ impl<'nbt, 'indices> ParentNavigationInformationMut<'nbt, 'indices> {
 
 		{
 			let len = parent.len().ok_or_else(|| NavigationError::ParentWasPrimitive { indices: parent_indices.to_owned() })?;
-			
+
 			if last >= len {
 				return Err(NavigationError::IndexOutOfBounds { idx: last, indices: parent_indices.to_owned() }.into());
 			}
@@ -214,9 +217,7 @@ impl<'nbt, 'indices> ParentNavigationInformationMut<'nbt, 'indices> {
 
 		Ok(Self {
 			idx: last,
-			key: parent
-				.get(last)
-				.and_then(|(a, _)| a.map(|x| x.to_compact_string())),
+			key: parent.get(last).and_then(|(a, _)| a.map(|x| x.to_compact_string())),
 			parent,
 			line_number,
 			true_line_number,
@@ -230,7 +231,7 @@ pub enum ParentNavigationError {
 	#[error("Indices were empty, root has no parent.")]
 	EmptyIndices,
 	#[error(transparent)]
-	NavigationError(#[from] NavigationError)
+	NavigationError(#[from] NavigationError),
 }
 
 pub struct IterativeNavigationInformationMut<'nbt, 'indices> {

@@ -1,22 +1,24 @@
 pub mod assets;
-mod color;
+pub mod color;
 pub mod shader;
 pub mod text_shader;
-mod vertex_buffer_builder;
+pub mod vertex_buffer_builder;
 pub mod widget;
-mod window;
+pub mod window;
 
-pub use color::*;
-pub use vertex_buffer_builder::*;
-pub use window::*;
-
-use crate::assets::{
-	BASE_TEXT_Z, BASE_Z, BOOKMARK_UV, BOOKMARK_Z, END_LINE_NUMBER_SEPARATOR_UV, HEADER_SIZE, HIDDEN_BOOKMARK_UV, INSERTION_CHUNK_UV, INSERTION_UV, INVALID_STRIPE_UV, LINE_NUMBER_SEPARATOR_UV, LINE_NUMBER_Z, SCROLLBAR_BOOKMARK_Z,
-	SELECTED_TOGGLE_OFF_UV, SELECTED_TOGGLE_ON_UV, TEXT_UNDERLINE_UV, TOGGLE_Z, UNSELECTED_TOGGLE_OFF_UV, UNSELECTED_TOGGLE_ON_UV,
+use crate::{
+	elements::element::NbtElement,
+	render::{
+		assets::{
+			BASE_TEXT_Z, BASE_Z, BOOKMARK_UV, BOOKMARK_Z, END_LINE_NUMBER_SEPARATOR_UV, HEADER_SIZE, HIDDEN_BOOKMARK_UV, INSERTION_CHUNK_UV, INSERTION_UV, INVALID_STRIPE_UV, LINE_NUMBER_SEPARATOR_UV, LINE_NUMBER_Z, SCROLLBAR_BOOKMARK_Z,
+			SELECTED_TOGGLE_OFF_UV, SELECTED_TOGGLE_ON_UV, TEXT_UNDERLINE_UV, TOGGLE_Z, UNSELECTED_TOGGLE_OFF_UV, UNSELECTED_TOGGLE_ON_UV,
+		},
+		color::TextColor,
+		vertex_buffer_builder::VertexBufferBuilder,
+	},
+	util::{StrExt, Vec2u},
+	workbench::marked_line::MarkedLineSlice,
 };
-use crate::elements::NbtElement;
-use crate::util::{StrExt, Vec2u};
-use crate::workbench::MarkedLineSlice;
 
 pub struct RenderContext<'a> {
 	selecting_key: bool,
@@ -29,8 +31,7 @@ pub struct RenderContext<'a> {
 	key_duplicate_error: bool,
 	ghost: Option<(&'a NbtElement, Vec2u)>,
 	left_margin: usize,
-	mouse_x: usize,
-	mouse_y: usize,
+	pub mouse: Vec2u,
 	line_number: usize,
 	// the most errors from invalid selected text can be 2 lines (duplicate key)
 	red_line_numbers: [usize; 2],
@@ -44,7 +45,7 @@ pub struct RenderContext<'a> {
 impl<'a> RenderContext<'a> {
 	#[must_use]
 	#[allow(clippy::type_complexity)] // forbidden is fine to be like that, c'mon
-	pub fn new(selected_text_y: Option<usize>, selected_key: Option<Box<str>>, selected_value: Option<Box<str>>, selecting_key: bool, ghost: Option<(&'a NbtElement, Vec2u)>, left_margin: usize, mouse: (usize, usize), freehand: bool) -> Self {
+	pub fn new(selected_text_y: Option<usize>, selected_key: Option<Box<str>>, selected_value: Option<Box<str>>, selecting_key: bool, ghost: Option<(&'a NbtElement, Vec2u)>, left_margin: usize, mouse: Vec2u, freehand: bool) -> Self {
 		Self {
 			selecting_key,
 			selected_text_y,
@@ -56,8 +57,7 @@ impl<'a> RenderContext<'a> {
 			key_duplicate_error: false,
 			ghost,
 			left_margin,
-			mouse_x: mouse.0,
-			mouse_y: mouse.1,
+			mouse,
 			line_number: 1,
 			red_line_numbers: [0, 0],
 			x_offset: 16 + left_margin,
@@ -79,7 +79,7 @@ impl<'a> RenderContext<'a> {
 	pub fn selected_text_y(&self) -> Option<usize> { self.selected_text_y }
 
 	#[must_use]
-	pub const fn mouse_pos(&self) -> Vec2u { Vec2u::new(self.mouse_x, self.mouse_y) }
+	pub const fn mouse(&self) -> Vec2u { self.mouse }
 
 	#[must_use]
 	pub const fn left_margin(&self) -> usize { self.left_margin }
@@ -128,8 +128,8 @@ impl<'a> RenderContext<'a> {
 		let pos = pos.into();
 		let x = (pos.0 - self.left_margin) / 16;
 		let y = (pos.1 - HEADER_SIZE) / 16;
-		let hovered = if (self.mouse_x >= self.left_margin) & (self.mouse_y >= HEADER_SIZE) {
-			((x >= (self.mouse_x - self.left_margin) / 16) || self.freehand) & (y == (self.mouse_y - HEADER_SIZE) / 16)
+		let hovered = if (self.mouse.x >= self.left_margin) & (self.mouse.y >= HEADER_SIZE) {
+			((x >= (self.mouse.x - self.left_margin) / 16) || self.freehand) & (y == (self.mouse.y - HEADER_SIZE) / 16)
 		} else {
 			false
 		};
@@ -167,16 +167,8 @@ impl<'a> RenderContext<'a> {
 	}
 
 	pub fn draw_error_underline(&self, x: usize, y: usize, builder: &mut VertexBufferBuilder) {
-		let key_width = self
-			.selected_key
-			.as_deref()
-			.map(str::width)
-			.unwrap_or(0);
-		let value_width = self
-			.selected_value
-			.as_deref()
-			.map(str::width)
-			.unwrap_or(0);
+		let key_width = self.selected_key.as_deref().map(str::width).unwrap_or(0);
+		let value_width = self.selected_value.as_deref().map(str::width).unwrap_or(0);
 		let (overridden_width, x_shift) = if self.selected_key.is_some() {
 			if self.extend_error {
 				(key_width + value_width + ": ".width(), 0)
@@ -302,15 +294,11 @@ impl<'a> RenderContext<'a> {
 	}
 
 	pub fn render_key_value_errors(&mut self, builder: &mut VertexBufferBuilder) {
-		if self.mouse_y < HEADER_SIZE {
+		if self.mouse.y < HEADER_SIZE {
 			return
 		}
-		let y = ((self.mouse_y - HEADER_SIZE) & !15) + HEADER_SIZE;
-		if self
-			.red_line_numbers
-			.into_iter()
-			.any(|red_line_number| red_line_number == y)
-		{
+		let y = ((self.mouse.y - HEADER_SIZE) & !15) + HEADER_SIZE;
+		if self.red_line_numbers.into_iter().any(|red_line_number| red_line_number == y) {
 			let mut errors = vec![];
 			if self.invalid_value_error {
 				errors.push("Error! The currently entered value is not valid for this type.");
@@ -322,7 +310,7 @@ impl<'a> RenderContext<'a> {
 				errors.push("Error! The current key is a duplicate of another one.");
 			}
 			let color_before = core::mem::replace(&mut builder.color, TextColor::Red.to_raw());
-			builder.draw_tooltip(&errors, (self.mouse_x, self.mouse_y), false);
+			builder.draw_tooltip(&errors, self.mouse, false);
 			builder.color = color_before;
 		}
 	}

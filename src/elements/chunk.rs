@@ -1,26 +1,41 @@
-use std::borrow::Cow;
-use std::fmt::{Display, Formatter};
-use std::hint::likely;
-use std::ops::{Deref, DerefMut};
+use std::{
+	borrow::Cow,
+	fmt::{Display, Formatter},
+	hint::likely,
+	ops::{Deref, DerefMut},
+};
 
 use zune_inflate::{DeflateDecoder, DeflateOptions};
 
-use crate::assets::{CHUNK_GHOST_UV, CHUNK_UV, CONNECTION_UV, HEADER_SIZE, JUST_OVERLAPPING_BASE_TEXT_Z};
-use crate::elements::result::{NbtParseResult, err, from_opt, from_result, ok};
-use crate::elements::{ComplexNbtElementVariant, CompoundEntry, Matches, NbtCompound, NbtElement, NbtElementVariant};
-use crate::render::{RenderContext, TextColor, VertexBufferBuilder};
-use crate::serialization::{Decoder, PrettyDisplay, PrettyFormatter, UncheckedBufWriter};
-use crate::util::{StrExt, Vec2u, now};
 #[cfg(target_arch = "wasm32")]
 use crate::wasm::{FakeScope as Scope, fake_scope as scope};
-use crate::workbench::FileFormat;
+use crate::{
+	elements::{
+		ComplexNbtElementVariant, Matches, NbtElement, NbtElementVariant,
+		compound::{CompoundEntry, NbtCompound},
+		result::{NbtParseResult, err, from_opt, from_result, ok},
+	},
+	render::{
+		RenderContext,
+		assets::{CHUNK_GHOST_UV, CHUNK_UV, CONNECTION_UV, HEADER_SIZE, JUST_OVERLAPPING_BASE_TEXT_Z},
+		color::TextColor,
+		vertex_buffer_builder::VertexBufferBuilder,
+	},
+	serialization::{
+		decoder::Decoder,
+		encoder::UncheckedBufWriter,
+		formatter::{PrettyDisplay, PrettyFormatter},
+	},
+	util::{StrExt, Timestamp, Vec2u},
+	workbench::tab::ChunkFileFormat,
+};
 
 #[repr(C)]
 pub struct NbtChunk {
 	inner: Box<NbtCompound>,
 	pub last_modified: u32,
 	// need to restrict this file format to only use GZIP, ZLIB, Uncompressed, and LZ4
-	compression: FileFormat,
+	format: ChunkFileFormat,
 	pub x: u8,
 	pub z: u8,
 }
@@ -37,8 +52,8 @@ impl Default for NbtChunk {
 	fn default() -> Self {
 		Self {
 			inner: Box::new(NbtCompound::default()),
-			last_modified: now().as_secs() as u32,
-			compression: FileFormat::Zlib,
+			last_modified: Timestamp::now().elapsed().as_secs() as u32,
+			format: ChunkFileFormat::default(),
 			x: 0,
 			z: 0,
 		}
@@ -50,7 +65,7 @@ impl Clone for NbtChunk {
 		Self {
 			inner: unsafe { Box::try_new(self.inner.deref().clone()).unwrap_unchecked() },
 			last_modified: self.last_modified,
-			compression: self.compression,
+			format: self.format,
 			x: self.x,
 			z: self.z,
 		}
@@ -101,26 +116,20 @@ impl NbtElementVariant for NbtChunk {
 
 	fn from_str0(mut s: &str) -> Result<(&str, Self), usize>
 	where Self: Sized {
-		let digits = s
-			.bytes()
-			.take_while(|b| b.is_ascii_digit())
-			.count();
+		let digits = s.bytes().take_while(|b| b.is_ascii_digit()).count();
 		let (digits, s2) = s.split_at(digits);
 		let Ok(x @ 0..=31) = digits.parse::<u8>() else { return Err(s.len()) };
 		s = s2.trim_start();
 
 		s = s.strip_prefix('|').ok_or(s.len())?.trim_start();
 
-		let digits = s
-			.bytes()
-			.take_while(|b| b.is_ascii_digit())
-			.count();
+		let digits = s.bytes().take_while(|b| b.is_ascii_digit()).count();
 		let (digits, s2) = s.split_at(digits);
 		let Ok(z @ 0..=31) = digits.parse::<u8>() else { return Err(s.len()) };
 		s = s2.trim_start();
 
 		let (s, compound) = NbtCompound::from_str0(s)?;
-		Ok((s, Self::new(compound, (x, z), FileFormat::Zlib, now().as_secs() as u32)))
+		Ok((s, Self::new(compound, (x, z), ChunkFileFormat::Zlib, Timestamp::now().elapsed().as_secs() as u32)))
 	}
 
 	fn from_bytes<'a, D: Decoder<'a>>(decoder: &mut D, idx: usize) -> NbtParseResult<Self>
@@ -128,18 +137,8 @@ impl NbtElementVariant for NbtChunk {
 		let bytes = decoder.rest();
 		let (offsets, bytes) = from_opt(bytes.split_first_chunk::<4096>(), "header wasn't big enough")?;
 		let (last_modifieds, bytes) = from_opt(bytes.split_first_chunk::<4096>(), "header wasn't big enough")?;
-		let last_modified = u32::from_be_bytes(unsafe {
-			last_modifieds[idx * 4..=idx * 4 + 3]
-				.as_ptr()
-				.cast::<[u8; 4]>()
-				.read()
-		});
-		let offset = u32::from_be_bytes(unsafe {
-			offsets[idx * 4..=idx * 4 + 3]
-				.as_ptr()
-				.cast::<[u8; 4]>()
-				.read()
-		});
+		let last_modified = u32::from_be_bytes(unsafe { last_modifieds[idx * 4..=idx * 4 + 3].as_ptr().cast::<[u8; 4]>().read() });
+		let offset = u32::from_be_bytes(unsafe { offsets[idx * 4..=idx * 4 + 3].as_ptr().cast::<[u8; 4]>().read() });
 		if offset < 512 {
 			return ok(NbtChunk::unloaded_from_pos(idx));
 		}
@@ -160,15 +159,15 @@ impl NbtElementVariant for NbtChunk {
 			let data = &data[..chunk_len];
 			let (compression, element) = match compression {
 				1 => (
-					FileFormat::Gzip,
+					ChunkFileFormat::Gzip,
 					NbtElement::from_be_file(&from_result(DeflateDecoder::new_with_options(data, DeflateOptions::default().set_confirm_checksum(false)).decode_gzip())?)?,
 				),
 				2 => (
-					FileFormat::Zlib,
+					ChunkFileFormat::Zlib,
 					NbtElement::from_be_file(&from_result(DeflateDecoder::new_with_options(data, DeflateOptions::default().set_confirm_checksum(false)).decode_zlib())?)?,
 				),
-				3 => (FileFormat::Nbt, NbtElement::from_be_file(data)?),
-				4 => (FileFormat::Lz4, NbtElement::from_be_file(&from_result(lz4_flex::decompress(data, data.len()))?)?),
+				3 => (ChunkFileFormat::Nbt, NbtElement::from_be_file(data)?),
+				4 => (ChunkFileFormat::Lz4, NbtElement::from_be_file(&from_result(lz4_flex::decompress(data, data.len()))?)?),
 				_ => return err("Unknown compression format"),
 			};
 			return ok(NbtChunk::new(from_opt(element.into_compound(), "Chunk was not of type compound")?, pos, compression, last_modified));
@@ -178,22 +177,17 @@ impl NbtElementVariant for NbtChunk {
 
 	fn to_be_bytes(&self, writer: &mut UncheckedBufWriter) {
 		// todo, mcc files
-		let encoded = self.compression.encode(unsafe {
-			(self.inner.as_ref() as *const NbtCompound)
-				.cast::<NbtElement>()
-				.as_ref_unchecked()
-		});
+		let encoded = self.format.encode(unsafe { (self.inner.as_ref() as *const NbtCompound).cast::<NbtElement>().as_ref_unchecked() });
 		let len = encoded.len() + 1;
 		// plus four for the len field writing, and + 1 for the compression
 		let pad_len = (4096 - (len + 4) % 4096) % 4096;
 		writer.write(&(len as u32).to_be_bytes());
 		writer.write(
-			&match self.compression {
-				FileFormat::Gzip => 1_u8,
-				FileFormat::Zlib => 2_u8,
-				FileFormat::Nbt => 3_u8,
-				FileFormat::Lz4 => 4_u8,
-				_ => unsafe { core::hint::unreachable_unchecked() },
+			&match self.format {
+				ChunkFileFormat::Gzip => 1_u8,
+				ChunkFileFormat::Zlib => 2_u8,
+				ChunkFileFormat::Nbt => 3_u8,
+				ChunkFileFormat::Lz4 => 4_u8,
 			}
 			.to_be_bytes(),
 		);
@@ -224,15 +218,8 @@ impl NbtElementVariant for NbtChunk {
 			if !self.is_empty() {
 				ctx.draw_toggle(pos - (16, 0), self.is_open(), builder);
 			}
-			ctx.check_for_invalid_key(|key| {
-				!key.parse::<usize>()
-					.is_ok_and(|x| (0..=31).contains(&x))
-			});
-			ctx.check_for_invalid_value(|value| {
-				!value
-					.parse::<usize>()
-					.is_ok_and(|z| (0..=31).contains(&z))
-			});
+			ctx.check_for_invalid_key(|key| !key.parse::<usize>().is_ok_and(|x| (0..=31).contains(&x)));
+			ctx.check_for_invalid_value(|value| !value.parse::<usize>().is_ok_and(|z| (0..=31).contains(&z)));
 			ctx.render_errors(pos, builder);
 			if ctx.forbid(pos) {
 				builder.settings(pos + (20, 0), false, JUST_OVERLAPPING_BASE_TEXT_Z);
@@ -253,11 +240,7 @@ impl NbtElementVariant for NbtChunk {
 				let children_contains_forbidden = 'f: {
 					let mut y = ctx.pos().y;
 					for CompoundEntry { key: _, value } in self.children() {
-						if ctx.selected_text_y() == Some(y.saturating_sub(*remaining_scroll * 16))
-							&& ctx
-								.selected_text_y()
-								.is_some_and(|y| y >= HEADER_SIZE)
-						{
+						if ctx.selected_text_y() == Some(y.saturating_sub(*remaining_scroll * 16)) && ctx.selected_text_y().is_some_and(|y| y >= HEADER_SIZE) {
 							break 'f true;
 						}
 						y += value.height() * 16;
@@ -319,18 +302,18 @@ impl NbtElementVariant for NbtChunk {
 
 impl NbtChunk {
 	#[must_use]
-	pub fn new(inner: NbtCompound, pos: (u8, u8), compression: FileFormat, last_modified: u32) -> Self {
+	pub fn new(inner: NbtCompound, pos: (u8, u8), compression: ChunkFileFormat, last_modified: u32) -> Self {
 		Self {
 			x: pos.0,
 			z: pos.1,
 			inner: Box::new(inner),
-			compression,
+			format: compression,
 			last_modified,
 		}
 	}
 
 	#[must_use]
-	pub fn unloaded_from_pos(pos: usize) -> Self { Self::new(NbtCompound::default(), ((pos / 32) as u8, (pos % 32) as u8), FileFormat::Zlib, 0) }
+	pub fn unloaded_from_pos(pos: usize) -> Self { Self::new(NbtCompound::default(), ((pos / 32) as u8, (pos % 32) as u8), ChunkFileFormat::default(), 0) }
 
 	#[must_use]
 	pub fn pos(&self) -> usize { self.x as usize * 32 + self.z as usize }

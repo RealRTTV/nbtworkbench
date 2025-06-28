@@ -3,8 +3,11 @@ use std::mem::ManuallyDrop;
 pub use ZOffset::*;
 use lazy_static::lazy_static;
 use zune_png::zune_core::options::DecoderOptions;
-use crate::render::Theme;
-use crate::util::{Vec2u, now};
+
+use crate::{
+	render::window::Theme,
+	util::{Timestamp, Vec2u},
+};
 
 pub const HEADER_SIZE: usize = 48;
 
@@ -26,6 +29,7 @@ const ELEVEN_MUSIC_DISC_ICON: &[u8] = include_bytes!("../assets/discs/11.hex");
 const RELIC_MUSIC_DISC_ICON: &[u8] = include_bytes!("../assets/discs/relic.hex");
 const STAL_MUSIC_DISC_ICON: &[u8] = include_bytes!("../assets/discs/stal.hex");
 
+// todo: make fn in RenderContext for this
 pub const CONNECTION_UV: Vec2u = Vec2u::new(64, 64);
 pub const FROM_CLIPBOARD_UV: Vec2u = Vec2u::new(112, 32);
 pub const FROM_CLIPBOARD_GHOST_UV: Vec2u = Vec2u::new(112, 48);
@@ -187,12 +191,8 @@ pub enum ZOffset {
 }
 
 lazy_static! {
-	static ref DARK_ATLAS_CELL: Vec<u8> = zune_png::PngDecoder::new_with_options(DARK_ATLAS_ENCODED, DecoderOptions::new_fast().png_set_confirm_crc(false))
-		.decode_raw()
-		.unwrap();
-	static ref LIGHT_ATLAS_CELL: Vec<u8> = zune_png::PngDecoder::new_with_options(LIGHT_ATLAS_ENCODED, DecoderOptions::new_fast().png_set_confirm_crc(false))
-		.decode_raw()
-		.unwrap();
+	static ref DARK_ATLAS_CELL: Vec<u8> = zune_png::PngDecoder::new_with_options(DARK_ATLAS_ENCODED, DecoderOptions::new_fast().png_set_confirm_crc(false)).decode_raw().unwrap();
+	static ref LIGHT_ATLAS_CELL: Vec<u8> = zune_png::PngDecoder::new_with_options(LIGHT_ATLAS_ENCODED, DecoderOptions::new_fast().png_set_confirm_crc(false)).decode_raw().unwrap();
 }
 
 pub fn atlas(theme: Theme) -> &'static [u8] {
@@ -203,7 +203,7 @@ pub fn atlas(theme: Theme) -> &'static [u8] {
 }
 
 pub fn icon() -> Vec<u8> {
-	let original = match (now().as_millis() & 7) as u8 {
+	let original = match (Timestamp::now().elapsed().as_millis() & 7) as u8 {
 		// it's a good random only because its used once
 		0 => OTHERSIDE_MUSIC_DISC_ICON,
 		1 => PIGSTEP_MUSIC_DISC_ICON,
@@ -219,33 +219,15 @@ pub fn icon() -> Vec<u8> {
 	for y in 0..16 {
 		for x in 0..16 {
 			unsafe {
-				let value = original
-					.as_ptr()
-					.cast::<i32>()
-					.add(y * 16 + x)
-					.read_unaligned();
+				let value = original.as_ptr().cast::<i32>().add(y * 16 + x).read_unaligned();
 				let offset = y * 256 + x * 4;
-				scaled
-					.as_mut_ptr()
-					.add(offset)
-					.cast::<(i32, i32, i32, i32)>()
-					.write((value, value, value, value));
+				scaled.as_mut_ptr().add(offset).cast::<(i32, i32, i32, i32)>().write((value, value, value, value));
 			}
 		}
 		unsafe {
 			let ptr = scaled.as_ptr().cast::<[i32; 64]>().add(y * 4);
-			scaled
-				.as_mut_ptr()
-				.cast::<[i32; 64]>()
-				.add(y * 4 + 1)
-				.cast::<u8>()
-				.copy_from_nonoverlapping(ptr.cast(), 256);
-			scaled
-				.as_mut_ptr()
-				.cast::<[i32; 64]>()
-				.add(y * 4 + 2)
-				.cast::<u8>()
-				.copy_from_nonoverlapping(ptr.cast(), 512);
+			scaled.as_mut_ptr().cast::<[i32; 64]>().add(y * 4 + 1).cast::<u8>().copy_from_nonoverlapping(ptr.cast(), 256);
+			scaled.as_mut_ptr().cast::<[i32; 64]>().add(y * 4 + 2).cast::<u8>().copy_from_nonoverlapping(ptr.cast(), 512);
 		}
 	}
 	let mut scaled = ManuallyDrop::new(core::hint::black_box(scaled));

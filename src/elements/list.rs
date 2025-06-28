@@ -1,46 +1,46 @@
-use std::borrow::Cow;
-use std::fmt::{Display, Formatter, Write};
-use std::hint::likely;
-use std::slice::{Iter, IterMut};
 #[cfg(not(target_arch = "wasm32"))] use std::thread::{Scope, scope};
+use std::{
+	borrow::Cow,
+	fmt::{Display, Formatter, Write},
+	hint::likely,
+	slice::{Iter, IterMut},
+};
 
-use crate::assets::{CONNECTION_UV, JUST_OVERLAPPING_BASE_TEXT_Z, LIST_GHOST_UV, LIST_UV};
-use crate::elements::result::NbtParseResult;
-use crate::elements::{ComplexNbtElementVariant, Matches, NbtCompound, NbtElement, NbtElementVariant, id_to_string_name};
-use crate::render::{RenderContext, TextColor, VertexBufferBuilder};
-use crate::serialization::{Decoder, PrettyDisplay, PrettyFormatter, UncheckedBufWriter};
-use crate::util::Vec2u;
 #[cfg(target_arch = "wasm32")]
 use crate::wasm::{FakeScope as Scope, fake_scope as scope};
+use crate::{
+	elements::{ComplexNbtElementVariant, Matches, NbtElement, NbtElementVariant, compound::NbtCompound, element::id_to_string_name, result::NbtParseResult},
+	render::{
+		RenderContext,
+		assets::{CONNECTION_UV, JUST_OVERLAPPING_BASE_TEXT_Z, LIST_GHOST_UV, LIST_UV},
+		color::TextColor,
+		vertex_buffer_builder::VertexBufferBuilder,
+	},
+	serialization::{
+		decoder::Decoder,
+		encoder::UncheckedBufWriter,
+		formatter::{PrettyDisplay, PrettyFormatter},
+	},
+	util::Vec2u,
+};
+use crate::render::widget::selected_text::SelectedText;
 
 #[repr(C)]
 pub struct NbtList {
 	pub elements: Box<Vec<NbtElement>>,
 	height: u32,
 	true_height: u32,
-	max_depth: u32,
+	end_x: u32,
 	elements_bitset: u16,
 	open: bool,
 }
 
 impl Matches for NbtList {
-	fn matches(&self, other: &Self) -> bool {
-		if self.is_empty() {
-			other.is_empty()
-		} else {
-			self.elements
-				.iter()
-				.all(|a| other.elements.iter().any(|b| a.matches(b)))
-		}
-	}
+	fn matches(&self, other: &Self) -> bool { if self.is_empty() { other.is_empty() } else { self.elements.iter().all(|a| other.elements.iter().any(|b| a.matches(b))) } }
 }
 
 impl PartialEq for NbtList {
-	fn eq(&self, other: &Self) -> bool {
-		self.elements
-			.as_slice()
-			.eq(other.elements.as_slice())
-	}
+	fn eq(&self, other: &Self) -> bool { self.elements.as_slice().eq(other.elements.as_slice()) }
 }
 
 impl Default for NbtList {
@@ -49,7 +49,7 @@ impl Default for NbtList {
 			elements: Box::new(vec![]),
 			height: 1,
 			true_height: 1,
-			max_depth: 0,
+			end_x: 0,
 			elements_bitset: 0,
 			open: false,
 		}
@@ -60,16 +60,13 @@ impl Clone for NbtList {
 	fn clone(&self) -> Self {
 		let mut vec = unsafe { Vec::try_with_capacity(self.len()).unwrap_unchecked() };
 		for src in self.elements.iter() {
-			unsafe {
-				vec.push_within_capacity(src.clone())
-					.unwrap_unchecked()
-			};
+			unsafe { vec.push_within_capacity(src.clone()).unwrap_unchecked() };
 		}
 		Self {
 			elements: unsafe { Box::try_new(vec).unwrap_unchecked() },
 			height: self.height,
 			true_height: self.true_height,
-			max_depth: self.max_depth,
+			end_x: self.end_x,
 			elements_bitset: self.elements_bitset,
 			open: self.open,
 		}
@@ -105,7 +102,7 @@ impl PrettyDisplay for NbtList {
 			f.increase();
 			for (idx, element) in self.children().enumerate() {
 				f.indent();
-				if heterogeneous && element.id() != NbtCompound::ID {
+				if heterogeneous && element.is_compound() {
 					f.write_str("{ '': ");
 					element.pretty_fmt(f);
 					f.write_str(" }");
@@ -156,11 +153,7 @@ impl NbtElementVariant for NbtList {
 		while !s.starts_with(']') {
 			let (s2, mut element) = NbtElement::from_str0(s, NbtElement::parse_int)?;
 			// SAFETY: no caches have been made
-			element = unsafe {
-				element
-					.try_compound_singleton_into_inner()
-					.unwrap_or_else(|element| element)
-			};
+			element = unsafe { element.try_compound_singleton_into_inner().unwrap_or_else(|element| element) };
 			unsafe { list.insert(list.len(), element) }.map_err(|_| s.len())?;
 			s = s2.trim_start();
 			if let Some(s2) = s.strip_prefix(',') {
@@ -186,18 +179,14 @@ impl NbtElementVariant for NbtList {
 		for _ in 0..len {
 			let mut element = NbtElement::from_bytes(element, decoder)?;
 			// SAFETY: no caches have been made
-			element = unsafe {
-				element
-					.try_compound_singleton_into_inner()
-					.unwrap_or_else(|element| element)
-			};
+			element = unsafe { element.try_compound_singleton_into_inner().unwrap_or_else(|element| element) };
 			from_opt(vec.push_within_capacity(element).ok(), "Vec was larger that stated")?;
 		}
 		let mut list = Self {
 			elements: unsafe { Box::try_new(vec).unwrap_unchecked() },
 			height: 1,
 			true_height: 1,
-			max_depth: 0,
+			end_x: 0,
 			elements_bitset: 1 << element,
 			open: false,
 		};
@@ -332,7 +321,7 @@ impl ComplexNbtElementVariant for NbtList {
 			elements: Box::new(entries),
 			open: false,
 			elements_bitset: 0,
-			max_depth: 0,
+			end_x: 0,
 		};
 		this.recache_elements_bitset();
 		this
@@ -348,7 +337,7 @@ impl ComplexNbtElementVariant for NbtList {
 
 	fn is_open(&self) -> bool { self.open }
 
-	fn max_depth(&self) -> usize { self.max_depth as usize }
+	fn end_x(&self) -> usize { self.end_x as usize }
 
 	unsafe fn toggle(&mut self) {
 		self.open = !self.open && !self.is_empty();
@@ -360,9 +349,7 @@ impl ComplexNbtElementVariant for NbtList {
 	unsafe fn insert(&mut self, idx: usize, entry: Self::Entry) -> Result<Option<Self::Entry>, Self::Entry> {
 		if self.can_insert(&entry) {
 			unsafe {
-				self.elements
-					.try_reserve_exact(1)
-					.unwrap_unchecked();
+				self.elements.try_reserve_exact(1).unwrap_unchecked();
 			}
 			self.elements.insert(idx, entry);
 			Ok(None)
@@ -412,19 +399,19 @@ impl ComplexNbtElementVariant for NbtList {
 	fn recache(&mut self) {
 		let mut height = 1;
 		let mut true_height = 1;
-		let mut max_depth = 0;
-		
+		let mut end_x = 0;
+
 		for child in self.children() {
 			height += child.height() as u32;
 			true_height += child.true_height() as u32;
-			max_depth = usize::max(max_depth, 16 + 4 + child.value_width());
-			max_depth = usize::max(max_depth, 16 + child.max_depth());
+			end_x = usize::max(end_x, NbtElement::DEPTH_INCREMENT_WIDTH + SelectedText::PREFIXING_SPACE_WIDTH + child.value_width());
+			end_x = usize::max(end_x, NbtElement::DEPTH_INCREMENT_WIDTH + child.end_x());
 		}
-		
+
 		self.height = if self.is_open() { height } else { 1 };
 		self.true_height = true_height;
-		self.max_depth = if self.is_open() { max_depth as u32 } else { 0 };
-		
+		self.end_x = if self.is_open() { end_x as u32 } else { 0 };
+
 		self.recache_elements_bitset();
 	}
 

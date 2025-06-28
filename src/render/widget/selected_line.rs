@@ -1,4 +1,4 @@
-use crate::tree::OwnedIndices;
+use crate::tree::indices::OwnedIndices;
 
 pub struct SelectedLine {
 	pub y: usize,

@@ -1,4 +1,4 @@
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
 pub enum TextColor {
 	Black,
 	DarkBlue,
@@ -15,6 +15,7 @@ pub enum TextColor {
 	Red,
 	LightPurple,
 	Yellow,
+	#[default]
 	White,
 
 	TreeString,

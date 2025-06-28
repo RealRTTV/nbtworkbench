@@ -2,9 +2,16 @@ use std::time::Duration;
 
 use enum_map::Enum;
 
-use crate::assets::{NOTIFICATION_BAR_BACKDROP_UV, NOTIFICATION_BAR_UV, NOTIFICATION_TEXT_Z, NOTIFICATION_UV, NOTIFICATION_Z};
-use crate::render::{TextColor, VertexBufferBuilder};
-use crate::util::{StrExt, Vec2u, now, smoothstep64, split_lines};
+use crate::{
+	render::{
+		assets::{NOTIFICATION_BAR_BACKDROP_UV, NOTIFICATION_BAR_UV, NOTIFICATION_TEXT_Z, NOTIFICATION_UV, NOTIFICATION_Z},
+		color::TextColor,
+		vertex_buffer_builder::VertexBufferBuilder,
+	},
+	util::{StrExt, Timestamp, Vec2u, smoothstep64, split_lines},
+};
+
+pub mod manager;
 
 #[derive(Copy, Clone, Enum)]
 pub enum NotificationKind {
@@ -14,7 +21,7 @@ pub enum NotificationKind {
 }
 
 pub struct Notification {
-	timestamp: Option<Duration>,
+	timestamp: Option<Timestamp>,
 	lines: Box<[String]>,
 	message_len: usize,
 	text_color: u32,
@@ -50,38 +57,37 @@ impl Notification {
 		self.lines = lines.into_boxed_slice();
 		self.text_color = text_color;
 		self.raw_message = message;
-		let now = now();
 		if let Some(timestamp) = self.timestamp {
-			let diff = (now - timestamp).as_millis();
-			if diff <= 250 {
+			let elapsed = timestamp.elapsed().as_millis();
+			if elapsed <= 250 {
 				// readjust based on amount previously out
-				let old_px = ((250 - diff) as f64 * (old_width + 10) as f64) as usize;
+				let old_px = ((250 - elapsed) as f64 * (old_width + 10) as f64) as usize;
 				if self.width + 10 <= old_px {
 					// already as far out as ours is, so set to full width of new one
-					self.timestamp = Some(now.saturating_sub(Duration::from_millis(250)));
+					self.timestamp = Some(Timestamp::now() - Duration::from_millis(250));
 				} else {
 					let ms = 250.0 * (1.0 - (self.width + 10) as f64 / old_px as f64);
-					self.timestamp = Some(now.saturating_sub(Duration::from_nanos((ms * 1_000_000.0) as u64)))
+					self.timestamp = Some(Timestamp::now() - Duration::from_nanos((ms * 1_000_000.0) as u64))
 				}
-			} else if diff <= 250 + old_display_time as u128 {
+			} else if elapsed <= 250 + old_display_time as u128 {
 				// reset the expiry clock
-				self.timestamp = Some(now.saturating_sub(Duration::from_millis(250)));
-			} else if diff <= 250 + old_display_time as u128 + 250 {
+				self.timestamp = Some(Timestamp::now() - Duration::from_millis(250));
+			} else if elapsed <= 250 + old_display_time as u128 + 250 {
 				// readjust based on amount previously out
-				let old_px = ((diff - (250 + old_display_time as u128)) as f64 * (old_width + 10) as f64) as usize;
+				let old_px = ((elapsed - (250 + old_display_time as u128)) as f64 * (old_width + 10) as f64) as usize;
 				if self.width + 10 <= old_px {
 					// already as far out as ours is, so set to full width of new one
-					self.timestamp = Some(now.saturating_sub(Duration::from_millis(250)));
+					self.timestamp = Some(Timestamp::now() - Duration::from_millis(250));
 				} else {
 					let ms = 250.0 * (1.0 - (self.width + 10) as f64 / old_px as f64);
-					self.timestamp = Some(now.saturating_sub(Duration::from_nanos((ms * 1_000_000.0) as u64)))
+					self.timestamp = Some(Timestamp::now() - Duration::from_nanos((ms * 1_000_000.0) as u64))
 				}
 			} else {
 				// shouldn't normally happen, but we'll handle it in case
-				self.timestamp = Some(now);
+				self.timestamp = Some(Timestamp::now());
 			}
 		} else {
-			self.timestamp = Some(now);
+			self.timestamp = Some(Timestamp::now());
 		}
 	}
 
@@ -122,21 +128,14 @@ impl Notification {
 	}
 
 	pub fn is_invisible(&mut self) -> bool {
-		let now = now();
-		let ms = now
-			.saturating_sub(*self.timestamp.get_or_insert(now))
-			.as_millis() as usize;
+		let ms = self.timestamp.get_or_insert_with(Timestamp::now).elapsed().as_millis() as usize;
 		let display_time = self.message_len * 60 + 3000 + 500;
 		ms > display_time
 	}
 
 	#[must_use]
 	fn get_bar_width(&mut self) -> usize {
-		let now = now();
-		let ms = (now
-			.saturating_sub(*self.timestamp.get_or_insert(now))
-			.as_millis() as usize)
-			.saturating_sub(250);
+		let ms = (self.timestamp.get_or_insert_with(Timestamp::now).elapsed().as_millis() as usize).saturating_sub(250);
 		let width = self.width + 4;
 		let display_time = self.message_len * 60 + 3000;
 		((1.0 - (ms as f64 / display_time as f64)).clamp(0.0, 1.0) * width as f64).round() as usize
@@ -144,10 +143,7 @@ impl Notification {
 
 	#[must_use]
 	fn get_inset(&mut self) -> usize {
-		let now = now();
-		let mut ms = now
-			.saturating_sub(*self.timestamp.get_or_insert(now))
-			.as_millis() as usize;
+		let mut ms = (self.timestamp.get_or_insert_with(Timestamp::now).elapsed().as_millis() as usize).saturating_sub(250);
 		let width = self.width + 10;
 		let display_time = self.message_len * 60 + 3000;
 		if ms < 250 {

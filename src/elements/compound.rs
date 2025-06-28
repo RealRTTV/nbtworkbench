@@ -1,31 +1,43 @@
-use std::borrow::Cow;
-use std::cmp::Ordering;
-use std::fmt::{Display, Formatter, Write};
-use std::hint::likely;
-use std::ops::Deref;
-use std::slice::{Iter, IterMut};
 #[cfg(not(target_arch = "wasm32"))] use std::thread::{Scope, scope};
+use std::{
+	borrow::Cow,
+	cmp::Ordering,
+	fmt::{Display, Formatter, Write},
+	hint::likely,
+	ops::Deref,
+	slice::{Iter, IterMut},
+};
 
 use compact_str::CompactString;
-use hashbrown::hash_table::Entry::*;
-use hashbrown::hash_table::HashTable;
+use hashbrown::hash_table::{Entry::*, HashTable};
 
-use crate::assets::{COMPOUND_GHOST_UV, COMPOUND_ROOT_UV, COMPOUND_UV, CONNECTION_UV, HEADER_SIZE, JUST_OVERLAPPING_BASE_TEXT_Z};
-use crate::elements::result::NbtParseResult;
-use crate::elements::{ComplexNbtElementVariant, Matches, NbtElement, NbtElementAndKey, NbtElementAndKeyRef, NbtElementAndKeyRefMut, NbtElementVariant};
-use crate::render::{RenderContext, TextColor, VertexBufferBuilder};
-use crate::serialization::{Decoder, PrettyDisplay, PrettyFormatter, UncheckedBufWriter};
-use crate::util::{StrExt, Vec2u, width_ascii};
 #[cfg(target_arch = "wasm32")]
 use crate::wasm::{FakeScope as Scope, fake_scope as scope};
-use crate::{config, hash, util};
+use crate::{
+	config,
+	elements::{ComplexNbtElementVariant, Matches, NbtElement, NbtElementAndKey, NbtElementAndKeyRef, NbtElementAndKeyRefMut, NbtElementVariant, result::NbtParseResult},
+	hash,
+	render::{
+		RenderContext,
+		assets::{COMPOUND_GHOST_UV, COMPOUND_ROOT_UV, COMPOUND_UV, CONNECTION_UV, HEADER_SIZE, JUST_OVERLAPPING_BASE_TEXT_Z},
+		color::TextColor,
+		vertex_buffer_builder::VertexBufferBuilder,
+	},
+	serialization::{
+		decoder::Decoder,
+		encoder::UncheckedBufWriter,
+		formatter::{PrettyDisplay, PrettyFormatter},
+	},
+	util::{self, StrExt, Vec2u, width_ascii},
+};
+use crate::render::widget::selected_text::SelectedText;
 
 #[repr(C)]
 pub struct NbtCompound {
 	pub map: Box<CompoundMap>,
 	height: u32,
 	true_height: u32,
-	max_depth: u32,
+	end_x: u32,
 	open: bool,
 }
 
@@ -43,7 +55,7 @@ impl Clone for NbtCompound {
 			map: unsafe { Box::try_new(self.map.deref().clone()).unwrap_unchecked() },
 			height: self.height,
 			true_height: self.true_height,
-			max_depth: self.max_depth,
+			end_x: self.end_x,
 			open: self.open,
 		}
 	}
@@ -56,7 +68,7 @@ impl Default for NbtCompound {
 			map: Box::<CompoundMap>::default(),
 			open: false,
 			true_height: 1,
-			max_depth: 0,
+			end_x: 0,
 		}
 	}
 }
@@ -121,15 +133,9 @@ impl NbtElementVariant for NbtCompound {
 		let mut compound = Self::default();
 		while !s.starts_with('}') {
 			let (key, s2) = s.snbt_string_read()?;
-			s = s2
-				.trim_start()
-				.strip_prefix(':')
-				.ok_or(s2.len())?
-				.trim_start();
+			s = s2.trim_start().strip_prefix(':').ok_or(s2.len())?.trim_start();
 			let (s2, value) = NbtElement::from_str0(s, NbtElement::parse_int)?;
-			compound
-				.map
-				.insert(CompoundEntry::new(key, value));
+			compound.map.insert(CompoundEntry::new(key, value));
 			s = s2.trim_start();
 			if let Some(s2) = s.strip_prefix(',') {
 				s = s2.trim_start();
@@ -160,9 +166,7 @@ impl NbtElementVariant for NbtCompound {
 				decoder.assert_len(2)?;
 				let key = decoder.string()?;
 				let value = NbtElement::from_bytes(current_element, decoder)?;
-				compound
-					.map
-					.insert(CompoundEntry::new(key, value));
+				compound.map.insert(CompoundEntry::new(key, value));
 				if is_err(&decoder.assert_len(1)) {
 					break // wow mojang, saving one byte, so cool of you
 				};
@@ -237,11 +241,7 @@ impl NbtElementVariant for NbtCompound {
 				let children_contains_forbidden = 'f: {
 					let mut y = ctx.pos().y;
 					for CompoundEntry { key: _, value } in self.children() {
-						if ctx.selected_text_y() == Some(y.saturating_sub(*remaining_scroll * 16))
-							&& ctx
-								.selected_text_y()
-								.is_some_and(|y| y >= HEADER_SIZE)
-						{
+						if ctx.selected_text_y() == Some(y.saturating_sub(*remaining_scroll * 16)) && ctx.selected_text_y().is_some_and(|y| y >= HEADER_SIZE) {
 							break 'f true;
 						}
 						y += value.height() * 16;
@@ -316,7 +316,7 @@ impl ComplexNbtElementVariant for NbtCompound {
 			map: Box::new(CompoundMap::from(entries)),
 			height: 0,
 			true_height: 0,
-			max_depth: 0,
+			end_x: 0,
 			open: false,
 		};
 		this.recache();
@@ -333,7 +333,7 @@ impl ComplexNbtElementVariant for NbtCompound {
 
 	fn is_open(&self) -> bool { self.open }
 
-	fn max_depth(&self) -> usize { self.max_depth as usize }
+	fn end_x(&self) -> usize { self.end_x as usize }
 
 	unsafe fn toggle(&mut self) {
 		self.open = !self.open && !self.is_empty();
@@ -378,16 +378,8 @@ impl ComplexNbtElementVariant for NbtCompound {
 			let a_hash = hash!(self.map.entries.get_unchecked(a).key);
 			let b_hash = hash!(self.map.entries.get_unchecked(b).key);
 			self.map.entries.swap(a, b);
-			let a = self
-				.map
-				.indices
-				.find_mut(a_hash, |&idx| idx == a)
-				.unwrap_unchecked() as *mut usize;
-			let b = self
-				.map
-				.indices
-				.find_mut(b_hash, |&idx| idx == b)
-				.unwrap_unchecked() as *mut usize;
+			let a = self.map.indices.find_mut(a_hash, |&idx| idx == a).unwrap_unchecked() as *mut usize;
+			let b = self.map.indices.find_mut(b_hash, |&idx| idx == b).unwrap_unchecked() as *mut usize;
 			core::ptr::swap(a, b);
 		}
 	}
@@ -413,18 +405,18 @@ impl ComplexNbtElementVariant for NbtCompound {
 	fn recache(&mut self) {
 		let mut height = 1;
 		let mut true_height = 1;
-		let mut max_depth = 0;
-		
+		let mut end_x = 0;
+
 		for CompoundEntry { key, value: child } in self.children() {
 			height += child.height() as u32;
 			true_height += child.true_height() as u32;
-			max_depth = max_depth.max(16 + 4 + key.width() + const { width_ascii(": ") } + child.value_width());
-			max_depth = max_depth.max(16 + child.max_depth());
+			end_x = end_x.max(NbtElement::DEPTH_INCREMENT_WIDTH + SelectedText::PREFIXING_SPACE_WIDTH + key.width() + const { width_ascii(": ") } + child.value_width());
+			end_x = end_x.max(NbtElement::DEPTH_INCREMENT_WIDTH + child.end_x());
 		}
-		
+
 		self.height = if self.is_open() { height } else { 1 };
 		self.true_height = true_height;
-		self.max_depth = if self.is_open() { max_depth as u32 } else { 0 };
+		self.end_x = if self.is_open() { end_x as u32 } else { 0 };
 	}
 
 	fn get(&self, idx: usize) -> Option<&Self::Entry> { self.map.entries.get(idx) }
@@ -449,9 +441,7 @@ pub struct CompoundMap {
 impl CompoundMap {
 	pub fn matches(&self, other: &Self) -> bool {
 		for entry in &self.entries {
-			if let Some(CompoundEntry { key, value }) = other
-				.idx_of(&entry.key)
-				.and_then(|idx| other.entries.get(idx))
+			if let Some(CompoundEntry { key, value }) = other.idx_of(&entry.key).and_then(|idx| other.entries.get(idx))
 				&& key == entry.key
 				&& entry.value.matches(value)
 			{
@@ -464,11 +454,7 @@ impl CompoundMap {
 }
 
 impl PartialEq for CompoundMap {
-	fn eq(&self, other: &Self) -> bool {
-		self.entries
-			.as_slice()
-			.eq(other.entries.as_slice())
-	}
+	fn eq(&self, other: &Self) -> bool { self.entries.as_slice().eq(other.entries.as_slice()) }
 }
 
 impl Clone for CompoundMap {
@@ -543,11 +529,7 @@ impl CompoundEntry {
 
 impl CompoundMap {
 	#[must_use]
-	pub fn idx_of(&self, key: &str) -> Option<usize> {
-		self.indices
-			.find(hash!(key), |&idx| unsafe { self.entries.get_unchecked(idx).key.as_str() == key })
-			.copied()
-	}
+	pub fn idx_of(&self, key: &str) -> Option<usize> { self.indices.find(hash!(key), |&idx| unsafe { self.entries.get_unchecked(idx).key.as_str() == key }).copied() }
 
 	#[must_use]
 	pub fn has(&self, key: &str) -> bool { self.idx_of(key.as_ref()).is_some() }
@@ -598,9 +580,7 @@ impl CompoundMap {
 			Vacant(slot) => {
 				let len = self.entries.len();
 				unsafe {
-					self.entries
-						.try_reserve_exact(1)
-						.unwrap_unchecked();
+					self.entries.try_reserve_exact(1).unwrap_unchecked();
 					let ptr = self.entries.as_mut_ptr().add(idx);
 					core::ptr::copy(ptr, ptr.add(1), len - idx);
 					self.entries.as_mut_ptr().add(idx).write(entry);
@@ -644,17 +624,13 @@ impl CompoundMap {
 	pub unsafe fn update_key_idx_unchecked(&mut self, idx: usize, key: CompactString) -> CompactString {
 		let new_hash = hash!(key);
 		let old_key = core::mem::replace(&mut unsafe { self.entries.get_unchecked_mut(idx) }.key, key);
-		if let Ok(entry) = self
-			.indices
-			.find_entry(hash!(old_key), |&target_idx| target_idx == idx)
-		{
+		if let Ok(entry) = self.indices.find_entry(hash!(old_key), |&target_idx| target_idx == idx) {
 			entry.remove();
 		} else {
 			// should **never** happen
 			unsafe { core::hint::unreachable_unchecked() };
 		}
-		self.indices
-			.insert_unique(new_hash, idx, |&idx| hash!(unsafe { self.entries.get_unchecked(idx) } .key));
+		self.indices.insert_unique(new_hash, idx, |&idx| hash!(unsafe { self.entries.get_unchecked(idx) }.key));
 		old_key
 	}
 
@@ -663,10 +639,7 @@ impl CompoundMap {
 			return None
 		}
 		unsafe {
-			if let Ok(entry) = self
-				.indices
-				.find_entry(hash!(self.entries.get_unchecked(idx).key), |&found_idx| found_idx == idx)
-			{
+			if let Ok(entry) = self.indices.find_entry(hash!(self.entries.get_unchecked(idx).key), |&found_idx| found_idx == idx) {
 				entry.remove();
 			} else {
 				// should **never** happen
@@ -689,15 +662,11 @@ impl CompoundMap {
 		let mut mapping = (0..self.len()).collect::<Vec<_>>();
 		mapping.sort_unstable_by(|&a, &b| f(unsafe { self.entries.get_unchecked(a) }, unsafe { self.entries.get_unchecked(b) }));
 		// SAFETY: definitely a valid mapping that was generated
-		unsafe{ util::invert_mapping_unchecked(&mapping) }
+		unsafe { util::invert_mapping_unchecked(&mapping) }
 	}
 
 	pub fn update_key(&mut self, idx: usize, key: CompactString) -> Option<CompactString> {
-		if self
-			.entries
-			.get(idx)
-			.is_some_and(|entry| entry.key == key)
-		{
+		if self.entries.get(idx).is_some_and(|entry| entry.key == key) {
 			Some(key)
 		} else if self.has(key.as_ref()) {
 			None

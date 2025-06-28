@@ -1,11 +1,15 @@
-use std::cmp::Ordering;
-use std::collections::Bound;
-use std::convert::identity;
-use std::ops::{BitAndAssign, BitOrAssign, BitXorAssign, Deref, DerefMut, Index, IndexMut, RangeBounds};
+use std::{
+	cmp::Ordering,
+	collections::Bound,
+	convert::identity,
+	ops::{BitAndAssign, BitOrAssign, BitXorAssign, Deref, DerefMut, Index, IndexMut, RangeBounds},
+};
 
-use crate::assets::{BOOKMARK_UV, HIDDEN_BOOKMARK_UV};
-use crate::elements::NbtElement;
-use crate::util::{Vec2u, intersection_two_sorted_no_duplicates, symmetric_difference_two_sorted_no_duplicates, union_two_sorted_no_duplicates};
+use crate::{
+	elements::element::NbtElement,
+	render::assets::{BOOKMARK_UV, HIDDEN_BOOKMARK_UV},
+	util::{Vec2u, intersection_two_sorted_no_duplicates, symmetric_difference_two_sorted_no_duplicates, union_two_sorted_no_duplicates},
+};
 
 macro_rules! slice {
     ($($t:tt)*) => {
@@ -69,9 +73,7 @@ impl MarkedLine {
 	#[must_use]
 	pub const fn offset(self, offset: isize, true_offset: isize) -> Self {
 		Self {
-			true_line_number: self
-				.true_line_number
-				.wrapping_add_signed(true_offset),
+			true_line_number: self.true_line_number.wrapping_add_signed(true_offset),
 			line_number: self.line_number.wrapping_add_signed(offset),
 			uv: self.uv,
 		}
@@ -101,7 +103,7 @@ impl Default for MarkedLines {
 
 impl MarkedLines {
 	#[must_use]
-	pub fn new() -> Self { Self::default() }
+	pub const fn new() -> Self { Self { inner: Vec::new() } }
 
 	#[must_use]
 	pub fn with_capacity(capacity: usize) -> Self { Self { inner: Vec::with_capacity(capacity) } }
@@ -137,40 +139,16 @@ impl MarkedLines {
 		// SAFETY: was a slice from self
 		unsafe {
 			Self::from_unchecked(
-				match (
-					range
-						.start_bound()
-						.map(|&x| MarkedLine::new(x, 0)),
-					range.end_bound().map(|&x| MarkedLine::new(x, 0)),
-				) {
+				match (range.start_bound().map(|&x| MarkedLine::new(x, 0)), range.end_bound().map(|&x| MarkedLine::new(x, 0))) {
 					(Bound::Unbounded, Bound::Unbounded) => self.inner.drain(..),
-					(Bound::Unbounded, Bound::Included(ref end)) => self
-						.inner
-						.drain(..=self.binary_search(end).unwrap_or_else(identity)),
-					(Bound::Unbounded, Bound::Excluded(ref end)) => self
-						.inner
-						.drain(..self.binary_search(end).unwrap_or_else(identity)),
-					(Bound::Included(ref start), Bound::Unbounded) => self
-						.inner
-						.drain(self.binary_search(start).unwrap_or_else(identity)..),
-					(Bound::Included(ref start), Bound::Included(ref end)) => self
-						.inner
-						.drain(self.binary_search(start).unwrap_or_else(identity)..=self.binary_search(end).unwrap_or_else(identity)),
-					(Bound::Included(ref start), Bound::Excluded(ref end)) => self
-						.inner
-						.drain(self.binary_search(start).unwrap_or_else(identity)..self.binary_search(end).unwrap_or_else(identity)),
-					(Bound::Excluded(ref start), Bound::Unbounded) => self.inner.drain(
-						self.binary_search(start)
-							.map_or_else(identity, |x| x + 1)..,
-					),
-					(Bound::Excluded(ref start), Bound::Included(ref end)) => self.inner.drain(
-						self.binary_search(start)
-							.map_or_else(identity, |x| x + 1)..=self.binary_search(end).unwrap_or_else(identity),
-					),
-					(Bound::Excluded(ref start), Bound::Excluded(ref end)) => self.inner.drain(
-						self.binary_search(start)
-							.map_or_else(identity, |x| x + 1)..self.binary_search(end).unwrap_or_else(identity),
-					),
+					(Bound::Unbounded, Bound::Included(ref end)) => self.inner.drain(..=self.binary_search(end).unwrap_or_else(identity)),
+					(Bound::Unbounded, Bound::Excluded(ref end)) => self.inner.drain(..self.binary_search(end).unwrap_or_else(identity)),
+					(Bound::Included(ref start), Bound::Unbounded) => self.inner.drain(self.binary_search(start).unwrap_or_else(identity)..),
+					(Bound::Included(ref start), Bound::Included(ref end)) => self.inner.drain(self.binary_search(start).unwrap_or_else(identity)..=self.binary_search(end).unwrap_or_else(identity)),
+					(Bound::Included(ref start), Bound::Excluded(ref end)) => self.inner.drain(self.binary_search(start).unwrap_or_else(identity)..self.binary_search(end).unwrap_or_else(identity)),
+					(Bound::Excluded(ref start), Bound::Unbounded) => self.inner.drain(self.binary_search(start).map_or_else(identity, |x| x + 1)..),
+					(Bound::Excluded(ref start), Bound::Included(ref end)) => self.inner.drain(self.binary_search(start).map_or_else(identity, |x| x + 1)..=self.binary_search(end).unwrap_or_else(identity)),
+					(Bound::Excluded(ref start), Bound::Excluded(ref end)) => self.inner.drain(self.binary_search(start).map_or_else(identity, |x| x + 1)..self.binary_search(end).unwrap_or_else(identity)),
 				}
 				.collect(),
 			)
@@ -230,9 +208,7 @@ impl MarkedLineSlice {
 
 		for marked_line in &mut self.0 {
 			marked_line.line_number = marked_line.line_number.wrapping_add(value);
-			marked_line.true_line_number = marked_line
-				.true_line_number
-				.wrapping_add(true_value);
+			marked_line.true_line_number = marked_line.true_line_number.wrapping_add(true_value);
 		}
 	}
 
@@ -254,9 +230,7 @@ impl MarkedLineSlice {
 
 		for marked_line in &mut self.0 {
 			marked_line.line_number = marked_line.line_number.wrapping_add_signed(value);
-			marked_line.true_line_number = marked_line
-				.true_line_number
-				.wrapping_add_signed(true_value);
+			marked_line.true_line_number = marked_line.true_line_number.wrapping_add_signed(true_value);
 		}
 	}
 
@@ -266,7 +240,7 @@ impl MarkedLineSlice {
 	pub fn iter(&self) -> std::slice::Iter<'_, MarkedLine> { self.0.iter() }
 
 	pub fn iter_mut(&mut self) -> std::slice::IterMut<'_, MarkedLine> { self.0.iter_mut() }
-	
+
 	#[must_use]
 	pub fn get(&self, true_line_number: usize) -> Option<&MarkedLine> {
 		let idx = self.0.binary_search(&MarkedLine::new(true_line_number, 0)).ok()?;
@@ -304,12 +278,7 @@ impl<R: RangeBounds<usize>> Index<R> for MarkedLineSlice {
 	type Output = MarkedLineSlice;
 
 	fn index(&self, index: R) -> &Self::Output {
-		match (
-			index
-				.start_bound()
-				.map(|&x| MarkedLine::new(x, 0)),
-			index.end_bound().map(|&x| MarkedLine::new(x, 0)),
-		) {
+		match (index.start_bound().map(|&x| MarkedLine::new(x, 0)), index.end_bound().map(|&x| MarkedLine::new(x, 0))) {
 			(Bound::Unbounded, Bound::Unbounded) => self,
 			(Bound::Unbounded, Bound::Included(ref end)) => {
 				let end = self.binary_search(end).unwrap_or_else(identity);
@@ -334,22 +303,16 @@ impl<R: RangeBounds<usize>> Index<R> for MarkedLineSlice {
 				slice!(self.0[start..end])
 			}
 			(Bound::Excluded(ref start), Bound::Unbounded) => {
-				let start = self
-					.binary_search(start)
-					.map_or_else(identity, |x| x + 1);
+				let start = self.binary_search(start).map_or_else(identity, |x| x + 1);
 				slice!(self.0[start..])
 			}
 			(Bound::Excluded(ref start), Bound::Included(ref end)) => {
-				let start = self
-					.binary_search(start)
-					.map_or_else(identity, |x| x + 1);
+				let start = self.binary_search(start).map_or_else(identity, |x| x + 1);
 				let end = self.binary_search(end).unwrap_or_else(identity);
 				if end >= self.len() { slice!([]) } else { slice!(self.0[start..=end]) }
 			}
 			(Bound::Excluded(ref start), Bound::Excluded(ref end)) => {
-				let start = self
-					.binary_search(start)
-					.map_or_else(identity, |x| x + 1);
+				let start = self.binary_search(start).map_or_else(identity, |x| x + 1);
 				let end = self.binary_search(end).unwrap_or_else(identity);
 				slice!(self.0[start..end])
 			}
@@ -359,12 +322,7 @@ impl<R: RangeBounds<usize>> Index<R> for MarkedLineSlice {
 
 impl<R: RangeBounds<usize>> IndexMut<R> for MarkedLineSlice {
 	fn index_mut(&mut self, index: R) -> &mut Self::Output {
-		match (
-			index
-				.start_bound()
-				.map(|&x| MarkedLine::new(x, 0)),
-			index.end_bound().map(|&x| MarkedLine::new(x, 0)),
-		) {
+		match (index.start_bound().map(|&x| MarkedLine::new(x, 0)), index.end_bound().map(|&x| MarkedLine::new(x, 0))) {
 			(Bound::Unbounded, Bound::Unbounded) => self,
 			(Bound::Unbounded, Bound::Included(ref end)) => {
 				let end = self.binary_search(end).unwrap_or_else(identity);
@@ -389,22 +347,16 @@ impl<R: RangeBounds<usize>> IndexMut<R> for MarkedLineSlice {
 				slice_mut!(self.0[start..end])
 			}
 			(Bound::Excluded(ref start), Bound::Unbounded) => {
-				let start = self
-					.binary_search(start)
-					.map_or_else(identity, |x| x + 1);
+				let start = self.binary_search(start).map_or_else(identity, |x| x + 1);
 				slice_mut!(self.0[start..])
 			}
 			(Bound::Excluded(ref start), Bound::Included(ref end)) => {
-				let start = self
-					.binary_search(start)
-					.map_or_else(identity, |x| x + 1);
+				let start = self.binary_search(start).map_or_else(identity, |x| x + 1);
 				let end = self.binary_search(end).unwrap_or_else(identity);
 				if end >= self.len() { slice_mut!([]) } else { slice_mut!(self.0[start..=end]) }
 			}
 			(Bound::Excluded(ref start), Bound::Excluded(ref end)) => {
-				let start = self
-					.binary_search(start)
-					.map_or_else(identity, |x| x + 1);
+				let start = self.binary_search(start).map_or_else(identity, |x| x + 1);
 				let end = self.binary_search(end).unwrap_or_else(identity);
 				slice_mut!(self.0[start..end])
 			}

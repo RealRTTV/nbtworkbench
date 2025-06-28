@@ -1,19 +1,31 @@
-use std::alloc::{Layout, alloc, dealloc};
-use std::array;
-use std::borrow::Cow;
-use std::fmt::{Display, Formatter};
-use std::mem::{ManuallyDrop, MaybeUninit};
-use std::ops::Deref;
-use std::ptr::NonNull;
+use std::{
+	alloc::{Layout, alloc, dealloc},
+	array,
+	borrow::Cow,
+	fmt::{Display, Formatter},
+	mem::{ManuallyDrop, MaybeUninit},
+	ops::Deref,
+	ptr::NonNull,
+};
 
 use compact_str::CompactString;
 
-use crate::assets::{BASE_Z, JUST_OVERLAPPING_BASE_TEXT_Z, STRING_GHOST_UV, STRING_UV};
-use crate::elements::result::NbtParseResult;
-use crate::elements::{Matches, NbtElementVariant, PrimitiveNbtElementVariant};
-use crate::render::{RenderContext, TextColor, VertexBufferBuilder};
-use crate::serialization::{Decoder, PrettyDisplay, PrettyFormatter, UncheckedBufWriter};
-use crate::util::{StrExt, Vec2u};
+use crate::{
+	elements::{Matches, NbtElementVariant, PrimitiveNbtElementVariant, result::NbtParseResult},
+	render::{
+		RenderContext,
+		assets::{JUST_OVERLAPPING_BASE_TEXT_Z, STRING_GHOST_UV, STRING_UV},
+		color::TextColor,
+		vertex_buffer_builder::VertexBufferBuilder,
+	},
+	serialization::{
+		decoder::Decoder,
+		encoder::UncheckedBufWriter,
+		formatter::{PrettyDisplay, PrettyFormatter},
+	},
+	util::{StrExt, Vec2u},
+};
+use crate::render::assets::BASE_Z;
 
 #[repr(transparent)]
 #[derive(Clone, PartialEq, Default)]

@@ -1,11 +1,14 @@
-use std::borrow::{Borrow, BorrowMut};
-use std::fmt::{Debug, Display, Formatter};
-use std::iter::Copied;
-use std::ops::{Deref, DerefMut, Index, IndexMut};
-use std::slice;
+use std::{
+	borrow::{Borrow, BorrowMut},
+	fmt::{Debug, Display, Formatter},
+	iter::Copied,
+	ops::{Deref, DerefMut, Index, IndexMut},
+	slice,
+};
+
 use itertools::{Itertools, Position};
-use crate::elements::NbtElement;
-use crate::util;
+
+use crate::{elements::element::NbtElement, util};
 
 #[repr(transparent)]
 pub struct Indices([usize]);
@@ -66,48 +69,30 @@ impl Default for OwnedIndices {
 impl Indices {
 	pub const EMPTY: &'static Indices = Indices::from_slice(&[]);
 
-	#[must_use]
 	pub fn iter(&self) -> Copied<slice::Iter<usize>> { self.0.iter().copied() }
 
-	#[must_use]
 	pub fn iter_mut(&mut self) -> slice::IterMut<usize> { self.0.iter_mut() }
 
 	#[must_use]
-	pub fn split_first(&self) -> Option<(usize, &Self)> {
-		self.0
-			.split_first()
-			.map(|(tail, rest)| (*tail, Self::from_slice(rest)))
-	}
+	pub fn split_first(&self) -> Option<(usize, &Self)> { self.0.split_first().map(|(tail, rest)| (*tail, Self::from_slice(rest))) }
 
 	#[must_use]
 	pub fn first(&self) -> Option<usize> { self.split_first().map(|x| x.0) }
 
 	#[must_use]
-	pub fn split_last(&self) -> Option<(usize, &Self)> {
-		self.0
-			.split_last()
-			.map(|(tail, rest)| (*tail, Self::from_slice(rest)))
-	}
+	pub fn split_last(&self) -> Option<(usize, &Self)> { self.0.split_last().map(|(tail, rest)| (*tail, Self::from_slice(rest))) }
 
 	#[must_use]
 	pub fn last(&self) -> Option<usize> { self.split_last().map(|x| x.0) }
 
 	#[must_use]
-	pub fn split_first_mut(&mut self) -> Option<(&mut usize, &mut Self)> {
-		self.0
-			.split_first_mut()
-			.map(|(tail, rest)| (tail, Self::from_slice_mut(rest)))
-	}
+	pub fn split_first_mut(&mut self) -> Option<(&mut usize, &mut Self)> { self.0.split_first_mut().map(|(tail, rest)| (tail, Self::from_slice_mut(rest))) }
 
 	#[must_use]
 	pub fn first_mut(&mut self) -> Option<&mut usize> { self.split_first_mut().map(|x| x.0) }
 
 	#[must_use]
-	pub fn split_last_mut(&mut self) -> Option<(&mut usize, &mut Self)> {
-		self.0
-			.split_last_mut()
-			.map(|(tail, rest)| (tail, Self::from_slice_mut(rest)))
-	}
+	pub fn split_last_mut(&mut self) -> Option<(&mut usize, &mut Self)> { self.0.split_last_mut().map(|(tail, rest)| (tail, Self::from_slice_mut(rest))) }
 
 	#[must_use]
 	pub fn last_mut(&mut self) -> Option<&mut usize> { self.split_last_mut().map(|x| x.0) }
@@ -135,6 +120,16 @@ impl Indices {
 
 	#[must_use]
 	pub fn is_root(&self) -> bool { self.0.is_empty() }
+	
+	#[must_use]
+	pub fn end_x(&self, left_margin: usize) -> usize {
+		Self::end_x_from_depth(self.len(), left_margin)
+	}
+
+	#[must_use]
+	pub fn end_x_from_depth(depth: usize, left_margin: usize) -> usize {
+		left_margin + NbtElement::INITIAL_DEPTH_WIDTH + depth * NbtElement::DEPTH_INCREMENT_WIDTH
+	}
 }
 
 impl<T: Into<Vec<usize>>> From<T> for OwnedIndices {
@@ -166,11 +161,7 @@ impl<'a> Index<&'a Indices> for NbtElement {
 }
 
 impl<'a> IndexMut<&'a Indices> for NbtElement {
-	fn index_mut(&mut self, indices: &'a Indices) -> &mut Self::Output {
-		indices
-			.iter()
-			.fold(self, |nbt, idx| &mut nbt[idx])
-	}
+	fn index_mut(&mut self, indices: &'a Indices) -> &mut Self::Output { indices.iter().fold(self, |nbt, idx| &mut nbt[idx]) }
 }
 
 impl Index<usize> for Indices {

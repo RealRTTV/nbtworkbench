@@ -1,24 +1,47 @@
-use std::borrow::Cow;
-use std::fmt::{Debug, Display, Error, Formatter};
-use std::mem::{ManuallyDrop, MaybeUninit};
-use std::ops::{Index, IndexMut};
-use std::slice::{Iter, IterMut};
 #[cfg(not(target_arch = "wasm32"))] use std::thread::Scope;
+use std::{
+	borrow::Cow,
+	fmt::{Debug, Display, Error, Formatter},
+	mem::{ManuallyDrop, MaybeUninit},
+	ops::{Index, IndexMut},
+	slice::{Iter, IterMut},
+};
 
 use compact_str::CompactString;
 
-use crate::elements::result::NbtParseResult;
-use crate::elements::{
-	ComplexNbtElementVariant, CompoundEntry, Matches, NbtByte, NbtByteArray, NbtChunk, NbtCompound, NbtDouble, NbtElementAndKey, NbtElementAndKeyRef, NbtElementAndKeyRefMut, NbtElementVariant, NbtFloat, NbtInt, NbtIntArray, NbtList, NbtLong,
-	NbtLongArray, NbtRegion, NbtShort, NbtString, PrimitiveNbtElementVariant,
-};
-use crate::render::{RenderContext, TextColor, VertexBufferBuilder};
-use crate::serialization::{BigEndianDecoder, Decoder, LittleEndianDecoder, PrettyDisplay, PrettyFormatter, UncheckedBufWriter};
-use crate::tree::{Indices, IterativeNavigationInformationMut, NavigationError, NavigationInformation, NavigationInformationMut, OwnedIndices, ParentIterativeNavigationInformationMut, ParentNavigationError, ParentNavigationInformation, ParentNavigationInformationMut, TraversalError, TraversalInformation, TraversalInformationMut};
-use crate::util;
-use crate::util::{StrExt, Vec2u, width_ascii};
 #[cfg(target_arch = "wasm32")] use crate::wasm::FakeScope as Scope;
-use crate::workbench::{DropResult, ElementAction, MarkedLines};
+use crate::{
+	elements::{
+		ComplexNbtElementVariant, Matches, NbtElementAndKey, NbtElementAndKeyRef, NbtElementAndKeyRefMut, NbtElementVariant, PrimitiveNbtElementVariant,
+		array::{NbtByteArray, NbtIntArray, NbtLongArray},
+		byte::NbtByte,
+		chunk::NbtChunk,
+		compound::{CompoundEntry, NbtCompound},
+		double::NbtDouble,
+		float::NbtFloat,
+		int::NbtInt,
+		list::NbtList,
+		long::NbtLong,
+		region::NbtRegion,
+		result::NbtParseResult,
+		short::NbtShort,
+		string::NbtString,
+	},
+	render::{RenderContext, color::TextColor, vertex_buffer_builder::VertexBufferBuilder},
+	serialization::{
+		decoder::{BigEndianDecoder, Decoder},
+		encoder::UncheckedBufWriter,
+		formatter::{PrettyDisplay, PrettyFormatter},
+	},
+	tree::{
+		indices::{Indices, OwnedIndices},
+		navigate::{IterativeNavigationInformationMut, NavigationError, NavigationInformation, NavigationInformationMut, ParentIterativeNavigationInformationMut, ParentNavigationError, ParentNavigationInformation, ParentNavigationInformationMut},
+		traverse::{TraversalError, TraversalInformation, TraversalInformationMut},
+	},
+	util::{self, StrExt, Vec2u, width_ascii},
+	workbench::{element_action::ElementAction, marked_line::MarkedLines, DropResult},
+};
+use crate::serialization::decoder::LittleEndianDecoder;
 
 #[repr(C)]
 pub union NbtElement {
@@ -156,6 +179,7 @@ impl NbtElement {
 
 /// FromStr
 impl NbtElement {
+	// todo: add error type
 	pub fn from_str(mut s: &str) -> Result<NbtElementAndKey, usize> {
 		let total_len = s.len();
 		s = s.trim();
@@ -164,21 +188,13 @@ impl NbtElement {
 			return Err(total_len - s.len())
 		}
 
-		let prefix = s
-			.snbt_string_read()
-			.ok()
-			.and_then(|(prefix, s2)| {
-				s2.trim_start()
-					.strip_prefix(':')
-					.filter(|s| !s.is_empty())
-					.map(|s2| {
-						s = s2.trim_start();
-						prefix
-					})
-			});
-		let (s, element) = Self::from_str0(s, Self::parse_int)
-			.map(|(s, x)| (s.trim_start(), x))
-			.map_err(|x| total_len - x)?;
+		let prefix = s.snbt_string_read().ok().and_then(|(prefix, s2)| {
+			s2.trim_start().strip_prefix(':').filter(|s| !s.is_empty()).map(|s2| {
+				s = s2.trim_start();
+				prefix
+			})
+		});
+		let (s, element) = Self::from_str0(s, Self::parse_int).map(|(s, x)| (s.trim_start(), x)).map_err(|x| total_len - x)?;
 		if !s.is_empty() {
 			return Err(total_len - s.len())
 		}
@@ -221,10 +237,7 @@ impl NbtElement {
 			};
 		}
 
-		if let Some(s2) = s
-			.strip_prefix("Infinity")
-			.or_else(|| s.strip_prefix("inf"))
-		{
+		if let Some(s2) = s.strip_prefix("Infinity").or_else(|| s.strip_prefix("inf")) {
 			s = s2.trim_start();
 			return if let Some(s2) = s.strip_prefix('f') {
 				Ok(Some((s2.trim_start(), Self::Float(NbtFloat { value: f32::INFINITY }))))
@@ -233,10 +246,7 @@ impl NbtElement {
 			};
 		}
 
-		if let Some(s2) = s
-			.strip_prefix("-Infinity")
-			.or_else(|| s.strip_prefix("-inf"))
-		{
+		if let Some(s2) = s.strip_prefix("-Infinity").or_else(|| s.strip_prefix("-inf")) {
 			s = s2.trim_start();
 			return if let Some(s2) = s.strip_prefix('f') {
 				Ok(Some((s2.trim_start(), Self::Float(NbtFloat { value: f32::NEG_INFINITY }))))
@@ -264,10 +274,7 @@ impl NbtElement {
 			if let Some(d2) = d.strip_prefix("0x") {
 				s = d2;
 				d = s;
-				let hex_part = d
-					.bytes()
-					.take_while(|&b| b.is_ascii_hexdigit() || b == b'_')
-					.count();
+				let hex_part = d.bytes().take_while(|&b| b.is_ascii_hexdigit() || b == b'_').count();
 				num_end_idx += hex_part;
 				let unsigned = !d.starts_with('s');
 				if d.starts_with('u') || d.starts_with('s') {
@@ -277,10 +284,7 @@ impl NbtElement {
 			} else if let Some(d2) = d.strip_prefix("0b") {
 				s = d2;
 				d = s;
-				let binary_part = d
-					.bytes()
-					.take_while(|&b| b == b'0' || b == b'1' || b == b'_')
-					.count();
+				let binary_part = d.bytes().take_while(|&b| b == b'0' || b == b'1' || b == b'_').count();
 				num_end_idx += binary_part;
 				let unsigned = !d.starts_with('s');
 				if d.starts_with('u') || d.starts_with('s') {
@@ -288,10 +292,7 @@ impl NbtElement {
 				}
 				(num_end_idx, suffix_len, unsigned, 2, positive)
 			} else {
-				let int_part = d
-					.bytes()
-					.take_while(|&b| b.is_ascii_digit() || b == b'_')
-					.count();
+				let int_part = d.bytes().take_while(|&b| b.is_ascii_digit() || b == b'_').count();
 				d = &d[int_part..];
 				num_end_idx += int_part;
 				if int_part == 0 && !d.starts_with('.') {
@@ -301,10 +302,7 @@ impl NbtElement {
 					// floats
 					num_end_idx += 1;
 					d = d2;
-					let frac_part = d
-						.bytes()
-						.take_while(|&b| b.is_ascii_digit() || b == b'_')
-						.count();
+					let frac_part = d.bytes().take_while(|&b| b.is_ascii_digit() || b == b'_').count();
 					num_end_idx += frac_part;
 					if let Some(s2) = d.strip_prefix('e').or(d.strip_prefix('E')) {
 						num_end_idx += 1;
@@ -313,10 +311,7 @@ impl NbtElement {
 							num_end_idx += 1;
 							d = s2;
 						}
-						let exponent_part = d
-							.bytes()
-							.take_while(|&b| b.is_ascii_digit() || b == b'_')
-							.count();
+						let exponent_part = d.bytes().take_while(|&b| b.is_ascii_digit() || b == b'_').count();
 						num_end_idx += exponent_part;
 					}
 					(num_end_idx, suffix_len, false, 10, positive)
@@ -331,11 +326,7 @@ impl NbtElement {
 			}
 		};
 		if num_end_idx > 0 {
-			let suffix = s[num_end_idx + suffix_len..]
-				.trim_start()
-				.as_bytes()
-				.first()
-				.map(u8::to_ascii_lowercase);
+			let suffix = s[num_end_idx + suffix_len..].trim_start().as_bytes().first().map(u8::to_ascii_lowercase);
 			let num_str = s[..num_end_idx].replace('_', "");
 			return match suffix {
 				Some(b'b') => Ok(Some((&s[num_end_idx + suffix_len + 1..], Self::parse_byte(&num_str, unsigned, positive, base, s)?))),
@@ -605,6 +596,12 @@ impl NbtElement {
 
 /// "Rendering" related functions
 impl NbtElement {
+	const ICON_WIDTH: usize = 16;
+	const TOGGLE_WIDTH: usize = 16;
+	
+	pub const INITIAL_DEPTH_WIDTH: usize = Self::TOGGLE_WIDTH + Self::ICON_WIDTH;
+	pub const DEPTH_INCREMENT_WIDTH: usize = Self::ICON_WIDTH;
+	
 	pub fn render(&self, remaining_scroll: &mut usize, builder: &mut VertexBufferBuilder, str: Option<&str>, tail: bool, ctx: &mut RenderContext) {
 		use NbtPattern as Nbt;
 
@@ -757,6 +754,7 @@ impl NbtElement {
 /// Immutable "getter" operations
 impl NbtElement {
 	/// Please minimize usage of this and instead rely upon [`NbtElement::as_pattern`] and [`NbtElement::as_pattern_mut`] as they are more stable
+	#[deprecated = "use `NbtElement::is_*`"]
 	#[must_use]
 	pub const fn id(&self) -> u8 { unsafe { self.id.id } }
 
@@ -816,8 +814,10 @@ impl NbtElement {
 
 	#[must_use]
 	pub fn has_keys(&self) -> bool {
-		match self.id() {
-			NbtCompound::ID | NbtChunk::ID => true,
+		use NbtPattern as Nbt;
+		
+		match self.as_pattern() {
+			Nbt::Compound(_) | Nbt::Chunk(_) => true,
 			_ => false,
 		}
 	}
@@ -1073,17 +1073,17 @@ impl NbtElement {
 	}
 
 	#[must_use]
-	pub fn max_depth(&self) -> usize {
+	pub fn end_x(&self) -> usize {
 		use NbtPattern as Nbt;
 
 		match self.as_pattern() {
-			Nbt::ByteArray(x) => x.max_depth(),
-			Nbt::IntArray(x) => x.max_depth(),
-			Nbt::LongArray(x) => x.max_depth(),
-			Nbt::List(x) => x.max_depth(),
-			Nbt::Compound(x) => x.max_depth(),
-			Nbt::Region(x) => x.max_depth(),
-			Nbt::Chunk(x) => x.max_depth(),
+			Nbt::ByteArray(x) => x.end_x(),
+			Nbt::IntArray(x) => x.end_x(),
+			Nbt::LongArray(x) => x.end_x(),
+			Nbt::List(x) => x.end_x(),
+			Nbt::Compound(x) => x.end_x(),
+			Nbt::Region(x) => x.end_x(),
+			Nbt::Chunk(x) => x.end_x(),
 			_ => 0,
 		}
 	}
@@ -1304,29 +1304,13 @@ impl NbtElement {
 		use NbtPatternMut as Nbt;
 
 		Ok(match self.as_pattern_mut() {
-			Nbt::ByteArray(byte_array) => unsafe {
-				byte_array
-					.insert(idx, kv.1)?
-					.map(NbtElement::into)
-			},
+			Nbt::ByteArray(byte_array) => unsafe { byte_array.insert(idx, kv.1)?.map(NbtElement::into) },
 			Nbt::List(list) => unsafe { list.insert(idx, kv.1)?.map(NbtElement::into) },
-			Nbt::Compound(compound) => unsafe {
-				compound
-					.insert(idx, CompoundEntry::new(kv.0.unwrap_or(CompactString::const_new("_")), kv.1))?
-					.map(CompoundEntry::into)
-			},
+			Nbt::Compound(compound) => unsafe { compound.insert(idx, CompoundEntry::new(kv.0.unwrap_or(CompactString::const_new("_")), kv.1))?.map(CompoundEntry::into) },
 			Nbt::IntArray(int_array) => unsafe { int_array.insert(idx, kv.1)?.map(NbtElement::into) },
-			Nbt::LongArray(long_array) => unsafe {
-				long_array
-					.insert(idx, kv.1)?
-					.map(NbtElement::into)
-			},
+			Nbt::LongArray(long_array) => unsafe { long_array.insert(idx, kv.1)?.map(NbtElement::into) },
 			Nbt::Region(region) => unsafe { region.insert(idx, kv.1)?.map(NbtElement::into) },
-			Nbt::Chunk(chunk) => unsafe {
-				chunk
-					.insert(idx, CompoundEntry::new(kv.0.unwrap_or(CompactString::const_new("_")), kv.1))?
-					.map(CompoundEntry::into)
-			},
+			Nbt::Chunk(chunk) => unsafe { chunk.insert(idx, CompoundEntry::new(kv.0.unwrap_or(CompactString::const_new("_")), kv.1))?.map(CompoundEntry::into) },
 			_ => return Err(kv),
 		})
 	}
@@ -1337,32 +1321,12 @@ impl NbtElement {
 		use NbtPatternMut as Nbt;
 
 		Ok(match self.as_pattern_mut() {
-			Nbt::ByteArray(byte_array) => unsafe {
-				byte_array
-					.replace(idx, kv.1)?
-					.map(NbtElement::into)
-			},
-			Nbt::IntArray(int_array) => unsafe {
-				int_array
-					.replace(idx, kv.1)?
-					.map(NbtElement::into)
-			},
-			Nbt::LongArray(long_array) => unsafe {
-				long_array
-					.replace(idx, kv.1)?
-					.map(NbtElement::into)
-			},
+			Nbt::ByteArray(byte_array) => unsafe { byte_array.replace(idx, kv.1)?.map(NbtElement::into) },
+			Nbt::IntArray(int_array) => unsafe { int_array.replace(idx, kv.1)?.map(NbtElement::into) },
+			Nbt::LongArray(long_array) => unsafe { long_array.replace(idx, kv.1)?.map(NbtElement::into) },
 			Nbt::List(list) => unsafe { list.replace(idx, kv.1)?.map(NbtElement::into) },
-			Nbt::Compound(compound) => unsafe {
-				compound
-					.replace(idx, CompoundEntry::new(kv.0.unwrap_or(CompactString::const_new("_")), kv.1))?
-					.map(CompoundEntry::into)
-			},
-			Nbt::Chunk(chunk) => unsafe {
-				chunk
-					.replace(idx, CompoundEntry::new(kv.0.unwrap_or(CompactString::const_new("_")), kv.1))?
-					.map(CompoundEntry::into)
-			},
+			Nbt::Compound(compound) => unsafe { compound.replace(idx, CompoundEntry::new(kv.0.unwrap_or(CompactString::const_new("_")), kv.1))?.map(CompoundEntry::into) },
+			Nbt::Chunk(chunk) => unsafe { chunk.replace(idx, CompoundEntry::new(kv.0.unwrap_or(CompactString::const_new("_")), kv.1))?.map(CompoundEntry::into) },
 			Nbt::Region(region) => unsafe { region.replace(idx, kv.1)?.map(NbtElement::into) },
 			_ => return Err(kv),
 		})
@@ -1428,58 +1392,29 @@ impl NbtElement {
 		match self.as_pattern_mut() {
 			Nbt::Byte(byte) => {
 				let before = byte.value().into_owned();
-				if value.parse().map(|x| byte.value = x).is_ok() {
-					Ok(before)
-				} else {
-					Err(value)
-				}
+				if value.parse().map(|x| byte.value = x).is_ok() { Ok(before) } else { Err(value) }
 			}
 			Nbt::Short(short) => {
 				let before = short.value().into_owned();
-				if value.parse().map(|x| short.value = x).is_ok() {
-					Ok(before)
-				} else {
-					Err(value)
-				}
+				if value.parse().map(|x| short.value = x).is_ok() { Ok(before) } else { Err(value) }
 			}
 			Nbt::Int(int) => {
 				let before = int.value().into_owned();
-				if value.parse().map(|x| int.value = x).is_ok() {
-					Ok(before)
-				} else {
-					Err(value)
-				}
+				if value.parse().map(|x| int.value = x).is_ok() { Ok(before) } else { Err(value) }
 			}
 			Nbt::Long(long) => {
 				let before = long.value().into_owned();
-				if value.parse().map(|x| long.value = x).is_ok() {
-					Ok(before)
-				} else {
-					Err(value)
-				}
+				if value.parse().map(|x| long.value = x).is_ok() { Ok(before) } else { Err(value) }
 			}
 			Nbt::Float(float) => {
 				let before = float.value().into_owned();
-				if value.parse().map(|x| float.value = x).is_ok() {
-					Ok(before)
-				} else {
-					Err(value)
-				}
+				if value.parse().map(|x| float.value = x).is_ok() { Ok(before) } else { Err(value) }
 			}
 			Nbt::Double(double) => {
 				let before = double.value().into_owned();
-				if value.parse().map(|x| double.value = x).is_ok() {
-					Ok(before)
-				} else {
-					Err(value)
-				}
+				if value.parse().map(|x| double.value = x).is_ok() { Ok(before) } else { Err(value) }
 			}
-			Nbt::String(string) => Ok(
-				core::mem::replace(string, NbtString::new(value.into()))
-					.str
-					.as_str()
-					.to_owned(),
-			),
+			Nbt::String(string) => Ok(core::mem::replace(string, NbtString::new(value.into())).str.as_str().to_owned()),
 			_ => {
 				std::hint::cold_path();
 				return Err(value)
@@ -1536,9 +1471,7 @@ impl NbtElement {
 	pub unsafe fn try_compound_singleton_into_inner(mut self) -> Result<Self, Self> {
 		if let Some(compound) = self.as_compound_mut()
 			&& compound.len() == 1
-			&& compound
-				.get(0)
-				.is_some_and(|entry| entry.key.is_empty())
+			&& compound.get(0).is_some_and(|entry| entry.key.is_empty())
 			&& let Some(CompoundEntry { key: _, value }) = unsafe { compound.remove(0) }
 		{
 			Ok(value)
@@ -1708,18 +1641,16 @@ impl IndexMut<usize> for NbtElement {
 	fn index_mut(&mut self, idx: usize) -> &mut Self::Output {
 		pub static mut NULL_MUT: NbtElement = NbtElement::NULL;
 
-		self.get_mut(idx)
-			.map(|(_, b)| b)
-			.unwrap_or_else(|| {
-				std::hint::cold_path();
-				unsafe {
-					NULL_MUT = NbtElement::NULL;
-				}
-				#[allow(static_mut_refs)]
-				unsafe {
-					&mut NULL_MUT
-				}
-			})
+		self.get_mut(idx).map(|(_, b)| b).unwrap_or_else(|| {
+			std::hint::cold_path();
+			unsafe {
+				NULL_MUT = NbtElement::NULL;
+			}
+			#[allow(static_mut_refs)]
+			unsafe {
+				&mut NULL_MUT
+			}
+		})
 	}
 }
 

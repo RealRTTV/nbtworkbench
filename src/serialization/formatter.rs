@@ -1,4 +1,4 @@
-use crate::serialization::UncheckedBufWriter;
+use crate::serialization::encoder::UncheckedBufWriter;
 
 pub struct PrettyFormatter {
 	buf: UncheckedBufWriter,
@@ -20,10 +20,7 @@ impl PrettyFormatter {
 
 	pub fn increase(&mut self) { self.current_depth += 1; }
 
-	pub fn indent(&mut self) {
-		self.buf
-			.write_bytes(Self::INDENT, self.current_depth * Self::INDENT_QUANTITY);
-	}
+	pub fn indent(&mut self) { self.buf.write_bytes(Self::INDENT, self.current_depth * Self::INDENT_QUANTITY); }
 
 	pub fn decrease(&mut self) { self.current_depth = self.current_depth.saturating_sub(1); }
 

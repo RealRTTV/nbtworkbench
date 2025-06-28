@@ -1,9 +1,17 @@
 use thiserror::Error;
-use crate::elements::NbtElement;
-use crate::tree::{Indices, IterativeNavigationInformationMutItem, RecacheBookmarkError};
-use crate::workbench::MarkedLines;
 
-pub fn expand_element_to_indices(root: &mut NbtElement, indices: &Indices, bookmarks: &mut MarkedLines) -> Result<(), ExpandElementToIndicesError> {
+use crate::{
+	elements::element::NbtElement,
+	tree::{actions::RecacheBookmarkError, indices::Indices, navigate::IterativeNavigationInformationMutItem},
+	workbench::marked_line::MarkedLines,
+};
+
+#[rustfmt::skip]
+pub fn expand_element_to_indices(
+	root: &mut NbtElement,
+	indices: &Indices,
+	bookmarks: &mut MarkedLines
+) -> Result<(), ExpandElementToIndicesError> {
 	// SAFETY: only NbtElement::toggle is being called
 	for IterativeNavigationInformationMutItem { element, line_number, true_line_number, .. } in unsafe { root.navigate_parents_iteratively_mut(indices) } {
 		if element.is_complex() && !element.is_open() {
@@ -22,5 +30,5 @@ pub fn expand_element_to_indices(root: &mut NbtElement, indices: &Indices, bookm
 #[derive(Error, Debug)]
 pub enum ExpandElementToIndicesError {
 	#[error(transparent)]
-	RecacheBookmarks(#[from] RecacheBookmarkError)
+	RecacheBookmarks(#[from] RecacheBookmarkError),
 }

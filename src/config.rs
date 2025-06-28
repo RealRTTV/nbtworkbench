@@ -1,13 +1,24 @@
-use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
-use anyhow::{ensure, Result};
+use std::{
+	path::Path,
+	sync::atomic::{AtomicBool, Ordering},
+};
+
+use anyhow::{Result, ensure};
 use fxhash::FxHashMap;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
-use crate::error;
-use crate::render::Theme;
-use crate::widget::{ReplaceBy, SearchFlags, SearchMode, SearchOperation};
-use crate::workbench::SortAlgorithm;
+
+use crate::{
+	error,
+	render::{
+		widget::{
+			replace_box::ReplaceBy,
+			search_box::{SearchFlags, SearchMode, SearchOperation},
+		},
+		window::Theme,
+	},
+	workbench::SortAlgorithm,
+};
 
 #[derive(Serialize, Deserialize, Default)]
 struct Config {
@@ -54,12 +65,12 @@ pub fn read() -> bool {
 	let Some(config_dir) = dirs::config_dir() else { return false };
 	let txt_config = config_dir.join("nbtworkbench/config.txt");
 	let toml_config = config_dir.join("nbtworkbench/config.toml");
-	
+
 	match try_read_string(&toml_config).and_then(|str| try_parse_toml(&str)) {
 		Ok(config) => {
 			*CONFIG.write() = config;
 			return true
-		},
+		}
 		Err(e) => error!("Error reading TOML config file: {e}"),
 	}
 
@@ -67,7 +78,7 @@ pub fn read() -> bool {
 		Ok(config) => {
 			*CONFIG.write() = config;
 			return true
-		},
+		}
 		Err(e) => error!("Error reading TXT config file: {e}"),
 	}
 
@@ -82,7 +93,7 @@ pub fn read() -> bool {
 		Ok(config) => {
 			*CONFIG.write() = config;
 			return true
-		},
+		}
 		Err(e) => error!("Error reading TOML config: {e}"),
 	}
 
@@ -90,7 +101,7 @@ pub fn read() -> bool {
 		Ok(config) => {
 			*CONFIG.write() = config;
 			return true
-		},
+		}
 		Err(e) => error!("Error reading TXT config: {e}"),
 	}
 
@@ -110,10 +121,7 @@ fn try_parse_toml(str: &str) -> Result<Config> {
 }
 
 fn try_parse_txt(str: &str) -> Result<Config> {
-	let map = str.lines()
-		.filter_map(|line| line.split_once('='))
-		.map(|(a, b)| (a.to_owned(), b.to_owned()))
-		.collect::<FxHashMap<String, String>>();
+	let map = str.lines().filter_map(|line| line.split_once('=')).map(|(a, b)| (a.to_owned(), b.to_owned())).collect::<FxHashMap<String, String>>();
 
 	let mut config = Config::default();
 
@@ -124,68 +132,50 @@ fn try_parse_txt(str: &str) -> Result<Config> {
 	}) {
 		config.theme = theme;
 	}
-	if let Some(sort_algorithm) = map
-		.get("sort_algorithm")
-		.and_then(|s| match s.as_str() {
-			"none" => Some(SortAlgorithm::None),
-			"name" => Some(SortAlgorithm::Name),
-			"type" => Some(SortAlgorithm::Type),
-			_ => None,
-		}) {
+	if let Some(sort_algorithm) = map.get("sort_algorithm").and_then(|s| match s.as_str() {
+		"none" => Some(SortAlgorithm::None),
+		"name" => Some(SortAlgorithm::Name),
+		"type" => Some(SortAlgorithm::Type),
+		_ => None,
+	}) {
 		config.sort_algorithm = sort_algorithm;
 	}
-	if let Some(search_mode) = map
-		.get("search_mode")
-		.and_then(|s| match s.as_str() {
-			"string" => Some(SearchMode::String),
-			"regex" => Some(SearchMode::Regex),
-			"snbt" => Some(SearchMode::Snbt),
-			_ => None,
-		}) {
+	if let Some(search_mode) = map.get("search_mode").and_then(|s| match s.as_str() {
+		"string" => Some(SearchMode::String),
+		"regex" => Some(SearchMode::Regex),
+		"snbt" => Some(SearchMode::Snbt),
+		_ => None,
+	}) {
 		config.search_mode = search_mode;
 	}
-	if let Some(search_flags) = map
-		.get("search_flags")
-		.and_then(|s| match s.as_str() {
-			"key" => Some(SearchFlags::Keys),
-			"value" => Some(SearchFlags::Values),
-			"all" => Some(SearchFlags::KeysValues),
-			_ => None,
-		}) {
+	if let Some(search_flags) = map.get("search_flags").and_then(|s| match s.as_str() {
+		"key" => Some(SearchFlags::Keys),
+		"value" => Some(SearchFlags::Values),
+		"all" => Some(SearchFlags::KeysValues),
+		_ => None,
+	}) {
 		config.search_flags = search_flags;
 	}
-	if let Some(search_operation) = map
-		.get("search_operation")
-		.and_then(|s| match s.as_str() {
-			"and" => Some(SearchOperation::And),
-			"or" => Some(SearchOperation::Or),
-			"xor" => Some(SearchOperation::Xor),
-			"b" => Some(SearchOperation::B),
-			_ => None,
-		}) {
+	if let Some(search_operation) = map.get("search_operation").and_then(|s| match s.as_str() {
+		"and" => Some(SearchOperation::And),
+		"or" => Some(SearchOperation::Or),
+		"xor" => Some(SearchOperation::Xor),
+		"b" => Some(SearchOperation::B),
+		_ => None,
+	}) {
 		config.search_operation = search_operation;
 	}
-	if let Some(replace_by) = map
-		.get("replace_by")
-		.and_then(|s| match s.as_str() {
-			"search_hits" => Some(ReplaceBy::SearchHits),
-			"bookmarked_lines" => Some(ReplaceBy::BookmarkedLines),
-			_ => None,
-		}) {
+	if let Some(replace_by) = map.get("replace_by").and_then(|s| match s.as_str() {
+		"search_hits" => Some(ReplaceBy::SearchHits),
+		"bookmarked_lines" => Some(ReplaceBy::BookmarkedLines),
+		_ => None,
+	}) {
 		config.replace_by = replace_by;
 	}
-	if let Some(search_exact_match) = map
-		.get("search_exact_match")
-		.and_then(|s| s.parse::<bool>().ok())
-	{
+	if let Some(search_exact_match) = map.get("search_exact_match").and_then(|s| s.parse::<bool>().ok()) {
 		config.search_exact_match = search_exact_match;
 	}
-	if let Some(scale) = map
-		.get("scale")
-		.and_then(|s| s.strip_prefix("Some("))
-		.and_then(|s| s.strip_suffix(")"))
-		.and_then(|s| s.parse::<f32>().ok())
-	{
+	if let Some(scale) = map.get("scale").and_then(|s| s.strip_prefix("Some(")).and_then(|s| s.strip_suffix(")")).and_then(|s| s.parse::<f32>().ok()) {
 		config.scale = Some(scale);
 	}
 
@@ -211,7 +201,7 @@ pub fn write() -> bool {
 	if DISABLE_FILE_WRITES.load(Ordering::Relaxed) {
 		return true
 	}
-	
+
 	let Some(local_storage) = web_sys::window().and_then(|window| window.local_storage().ok()).flatten() else { return false };
 	let Ok(value) = toml::to_string(&*CONFIG.read()) else { return false };
 	local_storage.set_item("config_toml", &value).is_ok()

@@ -1,10 +1,24 @@
 use thiserror::Error;
-use super::MutableIndices;
-use crate::elements::NbtElement;
-use crate::tree::{Indices, NavigationError, NavigationInformation, NavigationInformationMut, OwnedIndices};
-use crate::workbench::{MarkedLineSlice, MarkedLines, WorkbenchAction};
 
-pub fn swap_element_same_depth<'m1, 'm2: 'm1>(root: &mut NbtElement, parent_indices: OwnedIndices, a: usize, b: usize, bookmarks: &mut MarkedLines, mutable_indices: &'m1 mut MutableIndices<'m2>) -> Result<SwapElementResultSameDepth, SwapElementErrorSameDepth> {
+use crate::{
+	elements::element::NbtElement,
+	history::WorkbenchAction,
+	tree::{
+		MutableIndices,
+		indices::{Indices, OwnedIndices},
+		navigate::{NavigationError, NavigationInformation, NavigationInformationMut},
+	},
+	workbench::marked_line::MarkedLineSlice,
+};
+
+#[rustfmt::skip]
+pub fn swap_element_same_depth<'m1, 'm2: 'm1>(
+	root: &mut NbtElement,
+	parent_indices: OwnedIndices,
+	a: usize,
+	b: usize,
+	mi: &'m1 mut MutableIndices<'m2>,
+) -> Result<SwapElementResultSameDepth, SwapElementErrorSameDepth> {
 	let (a, b) = if a <= b { (a, b) } else { (b, a) };
 	let NavigationInformationMut {
 		element: parent,
@@ -31,20 +45,20 @@ pub fn swap_element_same_depth<'m1, 'm2: 'm1>(root: &mut NbtElement, parent_indi
 	b_true_line_number += parent_true_line_number;
 	b_line_number += parent_line_number;
 
-	let mut a_bookmarks = bookmarks.remove(a_true_line_number..a_true_line_number + a_true_height);
-	let mut b_bookmarks = bookmarks.remove(b_true_line_number..b_true_line_number + b_true_height);
+	let mut a_bookmarks = mi.bookmarks.remove(a_true_line_number..a_true_line_number + a_true_height);
+	let mut b_bookmarks = mi.bookmarks.remove(b_true_line_number..b_true_line_number + b_true_height);
 	MarkedLineSlice::from_marked_lines_mut(&mut a_bookmarks).decrement(a_line_number, a_true_line_number);
 	MarkedLineSlice::from_marked_lines_mut(&mut b_bookmarks).decrement(b_line_number, b_true_line_number);
 
-	bookmarks[b_true_line_number..].decrement(b_height, b_true_height);
-	bookmarks[a_true_line_number..].decrement(a_height, a_true_height);
+	mi.bookmarks[b_true_line_number..].decrement(b_height, b_true_height);
+	mi.bookmarks[a_true_line_number..].decrement(a_height, a_true_height);
 
 	MarkedLineSlice::from_marked_lines_mut(&mut a_bookmarks).increment(b_line_number, b_true_line_number);
 	MarkedLineSlice::from_marked_lines_mut(&mut b_bookmarks).increment(a_line_number, a_true_line_number);
-	*bookmarks |= a_bookmarks;
-	*bookmarks |= b_bookmarks;
+	*mi.bookmarks |= a_bookmarks;
+	*mi.bookmarks |= b_bookmarks;
 
-	mutable_indices.apply(|indices, _ci| {
+	mi.apply(|indices, _ci| {
 		if parent_indices.encompasses(indices) {
 			let sibling = &mut indices[parent_indices.len()];
 			if *sibling == a {
@@ -65,7 +79,6 @@ pub fn swap_element_same_depth<'m1, 'm2: 'm1>(root: &mut NbtElement, parent_indi
 	Ok(SwapElementResultSameDepth { parent: parent_indices, a, b })
 }
 
-#[must_use]
 #[derive(Clone)]
 pub struct SwapElementResultSameDepth {
 	pub parent: OwnedIndices,
@@ -81,5 +94,5 @@ impl SwapElementResultSameDepth {
 #[derive(Error, Debug)]
 pub enum SwapElementErrorSameDepth {
 	#[error(transparent)]
-	Navigation(#[from] NavigationError)
+	Navigation(#[from] NavigationError),
 }

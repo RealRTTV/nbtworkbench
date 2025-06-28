@@ -1,4 +1,5 @@
-#![allow(semicolon_in_expressions_from_macros, internal_features, incomplete_features)]
+#![allow(semicolon_in_expressions_from_macros, internal_features, incomplete_features, unsafe_op_in_unsafe_fn)]
+#![forbid(unused_must_use)]
 #![warn(clippy::pedantic)]
 #![feature(
 	allocator_api,
@@ -6,12 +7,15 @@
 	associated_type_defaults,
 	cold_path,
 	duration_millis_float,
+	if_let_guard,
 	inherent_associated_types,
 	let_chains,
 	likely_unlikely,
 	maybe_uninit_array_assume_init,
+	never_type,
 	panic_update_hook,
 	ptr_as_ref_unchecked,
+	try_trait_v2,
 	try_with_capacity,
 	vec_push_within_capacity,
 	array_chunks,
@@ -24,17 +28,17 @@
 
 extern crate core;
 
+pub mod action_result;
 #[cfg(not(target_arch = "wasm32"))] pub mod cli;
 pub mod config;
 pub mod elements;
+pub mod history;
 pub mod render;
 pub mod serialization;
 pub mod tree;
 pub mod util;
 #[cfg(target_arch = "wasm32")] pub mod wasm;
 pub mod workbench;
-
-pub use render::{assets, widget};
 
 #[macro_export]
 macro_rules! flags {
@@ -74,32 +78,11 @@ macro_rules! hash {
 }
 
 #[macro_export]
-macro_rules! tab {
-	($self:ident) => {
-		#[allow(unused_unsafe)]
-		unsafe {
-			$self.tabs.get_unchecked($self.tab)
-		}
-	};
-}
-
-#[macro_export]
-macro_rules! tab_mut {
-	($self:ident) => {
-		#[allow(unused_unsafe)]
-		unsafe {
-			$self.tabs.get_unchecked_mut($self.tab)
-		}
-	};
-}
-
-#[macro_export]
 macro_rules! get_interaction_information {
 	($self:ident) => {{
-		let left_margin = $self.left_margin();
-		let horizontal_scroll = $self.horizontal_scroll();
-		let scroll = $self.scroll();
-		$crate::workbench::Workbench::get_interaction_information_raw(left_margin, horizontal_scroll, scroll, $self.mouse_x, $self.mouse_y, &mut tab_mut!($self).value)
+		let tab = $self.tabs.active_tab_mut();
+		let consts = tab.consts();
+		$crate::workbench::Workbench::get_interaction_information_raw(consts, $self.mouse, &mut tab.root)
 	}};
 }
 
@@ -121,13 +104,19 @@ macro_rules! log {
 
 #[macro_export]
 macro_rules! mutable_indices {
-	($workbench:ident, $tab:ident) => {
-		&mut MutableIndices::new(&mut $tab.subscription, &mut $tab.selected_text)
+	($tab:ident) => {
+		&mut $crate::tree::MutableIndices::new(&mut $tab.subscription, &mut $tab.selected_text, &mut $tab.bookmarks)
 	};
 }
 
 pub static mut WORKBENCH: workbench::Workbench = unsafe { workbench::Workbench::uninit() };
-pub static mut WINDOW_PROPERTIES: render::WindowProperties = render::WindowProperties::Fake;
+pub fn window_properties() -> parking_lot::MutexGuard<'static, render::window::WindowProperties> {
+	static WINDOW_PROPERTIES: parking_lot::Mutex<render::window::WindowProperties> = parking_lot::Mutex::new(render::window::WindowProperties::Fake);
+
+	WINDOW_PROPERTIES.lock()
+}
+
+// TODO: GO OVER EACH FUNCTION IN WORKBENCH.RS AND TAB.RS AND CONVERT ALL SELF REFERENCES INTO FIELD REFERENCES ONLY: EXAMPLES INCLUDE, SELECTED TEXT. EX: `Workbench::bookmark_line(...)`
 
 /// # Refactor
 /// * render trees using [`RenderLine`](RenderLine) struct/enum
@@ -162,9 +151,9 @@ pub fn main() -> ! {
 			std::process::exit(0);
 		}
 		Some("-?" | "/?" | "--help" | "-h") => cli::help(),
-		_ => pollster::block_on(render::run()),
+		_ => pollster::block_on(render::window::run()),
 	}
 }
 
 // required so chunk coordinates function with the hardcoded spacing offset
-static_assertions::const_assert_eq!(render::VertexBufferBuilder::CHAR_WIDTH[b':' as usize], render::VertexBufferBuilder::CHAR_WIDTH[b',' as usize]);
+static_assertions::const_assert_eq!(render::vertex_buffer_builder::VertexBufferBuilder::CHAR_WIDTH[b':' as usize], render::vertex_buffer_builder::VertexBufferBuilder::CHAR_WIDTH[b',' as usize]);

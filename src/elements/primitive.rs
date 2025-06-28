@@ -1,6 +1,6 @@
 macro_rules! primitive {
 	($module:ident, $name:ident, $t:ty, $id:literal, $s:expr, $uv:path, $ghost_uv:path) => {
-		mod $module {
+		pub mod $module {
 			#[derive(Copy, Clone, Default, PartialEq)]
 			#[repr(transparent)]
 			pub struct $name {
@@ -21,8 +21,8 @@ macro_rules! primitive {
 				}
 			}
 
-			impl $crate::serialization::PrettyDisplay for $name {
-				fn pretty_fmt(&self, f: &mut $crate::serialization::PrettyFormatter) { f.write_str(&self.to_string()) }
+			impl $crate::serialization::formatter::PrettyDisplay for $name {
+				fn pretty_fmt(&self, f: &mut $crate::serialization::formatter::PrettyFormatter) { f.write_str(&self.to_string()) }
 			}
 
 			impl $crate::elements::NbtElementVariant for $name {
@@ -37,7 +37,7 @@ macro_rules! primitive {
 					Err(s.len())
 				}
 
-				fn from_bytes<'a, D: $crate::serialization::Decoder<'a>>(decoder: &mut D, _: Self::ExtraParseInfo) -> $crate::elements::result::NbtParseResult<Self> {
+				fn from_bytes<'a, D: $crate::serialization::decoder::Decoder<'a>>(decoder: &mut D, _: Self::ExtraParseInfo) -> $crate::elements::result::NbtParseResult<Self> {
 					use $crate::elements::result::*;
 
 					unsafe {
@@ -48,29 +48,25 @@ macro_rules! primitive {
 					}
 				}
 
-				fn to_be_bytes(&self, writer: &mut $crate::serialization::UncheckedBufWriter) { writer.write(self.value.to_be_bytes().as_ref()); }
+				fn to_be_bytes(&self, writer: &mut $crate::serialization::encoder::UncheckedBufWriter) { writer.write(self.value.to_be_bytes().as_ref()); }
 
-				fn to_le_bytes(&self, writer: &mut $crate::serialization::UncheckedBufWriter) { writer.write(self.value.to_le_bytes().as_ref()); }
+				fn to_le_bytes(&self, writer: &mut $crate::serialization::encoder::UncheckedBufWriter) { writer.write(self.value.to_le_bytes().as_ref()); }
 
-				fn render(&self, builder: &mut $crate::render::VertexBufferBuilder, name: Option<&str>, _remaining_scroll: &mut usize, _tail: bool, ctx: &mut $crate::render::RenderContext) {
+				fn render(&self, builder: &mut $crate::render::vertex_buffer_builder::VertexBufferBuilder, name: Option<&str>, _remaining_scroll: &mut usize, _tail: bool, ctx: &mut $crate::render::RenderContext) {
 					use ::std::fmt::Write as _;
 
 					ctx.line_number();
 					builder.draw_texture(ctx.pos(), Self::UV, (16, 16));
-					ctx.check_for_invalid_value(|value| {
-						value
-							.parse::<<Self as $crate::elements::PrimitiveNbtElementVariant>::InnerType>()
-							.is_err()
-					});
+					ctx.check_for_invalid_value(|value| value.parse::<<Self as $crate::elements::PrimitiveNbtElementVariant>::InnerType>().is_err());
 					ctx.render_errors(ctx.pos(), builder);
 					if ctx.forbid(ctx.pos()) {
-						builder.settings(ctx.pos() + (20, 0), false, $crate::assets::JUST_OVERLAPPING_BASE_TEXT_Z);
+						builder.settings(ctx.pos() + (20, 0), false, $crate::render::assets::JUST_OVERLAPPING_BASE_TEXT_Z);
 						if let Some(key) = name {
-							builder.color = $crate::render::TextColor::TreeKey.to_raw();
+							builder.color = $crate::render::color::TextColor::TreeKey.to_raw();
 							let _ = write!(builder, "{key}: ");
 						};
 
-						builder.color = $crate::render::TextColor::TreePrimitive.to_raw();
+						builder.color = $crate::render::color::TextColor::TreePrimitive.to_raw();
 						let _ = write!(builder, "{}", self.value);
 					}
 
@@ -89,13 +85,12 @@ macro_rules! primitive {
 				}
 			}
 		}
-		pub use $module::*;
 	};
 }
 
-primitive!(byte, NbtByte, i8, 1, Some('b'), crate::assets::BYTE_UV, crate::assets::BYTE_GHOST_UV);
-primitive!(short, NbtShort, i16, 2, Some('s'), crate::assets::SHORT_UV, crate::assets::SHORT_GHOST_UV);
-primitive!(int, NbtInt, i32, 3, None::<char>, crate::assets::INT_UV, crate::assets::INT_GHOST_UV);
-primitive!(long, NbtLong, i64, 4, Some('L'), crate::assets::LONG_UV, crate::assets::LONG_GHOST_UV);
-primitive!(float, NbtFloat, f32, 5, Some('f'), crate::assets::FLOAT_UV, crate::assets::FLOAT_GHOST_UV);
-primitive!(double, NbtDouble, f64, 6, Some('d'), crate::assets::DOUBLE_UV, crate::assets::DOUBLE_GHOST_UV);
+primitive!(byte, NbtByte, i8, 1, Some('b'), crate::render::assets::BYTE_UV, crate::render::assets::BYTE_GHOST_UV);
+primitive!(short, NbtShort, i16, 2, Some('s'), crate::render::assets::SHORT_UV, crate::render::assets::SHORT_GHOST_UV);
+primitive!(int, NbtInt, i32, 3, None::<char>, crate::render::assets::INT_UV, crate::render::assets::INT_GHOST_UV);
+primitive!(long, NbtLong, i64, 4, Some('L'), crate::render::assets::LONG_UV, crate::render::assets::LONG_GHOST_UV);
+primitive!(float, NbtFloat, f32, 5, Some('f'), crate::render::assets::FLOAT_UV, crate::render::assets::FLOAT_GHOST_UV);
+primitive!(double, NbtDouble, f64, 6, Some('d'), crate::render::assets::DOUBLE_UV, crate::render::assets::DOUBLE_GHOST_UV);

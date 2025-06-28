@@ -1,24 +1,42 @@
-use std::ffi::OsStr;
-use std::path::PathBuf;
+use std::{ffi::OsStr, path::PathBuf};
 
 use compact_str::{CompactString, ToCompactString};
 use thiserror::Error;
-use crate::elements::NbtElement;
-use crate::render::WindowProperties;
-use crate::tree::{OwnedIndices, ParentNavigationError, ParentNavigationInformationMut};
-use crate::workbench::WorkbenchAction;
 
-pub fn rename_element(root: &mut NbtElement, indices: OwnedIndices, key: Option<CompactString>, value: Option<String>, path: &mut Option<PathBuf>, name: &mut Box<str>, window_properties: &mut WindowProperties) -> Result<RenameElementResult, RenameElementError> {
+use crate::{
+	elements::element::NbtElement,
+	history::WorkbenchAction,
+	tree::{
+		indices::OwnedIndices,
+		navigate::{ParentNavigationError, ParentNavigationInformationMut},
+	},
+	window_properties,
+	workbench::tab::{FilePath, FilePathError},
+};
+
+#[rustfmt::skip]
+pub fn rename_element(
+	root: &mut NbtElement,
+	indices: OwnedIndices,
+	key: Option<CompactString>,
+	value: Option<String>,
+	path: &mut FilePath
+) -> Result<RenameElementResult, RenameElementError> {
 	if key.is_none() && value.is_none() {
 		return Ok(RenameElementResult { indices, key, value });
 	}
-	
+
 	match root.navigate_parent_mut(&indices) {
 		Ok(ParentNavigationInformationMut { parent, idx, .. }) => {
 			let old_key = if let Some(key) = key {
-				parent
-					.update_key(idx, key.clone())
-					.map(|x| x.unwrap_or(key))
+				if let Some(result) = parent.update_key(idx, key.clone()) {
+					match result {
+						Some(key) => Some(key),
+						None => return Err(RenameElementError::DuplicateKey { idx, indices, key }),
+					}
+				} else {
+					None
+				}
 			} else {
 				None
 			};
@@ -28,7 +46,7 @@ pub fn rename_element(root: &mut NbtElement, indices: OwnedIndices, key: Option<
 				let child = &mut parent[idx];
 				match child.set_value(value) {
 					Ok(old_value) => Some(old_value),
-					Err(value) => return Err(RenameElementError::InvalidValue { value, child: child.display_name() })
+					Err(value) => return Err(RenameElementError::InvalidValue { value, child: child.display_name() }),
 				}
 			} else {
 				None
@@ -37,46 +55,24 @@ pub fn rename_element(root: &mut NbtElement, indices: OwnedIndices, key: Option<
 			Ok(RenameElementResult { indices, key: old_key, value: old_value })
 		}
 		Err(ParentNavigationError::EmptyIndices) => {
-			if let Some(key) = key.clone() && value.is_none() {
-				if path
-					.as_ref()
-					.map(|path| path.as_os_str().to_string_lossy())
-					.as_deref()
-					.unwrap_or(name)
-					== key
-				{
-					return Ok(RenameElementResult { indices, key: Some(key), value });
-				}
-				let buf = PathBuf::from(key);
-				if let Some(new_name) = buf
-					.file_name()
-					.and_then(OsStr::to_str)
-					.map(ToOwned::to_owned)
-				{
-					window_properties.set_window_title(&format!("{new_name} - NBT Workbench"));
-					let old_name = core::mem::replace(name, new_name.into_boxed_str());
-					Ok(RenameElementResult {
-						indices: OwnedIndices::new(),
-						key: None,
-						value: Some(
-							path.replace(buf)
-								.as_deref()
-								.and_then(|path| path.to_str())
-								.map_or_else(|| old_name.into_string(), |str| str.to_owned()),
-						),
-					})
-				} else {
-					Err(RenameElementError::PathHasNoName { path: buf.to_string_lossy().into_owned() })
-				}
+			if let Some(key) = key.clone()
+				&& value.is_none()
+			{
+				let old_path = path.set_path(key)?;
+				window_properties().set_window_title(format!("{name} - NBT Workbench", name = path.name()).as_str());
+				Ok(RenameElementResult {
+					indices,
+					key: Some(old_path.to_string_lossy().into_owned().into()),
+					value
+				})
 			} else {
 				Err(RenameElementError::InvalidRootRenaming { key, value })
 			}
 		}
-		Err(e) => Err(e.into())
+		Err(e) => Err(e.into()),
 	}
 }
 
-#[must_use]
 #[derive(Clone)]
 pub struct RenameElementResult {
 	pub indices: OwnedIndices,
@@ -98,10 +94,12 @@ impl RenameElementResult {
 pub enum RenameElementError {
 	#[error(transparent)]
 	Navigation(#[from] ParentNavigationError),
+	#[error(transparent)]
+	FilePathError(#[from] FilePathError),
 	#[error("Invalid value '{value}' for {child}.")]
 	InvalidValue { value: String, child: &'static str },
-	#[error("Path '{path}' has no file name.")]
-	PathHasNoName { path: String },
+	#[error("Duplicate key ({key}) @ {nth} child for {indices}", nth = crate::util::nth(idx + 1))]
+	DuplicateKey { idx: usize, indices: OwnedIndices, key: CompactString },
 	#[error("Tried to rename root with {key:?} and {value:?}; needs key only.")]
-	InvalidRootRenaming { key: Option<CompactString>, value: Option<String> }
+	InvalidRootRenaming { key: Option<CompactString>, value: Option<String> },
 }

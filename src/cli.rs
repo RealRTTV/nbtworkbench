@@ -1,17 +1,17 @@
-use std::fmt::Formatter;
-use std::fs::{File, read};
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::{
+	fmt::Formatter,
+	fs::{read, File},
+	path::{Path, PathBuf},
+	sync::atomic::{AtomicU64, Ordering},
+};
 
 use glob::glob;
 
-use crate::elements::NbtElement;
-use crate::render::WindowProperties;
-use crate::tree::MutableIndices;
-use crate::util::create_regex;
-use crate::widget::{ReplaceBox, SearchBox, SearchFlags, SearchMode, SearchPredicate, SearchPredicateInner, SearchReplacement};
-use crate::workbench::{FileFormat, MarkedLines, Workbench, WorkbenchAction};
-use crate::{config, error, log};
+use crate::workbench::tab::NbtFileFormat;
+use crate::{config, elements::element::NbtElement, error, history::WorkbenchAction, log, mutable_indices, render::widget::{
+	replace_box::{ReplaceBox, SearchReplacement},
+	search_box::{SearchBox, SearchFlags, SearchMode, SearchPredicate, SearchPredicateInner},
+}, util::create_regex, workbench::Workbench};
 
 struct SearchResult {
 	path: PathBuf,
@@ -38,28 +38,15 @@ fn get_paths(mut args: Vec<String>) -> (PathBuf, Vec<PathBuf>) {
 	match glob(&path) {
 		Ok(paths) => {
 			let root = if let Some(astrix_index) = path.bytes().position(|x| x == b'*')
-				&& let Some(slash_index) = path
-					.bytes()
-					.take(astrix_index)
-					.rposition(|x| x == b'/' || x == b'\\')
+				&& let Some(slash_index) = path.bytes().take(astrix_index).rposition(|x| x == b'/' || x == b'\\')
 			{
 				PathBuf::from(&path[..=slash_index])
-			} else if let Some(slash_index) = path
-				.bytes()
-				.rposition(|x| x == b'/' || x == b'\\')
-			{
+			} else if let Some(slash_index) = path.bytes().rposition(|x| x == b'/' || x == b'\\') {
 				PathBuf::from(&path[..=slash_index])
 			} else {
 				panic!("{path}")
 			};
-			let paths = paths
-				.filter_map(|result| result.ok())
-				.filter_map(|p| {
-					p.strip_prefix(&root)
-						.ok()
-						.map(|x| x.to_path_buf())
-				})
-				.collect::<Vec<_>>();
+			let paths = paths.filter_map(|result| result.ok()).filter_map(|p| p.strip_prefix(&root).ok().map(|x| x.to_path_buf())).collect::<Vec<_>>();
 			(root, paths)
 		}
 		Err(e) => {
@@ -174,12 +161,7 @@ fn get_search_replacement(args: &mut Vec<String>) -> SearchReplacement {
 }
 
 #[must_use]
-fn file_size(path: impl AsRef<Path>) -> Option<u64> {
-	File::open(path)
-		.ok()
-		.and_then(|file| file.metadata().ok())
-		.map(|metadata| metadata.len())
-}
+fn file_size(path: impl AsRef<Path>) -> Option<u64> { File::open(path).ok().and_then(|file| file.metadata().ok()).map(|metadata| metadata.len()) }
 
 fn increment_progress_bar(completed: &AtomicU64, size: u64, total: u64, action: &str) {
 	let finished = completed.fetch_add(size, Ordering::Relaxed);
@@ -188,22 +170,10 @@ fn increment_progress_bar(completed: &AtomicU64, size: u64, total: u64, action: 
 }
 
 #[must_use]
-fn get_argument(key: &str, args: &mut Vec<String>) -> Option<String> {
-	Some(
-		args.remove(args.iter().position(|x| {
-			x.strip_prefix(key)
-				.is_some_and(|x| x.starts_with("="))
-		})?)
-		.split_off(key.len() + 1),
-	)
-}
+fn get_argument(key: &str, args: &mut Vec<String>) -> Option<String> { Some(args.remove(args.iter().position(|x| x.strip_prefix(key).is_some_and(|x| x.starts_with("=")))?).split_off(key.len() + 1)) }
 
 #[must_use]
-fn get_argument_any(keys: &[&str], args: &mut Vec<String>) -> Option<String> {
-	keys.iter()
-		.filter_map(|key| get_argument(key, args))
-		.next()
-}
+fn get_argument_any(keys: &[&str], args: &mut Vec<String>) -> Option<String> { keys.iter().filter_map(|key| get_argument(key, args)).next() }
 
 pub fn find() -> ! {
 	let mut args = std::env::args().collect::<Vec<_>>();
@@ -224,8 +194,8 @@ pub fn find() -> ! {
 			let mut path = root.clone();
 			path.push(p);
 			results.push(s.spawn(|| {
-				let mut workbench = Workbench::new(&mut WindowProperties::Fake, None);
-				workbench.tabs.clear();
+				let mut workbench = Workbench::new(None).expect("Valid workbench constructable");
+				drop(workbench.tabs.remove(0));
 
 				let bytes = match read(&path) {
 					Ok(bytes) => bytes,
@@ -238,24 +208,21 @@ pub fn find() -> ! {
 
 				let len = bytes.len() as u64;
 
-				if let Err(e) = workbench.on_open_file(&path, bytes, &mut WindowProperties::Fake) {
+				if let Err(e) = workbench.on_open_file(&path, bytes) {
 					error!("File parse error: {e}");
 					increment_progress_bar(&completed, len, total_size, "Searching");
 					return None;
 				}
 
-				let tab = workbench.tabs.remove(0);
-				let bookmarks = SearchBox::search0(&tab.value, &predicate);
+				let tab = workbench.tabs.remove(0).expect("Expected a tab");
+				let bookmarks = SearchBox::search0(&tab.root, &predicate);
 
 				increment_progress_bar(&completed, len, total_size, "Searching");
 				drop(tab);
 				if !bookmarks.is_empty() {
 					Some(SearchResult {
 						path,
-						lines: bookmarks
-							.into_iter()
-							.map(|x| x.true_line_number())
-							.collect(),
+						lines: bookmarks.into_iter().map(|x| x.true_line_number()).collect(),
 					})
 				} else {
 					None
@@ -263,11 +230,7 @@ pub fn find() -> ! {
 			}));
 		}
 
-		results
-			.into_iter()
-			.filter_map(|x| x.join().ok())
-			.filter_map(std::convert::identity)
-			.collect::<Vec<_>>()
+		results.into_iter().filter_map(|x| x.join().ok()).filter_map(std::convert::identity).collect::<Vec<_>>()
 	});
 
 	log!("\rSearching ({total_size} / {total_size} bytes) (100.0% complete)");
@@ -301,8 +264,8 @@ pub fn replace() -> ! {
 			let mut path = root.clone();
 			path.push(p);
 			results.push(s.spawn(|| {
-				let mut workbench = Workbench::new(&mut WindowProperties::Fake, None);
-				workbench.tabs.clear();
+				let mut workbench = Workbench::new(None).expect("Valid workbench constructable");
+				drop(workbench.tabs.remove(0));
 
 				let bytes = match read(&path) {
 					Ok(bytes) => bytes,
@@ -315,20 +278,20 @@ pub fn replace() -> ! {
 
 				let len = bytes.len() as u64;
 
-				if let Err(e) = workbench.on_open_file(&path, bytes, &mut WindowProperties::Fake) {
+				if let Err(e) = workbench.on_open_file(&path, bytes) {
 					error!("File parse error: {e}");
 					increment_progress_bar(&completed, len, total_size, "Replacing");
 					return None;
 				}
 
-				let mut tab = workbench.tabs.remove(0);
-				let (bulk, errors) = ReplaceBox::replace_by_search_box0(&mut MarkedLines::new(), MutableIndices::empty(), &mut tab.value, &replacement);
+				let mut tab = workbench.tabs.remove(0).expect("Expected a tab");
+				let (bulk, errors) = ReplaceBox::replace_by_search_box0(mutable_indices!(tab), &mut tab.root, &replacement);
 				for e in errors {
 					error!("Error while replacing line: {e}");
 				}
 				let actions = if let WorkbenchAction::Bulk { actions } = &bulk { actions.len() } else { 0 };
 
-				if let Err(e) = tab.save(false, &mut WindowProperties::Fake) {
+				if let Err(e) = tab.save(false) {
 					error!("File write error: {e}");
 				}
 
@@ -340,11 +303,7 @@ pub fn replace() -> ! {
 				Some((path, actions))
 			}));
 		}
-		results
-			.into_iter()
-			.filter_map(|x| x.join().ok())
-			.filter_map(std::convert::identity)
-			.collect::<Vec<_>>()
+		results.into_iter().filter_map(|x| x.join().ok()).filter_map(std::convert::identity).collect::<Vec<_>>()
 	});
 
 	log!("\rReplacing ({total_size} / {total_size} bytes) (100.0% complete)");
@@ -370,11 +329,11 @@ pub fn reformat() -> ! {
 
 	let format_arg = get_argument_any(&["--format", "-f"], &mut args);
 	let (extension, format) = match format_arg.as_deref() {
-		Some(x @ "nbt") => (x, FileFormat::Nbt),
-		Some(x @ ("dat" | "dat_old" | "gzip")) => (if x == "gzip" { "dat" } else { x }, FileFormat::Gzip),
-		Some(x @ "zlib") => (x, FileFormat::Zlib),
-		Some(x @ "snbt") => (x, FileFormat::Snbt),
-		Some(x @ ("lnbt" | "lhnbt")) => ("nbt", if x == "lnbt" { FileFormat::LittleEndianNbt } else { FileFormat::LittleEndianHeaderNbt }),
+		Some(x @ "nbt") => (x, NbtFileFormat::Nbt),
+		Some(x @ ("dat" | "dat_old" | "gzip")) => (if x == "gzip" { "dat" } else { x }, NbtFileFormat::Gzip),
+		Some(x @ "zlib") => (x, NbtFileFormat::Zlib),
+		Some(x @ "snbt") => (x, NbtFileFormat::Snbt),
+		Some(x @ ("lnbt" | "lhnbt")) => ("nbt", if x == "lnbt" { NbtFileFormat::LittleEndianNbt } else { NbtFileFormat::LittleEndianHeaderNbt }),
 		None => {
 			error!("`--format` not specified.");
 			std::process::exit(1);
@@ -403,8 +362,8 @@ pub fn reformat() -> ! {
 			s.spawn(|| 'a: {
 				let p = p;
 				let path = pa;
-				let mut workbench = Workbench::new(&mut WindowProperties::Fake, None);
-				workbench.tabs.clear();
+				let mut workbench = Workbench::new(None).expect("Valid workbench construction");
+				drop(workbench.tabs.remove(0));
 
 				let bytes = match read(&path) {
 					Ok(bytes) => bytes,
@@ -417,26 +376,21 @@ pub fn reformat() -> ! {
 
 				let len = bytes.len() as u64;
 
-				if let Err(e) = workbench.on_open_file(&path, bytes, &mut WindowProperties::Fake) {
+				if let Err(e) = workbench.on_open_file(&path, bytes) {
 					error!("File parse error: {e}");
 					increment_progress_bar(&completed, len, total_size, "Reformatting");
 					break 'a;
 				}
 
-				let tab = workbench.tabs.remove(0);
-				if let FileFormat::Nbt | FileFormat::Snbt | FileFormat::Gzip | FileFormat::Zlib = tab.format() {
+				let tab = workbench.tabs.remove(0).expect("Expected a tab");
+				if let NbtFileFormat::Nbt | NbtFileFormat::Snbt | NbtFileFormat::Gzip | NbtFileFormat::Zlib = tab.format {
 				} else {
-					error!("Tab had invalid file format {}", tab.format().to_string());
+					error!("Tab had invalid file format {}", tab.format.to_string());
 				}
 
-				let out = format.encode(&tab.value);
+				let out = format.encode(&tab.root);
 
-				let name = path
-					.file_stem()
-					.expect("File must have stem")
-					.to_string_lossy()
-					.into_owned() + "."
-					+ &extension;
+				let name = path.file_stem().expect("File must have stem").to_string_lossy().into_owned() + "." + &extension;
 
 				let mut new_path = if let Some(out_dir) = out_dir.as_deref() { out_dir.to_path_buf() } else { root.to_path_buf() };
 				new_path.push(p);

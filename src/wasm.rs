@@ -2,9 +2,11 @@ use std::time::Duration;
 
 use wasm_bindgen::prelude::wasm_bindgen;
 
-use crate::render::{TextColor, run};
-use crate::widget::Alert;
-use crate::{WINDOW_PROPERTIES, WORKBENCH, config};
+use crate::{
+	WINDOW_PROPERTIES, WORKBENCH, config,
+	render::{TextColor, run},
+	widget::{Alert, Alertable},
+};
 
 #[macro_export]
 macro_rules! error {
@@ -55,24 +57,13 @@ pub fn open_file(name: String, bytes: Vec<u8>) {
 
 	let workbench = unsafe { &mut WORKBENCH };
 
-	if let Err(e) = workbench.on_open_file(name.as_str().as_ref(), bytes, unsafe { &mut WINDOW_PROPERTIES }) {
-		workbench.alert(e);
-	}
+	workbench.on_open_file(name.as_str().as_ref(), bytes).alert_err(&mut workbench.alerts);
 }
 
 #[wasm_bindgen]
 pub fn close() -> usize { unsafe { WORKBENCH.close() } }
 
-pub fn set_clipboard(value: String) -> bool {
-	web_sys::window()
-		.map(|window| window.navigator())
-		.map(|navigator| navigator.clipboard())
-		.map(|clipboard| clipboard.write_text(&value))
-		.is_some()
-}
-
-#[must_use]
-pub fn now() -> Duration { Duration::from_millis(web_sys::js_sys::Date::now() as u64) }
+pub fn set_clipboard(value: String) -> bool { web_sys::window().map(|window| window.navigator()).map(|navigator| navigator.clipboard()).map(|clipboard| clipboard.write_text(&value)).is_some() }
 
 pub struct FakeScope<'a, 'b>;
 

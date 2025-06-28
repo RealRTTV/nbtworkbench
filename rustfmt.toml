@@ -4,7 +4,7 @@ binop_separator = "Front"
 blank_lines_lower_bound = 0
 blank_lines_upper_bound = 1
 brace_style = "SameLineWhere" # *
-chain_width = 50 # *
+#chain_width = 50 # *
 color = "Auto"
 combine_control_expr = true
 condense_wildcard_suffixes = false
@@ -44,7 +44,7 @@ match_arm_trailing_comma = true
 max_width = 250
 
 merge_derives = true
-imports_granularity = "Module"
+imports_granularity = "Crate"
 newline_style = "Unix"
 normalize_comments = true
 normalize_doc_attributes = true

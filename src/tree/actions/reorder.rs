@@ -1,14 +1,33 @@
 use thiserror::Error;
-use crate::elements::{CompoundEntry, CompoundMap, NbtElement, NbtPatternMut};
-use crate::{hash, util};
-use crate::tree::{MutableIndices, NavigationError, NavigationInformationMut, OwnedIndices};
-use crate::util::{invert_mapping, InvertMappingError, ReorderMappingError};
-use crate::workbench::{MarkedLines, WorkbenchAction};
 
+use crate::{
+	elements::{
+		compound::CompoundMap,
+		element::{NbtElement, NbtPatternMut},
+	},
+	hash,
+	history::WorkbenchAction,
+	tree::{
+		MutableIndices,
+		indices::OwnedIndices,
+		navigate::{NavigationError, NavigationInformationMut},
+	},
+	util::{self, InvertMappingError, ReorderMappingError, invert_mapping},
+	workbench::marked_line::MarkedLines,
+};
+
+#[rustfmt::skip]
 #[allow(non_snake_case)]
-pub fn reorder_element<'m1, 'm2: 'm1>(root: &mut NbtElement, indices: OwnedIndices, mapping: impl Into<Box<[usize]>>, bookmarks: &mut MarkedLines, mutable_indices: &'m1 mut MutableIndices<'m2>) -> Result<ReorderElementResult, ReorderElementError> {
+pub fn reorder_element<'m1, 'm2: 'm1>(
+	root: &mut NbtElement,
+	indices: OwnedIndices,
+	mapping: impl Into<Box<[usize]>>,
+	mi: &'m1 mut MutableIndices<'m2>
+) -> Result<ReorderElementResult, ReorderElementError> {
 	let NavigationInformationMut { element, line_number, true_line_number, .. } = root.navigate_mut(&indices)?;
-	let len = element.len().ok_or_else(|| ReorderElementError::ElementWasPrimitive { element: element.display_name() })?;
+	let len = element
+		.len()
+		.ok_or_else(|| ReorderElementError::ElementWasPrimitive { element: element.display_name() })?;
 	let mapping = mapping.into();
 	if mapping.len() != len {
 		return Err(ReorderElementError::InvalidMappingLength { mapping_len: mapping.len(), parent_len: len })
@@ -38,7 +57,7 @@ pub fn reorder_element<'m1, 'm2: 'm1>(root: &mut NbtElement, indices: OwnedIndic
 			.collect::<Vec<_>>()
 	};
 
-	let mut new_bookmarks = Vec::with_capacity(bookmarks[true_line_number..true_line_number + parent_true_height].len());
+	let mut new_bookmarks = Vec::with_capacity(mi.bookmarks[true_line_number..true_line_number + parent_true_height].len());
 
 	// line numbers for the current child under the old ordering
 	let mut old_idx__line_number = line_number + 1;
@@ -55,36 +74,34 @@ pub fn reorder_element<'m1, 'm2: 'm1>(root: &mut NbtElement, indices: OwnedIndic
 
 		let offset = if is_parent_open { new_idx__line_number as isize - old_idx__line_number as isize } else { 0 };
 		let true_offset = new_idx__true_line_number as isize - old_idx__true_line_number as isize;
-		for bookmark in bookmarks.for_element(&entry.value, old_idx__true_line_number) {
+		for bookmark in mi.bookmarks.for_element(&entry.value, old_idx__true_line_number) {
 			new_bookmarks.push(bookmark.offset(offset, true_offset));
 		}
 
-		*map_indices.find_mut(hash!(entry.key), |&x| x == idx).ok_or_else(|| ReorderElementError::NoEntryInIndices { idx })? = new_idx;
+		*map_indices
+			.find_mut(hash!(entry.key), |&x| x == idx)
+			.ok_or_else(|| ReorderElementError::NoEntryInIndices { idx })? = new_idx;
 
 		old_idx__line_number += child_height;
 		old_idx__true_line_number += child_true_height;
 	}
 
-	mutable_indices.apply(|mutable_indices, _ci| {
+	mi.apply(|mutable_indices, _ci| {
 		if indices.encompasses(mutable_indices) {
 			let idx = &mut mutable_indices[indices.len()];
 			*idx = mapping[*idx];
 		}
 	});
 
-	let bookmark_slice = &mut bookmarks[true_line_number..true_line_number + parent_true_height];
+	let bookmark_slice = &mut mi.bookmarks[true_line_number..true_line_number + parent_true_height];
 	let new_bookmarks = MarkedLines::from(new_bookmarks);
 	bookmark_slice.copy_from_slice(&new_bookmarks);
 
 	util::reorder(entries, &*mapping)?;
 
-	Ok(ReorderElementResult {
-		indices,
-		mapping: inverted_mapping,
-	})
+	Ok(ReorderElementResult { indices, mapping: inverted_mapping })
 }
 
-#[must_use]
 pub struct ReorderElementResult {
 	pub indices: OwnedIndices,
 	pub mapping: Box<[usize]>,

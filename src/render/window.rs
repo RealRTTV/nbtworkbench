@@ -1,40 +1,52 @@
-use std::borrow::Cow;
-use std::rc::Rc;
-use std::time::Duration;
+use std::{borrow::Cow, sync::Arc, time::Duration};
+use std::ops::DerefMut;
 use serde::{Deserialize, Serialize};
 #[cfg(target_arch = "wasm32")] use wasm_bindgen::JsValue;
-use wgpu::util::{BufferInitDescriptor, DeviceExt};
-use wgpu::*;
-use winit::application::ApplicationHandler;
-use winit::dpi::{PhysicalPosition, PhysicalSize};
-use winit::event::*;
-use winit::event_loop::{ActiveEventLoop, EventLoop};
+use wgpu::{
+	util::{BufferInitDescriptor, DeviceExt},
+	*,
+};
 #[cfg(target_arch = "wasm32")] use winit::platform::web::WindowExtWebSys;
 #[cfg(target_os = "windows")]
 use winit::platform::windows::WindowAttributesExtWindows;
-use winit::window::{Icon, Window, WindowAttributes, WindowId};
+use winit::{
+	application::ApplicationHandler,
+	dpi::{PhysicalPosition, PhysicalSize},
+	event::*,
+	event_loop::{ActiveEventLoop, EventLoop},
+	window::{Icon, Window, WindowAttributes, WindowId},
+};
 use zune_inflate::DeflateOptions;
 
-use crate::assets::{ATLAS_HEIGHT, ATLAS_WIDTH, HEADER_SIZE, ICON_HEIGHT, ICON_WIDTH, UNICODE_LEN, atlas, icon};
-use crate::config::get_theme;
-use crate::render::VertexBufferBuilder;
-use crate::util::now;
-use crate::widget::{SEARCH_BOX_END_X, SEARCH_BOX_START_X};
-use crate::workbench::Workbench;
-use crate::{WINDOW_PROPERTIES, WORKBENCH, error};
+use crate::{
+	WORKBENCH,
+	action_result::ActionResult,
+	config::get_theme,
+	error,
+	render::{
+		VertexBufferBuilder,
+		assets::{ATLAS_HEIGHT, ATLAS_WIDTH, HEADER_SIZE, ICON_HEIGHT, ICON_WIDTH, UNICODE_LEN, atlas, icon},
+		widget::{
+			alert::manager::Alertable,
+			search_box::{SEARCH_BOX_END_X, SEARCH_BOX_START_X},
+		},
+	},
+	util::Timestamp,
+	window_properties,
+	workbench::Workbench,
+};
 
-pub const WINDOW_HEIGHT: usize = 420;
-pub const WINDOW_WIDTH: usize = 720;
-pub const MIN_WINDOW_HEIGHT: usize = HEADER_SIZE + 64;
-pub const MIN_WINDOW_WIDTH: usize = 480;
+pub const WINDOW_HEIGHT: u32 = 420;
+pub const WINDOW_WIDTH: u32 = 720;
+pub const MIN_WINDOW_HEIGHT: u32 = HEADER_SIZE as u32 + 64;
+pub const MIN_WINDOW_WIDTH: u32 = 480;
 
 #[allow(static_mut_refs)]
 pub async fn run() -> ! {
 	struct Handler<'window> {
 		state: State<'window>,
-		window_properties: &'static mut WindowProperties,
 		workbench: &'static mut Workbench,
-		window: Rc<Window>,
+		window: Arc<Window>,
 	}
 
 	impl<'window> ApplicationHandler<()> for Handler<'window> {
@@ -46,22 +58,20 @@ pub async fn run() -> ! {
 
 			#[cfg(target_arch = "wasm32")]
 			crate::wasm::on_input();
-			if self.workbench.should_ignore_event() || !State::input(&event, self.workbench, self.window_properties) {
+			if self.workbench.should_ignore_event() {
+				return;
+			}
+			if State::input(event.clone(), self.workbench) == ActionResult::Pass {
 				match event {
-					WindowEvent::RedrawRequested => {
-						match self.state.render(self.workbench, self.window.as_ref(), self.window_properties) { 
-							Ok(()) => {}
-							Err(SurfaceError::Lost | SurfaceError::Outdated) => self
-								.state
-								.surface
-								.configure(&self.state.device, &self.state.config),
-							Err(SurfaceError::OutOfMemory) => std::process::exit(1),
-							Err(SurfaceError::Timeout) => {
-								error!("Frame took too long to process")
-							}
-							Err(SurfaceError::Other) => {
-								error!("Failed to acquire texture")
-							}
+					WindowEvent::RedrawRequested => match self.state.render(self.workbench, self.window.as_ref()) {
+						Ok(()) => {}
+						Err(SurfaceError::Lost | SurfaceError::Outdated) => self.state.surface.configure(&self.state.device, &self.state.config),
+						Err(SurfaceError::OutOfMemory) => std::process::exit(1),
+						Err(SurfaceError::Timeout) => {
+							error!("Frame took too long to process")
+						}
+						Err(SurfaceError::Other) => {
+							error!("Failed to acquire texture")
 						}
 					},
 					WindowEvent::CloseRequested =>
@@ -71,7 +81,7 @@ pub async fn run() -> ! {
 					WindowEvent::Resized(new_size) => {
 						self.state.resize(self.workbench, new_size);
 						// self.window.request_redraw();
-					},
+					}
 					_ => {}
 				}
 			}
@@ -85,22 +95,8 @@ pub async fn run() -> ! {
 				let new_size: PhysicalSize<u32> = web_sys::window()
 					.map(|window| {
 						PhysicalSize::new(
-							(window
-								.inner_width()
-								.ok()
-								.as_ref()
-								.and_then(JsValue::as_f64)
-								.expect("Width must exist")
-								* scaling_factor)
-								.ceil() as u32,
-							(window
-								.inner_height()
-								.ok()
-								.as_ref()
-								.and_then(JsValue::as_f64)
-								.expect("Height must exist")
-								* scaling_factor)
-								.ceil() as u32,
+							(window.inner_width().ok().as_ref().and_then(JsValue::as_f64).expect("Width must exist") * scaling_factor).ceil() as u32,
+							(window.inner_height().ok().as_ref().and_then(JsValue::as_f64).expect("Height must exist") * scaling_factor).ceil() as u32,
 						)
 					})
 					.expect("Window has dimension properties");
@@ -113,19 +109,18 @@ pub async fn run() -> ! {
 		}
 	}
 
-	let event_loop = EventLoop::builder()
-		.build()
-		.expect("Event loop was unconstructable");
+	let event_loop = EventLoop::builder().build().expect("Event loop was unconstructable");
 	#[allow(unused_mut)]
 	let mut builder = WindowAttributes::default()
 		.with_title("NBT Workbench")
 		.with_inner_size(PhysicalSize::new(7680, 4320))
 		.with_min_inner_size(PhysicalSize::new(MIN_WINDOW_WIDTH as u32, MIN_WINDOW_HEIGHT as u32))
 		.with_window_icon(Some(Icon::from_rgba(icon(), ICON_WIDTH as u32, ICON_HEIGHT as u32).expect("valid format")));
-	#[cfg(target_os = "windows")] {
+	#[cfg(target_os = "windows")]
+	{
 		builder = builder.with_drag_and_drop(true);
 	}
-	let window = Rc::new(event_loop.create_window(builder).expect("Unable to construct window"));
+	let window = Arc::new(event_loop.create_window(builder).expect("Unable to construct window"));
 	#[cfg(target_arch = "wasm32")]
 	let window_size = {
 		web_sys::window()
@@ -148,10 +143,7 @@ pub async fn run() -> ! {
 	#[cfg(not(target_arch = "wasm32"))]
 	let window_size = {
 		let (window_width_pct, window_height_pct) = (WINDOW_WIDTH as f64 / 1920.0, WINDOW_HEIGHT as f64 / 1080.0);
-		let monitor_dims = window
-			.current_monitor()
-			.map(|monitor| monitor.size())
-			.unwrap_or(PhysicalSize::new(1920, 1080));
+		let monitor_dims = window.current_monitor().map(|monitor| monitor.size()).unwrap_or(PhysicalSize::new(1920, 1080));
 		let width = (f64::round(window_width_pct * monitor_dims.width as f64) as u32).max(MIN_WINDOW_WIDTH as u32);
 		let height = (f64::round(window_height_pct * monitor_dims.height as f64) as u32).max(MIN_WINDOW_HEIGHT as u32);
 		let size = PhysicalSize::new(width, height);
@@ -159,23 +151,18 @@ pub async fn run() -> ! {
 		size
 	};
 	let state = State::new(&window, window_size).await;
+	*window_properties().deref_mut() = WindowProperties::new(Arc::clone(&window));
 	unsafe {
-		std::ptr::write(&raw mut WINDOW_PROPERTIES, WindowProperties::new(Rc::clone(&window)));
-	}
-	unsafe {
-		std::ptr::write(&raw mut WORKBENCH, Workbench::new(&mut WINDOW_PROPERTIES, Some(window_size)));
+		std::ptr::write(&raw mut WORKBENCH, Workbench::new(Some(window_size)).expect("Valid workbench construction"));
 	}
 	let mut handler = unsafe {
 		Handler {
 			state,
-			window_properties: &mut WINDOW_PROPERTIES,
 			workbench: &mut WORKBENCH,
-			window: Rc::clone(&window),
+			window: Arc::clone(&window),
 		}
 	};
-	event_loop
-		.run_app(&mut handler)
-		.expect("Event loop failed");
+	event_loop.run_app(&mut handler).expect("Event loop failed");
 	loop {}
 }
 
@@ -186,11 +173,11 @@ pub enum Theme {
 	Dark,
 }
 
-impl From<::winit::window::Theme> for Theme {
-	fn from(value: ::winit::window::Theme) -> Self {
+impl From<winit::window::Theme> for Theme {
+	fn from(value: winit::window::Theme) -> Self {
 		match value {
-			::winit::window::Theme::Light => Self::Light,
-			::winit::window::Theme::Dark => Self::Dark,
+			winit::window::Theme::Light => Self::Light,
+			winit::window::Theme::Dark => Self::Dark,
 		}
 	}
 }
@@ -206,7 +193,7 @@ pub struct State<'window> {
 	diffuse_texture: Texture,
 	text_render_pipeline: RenderPipeline,
 	unicode_bind_group: BindGroup,
-	last_tick: Duration,
+	last_tick: Timestamp,
 	previous_theme: Theme,
 }
 
@@ -225,9 +212,7 @@ impl<'window> State<'window> {
 				noop: NoopBackendOptions { enable: false },
 			},
 		});
-		let surface = instance
-			.create_surface(window)
-			.expect("Surface was able to be created");
+		let surface = instance.create_surface(window).expect("Surface was able to be created");
 		let adapter = instance
 			.request_adapter(&RequestAdapterOptions {
 				power_preference: PowerPreference::None,
@@ -256,12 +241,7 @@ impl<'window> State<'window> {
 			})
 			.await
 			.expect("Could obtain device");
-		let format = surface
-			.get_capabilities(&adapter)
-			.formats
-			.into_iter()
-			.find(|format| !format.is_srgb())
-			.expect("An SRGB format exists");
+		let format = surface.get_capabilities(&adapter).formats.into_iter().find(|format| !format.is_srgb()).expect("An SRGB format exists");
 		let config = SurfaceConfiguration {
 			usage: TextureUsages::RENDER_ATTACHMENT,
 			format,
@@ -528,7 +508,7 @@ impl<'window> State<'window> {
 			diffuse_texture,
 			text_render_pipeline,
 			unicode_bind_group,
-			last_tick: Duration::ZERO,
+			last_tick: Timestamp::UNIX_EPOCH,
 			previous_theme: get_theme(),
 		}
 	}
@@ -556,76 +536,52 @@ impl<'window> State<'window> {
 			self.config.width = new_size.width;
 			self.config.height = new_size.height;
 			self.surface.configure(&self.device, &self.config);
-			workbench.window_dimensions(new_size.width as usize, new_size.height as usize);
+			workbench.on_window_dims(new_size);
 			for tab in &mut workbench.tabs {
 				tab.refresh_scrolls();
 			}
 		}
 	}
 
-	#[allow(clippy::match_same_arms)] // it's cool to be reminded more often how many things I can have events for to make nbt workbench more reactive
-	fn input(event: &WindowEvent, workbench: &mut Workbench, window_properties: &mut WindowProperties) -> bool {
+	fn input(event: WindowEvent, workbench: &mut Workbench) -> ActionResult {
 		match event {
 			WindowEvent::Resized(size) => {
-				workbench.window_height = size.height as usize;
+				workbench.window_dims = size;
 				for tab in &mut workbench.tabs {
-					tab.update_window_dimensions(workbench.window_width, workbench.window_height);
+					tab.set_window_dims(workbench.window_dims);
 				}
-				false
+				ActionResult::Success(())
 			}
-			WindowEvent::Moved(_) => false,
-			WindowEvent::CloseRequested => false,
-			WindowEvent::Destroyed => false,
-			WindowEvent::DroppedFile(file) => {
-				if let Err(e) = workbench.on_open_file(file, std::fs::read(file).unwrap_or(vec![]), window_properties) {
-					workbench.alert(e)
-				}
-				true
+			WindowEvent::DroppedFile(file) if let Some(data) = std::fs::read(&file).alert_err(&mut workbench.alerts) => {
+				workbench.on_open_file(&file, data).alert_err(&mut workbench.alerts);
+				ActionResult::Success(())
 			}
-			WindowEvent::HoveredFile(_) => false,
-			WindowEvent::HoveredFileCancelled => false,
-			WindowEvent::Focused(_) => false,
-			WindowEvent::KeyboardInput { event, .. } => workbench.on_key_input(event, window_properties),
-			WindowEvent::ModifiersChanged(_) => false,
-			WindowEvent::CursorMoved { position, .. } => workbench.on_mouse_move(*position),
-			WindowEvent::CursorEntered { .. } => false,
+			WindowEvent::KeyboardInput { event, .. } => workbench.on_key_input(event),
+			WindowEvent::CursorMoved { position, .. } => workbench.on_mouse_move(position),
 			WindowEvent::CursorLeft { .. } => workbench.on_mouse_move(PhysicalPosition::new(0.0, 0.0)),
-			WindowEvent::MouseWheel { delta, .. } => workbench.on_scroll(*delta),
-			WindowEvent::MouseInput { state, button, .. } => workbench.on_mouse_input(*state, *button, window_properties),
-			WindowEvent::TouchpadPressure { .. } => false,
-			WindowEvent::AxisMotion { .. } => false,
+			WindowEvent::MouseWheel { delta, .. } => workbench.on_scroll(delta),
+			WindowEvent::MouseInput { state, button, .. } => workbench.on_mouse_input(state, button),
 			WindowEvent::Touch(touch) => match touch.phase {
 				TouchPhase::Started => {
-					workbench.on_mouse_move(touch.location);
-					workbench.on_mouse_input(ElementState::Pressed, MouseButton::Left, window_properties)
+					workbench.on_mouse_move(touch.location)?;
+					workbench.on_mouse_input(ElementState::Pressed, MouseButton::Left)
 				}
 				TouchPhase::Moved => workbench.on_mouse_move(touch.location),
 				TouchPhase::Ended | TouchPhase::Cancelled => {
-					workbench.on_mouse_move(touch.location);
-					workbench.on_mouse_input(ElementState::Released, MouseButton::Left, window_properties)
+					workbench.on_mouse_move(touch.location)?;
+					workbench.on_mouse_input(ElementState::Released, MouseButton::Left)
 				}
 			},
-			WindowEvent::ScaleFactorChanged { .. } => false,
-			WindowEvent::ThemeChanged(_) => false,
-			WindowEvent::Ime(_) => false,
-			WindowEvent::Occluded(_) => false,
-			WindowEvent::ActivationTokenDone { .. } => false,
-			WindowEvent::RedrawRequested => false,
-			WindowEvent::PinchGesture { .. } => false,
-			WindowEvent::PanGesture { .. } => false,
-			WindowEvent::DoubleTapGesture { .. } => false,
-			WindowEvent::RotationGesture { .. } => false,
+			_ => ActionResult::Pass,
 		}
 	}
 
-	fn render(&mut self, workbench: &mut Workbench, window: &Window, window_properties: &mut WindowProperties) -> Result<(), SurfaceError> {
-		if (now() - self.last_tick).as_millis() >= 25 {
-			workbench.tick(window_properties);
-			self.last_tick = now();
+	fn render(&mut self, workbench: &mut Workbench, window: &Window) -> Result<(), SurfaceError> {
+		if self.last_tick.elapsed() >= Duration::from_millis(25) {
+			self.last_tick = Timestamp::now();
+			workbench.tick();
 		}
-		if let Err(e) = workbench.try_subscription() {
-			workbench.alert(e)
-		}
+		workbench.try_subscription().alert_err(&mut workbench.alerts);
 
 		if self.previous_theme != get_theme() {
 			self.queue.write_texture(
@@ -651,17 +607,13 @@ impl<'window> State<'window> {
 
 		self.previous_theme = get_theme();
 		let surface_texture = self.surface.get_current_texture()?;
-		let view = surface_texture
-			.texture
-			.create_view(&TextureViewDescriptor::default());
+		let view = surface_texture.texture.create_view(&TextureViewDescriptor::default());
 		let size = Extent3d {
 			width: surface_texture.texture.width(),
 			height: surface_texture.texture.height(),
 			depth_or_array_layers: 1,
 		};
-		let mut encoder = self
-			.device
-			.create_command_encoder(&CommandEncoderDescriptor { label: Some("Command Encoder") });
+		let mut encoder = self.device.create_command_encoder(&CommandEncoderDescriptor { label: Some("Command Encoder") });
 		let depth_texture = self.device.create_texture(&TextureDescriptor {
 			label: Some("Depth Texture"),
 			size,
@@ -674,7 +626,7 @@ impl<'window> State<'window> {
 		});
 		let depth_texture_view = depth_texture.create_view(&TextureViewDescriptor::default());
 
-		let mut builder = VertexBufferBuilder::new(self.size, workbench.scroll(), workbench.scale);
+		let mut builder = VertexBufferBuilder::new(self.size, workbench.tabs.active_tab().consts().scroll, workbench.scale);
 
 		{
 			let vertex_buffer;
@@ -722,21 +674,17 @@ impl<'window> State<'window> {
 				render_pass.set_pipeline(&self.text_render_pipeline);
 				render_pass.set_bind_group(0, &self.unicode_bind_group, &[]);
 
-				text_vertex_buffer = self
-					.device
-					.create_buffer_init(&BufferInitDescriptor {
-						label: Some("Text Vertex Buffer"),
-						contents: builder.text_vertices(),
-						usage: BufferUsages::VERTEX,
-					});
+				text_vertex_buffer = self.device.create_buffer_init(&BufferInitDescriptor {
+					label: Some("Text Vertex Buffer"),
+					contents: builder.text_vertices(),
+					usage: BufferUsages::VERTEX,
+				});
 
-				text_index_buffer = self
-					.device
-					.create_buffer_init(&BufferInitDescriptor {
-						label: Some("Text Index Buffer"),
-						contents: builder.text_indices(),
-						usage: BufferUsages::INDEX,
-					});
+				text_index_buffer = self.device.create_buffer_init(&BufferInitDescriptor {
+					label: Some("Text Index Buffer"),
+					contents: builder.text_indices(),
+					usage: BufferUsages::INDEX,
+				});
 
 				render_pass.set_vertex_buffer(0, text_vertex_buffer.slice(..));
 				render_pass.set_index_buffer(text_index_buffer.slice(..), IndexFormat::Uint32);
@@ -748,21 +696,17 @@ impl<'window> State<'window> {
 				render_pass.set_pipeline(&self.render_pipeline);
 				render_pass.set_bind_group(0, &self.diffuse_texture_bind_group, &[]);
 
-				vertex_buffer = self
-					.device
-					.create_buffer_init(&BufferInitDescriptor {
-						label: Some("Vertex Buffer"),
-						contents: builder.vertices(),
-						usage: BufferUsages::VERTEX,
-					});
+				vertex_buffer = self.device.create_buffer_init(&BufferInitDescriptor {
+					label: Some("Vertex Buffer"),
+					contents: builder.vertices(),
+					usage: BufferUsages::VERTEX,
+				});
 
-				index_buffer = self
-					.device
-					.create_buffer_init(&BufferInitDescriptor {
-						label: Some("Index Buffer"),
-						contents: builder.indices(),
-						usage: BufferUsages::INDEX,
-					});
+				index_buffer = self.device.create_buffer_init(&BufferInitDescriptor {
+					label: Some("Index Buffer"),
+					contents: builder.indices(),
+					usage: BufferUsages::INDEX,
+				});
 
 				render_pass.set_vertex_buffer(0, vertex_buffer.slice(..));
 				render_pass.set_index_buffer(index_buffer.slice(..), IndexFormat::Uint16);
@@ -773,7 +717,7 @@ impl<'window> State<'window> {
 			render_pass.set_scissor_rect(
 				(SEARCH_BOX_START_X as f32 * workbench.scale).floor() as u32,
 				(22.0 * workbench.scale).floor() as u32,
-				((workbench.window_width - SEARCH_BOX_END_X - SEARCH_BOX_START_X) as f32 * workbench.scale).ceil() as u32,
+				((workbench.window_dims.width as usize - SEARCH_BOX_END_X - SEARCH_BOX_START_X) as f32 * workbench.scale).ceil() as u32,
 				(46.0 * workbench.scale).ceil() as u32,
 			);
 			builder.reset();
@@ -783,21 +727,17 @@ impl<'window> State<'window> {
 				render_pass.set_pipeline(&self.text_render_pipeline);
 				render_pass.set_bind_group(0, &self.unicode_bind_group, &[]);
 
-				search_boxes_text_vertex_buffer = self
-					.device
-					.create_buffer_init(&BufferInitDescriptor {
-						label: Some("Text Vertex Buffer"),
-						contents: builder.text_vertices(),
-						usage: BufferUsages::VERTEX,
-					});
+				search_boxes_text_vertex_buffer = self.device.create_buffer_init(&BufferInitDescriptor {
+					label: Some("Text Vertex Buffer"),
+					contents: builder.text_vertices(),
+					usage: BufferUsages::VERTEX,
+				});
 
-				search_boxes_text_index_buffer = self
-					.device
-					.create_buffer_init(&BufferInitDescriptor {
-						label: Some("Text Index Buffer"),
-						contents: builder.text_indices(),
-						usage: BufferUsages::INDEX,
-					});
+				search_boxes_text_index_buffer = self.device.create_buffer_init(&BufferInitDescriptor {
+					label: Some("Text Index Buffer"),
+					contents: builder.text_indices(),
+					usage: BufferUsages::INDEX,
+				});
 
 				render_pass.set_vertex_buffer(0, search_boxes_text_vertex_buffer.slice(..));
 				render_pass.set_index_buffer(search_boxes_text_index_buffer.slice(..), IndexFormat::Uint32);
@@ -809,21 +749,17 @@ impl<'window> State<'window> {
 				render_pass.set_pipeline(&self.render_pipeline);
 				render_pass.set_bind_group(0, &self.diffuse_texture_bind_group, &[]);
 
-				search_boxes_vertex_buffer = self
-					.device
-					.create_buffer_init(&BufferInitDescriptor {
-						label: Some("Vertex Buffer"),
-						contents: builder.vertices(),
-						usage: BufferUsages::VERTEX,
-					});
+				search_boxes_vertex_buffer = self.device.create_buffer_init(&BufferInitDescriptor {
+					label: Some("Vertex Buffer"),
+					contents: builder.vertices(),
+					usage: BufferUsages::VERTEX,
+				});
 
-				search_boxes_index_buffer = self
-					.device
-					.create_buffer_init(&BufferInitDescriptor {
-						label: Some("Index Buffer"),
-						contents: builder.indices(),
-						usage: BufferUsages::INDEX,
-					});
+				search_boxes_index_buffer = self.device.create_buffer_init(&BufferInitDescriptor {
+					label: Some("Index Buffer"),
+					contents: builder.indices(),
+					usage: BufferUsages::INDEX,
+				});
 
 				render_pass.set_vertex_buffer(0, search_boxes_vertex_buffer.slice(..));
 				render_pass.set_index_buffer(search_boxes_index_buffer.slice(..), IndexFormat::Uint16);
@@ -831,7 +767,7 @@ impl<'window> State<'window> {
 				render_pass.draw_indexed(0..builder.indices_len(), 0, 0..1);
 			}
 		}
-		
+
 		window.pre_present_notify();
 
 		self.queue.submit(Some(encoder.finish()));
@@ -841,12 +777,12 @@ impl<'window> State<'window> {
 }
 
 pub enum WindowProperties {
-	Real(Rc<Window>),
+	Real(Arc<Window>),
 	Fake,
 }
 
 impl WindowProperties {
-	pub const fn new(window: Rc<Window>) -> Self { Self::Real(window) }
+	pub const fn new(window: Arc<Window>) -> Self { Self::Real(window) }
 
 	pub fn set_window_title(&self, title: &str) -> &Self {
 		if let Self::Real(window) = self {

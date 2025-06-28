@@ -1,15 +1,21 @@
-use std::alloc::{Allocator, Layout};
-use std::cmp::Ordering;
-use std::fmt::{Debug, Formatter};
-use std::hint::likely;
-use std::iter;
-use std::mem::MaybeUninit;
+use core::time::Duration;
+use std::{
+	alloc::{Allocator, Layout},
+	cmp::Ordering,
+	fmt::{Debug, Formatter},
+	hint::likely,
+	iter,
+	mem::MaybeUninit,
+	ops::{Add, Sub},
+};
+use std::ops::{AddAssign, Div, DivAssign, Mul, MulAssign, SubAssign};
 use compact_str::{CompactString, ToCompactString};
 use regex::{Regex, RegexBuilder};
 use thiserror::Error;
-use crate::render::VertexBufferBuilder;
+use winit::dpi::{PhysicalPosition, PhysicalSize};
+use crate::render::vertex_buffer_builder::VertexBufferBuilder;
 #[cfg(target_arch = "wasm32")]
-pub use crate::wasm::{get_clipboard, now, set_clipboard};
+pub use crate::wasm::{get_clipboard, set_clipboard};
 
 #[must_use]
 #[cfg(not(target_arch = "wasm32"))]
@@ -18,12 +24,53 @@ pub fn get_clipboard() -> Option<String> { cli_clipboard::get_contents().ok() }
 #[cfg(not(target_arch = "wasm32"))]
 pub fn set_clipboard(value: String) -> bool { cli_clipboard::set_contents(value).is_ok() }
 
-#[must_use]
-#[cfg(not(target_arch = "wasm32"))]
-pub fn now() -> std::time::Duration {
-	std::time::SystemTime::UNIX_EPOCH
-		.elapsed()
-		.unwrap_or_else(|e| e.duration())
+#[derive(Copy, Clone)]
+pub struct Timestamp {
+	since_epoch: Duration,
+}
+
+impl Timestamp {
+	pub const UNIX_EPOCH: Self = Self { since_epoch: Duration::ZERO };
+
+	#[must_use]
+	#[cfg(not(target_arch = "wasm32"))]
+	pub fn now() -> Self {
+		Self {
+			since_epoch: std::time::SystemTime::UNIX_EPOCH.elapsed().unwrap_or_else(|e| e.duration()),
+		}
+	}
+
+	#[must_use]
+	#[cfg(target_arch = "wasm32")]
+	pub fn now() -> Self {
+		Self {
+			since_epoch: Duration::from_millis(web_sys::js_sys::Date::now() as u64),
+		}
+	}
+
+	#[must_use]
+	pub fn elapsed(self) -> Duration { self - Self::UNIX_EPOCH }
+
+	#[must_use]
+	pub const fn saturating_sub(self, rhs: Self) -> Duration { self.since_epoch.saturating_sub(rhs.since_epoch) }
+}
+
+impl Sub for Timestamp {
+	type Output = Duration;
+
+	fn sub(self, rhs: Self) -> Self::Output { self.since_epoch.sub(rhs.since_epoch) }
+}
+
+impl Sub<Duration> for Timestamp {
+	type Output = Self;
+
+	fn sub(self, rhs: Duration) -> Self::Output { Self { since_epoch: self.since_epoch - rhs } }
+}
+
+impl Add<Duration> for Timestamp {
+	type Output = Self;
+
+	fn add(self, rhs: Duration) -> Self::Output { Self { since_epoch: self.since_epoch + rhs } }
 }
 
 #[must_use]
@@ -159,35 +206,17 @@ pub unsafe fn union_two_sorted_no_duplicates<T: Ord>(a: Vec<T>, b: Vec<T>) -> Ve
 
 		match Ord::cmp(a, b) {
 			Ordering::Less => {
-				out.push(
-					a_ptr
-						.cast::<MaybeUninit<T>>()
-						.replace(MaybeUninit::uninit())
-						.assume_init(),
-				);
+				out.push(a_ptr.cast::<MaybeUninit<T>>().replace(MaybeUninit::uninit()).assume_init());
 				a_ptr = a_ptr.add(1);
 			}
 			Ordering::Equal => {
-				out.push(
-					a_ptr
-						.cast::<MaybeUninit<T>>()
-						.replace(MaybeUninit::uninit())
-						.assume_init(),
-				);
-				b_ptr
-					.cast::<MaybeUninit<T>>()
-					.replace(MaybeUninit::uninit())
-					.assume_init_drop();
+				out.push(a_ptr.cast::<MaybeUninit<T>>().replace(MaybeUninit::uninit()).assume_init());
+				b_ptr.cast::<MaybeUninit<T>>().replace(MaybeUninit::uninit()).assume_init_drop();
 				a_ptr = a_ptr.add(1);
 				b_ptr = b_ptr.add(1);
 			}
 			Ordering::Greater => {
-				out.push(
-					b_ptr
-						.cast::<MaybeUninit<T>>()
-						.replace(MaybeUninit::uninit())
-						.assume_init(),
-				);
+				out.push(b_ptr.cast::<MaybeUninit<T>>().replace(MaybeUninit::uninit()).assume_init());
 				b_ptr = b_ptr.add(1);
 			}
 		}
@@ -195,13 +224,11 @@ pub unsafe fn union_two_sorted_no_duplicates<T: Ord>(a: Vec<T>, b: Vec<T>) -> Ve
 
 	if a_ptr < a_end_ptr {
 		let remaining = a_end_ptr.offset_from_unsigned(a_ptr);
-		out.as_mut_ptr()
-			.copy_from_nonoverlapping(a_ptr, remaining);
+		out.as_mut_ptr().copy_from_nonoverlapping(a_ptr, remaining);
 		out.set_len(out.len() + remaining);
 	} else {
 		let remaining = b_end_ptr.offset_from_unsigned(b_ptr);
-		out.as_mut_ptr()
-			.copy_from_nonoverlapping(b_ptr, remaining);
+		out.as_mut_ptr().copy_from_nonoverlapping(b_ptr, remaining);
 		out.set_len(out.len() + remaining);
 	}
 
@@ -231,31 +258,17 @@ pub unsafe fn intersection_two_sorted_no_duplicates<T: Ord>(a: Vec<T>, b: Vec<T>
 
 		match Ord::cmp(a, b) {
 			Ordering::Less => {
-				a_ptr
-					.cast::<MaybeUninit<T>>()
-					.replace(MaybeUninit::uninit())
-					.assume_init_drop();
+				a_ptr.cast::<MaybeUninit<T>>().replace(MaybeUninit::uninit()).assume_init_drop();
 				a_ptr = a_ptr.add(1);
 			}
 			Ordering::Equal => {
-				out.push(
-					a_ptr
-						.cast::<MaybeUninit<T>>()
-						.replace(MaybeUninit::uninit())
-						.assume_init(),
-				);
-				b_ptr
-					.cast::<MaybeUninit<T>>()
-					.replace(MaybeUninit::uninit())
-					.assume_init_drop();
+				out.push(a_ptr.cast::<MaybeUninit<T>>().replace(MaybeUninit::uninit()).assume_init());
+				b_ptr.cast::<MaybeUninit<T>>().replace(MaybeUninit::uninit()).assume_init_drop();
 				a_ptr = a_ptr.add(1);
 				b_ptr = b_ptr.add(1);
 			}
 			Ordering::Greater => {
-				b_ptr
-					.cast::<MaybeUninit<T>>()
-					.replace(MaybeUninit::uninit())
-					.assume_init_drop();
+				b_ptr.cast::<MaybeUninit<T>>().replace(MaybeUninit::uninit()).assume_init_drop();
 				b_ptr = b_ptr.add(1);
 			}
 		}
@@ -287,33 +300,17 @@ pub unsafe fn symmetric_difference_two_sorted_no_duplicates<T: Ord>(a: Vec<T>, b
 
 		match Ord::cmp(a, b) {
 			Ordering::Less => {
-				out.push(
-					a_ptr
-						.cast::<MaybeUninit<T>>()
-						.replace(MaybeUninit::uninit())
-						.assume_init(),
-				);
+				out.push(a_ptr.cast::<MaybeUninit<T>>().replace(MaybeUninit::uninit()).assume_init());
 				a_ptr = a_ptr.add(1);
 			}
 			Ordering::Equal => {
-				a_ptr
-					.cast::<MaybeUninit<T>>()
-					.replace(MaybeUninit::uninit())
-					.assume_init_drop();
-				b_ptr
-					.cast::<MaybeUninit<T>>()
-					.replace(MaybeUninit::uninit())
-					.assume_init_drop();
+				a_ptr.cast::<MaybeUninit<T>>().replace(MaybeUninit::uninit()).assume_init_drop();
+				b_ptr.cast::<MaybeUninit<T>>().replace(MaybeUninit::uninit()).assume_init_drop();
 				a_ptr = a_ptr.add(1);
 				b_ptr = b_ptr.add(1);
 			}
 			Ordering::Greater => {
-				out.push(
-					b_ptr
-						.cast::<MaybeUninit<T>>()
-						.replace(MaybeUninit::uninit())
-						.assume_init(),
-				);
+				out.push(b_ptr.cast::<MaybeUninit<T>>().replace(MaybeUninit::uninit()).assume_init());
 				b_ptr = b_ptr.add(1);
 			}
 		}
@@ -321,13 +318,11 @@ pub unsafe fn symmetric_difference_two_sorted_no_duplicates<T: Ord>(a: Vec<T>, b
 
 	if a_ptr < a_end_ptr {
 		let remaining = a_end_ptr.offset_from_unsigned(a_ptr);
-		out.as_mut_ptr()
-			.copy_from_nonoverlapping(a_ptr, remaining);
+		out.as_mut_ptr().copy_from_nonoverlapping(a_ptr, remaining);
 		out.set_len(out.len() + remaining);
 	} else {
 		let remaining = b_end_ptr.offset_from_unsigned(b_ptr);
-		out.as_mut_ptr()
-			.copy_from_nonoverlapping(b_ptr, remaining);
+		out.as_mut_ptr().copy_from_nonoverlapping(b_ptr, remaining);
 		out.set_len(out.len() + remaining);
 	}
 
@@ -486,21 +481,14 @@ impl StrExt for str {
 		};
 
 		if !self.starts_with('"') && !self.starts_with('\'') {
-			let end_idx = self
-				.char_indices()
-				.find(|(_, c)| !valid_unescaped_char(*c as u8))
-				.map_or(self.len(), |(idx, _)| idx);
+			let end_idx = self.char_indices().find(|(_, c)| !valid_unescaped_char(*c as u8)).map_or(self.len(), |(idx, _)| idx);
 			let (s, s2) = unsafe { (self.get_unchecked(..end_idx), self.get_unchecked(end_idx..self.len())) };
 			if s.needs_escape() {
 				return Err(s2.len())
 			}
 			Ok((s.to_compact_string(), s2))
 		} else {
-			let enclosing = self
-				.as_bytes()
-				.first()
-				.copied()
-				.ok_or(self.len())?;
+			let enclosing = self.as_bytes().first().copied().ok_or(self.len())?;
 			self = unsafe { self.get_unchecked(1..) };
 			let (end, len) = 'a: {
 				let mut backslash = false;
@@ -685,13 +673,7 @@ impl StrExt for str {
 		}
 	}
 
-	fn needs_escape(&self) -> bool {
-		self.as_bytes()
-			.first()
-			.copied()
-			.is_some_and(valid_starting_char)
-			|| !self.bytes().all(valid_unescaped_char)
-	}
+	fn needs_escape(&self) -> bool { self.as_bytes().first().copied().is_some_and(valid_starting_char) || !self.bytes().all(valid_unescaped_char) }
 
 	fn width(&self) -> usize { self.chars().map(CharExt::width).sum() }
 
@@ -770,7 +752,12 @@ pub const fn width_ascii(s: &str) -> usize {
 
 pub fn reorder<T>(data: &mut [T], mapping: impl Into<Box<[usize]>>) -> Result<(), ReorderMappingError> {
 	let mut mapping = mapping.into();
-	if data.len() != mapping.len() { return Err(ReorderMappingError::InequalLength { mapping_len: mapping.len(), data_len: data.len() }) }
+	if data.len() != mapping.len() {
+		return Err(ReorderMappingError::InequalLength {
+			mapping_len: mapping.len(),
+			data_len: data.len(),
+		})
+	}
 	let len = data.len();
 
 	for &mapped_idx in &mapping {
@@ -888,22 +875,19 @@ float_num_width!(f64_width, f64);
 
 pub fn drop_on_separate_thread<T: 'static + Send>(t: T) {
 	#[cfg(not(target_arch = "wasm32"))]
-	std::thread::Builder::new()
-		.stack_size(1_048_576 * 64 /* 64MiB */)
-		.spawn(move || drop(t))
-		.expect("Failed to spawn thread");
+	std::thread::Builder::new().stack_size(1_048_576 * 64 /* 64MiB */).spawn(move || drop(t)).expect("Failed to spawn thread");
 	#[cfg(target_arch = "wasm32")]
 	drop(t)
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub fn open_file(str: &str) -> ::anyhow::Result<::std::process::ExitStatus> {
+pub fn open_file(str: &str) -> anyhow::Result<std::process::ExitStatus> {
 	#[cfg(target_os = "windows")]
-	return ::std::process::Command::new("cmd").args(["/c", "start", str]).status().into();
+	return Ok(std::process::Command::new("cmd").args(["/c", "start", str]).status()?);
 	#[cfg(target_os = "macos")]
-	return ::std::process::Command::new("open").arg(str).status().into();
+	return Ok(std::process::Command::new("open").arg(str).status()?);
 	#[cfg(target_os = "linux")]
-	return ::std::process::Command::new("xdg-open").arg(str).status().into();
+	return Ok(std::process::Command::new("xdg-open").arg(str).status()?);
 }
 
 #[derive(Copy, Clone, Eq)]
@@ -917,8 +901,10 @@ impl Debug for Vec2u {
 }
 
 impl Vec2u {
+	#[must_use]
 	pub const fn new(x: usize, y: usize) -> Self { Self { x, y } }
 
+	#[must_use]
 	pub const fn wrapping_sub(self, rhs: Self) -> Self {
 		Self {
 			x: self.x.wrapping_sub(rhs.x),
@@ -926,11 +912,17 @@ impl Vec2u {
 		}
 	}
 
+	#[must_use]
 	pub const fn saturating_sub(self, rhs: Self) -> Self {
 		Self {
 			x: self.x.saturating_sub(rhs.x),
 			y: self.y.saturating_sub(rhs.y),
 		}
+	}
+	
+	#[must_use]
+	pub fn angle(self) -> f64 {
+		f64::atan2(self.y as f64, self.x as f64)
 	}
 }
 
@@ -948,11 +940,168 @@ impl From<(usize, usize)> for Vec2u {
 	}
 }
 
+impl From<PhysicalSize<u32>> for Vec2u {
+	fn from(value: PhysicalSize<u32>) -> Self {
+		Self {
+			x: value.width as usize,
+			y: value.height as usize,
+		}
+	}
+}
+
 impl From<Vec2u> for (usize, usize) {
 	fn from(val: Vec2u) -> Self { (val.x, val.y) }
 }
 
-impl<T: Into<(usize, usize)>> std::ops::Add<T> for Vec2u {
+impl<T: Into<(usize, usize)>> Add<T> for Vec2u {
+	type Output = Self;
+
+	fn add(self, rhs: T) -> Self::Output {
+		let (x, y) = rhs.into();
+		Self { x: self.x.wrapping_add(x), y: self.y.wrapping_add(y) }
+	}
+}
+
+impl<T: Into<(usize, usize)>> AddAssign<T> for Vec2u {
+	fn add_assign(&mut self, rhs: T) {
+		let (x, y) = rhs.into();
+		self.x = self.x.wrapping_add(x);
+		self.y = self.y.wrapping_add(y);
+	}
+}
+
+impl<T: Into<(usize, usize)>> Sub<T> for Vec2u {
+	type Output = Self;
+
+	fn sub(self, rhs: T) -> Self::Output {
+		let (x, y) = rhs.into();
+		Self { x: self.x.wrapping_sub(x), y: self.y.wrapping_sub(y) }
+	}
+}
+
+impl<T: Into<(usize, usize)>> SubAssign<T> for Vec2u {
+	fn sub_assign(&mut self, rhs: T) {
+		let (x, y) = rhs.into();
+		self.x = self.x.wrapping_sub(x);
+		self.y = self.x.wrapping_sub(y);
+	}
+}
+
+impl Mul for Vec2u {
+	type Output = Self;
+
+	fn mul(self, rhs: Self) -> Self::Output {
+		Self {
+			x: self.x * rhs.x,
+			y: self.y * rhs.y,
+		}
+	}
+}
+
+impl MulAssign for Vec2u {
+	fn mul_assign(&mut self, rhs: Self) {
+		self.x *= rhs.x;
+		self.y *= rhs.y;
+	}
+}
+
+impl Div for Vec2u {
+	type Output = Self;
+
+	fn div(self, rhs: Self) -> Self::Output {
+		Self {
+			x: self.x / rhs.x,
+			y: self.y / rhs.y,
+		}
+	}
+}
+
+impl DivAssign for Vec2u {
+	fn div_assign(&mut self, rhs: Self) {
+		self.x /= rhs.x;
+		self.y /= rhs.y;
+	}
+}
+
+#[derive(Copy, Clone, PartialEq)]
+pub struct Vec2d {
+	pub x: f64,
+	pub y: f64,
+}
+
+impl Vec2d {
+	#[must_use]
+	pub const fn new(x: f64, y: f64) -> Self {
+		Self { x, y, }
+	}
+	
+	#[must_use]
+	pub fn round(self) -> Self {
+		Self {
+			x: self.x.round(),
+			y: self.y.round(),
+		}
+	}
+	
+	#[must_use]
+	pub fn distance_squared(self) -> f64 {
+		self.x * self.x + self.y * self.y
+	}
+}
+
+impl Debug for Vec2d {
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+		write!(f, "({x},{y})", x = self.x, y = self.y)
+	}
+}
+
+impl From<(f64, f64)> for Vec2d {
+	fn from(value: (f64, f64)) -> Self {
+		Self::new(value.0, value.1)
+	}
+}
+
+impl From<Vec2d> for (f64, f64) {
+	fn from(val: Vec2d) -> Self { (val.x, val.y) }
+}
+
+impl From<Vec2d> for Vec2u {
+	fn from(vec: Vec2d) -> Self {
+		Self {
+			x: vec.x as usize,
+			y: vec.y as usize,
+		}
+	}
+}
+
+impl From<Vec2u> for Vec2d {
+	fn from(vec: Vec2u) -> Self {
+		Self {
+			x: vec.x as f64,
+			y: vec.y as f64,
+		}
+	}
+}
+
+impl From<PhysicalSize<f64>> for Vec2d {
+	fn from(value: PhysicalSize<f64>) -> Self {
+		Self {
+			x: value.width,
+			y: value.height,
+		}
+	}
+}
+
+impl From<PhysicalPosition<f64>> for Vec2d {
+	fn from(value: PhysicalPosition<f64>) -> Self {
+		Self {
+			x: value.x,
+			y: value.y,
+		}
+	}
+}
+
+impl<T: Into<(f64, f64)>> Add<T> for Vec2d {
 	type Output = Self;
 
 	fn add(self, rhs: T) -> Self::Output {
@@ -961,7 +1110,7 @@ impl<T: Into<(usize, usize)>> std::ops::Add<T> for Vec2u {
 	}
 }
 
-impl<T: Into<(usize, usize)>> std::ops::AddAssign<T> for Vec2u {
+impl<T: Into<(f64, f64)>> AddAssign<T> for Vec2d {
 	fn add_assign(&mut self, rhs: T) {
 		let (x, y) = rhs.into();
 		self.x += x;
@@ -969,7 +1118,7 @@ impl<T: Into<(usize, usize)>> std::ops::AddAssign<T> for Vec2u {
 	}
 }
 
-impl<T: Into<(usize, usize)>> std::ops::Sub<T> for Vec2u {
+impl<T: Into<(f64, f64)>> Sub<T> for Vec2d {
 	type Output = Self;
 
 	fn sub(self, rhs: T) -> Self::Output {
@@ -978,11 +1127,83 @@ impl<T: Into<(usize, usize)>> std::ops::Sub<T> for Vec2u {
 	}
 }
 
-impl<T: Into<(usize, usize)>> std::ops::SubAssign<T> for Vec2u {
+impl<T: Into<(f64, f64)>> SubAssign<T> for Vec2d {
 	fn sub_assign(&mut self, rhs: T) {
 		let (x, y) = rhs.into();
-		self.x = self.x.wrapping_sub(x);
-		self.y = self.x.wrapping_sub(y);
+		self.x = self.x - x;
+		self.y = self.x - y;
+	}
+}
+
+impl Mul for Vec2d {
+	type Output = Self;
+
+	fn mul(self, rhs: Self) -> Self::Output {
+		Self {
+			x: self.x * rhs.x,
+			y: self.y * rhs.y,
+		}
+	}
+}
+
+impl MulAssign for Vec2d {
+	fn mul_assign(&mut self, rhs: Self) {
+		self.x *= rhs.x;
+		self.y *= rhs.y;
+	}
+}
+
+impl Div for Vec2d {
+	type Output = Self;
+
+	fn div(self, rhs: Self) -> Self::Output {
+		Self {
+			x: self.x / rhs.x,
+			y: self.y / rhs.y,
+		}
+	}
+}
+
+impl DivAssign for Vec2d {
+	fn div_assign(&mut self, rhs: Self) {
+		self.x /= rhs.x;
+		self.y /= rhs.y;
+	}
+}
+
+impl Mul<f64> for Vec2d {
+	type Output = Self;
+
+	fn mul(self, rhs: f64) -> Self::Output {
+		Self {
+			x: self.x * rhs,
+			y: self.y * rhs,
+		}
+	}
+}
+
+impl MulAssign<f64> for Vec2d {
+	fn mul_assign(&mut self, rhs: f64) {
+		self.x *= rhs;
+		self.y *= rhs;
+	}
+}
+
+impl Div<f64> for Vec2d {
+	type Output = Self;
+
+	fn div(self, rhs: f64) -> Self::Output {
+		Self {
+			x: self.x / rhs,
+			y: self.y / rhs,
+		}
+	}
+}
+
+impl DivAssign<f64> for Vec2d {
+	fn div_assign(&mut self, rhs: f64) {
+		self.x /= rhs;
+		self.y /= rhs;
 	}
 }
 
@@ -1010,7 +1231,7 @@ impl AxisAlignedBoundingBox {
 			high: Vec2u { x: x1, y: y1 },
 		} = self;
 		let Vec2u { x, y } = point;
-		x0 <= x && x <= x1 && y0 <= y && y <= y1
+		x0 <= x && x < x1 && y0 <= y && y < y1
 	}
 
 	#[must_use]

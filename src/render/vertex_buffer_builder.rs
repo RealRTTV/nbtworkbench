@@ -1,11 +1,14 @@
-use std::hint::unlikely;
-use std::ops::BitAnd;
+use std::{hint::unlikely, ops::BitAnd};
 
 use winit::dpi::PhysicalSize;
 
-use crate::assets::{BASE_TEXT_Z, BASE_Z, TOOLTIP_UV, TOOLTIP_Z, ZOffset};
-use crate::render::TextColor;
-use crate::util::{StrExt, Vec2u};
+use crate::{
+	render::{
+		TextColor,
+		assets::{BASE_TEXT_Z, BASE_Z, TOOLTIP_UV, TOOLTIP_Z, ZOffset},
+	},
+	util::{StrExt, Vec2u},
+};
 
 pub struct VertexBufferBuilder {
 	vertices: Vec<f32>,
@@ -14,8 +17,7 @@ pub struct VertexBufferBuilder {
 	text_indices: Vec<u32>,
 	vertices_len: u32,
 	text_vertices_len: u32,
-	window_width: f32,
-	window_height: f32,
+	window_dims: PhysicalSize<f32>,
 	scroll: usize,
 	pub horizontal_scroll: usize,
 	pub text_coords: (usize, usize),
@@ -58,8 +60,7 @@ impl VertexBufferBuilder {
 			text_indices: Vec::with_capacity(65536),
 			vertices_len: 0,
 			text_vertices_len: 0,
-			window_width: size.width as f32,
-			window_height: size.height as f32,
+			window_dims: size.cast(),
 			scroll,
 			horizontal_scroll: 0,
 			text_coords: (0, 0),
@@ -111,15 +112,7 @@ impl VertexBufferBuilder {
 
 	pub fn draw_tooltip(&mut self, text: &[&str], pos: impl Into<(usize, usize)>, force_draw_right: bool) {
 		let color = self.color;
-		self.tooltips.push((
-			text.iter()
-				.map(|s| s.to_string())
-				.collect::<Vec<_>>()
-				.into_boxed_slice(),
-			Vec2u::from(pos.into()),
-			force_draw_right,
-			color,
-		));
+		self.tooltips.push((text.iter().map(|s| s.to_string()).collect::<Vec<_>>().into_boxed_slice(), Vec2u::from(pos.into()), force_draw_right, color));
 	}
 
 	pub fn reset(&mut self) {
@@ -150,9 +143,7 @@ impl VertexBufferBuilder {
 				x = usize::max(x.saturating_sub(text_width + 30), 4)
 			}
 			if !no_tooltip_repositioning && y + text.len() * 16 + 9 > self.window_height() {
-				y = self
-					.window_height()
-					.saturating_sub(text.len() * 16 + 9);
+				y = self.window_height().saturating_sub(text.len() * 16 + 9);
 			}
 			self.text_z = TOOLTIP_Z;
 			self.text_coords = (x + 3, y + 3);
@@ -190,13 +181,9 @@ impl VertexBufferBuilder {
 			let char = f32::from_bits(char as u32);
 
 			let x0 = x.mul_add(self.two_over_width, -1.0);
-			let x1 = self
-				.two_over_width
-				.mul_add(Self::CHAR_HEIGHT as f32 * self.scale, x0);
+			let x1 = self.two_over_width.mul_add(Self::CHAR_HEIGHT as f32 * self.scale, x0);
 			let y1 = y.mul_add(self.negative_two_over_height, 1.0);
-			let y0 = self
-				.negative_two_over_height
-				.mul_add(Self::CHAR_HEIGHT as f32 * self.scale, y1);
+			let y0 = self.negative_two_over_height.mul_add(Self::CHAR_HEIGHT as f32 * self.scale, y1);
 
 			let len = self.text_vertices_len;
 			let vec = &mut self.text_vertices;
@@ -250,45 +237,57 @@ impl VertexBufferBuilder {
 		self.text_vertices.reserve_exact(98304);
 		self.text_indices.reserve_exact(36864);
 	}
+	
+	pub fn window_dims(&self) -> PhysicalSize<u32> {
+		PhysicalSize::new((self.window_dims.width / self.scale) as u32, (self.window_dims.height / self.scale) as u32)
+	}
 
-	pub fn window_height(&self) -> usize { (self.window_height / self.scale) as usize }
+	#[must_use]
+	pub fn window_width(&self) -> usize { (self.window_dims.width / self.scale) as usize }
 
-	pub fn window_width(&self) -> usize { (self.window_width / self.scale) as usize }
+	#[must_use]
+	pub fn window_height(&self) -> usize { (self.window_dims.height / self.scale) as usize }
 
+	#[must_use]
 	pub fn vertices(&self) -> &[u8] { unsafe { core::slice::from_raw_parts(self.vertices.as_ptr().cast::<u8>(), self.vertices.len() * 4) } }
 
+	#[must_use]
 	pub fn indices(&self) -> &[u8] { unsafe { core::slice::from_raw_parts(self.indices.as_ptr().cast::<u8>(), self.indices.len() * 4) } }
 
+	#[must_use]
 	pub fn text_vertices(&self) -> &[u8] { unsafe { core::slice::from_raw_parts(self.text_vertices.as_ptr().cast::<u8>(), self.text_vertices.len() * 4) } }
 
+	#[must_use]
 	pub fn text_indices(&self) -> &[u8] { unsafe { core::slice::from_raw_parts(self.text_indices.as_ptr().cast::<u8>(), self.text_indices.len() * 4) } }
 
+	#[must_use]
 	pub fn indices_len(&self) -> u32 { self.indices.len() as u32 }
 
+	#[must_use]
 	pub fn text_indices_len(&self) -> u32 { self.text_indices.len() as u32 }
 
-	pub fn draw_texture(&mut self, pos: impl Into<(usize, usize)>, uv: impl Into<(usize, usize)>, dims: impl Into<(usize, usize)>) { self.draw_texture_z(pos, BASE_Z, uv, dims); }
+	pub fn draw_texture(&mut self, pos: impl Into<Vec2u>, uv: impl Into<Vec2u>, dims: impl Into<Vec2u>) { self.draw_texture_z(pos, BASE_Z, uv, dims); }
 
-	pub fn draw_texture_z(&mut self, pos: impl Into<(usize, usize)>, z: ZOffset, uv: impl Into<(usize, usize)>, dims: impl Into<(usize, usize)>) {
+	pub fn draw_texture_z(&mut self, pos: impl Into<Vec2u>, z: ZOffset, uv: impl Into<Vec2u>, dims: impl Into<Vec2u>) {
 		let dims = dims.into();
 		self.draw_texture_region_z(pos, z, uv, dims, dims);
 	}
 
-	pub fn draw_texture_region_z(&mut self, pos: impl Into<(usize, usize)>, z: ZOffset, uv: impl Into<(usize, usize)>, dims: impl Into<(usize, usize)>, uv_dims: impl Into<(usize, usize)>) {
+	pub fn draw_texture_region_z(&mut self, pos: impl Into<Vec2u>, z: ZOffset, uv: impl Into<Vec2u>, dims: impl Into<Vec2u>, uv_dims: impl Into<Vec2u>) {
 		unsafe {
 			let pos = pos.into();
 			let uv = uv.into();
 			let dims = dims.into();
 			let uv_dims = uv_dims.into();
-			let x = (pos.0 as isize - self.horizontal_scroll as isize) as f32 * self.scale;
-			let y = pos.1 as f32 * self.scale;
+			let x = (pos.x as isize - self.horizontal_scroll as isize) as f32 * self.scale;
+			let y = pos.y as f32 * self.scale;
 			let z = 1.0 - z as u8 as f32 / 256.0;
-			let u = uv.0 as f32;
-			let v = uv.1 as f32;
-			let width = dims.0 as f32 * self.scale;
-			let height = dims.1 as f32 * self.scale;
-			let uv_width = uv_dims.0 as f32;
-			let uv_height = uv_dims.1 as f32;
+			let u = uv.x as f32;
+			let v = uv.y as f32;
+			let width = dims.x as f32 * self.scale;
+			let height = dims.y as f32 * self.scale;
+			let uv_width = uv_dims.x as f32;
+			let uv_height = uv_dims.y as f32;
 
 			let x0 = self.two_over_width.mul_add(x, -1.0);
 			let y1 = self.negative_two_over_height.mul_add(y, 1.0);
@@ -332,11 +331,7 @@ impl VertexBufferBuilder {
 			vec.set_len(vertices_len + 20);
 
 			let indices_len = self.indices.len();
-			let ptr = self
-				.indices
-				.as_mut_ptr()
-				.add(indices_len)
-				.cast::<u8>();
+			let ptr = self.indices.as_mut_ptr().add(indices_len).cast::<u8>();
 
 			*ptr = len as u8;
 			*(ptr.add(1)) = (len >> 8) as u8;

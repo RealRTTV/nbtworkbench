@@ -2,14 +2,13 @@ macro_rules! array {
 	($module:ident, $name:ident, $id:literal, $element:ty, $get_inner_unchecked:path, $constructor:path, $char:literal, $uv:path, $ghost_uv:path, $default_snbt_integer:path, $try_into_element:path) => {
 		mod $module {
 			#[cfg(not(target_arch = "wasm32"))] use ::std::thread::Scope;
+			use $crate::elements::{ComplexNbtElementVariant, NbtElementVariant};
 			#[cfg(target_arch = "wasm32")] use $crate::wasm::FakeScope as Scope;
-
-			use crate::elements::{ComplexNbtElementVariant, NbtElement, NbtElementVariant};
 
 			#[repr(C)]
 			pub struct $name {
-				pub(in $crate::elements) values: Box<Vec<NbtElement>>,
-				max_depth: u32,
+				pub(in $crate::elements) values: Box<Vec<$crate::elements::element::NbtElement>>,
+				end_x: u32,
 				open: bool,
 			}
 
@@ -19,8 +18,8 @@ macro_rules! array {
 
 			impl PartialEq for $name {
 				fn eq(&self, other: &Self) -> bool {
-					let a = unsafe { ::std::slice::from_raw_parts(self.values.as_ptr().cast::<u8>(), self.values.len() * ::std::mem::size_of::<NbtElement>()) };
-					let b = unsafe { ::std::slice::from_raw_parts(other.values.as_ptr().cast::<u8>(), other.values.len() * ::std::mem::size_of::<NbtElement>()) };
+					let a = unsafe { ::std::slice::from_raw_parts(self.values.as_ptr().cast::<u8>(), self.values.len() * ::std::mem::size_of::<$crate::elements::element::NbtElement>()) };
+					let b = unsafe { ::std::slice::from_raw_parts(other.values.as_ptr().cast::<u8>(), other.values.len() * ::std::mem::size_of::<$crate::elements::element::NbtElement>()) };
 					a == b
 				}
 			}
@@ -29,14 +28,11 @@ macro_rules! array {
 				fn clone(&self) -> Self {
 					let mut vec = unsafe { Vec::try_with_capacity(self.values.len()).unwrap_unchecked() };
 					for src in self.values.iter() {
-						unsafe {
-							vec.push_within_capacity(src.clone())
-								.unwrap_unchecked()
-						};
+						unsafe { vec.push_within_capacity(src.clone()).unwrap_unchecked() };
 					}
 					Self {
 						values: unsafe { Box::try_new(vec).unwrap_unchecked() },
-						max_depth: self.max_depth,
+						end_x: self.end_x,
 						open: self.open,
 					}
 				}
@@ -45,9 +41,9 @@ macro_rules! array {
 			impl Default for $name {
 				fn default() -> Self {
 					Self {
-						values: Box::<Vec<NbtElement>>::default(),
+						values: Box::<Vec<$crate::elements::element::NbtElement>>::default(),
 						open: false,
-						max_depth: 0,
+						end_x: 0,
 					}
 				}
 			}
@@ -65,8 +61,8 @@ macro_rules! array {
 				}
 			}
 
-			impl $crate::serialization::PrettyDisplay for $name {
-				fn pretty_fmt(&self, f: &mut $crate::serialization::PrettyFormatter) {
+			impl $crate::serialization::formatter::PrettyDisplay for $name {
+				fn pretty_fmt(&self, f: &mut $crate::serialization::formatter::PrettyFormatter) {
 					if self.is_empty() {
 						f.write_str(concat!("[", $char, ";]"))
 					} else {
@@ -94,7 +90,7 @@ macro_rules! array {
 
 				pub type ChildType = $element;
 
-				fn transmute(element: &NbtElement) -> <Self::ChildType as $crate::elements::PrimitiveNbtElementVariant>::InnerType { unsafe { $get_inner_unchecked(element).value } }
+				fn transmute(element: &$crate::elements::element::NbtElement) -> <Self::ChildType as $crate::elements::PrimitiveNbtElementVariant>::InnerType { unsafe { $get_inner_unchecked(element).value } }
 			}
 
 			impl NbtElementVariant for $name {
@@ -106,19 +102,14 @@ macro_rules! array {
 
 				fn from_str0(mut s: &str) -> Result<(&str, Self), usize> {
 					s = s.strip_prefix('[').ok_or(s.len())?.trim_start();
-					s = s
-						.strip_prefix(concat!($char, ";"))
-						.ok_or(s.len())?
-						.trim_start();
+					s = s.strip_prefix(concat!($char, ";")).ok_or(s.len())?.trim_start();
 					let mut array = Self::default();
 					while !s.starts_with(']') {
-						let (s2, element) = NbtElement::from_str0(s, $default_snbt_integer)?;
+						let (s2, element) = $crate::elements::element::NbtElement::from_str0(s, $default_snbt_integer)?;
 						let element = $try_into_element(element).ok_or(s.len())?;
 						// SAFETY: there is nothing to update
 						unsafe {
-							array
-								.insert(array.len(), element)
-								.map_err(|_| s.len())?;
+							array.insert(array.len(), element).map_err(|_| s.len())?;
 						}
 						s = s2.trim_start();
 						if let Some(s2) = s.strip_prefix(',') {
@@ -132,7 +123,7 @@ macro_rules! array {
 					Ok((s.strip_prefix(']').ok_or(s.len())?, array))
 				}
 
-				fn from_bytes<'a, D: $crate::serialization::Decoder<'a>>(decoder: &mut D, _: Self::ExtraParseInfo) -> $crate::elements::result::NbtParseResult<Self> {
+				fn from_bytes<'a, D: $crate::serialization::decoder::Decoder<'a>>(decoder: &mut D, _: Self::ExtraParseInfo) -> $crate::elements::result::NbtParseResult<Self> {
 					use $crate::elements::result::*;
 
 					decoder.assert_len(4)?;
@@ -146,34 +137,34 @@ macro_rules! array {
 							))
 						});
 						match vec.push_within_capacity(element) {
-							Ok(()) => {},
+							Ok(()) => {}
 							Err(_) => return err("Vec was longer than originally stated"),
 						}
 					}
 					let mut array = Self {
 						values: unsafe { Box::try_new(vec).unwrap_unchecked() },
 						open: false,
-						max_depth: 0,
+						end_x: 0,
 					};
 					array.recache();
 					ok(array)
 				}
 
-				fn to_be_bytes(&self, writer: &mut $crate::serialization::UncheckedBufWriter) {
+				fn to_be_bytes(&self, writer: &mut $crate::serialization::encoder::UncheckedBufWriter) {
 					writer.write(&(self.len() as u32).to_be_bytes());
 					for entry in self.values.iter() {
 						writer.write(&Self::transmute(entry).to_be_bytes());
 					}
 				}
 
-				fn to_le_bytes(&self, writer: &mut $crate::serialization::UncheckedBufWriter) {
+				fn to_le_bytes(&self, writer: &mut $crate::serialization::encoder::UncheckedBufWriter) {
 					writer.write(&(self.len() as u32).to_le_bytes());
 					for entry in self.values.iter() {
 						writer.write(&Self::transmute(entry).to_le_bytes());
 					}
 				}
 
-				fn render(&self, builder: &mut $crate::render::VertexBufferBuilder, key: Option<&str>, remaining_scroll: &mut usize, tail: bool, ctx: &mut $crate::render::RenderContext) {
+				fn render(&self, builder: &mut $crate::render::vertex_buffer_builder::VertexBufferBuilder, key: Option<&str>, remaining_scroll: &mut usize, tail: bool, ctx: &mut $crate::render::RenderContext) {
 					use ::std::fmt::Write as _;
 
 					'head: {
@@ -186,19 +177,19 @@ macro_rules! array {
 						let pos = ctx.pos();
 
 						ctx.line_number();
-						builder.draw_texture_z(pos, $crate::assets::BASE_Z, Self::UV, (16, 16));
+						builder.draw_texture_z(pos, $crate::render::assets::BASE_Z, Self::UV, (16, 16));
 						if !self.is_empty() {
 							ctx.draw_toggle(pos - (16, 0), self.open, builder);
 						}
 						ctx.render_errors(pos, builder);
 						if ctx.forbid(pos) {
-							builder.settings(pos + (20, 0), false, $crate::assets::JUST_OVERLAPPING_BASE_TEXT_Z);
+							builder.settings(pos + (20, 0), false, $crate::render::assets::JUST_OVERLAPPING_BASE_TEXT_Z);
 							if let Some(key) = key {
-								builder.color = $crate::render::TextColor::TreeKey.to_raw();
+								builder.color = $crate::render::color::TextColor::TreeKey.to_raw();
 								let _ = write!(builder, "{key}: ");
 							};
 
-							builder.color = $crate::render::TextColor::TreeKey.to_raw();
+							builder.color = $crate::render::color::TextColor::TreeKey.to_raw();
 							let _ = write!(builder, "{}", self.value());
 						}
 
@@ -226,23 +217,19 @@ macro_rules! array {
 
 							ctx.draw_held_entry_bar(pos, builder, |x, y| pos == (x, y), |x| self.can_insert(x));
 
-							builder.draw_texture(pos - (16, 0), $crate::assets::CONNECTION_UV, (16, (idx != self.len() - 1) as usize * 7 + 9));
+							builder.draw_texture(pos - (16, 0), $crate::render::assets::CONNECTION_UV, (16, (idx != self.len() - 1) as usize * 7 + 9));
 							if !tail {
-								builder.draw_texture(pos - (32, 0), $crate::assets::CONNECTION_UV, (8, 16));
+								builder.draw_texture(pos - (32, 0), $crate::render::assets::CONNECTION_UV, (8, 16));
 							}
 
 							ctx.line_number();
-							builder.draw_texture_z(pos, $crate::assets::BASE_Z, Self::ChildType::UV, (16, 16));
-							ctx.check_for_invalid_value(|value| {
-								value
-									.parse::<<Self::ChildType as $crate::elements::PrimitiveNbtElementVariant>::InnerType>()
-									.is_err()
-							});
+							builder.draw_texture_z(pos, $crate::render::assets::BASE_Z, Self::ChildType::UV, (16, 16));
+							ctx.check_for_invalid_value(|value| value.parse::<<Self::ChildType as $crate::elements::PrimitiveNbtElementVariant>::InnerType>().is_err());
 							ctx.render_errors(pos, builder);
 							let str = ::compact_str::format_compact!("{}", Self::transmute(element));
 							if ctx.forbid(pos) {
-								builder.settings(pos + (20, 0), false, $crate::assets::JUST_OVERLAPPING_BASE_TEXT_Z);
-								builder.color = $crate::render::TextColor::TreePrimitive.to_raw();
+								builder.settings(pos + (20, 0), false, $crate::render::assets::JUST_OVERLAPPING_BASE_TEXT_Z);
+								builder.color = $crate::render::color::TextColor::TreePrimitive.to_raw();
 								let _ = write!(builder, "{str}");
 							}
 
@@ -259,24 +246,19 @@ macro_rules! array {
 				}
 
 				fn value(&self) -> ::std::borrow::Cow<'_, str> {
-					let item = $crate::elements::id_to_string_name(Self::CHILD_ID, self.len());
+					let item = $crate::elements::element::id_to_string_name(Self::CHILD_ID, self.len());
 					::std::borrow::Cow::Owned(format!("{} {item}", self.len()))
 				}
 			}
 
 			impl ComplexNbtElementVariant for $name {
-				type Entry = NbtElement;
+				type Entry = $crate::elements::element::NbtElement;
 
 				fn new(entries: Vec<Self::Entry>) -> Self
 				where Self: Sized {
 					Self {
-						values: Box::new(
-							entries
-								.into_iter()
-								.filter(|entry| entry.id() == Self::CHILD_ID)
-								.collect::<Vec<_>>(),
-						),
-						max_depth: 0,
+						values: Box::new(entries.into_iter().filter(|entry| entry.id() == Self::CHILD_ID).collect::<Vec<_>>()),
+						end_x: 0,
 						open: false,
 					}
 				}
@@ -287,11 +269,11 @@ macro_rules! array {
 
 				fn len(&self) -> usize { self.values.len() }
 
-				fn can_insert(&self, value: &NbtElement) -> bool { value.id() == Self::CHILD_ID }
+				fn can_insert(&self, value: &$crate::elements::element::NbtElement) -> bool { value.id() == Self::CHILD_ID }
 
 				fn is_open(&self) -> bool { self.open }
 
-				fn max_depth(&self) -> usize { self.max_depth as usize }
+				fn end_x(&self) -> usize { self.end_x as usize }
 
 				unsafe fn toggle(&mut self) { self.open = !self.open && !self.is_empty(); }
 
@@ -299,9 +281,7 @@ macro_rules! array {
 					if self.can_insert(&entry) {
 						// the time complexity is fine here
 						unsafe {
-							self.values
-								.try_reserve_exact(1)
-								.unwrap_unchecked();
+							self.values.try_reserve_exact(1).unwrap_unchecked();
 						}
 						self.values.insert(idx, entry);
 						Ok(None)
@@ -333,13 +313,13 @@ macro_rules! array {
 				unsafe fn expand<'a, 'b>(&mut self, _scope: &'a Scope<'a, 'b>) { self.open = !self.is_empty(); }
 
 				fn recache(&mut self) {
-					let mut max_depth = 0;
+					let mut end_x = 0;
 					if self.is_open() {
 						for child in self.children() {
-							max_depth = usize::max(max_depth, 16 + 4 + $crate::util::StrExt::width(child.value().0.as_ref()));
+							end_x = usize::max(end_x, $crate::elements::element::NbtElement::DEPTH_INCREMENT_WIDTH + $crate::render::widget::selected_text::SelectedText::PREFIXING_SPACE_WIDTH + $crate::util::StrExt::width(child.value().0.as_ref()));
 						}
 					}
-					self.max_depth = max_depth as u32;
+					self.end_x = end_x as u32;
 				}
 
 				fn children(&self) -> ::std::slice::Iter<'_, Self::Entry> { self.values.iter() }
@@ -363,40 +343,40 @@ array!(
 	byte_array,
 	NbtByteArray,
 	7,
-	crate::elements::NbtByte,
-	crate::elements::NbtElement::as_byte_unchecked,
-	crate::elements::NbtElement::Byte,
+	crate::elements::byte::NbtByte,
+	crate::elements::element::NbtElement::as_byte_unchecked,
+	crate::elements::element::NbtElement::Byte,
 	'B',
-	crate::assets::BYTE_ARRAY_UV,
-	crate::assets::BYTE_ARRAY_GHOST_UV,
-	crate::elements::NbtElement::parse_byte,
-	crate::elements::NbtElement::array_try_into_byte
+	crate::render::assets::BYTE_ARRAY_UV,
+	crate::render::assets::BYTE_ARRAY_GHOST_UV,
+	crate::elements::element::NbtElement::parse_byte,
+	crate::elements::element::NbtElement::array_try_into_byte
 );
 
 array!(
 	int_array,
 	NbtIntArray,
 	11,
-	crate::elements::NbtInt,
-	crate::elements::NbtElement::as_int_unchecked,
-	crate::elements::NbtElement::Int,
+	crate::elements::int::NbtInt,
+	crate::elements::element::NbtElement::as_int_unchecked,
+	crate::elements::element::NbtElement::Int,
 	'I',
-	crate::assets::INT_ARRAY_UV,
-	crate::assets::INT_ARRAY_GHOST_UV,
-	crate::elements::NbtElement::parse_int,
-	crate::elements::NbtElement::array_try_into_int
+	crate::render::assets::INT_ARRAY_UV,
+	crate::render::assets::INT_ARRAY_GHOST_UV,
+	crate::elements::element::NbtElement::parse_int,
+	crate::elements::element::NbtElement::array_try_into_int
 );
 
 array!(
 	long_array,
 	NbtLongArray,
 	12,
-	crate::elements::NbtLong,
-	crate::elements::NbtElement::as_long_unchecked,
-	crate::elements::NbtElement::Long,
+	crate::elements::long::NbtLong,
+	crate::elements::element::NbtElement::as_long_unchecked,
+	crate::elements::element::NbtElement::Long,
 	'L',
-	crate::assets::LONG_ARRAY_UV,
-	crate::assets::LONG_ARRAY_GHOST_UV,
-	crate::elements::NbtElement::parse_long,
-	crate::elements::NbtElement::array_try_into_long
+	crate::render::assets::LONG_ARRAY_UV,
+	crate::render::assets::LONG_ARRAY_GHOST_UV,
+	crate::elements::element::NbtElement::parse_long,
+	crate::elements::element::NbtElement::array_try_into_long
 );

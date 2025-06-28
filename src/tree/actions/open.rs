@@ -1,10 +1,21 @@
 use thiserror::Error;
-use crate::assets::HIDDEN_BOOKMARK_UV;
-use crate::elements::NbtElement;
-use crate::tree::{Indices, NavigationError, NavigationInformationMut, RecacheBookmarkError};
-use crate::workbench::MarkedLines;
 
-pub fn open_element(root: &mut NbtElement, indices: &Indices, bookmarks: &mut MarkedLines) -> Result<(), OpenElementError> {
+use crate::{
+	elements::element::NbtElement,
+	tree::{
+		actions::RecacheBookmarkError,
+		indices::Indices,
+		navigate::{NavigationError, NavigationInformationMut},
+	},
+	workbench::marked_line::MarkedLines,
+};
+
+#[rustfmt::skip]
+pub fn open_element(
+	root: &mut NbtElement,
+	indices: &Indices,
+	bookmarks: &mut MarkedLines
+) -> Result<(), OpenElementError> {
 	let NavigationInformationMut { element, true_line_number, line_number, .. } = root.navigate_mut(&indices)?;
 	let height_before = element.height();
 	if element.is_open() {
