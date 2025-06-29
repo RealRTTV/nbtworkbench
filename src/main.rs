@@ -1,5 +1,5 @@
 #![allow(semicolon_in_expressions_from_macros, internal_features, incomplete_features, unsafe_op_in_unsafe_fn)]
-#![forbid(unused_must_use)]
+#![deny(unused_must_use)]
 #![warn(clippy::pedantic)]
 #![feature(
 	allocator_api,
