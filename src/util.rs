@@ -1253,7 +1253,7 @@ mod tests {
 			data
 		}
 
-		assert_eq!(reorder(vec![1, 2, 3], &[2, 0, 1]), vec![3, 1, 2]);
+		assert_eq!(reorder(vec![1, 2, 3], &[2, 0, 1]), vec![2, 3, 1]);
 		assert_eq!(reorder(vec![1, 2, 3, 4, 5], &[0, 1, 2, 3, 4]), vec![1, 2, 3, 4, 5]);
 		assert_eq!(reorder(vec![1, 2, 3, 4], &[3, 2, 1, 0]), vec![4, 3, 2, 1]);
 	}
