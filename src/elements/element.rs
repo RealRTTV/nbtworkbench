@@ -596,8 +596,8 @@ impl NbtElement {
 
 /// "Rendering" related functions
 impl NbtElement {
-	const ICON_WIDTH: usize = 16;
-	const TOGGLE_WIDTH: usize = 16;
+	pub const ICON_WIDTH: usize = 16;
+	pub const TOGGLE_WIDTH: usize = 16;
 	
 	pub const INITIAL_DEPTH_WIDTH: usize = Self::TOGGLE_WIDTH + Self::ICON_WIDTH;
 	pub const DEPTH_INCREMENT_WIDTH: usize = Self::ICON_WIDTH;
