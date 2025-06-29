@@ -608,6 +608,8 @@ impl Workbench {
     fn steal(&mut self) -> ActionResult {
         // todo, the fact that these indices aren't seemingly (to me) stored between like a queue might pose an issue in creating a correct workbench action history model -- correct, is still buggy :(
 
+        if self.tabs.active_tab().steal_animation_data.as_ref().is_some_and(|x| x.0.elapsed() >= LINE_DOUBLE_CLICK_INTERVAL) { return ActionResult::Pass }
+        
         if self.tabs.active_tab().held_entry.is_some() {
             return ActionResult::Pass
         }
@@ -1477,13 +1479,12 @@ impl Workbench {
             self.try_replace_box_scroll();
             self.try_extend_drag_selection();
         }
-        let tab = self.tabs.active_tab_mut();
-        if tab.steal_animation_data.is_some() && self.try_steal(false) {
-            if tab.steal_animation_data.as_ref().is_some_and(|x| x.0.elapsed() >= LINE_DOUBLE_CLICK_INTERVAL) {
-                self.steal();
+        if self.tabs.active_tab().steal_animation_data.is_some() && let ActionResult::Success(()) = self.try_steal(false) {
+            if !self.steal().passed() {
+                return;
             }
         } else {
-            tab.steal_animation_data = None;
+            self.tabs.active_tab_mut().steal_animation_data = None;
         }
     }
 
@@ -1729,7 +1730,7 @@ impl Workbench {
         }
     }
 
-    pub fn should_ignore_event(&self) -> bool { Timestamp::now().saturating_sub(self.ignore_event_end) > Duration::ZERO }
+    pub fn should_ignore_event(&self) -> bool { Timestamp::now() < self.ignore_event_end }
 
     #[allow(clippy::cognitive_complexity, clippy::match_same_arms, clippy::too_many_lines)]
     #[must_use]

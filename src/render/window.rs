@@ -53,6 +53,7 @@ pub async fn run() -> ! {
 		fn resumed(&mut self, _: &ActiveEventLoop) {}
 		fn window_event(&mut self, _: &ActiveEventLoop, window_id: WindowId, event: WindowEvent) {
 			if self.window.id() != window_id {
+				dbg!(self.window.id(), window_id);
 				return;
 			}
 
@@ -545,13 +546,6 @@ impl<'window> State<'window> {
 
 	fn input(event: WindowEvent, workbench: &mut Workbench) -> ActionResult {
 		match event {
-			WindowEvent::Resized(size) => {
-				workbench.window_dims = size;
-				for tab in &mut workbench.tabs {
-					tab.set_window_dims(workbench.window_dims);
-				}
-				ActionResult::Success(())
-			}
 			WindowEvent::DroppedFile(file) if let Some(data) = std::fs::read(&file).alert_err(&mut workbench.alerts) => {
 				workbench.on_open_file(&file, data).alert_err(&mut workbench.alerts);
 				ActionResult::Success(())

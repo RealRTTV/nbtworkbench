@@ -109,7 +109,7 @@ pub fn read() -> bool {
 }
 
 fn try_read_string(path: &Path) -> Result<String> {
-	ensure!(std::fs::exists(path)?, "TOML file does not exist");
+	ensure!(std::fs::exists(path)?, "File does not exist");
 	let data = std::fs::read(path)?;
 	let data = String::from_utf8(data)?;
 	Ok(data)

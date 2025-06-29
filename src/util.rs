@@ -24,7 +24,7 @@ pub fn get_clipboard() -> Option<String> { cli_clipboard::get_contents().ok() }
 #[cfg(not(target_arch = "wasm32"))]
 pub fn set_clipboard(value: String) -> bool { cli_clipboard::set_contents(value).is_ok() }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Timestamp {
 	since_epoch: Duration,
 }

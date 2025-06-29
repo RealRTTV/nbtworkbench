@@ -130,6 +130,8 @@ pub fn window_properties() -> parking_lot::MutexGuard<'static, render::window::W
 /// * add multi-cursor
 /// * [chunk](elements::chunk::NbtChunk) section rendering
 /// # Minor Features
+/// * use another scissor rect to make the left margin always exist while scrolling
+/// * change to Vec2i-based system for rendering, and do the rem_euclid for each coord to the window dims
 /// * [`last_modified`](elements::chunk::NbtChunk) field actually gets the ability to be set
 /// # Major Features
 /// * macros

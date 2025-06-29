@@ -93,7 +93,7 @@ impl Tab {
 		("Little Endian NBT File (With Header)", &["dat"]),
 	];
 	pub const AUTOSAVE_INTERVAL: Duration = Duration::from_secs(30);
-	pub const TAB_CLOSE_DOUBLE_CLICK_INTERVAL: Duration = Duration::from_millis(2_000);
+	pub const TAB_CLOSE_DOUBLE_CLICK_INTERVAL: Duration = Duration::from_millis(5_000);
 	pub const AUTOSAVE_MAXIMUM_LINES: usize = 1_000_000;
 
 	pub fn new(nbt: NbtElement, path: FilePath, format: NbtFileFormat, window_dims: PhysicalSize<u32>) -> Result<Self> {
@@ -416,11 +416,11 @@ impl Tab {
 	pub fn horizontal_scroll(&self) -> usize {
 		let left_margin = self.left_margin();
 		let selected_text_width = if let Some(selected_text) = &self.selected_text {
-			selected_text.indices.len() * NbtElement::ICON_WIDTH + NbtElement::TOGGLE_WIDTH + NbtElement::ICON_WIDTH + SelectedText::PREFIXING_SPACE_WIDTH + selected_text.width()
+			selected_text.indices.end_x(left_margin) + SelectedText::PREFIXING_SPACE_WIDTH + selected_text.width()
 		} else {
 			0
 		};
-		let width = self.root.end_x().max(self.path.name().width()).max(selected_text_width) + 32 + 48;
+		let width = (left_margin + NbtElement::INITIAL_DEPTH_WIDTH + self.root.end_x().max(self.path.name().width())).max(selected_text_width) + 48;
 		let scroll = self.horizontal_scroll;
 		let max = (width + left_margin).saturating_sub(self.window_dims.width as usize);
 		scroll.min(max)
@@ -435,7 +435,7 @@ impl Tab {
 	pub fn end_x(&self) -> usize {
 		let TabConstants { left_margin, .. } = self.consts();
 		let selected_text_width = self.selected_text.as_ref().map_or(0, |text| text.end_x(left_margin));
-		let root_width = left_margin + self.root.end_x().max(NbtElement::TOGGLE_WIDTH + NbtElement::ICON_WIDTH + SelectedText::PREFIXING_SPACE_WIDTH + self.path.name().width());
+		let root_width = left_margin + self.root.end_x().max(NbtElement::INITIAL_DEPTH_WIDTH + SelectedText::PREFIXING_SPACE_WIDTH + self.path.name().width());
 		usize::max(selected_text_width, root_width)
 	}
 
