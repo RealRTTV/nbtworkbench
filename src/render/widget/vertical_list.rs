@@ -75,11 +75,11 @@ impl<'a> Widget for VerticalList<'a> {
 		self.widgets.iter().any(|w| w.is_currently_hovering())
 	}
 
-	fn on_start_hovering(&mut self, pos: Vec2u, dims: PhysicalSize<u32>, ctx: &mut WidgetContextMut) {
+	fn on_hovering(&mut self, pos: Vec2u, dims: PhysicalSize<u32>, ctx: &mut WidgetContextMut) {
 		let mut y = 0;
 		for (aabb, widget) in self.widgets.iter_mut().map(|w| (aabb_of(&**w, &mut y, dims), w)) {
 			if let Some(pos) = pos.relative_to(aabb) {
-				widget.on_start_hovering(pos, aabb.dims(), ctx);
+				widget.on_hovering(pos, aabb.dims(), ctx);
 			}
 		}
 	}

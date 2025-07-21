@@ -88,6 +88,12 @@ impl Alert {
 		let display_time = (self.message_len + self.title.len()) * 60 + 3000;
 		ms <= 500 + display_time
 	}
+
+	#[must_use]
+	fn is_actually_within_bounds(&self, pos: Vec2u, dims: PhysicalSize<u32>) -> bool {
+		let inset = self.get_inset() as u32;
+		inset <= pos.x as u32 && (pos.x as u32) < dims.width
+	}
 }
 
 impl Widget for Alert {
@@ -105,6 +111,8 @@ impl Widget for Alert {
 	}
 
 	fn on_mouse_down(&mut self, button: MouseButton, pos: Vec2u, dims: PhysicalSize<u32>, ctx: &mut WidgetContextMut) -> ActionResult {
+		if !self.is_actually_within_bounds(pos, dims) { return ActionResult::Pass }
+		
 		if let MouseButton::Left | MouseButton::Middle = button {
 			self.timestamp = Timestamp::UNIX_EPOCH;
 			self.time_elapsed_override = None;
@@ -120,9 +128,12 @@ impl Widget for Alert {
 
 	fn is_currently_hovering(&self) -> bool { self.is_currently_hovering }
 	
-	fn on_start_hovering(&mut self, pos: Vec2u, dims: PhysicalSize<u32>, ctx: &mut WidgetContextMut) {
+	fn on_hovering(&mut self, pos: Vec2u, dims: PhysicalSize<u32>, ctx: &mut WidgetContextMut) {
+		if !self.is_actually_within_bounds(pos, dims) { self.is_currently_hovering = false; return }
 		self.is_currently_hovering = true;
-		self.time_elapsed_override = Some(self.timestamp.elapsed());
+		if self.time_elapsed_override.is_none() {
+			self.time_elapsed_override = Some(self.timestamp.elapsed());
+		}
 	}
 
 	fn on_stop_hovering(&mut self, ctx: &mut WidgetContextMut) {

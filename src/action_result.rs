@@ -173,64 +173,26 @@ impl<S> IntoFailingActionResult<S, ()> for Option<S> {
 	}
 }
 
-/// [`ActionResult`]-esc type for ? syntax. Returns [`ActionResult::Pass`] on failure.
-/// Examples:
-/// ```rs
-/// fn apply_action() -> AnyhowActionResult {
-///     let result: Result<i32, anyhow::Error> = { Ok(4) };
-///     let guard: PassingActionResult<i32, anyhow::Error> = result.pass_on_err();
-///     let value: i32 = guard?;
-///     // ... do stuff
-///     ActionResult::Success(())
-/// }
-/// ```
-#[must_use]
-pub enum PassingActionResult<S> {
-	Success(S),
-	Failure,
+pub trait PassOrFail<S, E> {
+	fn pass_or_fail(self, pass_predicate: impl FnOnce(&E) -> bool) -> ActionResult<S, E>;
 }
 
-impl<S> FromResidual<ActionResult<!, !>> for PassingActionResult<S> {
-	fn from_residual(residual: ActionResult<!, !>) -> Self {
-		match residual {
-			ActionResult::Pass => Self::Failure,
-			_ => unsafe { core::hint::unreachable_unchecked() },
+impl<S, E> PassOrFail<S, E> for Result<S, E> {
+	fn pass_or_fail(self, pass_predicate: impl FnOnce(&E) -> bool) -> ActionResult<S, E> {
+		match self {
+			Ok(x) => ActionResult::Success(x),
+			Err(e) if pass_predicate(&e) => ActionResult::Pass,
+			Err(e) => ActionResult::Failure(e),
 		}
 	}
 }
 
-impl<S> Try for PassingActionResult<S> {
-	type Output = S;
-	type Residual = ActionResult<!, !>;
-
-	fn from_output(output: Self::Output) -> Self { Self::Success(output) }
-
-	fn branch(self) -> ControlFlow<Self::Residual, Self::Output> {
+impl<S> PassOrFail<S, ()> for Option<S> {
+	fn pass_or_fail(self, pass_predicate: impl FnOnce(&()) -> bool) -> ActionResult<S, ()> {
 		match self {
-			Self::Success(t) => ControlFlow::Continue(t),
-			Self::Failure => ControlFlow::Break(ActionResult::Pass),
-		}
-	}
-}
-
-pub trait IntoPassingActionResult<S> {
-	fn pass_on_err(self) -> PassingActionResult<S>;
-}
-
-impl<S, E> IntoPassingActionResult<S> for Result<S, E> {
-	fn pass_on_err(self) -> PassingActionResult<S> {
-		match self {
-			Ok(t) => PassingActionResult::Success(t),
-			Err(_) => PassingActionResult::Failure,
-		}
-	}
-}
-
-impl<S> IntoPassingActionResult<S> for Option<S> {
-	fn pass_on_err(self) -> PassingActionResult<S> {
-		match self {
-			Some(t) => PassingActionResult::Success(t),
-			None => PassingActionResult::Failure,
+			Some(x) => ActionResult::Success(x),
+			None if pass_predicate(&()) => ActionResult::Pass,
+			None => ActionResult::Failure(()),
 		}
 	}
 }

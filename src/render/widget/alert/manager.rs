@@ -1,5 +1,5 @@
 use std::ops::BitOrAssign;
-
+use crate::action_result::ActionResult;
 use crate::render::assets::HEADER_SIZE;
 use crate::render::widget::alert::Alert;
 use crate::render::widget::vertical_list::VerticalList;
@@ -46,6 +46,22 @@ impl<T, E: Into<Alert>> Alertable<Option<T>> for Result<T, E> {
 			Err(e) => {
 				alerts.alert(e);
 				None
+			}
+		}
+	}
+}
+
+impl<S, E: Into<Alert>> Alertable<ActionResult<S, ()>> for ActionResult<S, E> {
+	fn alert_err(self, alerts: &mut AlertManager) -> ActionResult<S, ()>
+	where
+		Self: Sized
+	{
+		match self {
+			ActionResult::Success(s) => ActionResult::Success(s),
+			ActionResult::Pass => ActionResult::Pass,
+			ActionResult::Failure(e) => {
+				alerts.alert(e);
+				ActionResult::Failure(())
 			}
 		}
 	}

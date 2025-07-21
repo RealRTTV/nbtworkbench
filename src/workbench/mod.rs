@@ -1240,13 +1240,18 @@ impl Workbench {
 			let pixel_delta = height as isize * dy / total as isize;
 			tab.modify_scroll(|scroll| (scroll as isize + pixel_delta).max(0) as usize);
 		}
-		{
-			let mut new_alerts = AlertManager::new();
-			let mut new_notifications = NotificationManager::new();
-			let shift = self.keyboard.shift();
-			let mut ctx = WidgetContextMut::new(&mut self.tabs, &mut self.search_box, &mut self.replace_box, &mut new_alerts, &mut new_notifications, shift);
-			
-			macro_rules! hover_widgets {
+		self.hover_widgets();
+		self.try_extend_drag_selection();
+		ActionResult::Success(())
+	}
+	
+	pub fn hover_widgets(&mut self) {
+		let mut new_alerts = AlertManager::new();
+		let mut new_notifications = NotificationManager::new();
+		let shift = self.keyboard.shift();
+		let mut ctx = WidgetContextMut::new(&mut self.tabs, &mut self.search_box, &mut self.replace_box, &mut new_alerts, &mut new_notifications, shift);
+
+		macro_rules! hover_widgets {
 				($($widget:expr),+ $(,)?) => {
 					$({
 						#[allow(unused_mut)]
@@ -1259,25 +1264,20 @@ impl Workbench {
 						let widget_is_currently_hovering = widget.is_currently_hovering();
 						match (relative_pos, widget_is_currently_hovering) {
 							(None, false) => {},
-							(Some(_), true) => {},
 							(None, true) => widget.on_stop_hovering(&mut ctx),
-							(Some(pos), false) => widget.on_start_hovering(pos, dims, &mut ctx),
+							(Some(pos), _) => widget.on_hovering(pos, dims, &mut ctx),
 						}
 					})+
 				};
 			}
 
-			hover_widgets![
+		hover_widgets![
 				self.alerts.as_vertical_list(),
 			    self.notifications.as_vertical_list(),
 		    ];
-			
-			self.alerts |= new_alerts;
-			self.notifications |= new_notifications;
-		}
 
-		self.try_extend_drag_selection();
-		ActionResult::Success(())
+		self.alerts |= new_alerts;
+		self.notifications |= new_notifications;
 	}
 
 	pub fn try_extend_drag_selection(&mut self) {
@@ -1505,6 +1505,7 @@ impl Workbench {
 		}
 		self.alerts.cleanup();
 		self.notifications.cleanup();
+		self.hover_widgets();
 		if self.tabs.active_tab().steal_animation_data.is_some()
 			&& let ActionResult::Success(()) = self.try_steal(false)
 		{

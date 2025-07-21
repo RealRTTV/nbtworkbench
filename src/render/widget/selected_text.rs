@@ -6,7 +6,7 @@ use thiserror::Error;
 use uuid::Uuid;
 use winit::keyboard::KeyCode;
 
-use crate::action_result::{ActionResult, IntoFailingActionResult};
+use crate::action_result::{ActionResult, IntoFailingActionResult, PassOrFail};
 use crate::elements::element::NbtElement;
 use crate::flags;
 use crate::history::WorkbenchAction;
@@ -112,7 +112,7 @@ impl SelectedText {
 	) -> Result<Self, SelectedTextConstructionError> {
 		let key_width = key.as_ref().map_or(0, |k| k.0.width());
 		let value_width = value.as_ref().map_or(0, |v| v.0.width());
-		let has_key_and_value = key.is_some() && value.is_some();
+		let has_key_and_value = key.as_ref().is_some_and(|k| k.2) && value.as_ref().is_some_and(|v| v.2);
 		let intersection_width = has_key_and_value as usize * ": ".width();
 		let full_width = key_width + intersection_width + value_width;
 
@@ -210,59 +210,58 @@ impl SelectedText {
 			root: &mut NbtElement,
 			path: &mut FilePath,
 			mi: &'m1 mut MutableIndices<'m2>,
-		) -> Result<SelectedTextKeyResult, SelectedTextInputError> {
+		) -> ActionResult<SelectedTextKeyResult, SelectedTextInputError> {
 			if key == KeyCode::ArrowUp {
 				if flags & !flags!(Ctrl) == 0 {
-					return Ok(SelectedTextKeyResult::Action(this.move_up(consts, flags == flags!(Ctrl), root, path)?))
+					return this.move_up(consts, flags == flags!(Ctrl), root, path).map(SelectedTextKeyResult::Action).map_err(SelectedTextInputError::from).pass_or_fail(SelectedTextInputError::is_generally_ignored);
 				} else if flags == flags!(Ctrl + Shift) {
-					return Ok(SelectedTextKeyResult::Action(Some(this.shift_up(consts, root, mi)?)))
+					return this.shift_up(consts, root, mi).map(Some).map(SelectedTextKeyResult::Action).map_err(SelectedTextInputError::from).pass_or_fail(SelectedTextInputError::is_generally_ignored);
 				}
 			}
 
 			if key == KeyCode::ArrowDown {
 				if flags & !flags!(Ctrl) == 0 {
-					return Ok(SelectedTextKeyResult::Action(this.move_down(consts, flags == flags!(Ctrl), root, path)?))
+					return this.move_down(consts, flags == flags!(Ctrl), root, path).map(SelectedTextKeyResult::Action).map_err(SelectedTextInputError::from).pass_or_fail(SelectedTextInputError::is_generally_ignored)
 				} else if flags == flags!(Ctrl + Shift) {
-					return Ok(SelectedTextKeyResult::Action(Some(this.shift_down(consts, root, mi)?)))
+					return this.shift_down(consts, root, mi).map(Some).map(SelectedTextKeyResult::Action).map_err(SelectedTextInputError::from).pass_or_fail(SelectedTextInputError::is_generally_ignored);
 				}
 			}
 
 			if key == KeyCode::ArrowLeft {
 				if flags & !flags!(Ctrl) == 0 && this.selection.is_none() && this.cursor == 0 && this.keyfix.is_some() {
-					return Ok(SelectedTextKeyResult::Action(this.move_to_keyfix(consts, root, path)?))
+					return this.move_to_keyfix(consts, root, path).map(SelectedTextKeyResult::Action).map_err(SelectedTextInputError::from).pass_or_fail(SelectedTextInputError::is_generally_ignored);
 				}
 				if flags & !flags!(Shift) == flags!(Alt) {
-					this.force_close(root, mi.bookmarks)?;
-					return Ok(SelectedTextKeyResult::Action(None))
+					return this.force_close(root, mi.bookmarks).map(|_| None).map(SelectedTextKeyResult::Action).map_err(SelectedTextInputError::from).pass_or_fail(SelectedTextInputError::is_generally_ignored);
 				}
 			}
 
 			if key == KeyCode::ArrowRight {
 				if flags & !flags!(Ctrl) == 0 && this.selection.is_none() && this.cursor == this.value.len() && this.valuefix.is_some() {
-					return Ok(SelectedTextKeyResult::Action(this.move_to_valuefix(consts, root, path)?))
+					return this.move_to_valuefix(consts, root, path).map(SelectedTextKeyResult::Action).map_err(SelectedTextInputError::from).pass_or_fail(SelectedTextInputError::is_generally_ignored);
 				}
 				if (flags) & !flags!(Shift) == flags!(Alt) {
-					this.force_open((flags & !flags!(Alt)) == flags!(Shift), root, mi.bookmarks)?;
-					return Ok(SelectedTextKeyResult::Action(None))
+					return this.force_open((flags & !flags!(Alt)) == flags!(Shift), root, mi.bookmarks).map(|_| None).map(SelectedTextKeyResult::Action).map_err(SelectedTextInputError::from).pass_or_fail(SelectedTextInputError::is_generally_ignored);
 				}
 			}
 
-			Ok(this.0.on_key_press(key, ch, flags).into())
+			ActionResult::Success(this.0.on_key_press(key, ch, flags).into())
 		}
-		let result = on_key_press0(self, key, ch, flags, consts, root, path, mi);
-		match result.alert_err(alerts).failure_on_err()? {
-			SelectedTextKeyResult::NoAction => ActionResult::Pass,
-			SelectedTextKeyResult::Action(action) => {
+		match on_key_press0(self, key, ch, flags, consts, root, path, mi).alert_err(alerts) {
+			ActionResult::Pass => ActionResult::Pass,
+			ActionResult::Failure(e) => ActionResult::Failure(e),
+			ActionResult::Success(SelectedTextKeyResult::NoAction) => ActionResult::Pass,
+			ActionResult::Success(SelectedTextKeyResult::Action(action)) => {
 				self.post_input();
 				history.append_all(action);
 				ActionResult::Success(false)
 			}
-			SelectedTextKeyResult::Escape => ActionResult::Success(true),
-			SelectedTextKeyResult::Finish => {
+			ActionResult::Success(SelectedTextKeyResult::Escape) => ActionResult::Success(true),
+			ActionResult::Success(SelectedTextKeyResult::Finish) => {
 				history.append_all(self.save(root, path).map_success(Some).flatten_pass(Ok(None)).alert_err(alerts).failure_on_err()?);
 				ActionResult::Success(true)
 			}
-			SelectedTextKeyResult::GenericAction => {
+			ActionResult::Success(SelectedTextKeyResult::GenericAction) => {
 				self.post_input();
 				ActionResult::Success(false)
 			}
@@ -335,7 +334,7 @@ impl SelectedText {
 				offset + path_minus_name_width,
 				HEADER_SIZE,
 				Some((path.path_str().to_string(), TextColor::TreeKey, true)),
-				Some((format!("[{}]", root.value().0), TextColor::TreeKey, false)),
+				Some((root.value().0.into_owned(), TextColor::TreeKey, false)),
 				OwnedIndices::new(),
 				cached_cursor_x,
 				snap_to_ends,
@@ -506,6 +505,17 @@ pub enum SelectedTextConstructionError {
 	Region,
 }
 
+impl SelectedTextConstructionError {
+	#[must_use]
+	pub const fn is_generally_ignored(&self) -> bool {
+		match self {
+			Self::Traversal(e) => e.is_generally_ignored(),
+			Self::OutOfBounds { .. } => true,
+			Self::Region => true,
+		}
+	}
+}
+
 #[derive(Error, Debug)]
 pub enum SaveSelectedTextError {
 	#[error(transparent)]
@@ -522,6 +532,17 @@ pub enum MoveSelectedTextError {
 	Navigation(#[from] NavigationError),
 	#[error("Could not create new selected text: {0}")]
 	NoNewSelectedText(#[from] SelectedTextConstructionError),
+}
+
+impl MoveSelectedTextError {
+	#[must_use]
+	pub const fn is_generally_ignored(&self) -> bool {
+		match self {
+			Self::Save(_save) => false,
+			Self::Navigation(_navigation) => false,
+			Self::NoNewSelectedText(construction) => construction.is_generally_ignored(),
+		}
+	}
 }
 
 #[derive(Error, Debug)]
@@ -568,4 +589,18 @@ pub enum SelectedTextInputError {
 	MoveToKeyfix(#[from] MoveToKeyfixError),
 	#[error(transparent)]
 	MoveSelectedText(#[from] MoveSelectedTextError),
+}
+
+impl SelectedTextInputError {
+	#[must_use]
+	pub const fn is_generally_ignored(&self) -> bool {
+		match self {
+			Self::CloseElement(_e) => false,
+			Self::OpenElement(_e) => false,
+			Self::ShiftSelectedText(_e) => false,
+			Self::MoveToValuefix(_e) => false,
+			Self::MoveToKeyfix(_e) => false,
+			Self::MoveSelectedText(e) => e.is_generally_ignored(),
+		}
+	}
 }

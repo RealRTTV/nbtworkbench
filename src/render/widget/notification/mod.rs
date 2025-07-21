@@ -11,7 +11,7 @@ use crate::workbench::mouse::MouseManager;
 
 pub mod manager;
 
-#[derive(Copy, Clone, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub enum NotificationKind {
 	Scale,
 	Find,
@@ -19,6 +19,7 @@ pub enum NotificationKind {
 	CopiedToClipboard,
 }
 
+#[derive(Debug)]
 pub struct Notification {
 	timestamp: Timestamp,
 	lines: Box<[String]>,
@@ -139,7 +140,7 @@ impl Widget for Notification {
 	fn dimensions(&self, _containment_dims: PhysicalSize<u32>) -> PhysicalSize<u32> { PhysicalSize::new(self.width as _, self.height() as _) }
 	fn is_currently_hovering(&self) -> bool { self.time_elapsed_override.is_some() }
 
-	fn on_start_hovering(&mut self, pos: Vec2u, dims: PhysicalSize<u32>, ctx: &mut WidgetContextMut) {
+	fn on_hovering(&mut self, pos: Vec2u, dims: PhysicalSize<u32>, ctx: &mut WidgetContextMut) {
 		self.is_hovering = false;
 		self.time_elapsed_override = Some(self.elapsed());
 	}

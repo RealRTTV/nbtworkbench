@@ -112,7 +112,7 @@ pub trait Widget {
 	fn is_currently_hovering(&self) -> bool { false }
 	
 	#[allow(unused_variables)]
-	fn on_start_hovering(&mut self, pos: Vec2u, dims: PhysicalSize<u32>, ctx: &mut WidgetContextMut) {}
+	fn on_hovering(&mut self, pos: Vec2u, dims: PhysicalSize<u32>, ctx: &mut WidgetContextMut) {}
 	
 	#[allow(unused_variables)]
 	fn on_stop_hovering(&mut self, ctx: &mut WidgetContextMut) {}

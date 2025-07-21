@@ -37,7 +37,6 @@ use crate::render::color::TextColor;
 use crate::render::vertex_buffer_builder::VertexBufferBuilder;
 use crate::render::widget::selected_text::{SaveSelectedTextError, SelectedText, SelectedTextConstructionError};
 use crate::render::widget::text::{TEXT_DOUBLE_CLICK_INTERVAL, get_cursor_left_jump_idx, get_cursor_right_jump_idx};
-use crate::tree::traverse::TraversalError;
 use crate::util::{StrExt, Timestamp, Vec2u, drop_on_separate_thread};
 use crate::workbench::marked_line::MarkedLines;
 use crate::workbench::{FileUpdateSubscription, HeldEntry};
@@ -351,7 +350,11 @@ impl Tab {
 				self.selected_text = Some(text);
 				Ok(())
 			},
-			Err(SelectedTextConstructionError::Traversal(e)) if e.is_generally_ignored() => Ok(()), // ignored
+			// ignored
+			Err(e) if e.is_generally_ignored() => {
+				self.selected_text = None;
+				Ok(())
+			},
 			Err(e) => {
 				self.selected_text = None;
 				self.last_selected_text_interaction = (0, 0, Timestamp::UNIX_EPOCH);

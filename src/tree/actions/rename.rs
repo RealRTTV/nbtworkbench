@@ -64,6 +64,7 @@ pub fn rename_element(
 			if let Some(key) = key.clone()
 				&& value.is_none()
 			{
+				if path.path_str() == &key { return ActionResult::Pass }
 				let old_path = path.set_path(key).map_err(RenameElementError::from).failure_on_err()?;
 				window_properties().set_window_title(format!("{name} - NBT Workbench", name = path.name()).as_str());
 				ActionResult::Success(RenameElementResult {
