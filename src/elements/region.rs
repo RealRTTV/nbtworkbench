@@ -269,8 +269,11 @@ impl NbtElementVariant for NbtRegion {
 				builder.settings(pos + (20, 0), false, JUST_OVERLAPPING_BASE_TEXT_Z);
 				if let Some(key) = name {
 					builder.color = TextColor::TreeKey.to_raw();
-					let _ = write!(builder, "{key}: [{}]", self.value());
+					let _ = write!(builder, "{key}");
 				}
+				
+				builder.color = TextColor::TreeValueDesc.to_raw();
+				let _ = write!(builder, ": {}", self.value());
 			}
 
 			ctx.offset_pos(0, 16);

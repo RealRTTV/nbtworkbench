@@ -186,10 +186,12 @@ macro_rules! array {
 							builder.settings(pos + (20, 0), false, $crate::render::assets::JUST_OVERLAPPING_BASE_TEXT_Z);
 							if let Some(key) = key {
 								builder.color = $crate::render::color::TextColor::TreeKey.to_raw();
-								let _ = write!(builder, "{key}: ");
+								let _ = write!(builder, "{key}");
+								builder.color = $crate::render::color::TextColor::TreeValueDesc.to_raw();
+								let _ = write!(builder, ": ");
 							};
 
-							builder.color = $crate::render::color::TextColor::TreeKey.to_raw();
+							builder.color = $crate::render::color::TextColor::TreeValueDesc.to_raw();
 							let _ = write!(builder, "{}", self.value());
 						}
 

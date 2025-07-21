@@ -20,6 +20,7 @@ pub struct VertexBufferBuilder {
 	pub text_coords: (usize, usize),
 	dropshadow: bool,
 	text_z: ZOffset,
+	// todo: make `set_color` fn
 	pub color: u32,
 	two_over_width: f32,
 	negative_two_over_height: f32,

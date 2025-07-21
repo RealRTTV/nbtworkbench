@@ -345,7 +345,7 @@ impl ReplaceBox {
 				} else {
 					None
 				};
-				match replacement.replace(alternative_root, key_str, element_str.filter(|&(_, color)| color != TextColor::TreeKey).map(|(x, _)| x), mi, &current_indices) {
+				match replacement.replace(alternative_root, key_str, element_str.filter(|&(_, color)| color != TextColor::TreeValueDesc).map(|(x, _)| x), mi, &current_indices) {
 					ActionResult::Success((action, replaced)) => {
 						actions.push(action);
 						element_replaced = replaced;
@@ -519,14 +519,14 @@ impl SearchReplacement {
 			SearchReplacementInner::Substring { find, case_sensitive, .. } => {
 				let (value, color) = kv.1.value();
 				if *case_sensitive {
-					(value_flag && color != TextColor::TreeKey && value.contains(find)) || (key_flag && kv.0.is_some_and(|k| k.contains(find)))
+					(value_flag && color.is_non_editable() && value.contains(find)) || (key_flag && kv.0.is_some_and(|k| k.contains(find)))
 				} else {
-					(value_flag && color != TextColor::TreeKey && value.contains_ignore_ascii_case(find)) || (key_flag && kv.0.is_some_and(|k| k.contains_ignore_ascii_case(find)))
+					(value_flag && color.is_non_editable() && value.contains_ignore_ascii_case(find)) || (key_flag && kv.0.is_some_and(|k| k.contains_ignore_ascii_case(find)))
 				}
 			}
 			SearchReplacementInner::Regex { regex, .. } => {
 				let (value, color) = kv.1.value();
-				(value_flag && color != TextColor::TreeKey && regex.is_match(&value)) || (key_flag && kv.0.is_some_and(|k| regex.is_match(k)))
+				(value_flag && color.is_non_editable() && regex.is_match(&value)) || (key_flag && kv.0.is_some_and(|k| regex.is_match(k)))
 			}
 			SearchReplacementInner::Snbt { find: (find_key, find_value), exact_match, .. } =>
 				if *exact_match {

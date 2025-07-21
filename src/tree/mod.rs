@@ -99,6 +99,10 @@ impl<'m1, 'm2: 'm1> MutableIndices<'m2> {
 			}
 		}
 	}
+	
+	pub fn recache_all_line_number_caches(&'m1 mut self, root: &NbtElement) {
+		self.selected_text.iter_mut().for_each(|text| text.recache_y(root));
+	}
 
 	#[must_use]
 	pub fn as_inner_mut(&'m1 mut self) -> (&'m1 mut &'m2 mut Option<FileUpdateSubscription>, &'m1 mut &'m2 mut Option<SelectedText>, &'m1 mut Vec<&'m2 mut Option<OwnedIndices>>) { (&mut self.subscription, &mut self.selected_text, &mut self.temp) }

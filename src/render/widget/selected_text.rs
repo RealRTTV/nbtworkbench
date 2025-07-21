@@ -104,39 +104,32 @@ impl SelectedText {
 		base_x: usize,
 		mouse_x: usize,
 		y: usize,
-		key: Option<(String, TextColor, bool)>,
-		value: Option<(String, TextColor, bool)>,
+		key: Option<(String, TextColor)>,
+		value: Option<(String, TextColor)>,
+		seperator_color: TextColor,
 		indices: OwnedIndices,
 		cached_cursor_x: Option<usize>,
 		snap_to_ends: bool,
 	) -> Result<Self, SelectedTextConstructionError> {
 		let key_width = key.as_ref().map_or(0, |k| k.0.width());
 		let value_width = value.as_ref().map_or(0, |v| v.0.width());
-		let has_key_and_value = key.as_ref().is_some_and(|k| k.2) && value.as_ref().is_some_and(|v| v.2);
+		let has_key_and_value = key.as_ref().is_some_and(|k| k.1.is_editable()) && value.as_ref().is_some_and(|v| v.1.is_editable());
 		let intersection_width = has_key_and_value as usize * ": ".width();
 		let full_width = key_width + intersection_width + value_width;
 
-		let (keyfix, prefix) = if let Some((key, key_color, key_editable)) = key.clone() {
-			if key_editable {
-				(Some((key, key_color)), (": ".to_owned(), TextColor::TreeKey))
-			} else {
-				(None, (format!("{key}: "), TextColor::TreeKey))
-			}
+		let (keyfix, prefix) = if let Some((key, key_color)) = key.clone() {
+			(Some((key, key_color)), (": ".to_owned(), seperator_color))
 		} else {
 			(None, (String::new(), TextColor::White))
 		};
 
-		let (suffix, valuefix) = if let Some((value, value_color, value_editable)) = value.clone() {
-			if value_editable {
-				((": ".to_owned(), TextColor::TreeKey), Some((value, value_color)))
-			} else {
-				((format!(": {value}"), TextColor::TreeKey), None)
-			}
+		let (suffix, valuefix) = if let Some((value, value_color)) = value.clone() {
+			((": ".to_owned(), seperator_color), Some((value, value_color)))
 		} else {
 			((String::new(), TextColor::White), None)
 		};
 
-		if let Some((key, key_color, true)) = key {
+		if let Some((key, key_color)) = key && key_color.is_editable() {
 			let x = mouse_x as isize - base_x as isize;
 			if (-(Self::PREFIXING_SPACE_WIDTH as isize) <= x || snap_to_ends)
 				&& (x.try_into().unwrap_or(0_usize) < key_width + if has_key_and_value { intersection_width / 2 } else { Self::POSTFIXING_SPACE_WIDTH } || !has_key_and_value && snap_to_ends)
@@ -156,7 +149,7 @@ impl SelectedText {
 			}
 		}
 
-		if let Some((value, value_color, true)) = value {
+		if let Some((value, value_color)) = value && value_color.is_editable() {
 			let x = mouse_x as isize - base_x as isize - key_width as isize - intersection_width as isize;
 			if (-(if has_key_and_value { (intersection_width + 1) / 2 } else { Self::PREFIXING_SPACE_WIDTH } as isize) <= x || !has_key_and_value && snap_to_ends)
 				&& (x.try_into().unwrap_or(0_usize) < value_width + Self::POSTFIXING_SPACE_WIDTH || snap_to_ends)
@@ -228,24 +221,29 @@ impl SelectedText {
 			}
 
 			if key == KeyCode::ArrowLeft {
-				if flags & !flags!(Ctrl) == 0 && this.selection.is_none() && this.cursor == 0 && this.keyfix.is_some() {
+				if flags & !flags!(Ctrl) == 0 && this.selection.is_none() && this.cursor == 0 && this.keyfix.as_ref().is_some_and(|keyfix| keyfix.1.is_editable()) {
 					return this.move_to_keyfix(consts, root, path).map(SelectedTextKeyResult::Action).map_err(SelectedTextInputError::from).pass_or_fail(SelectedTextInputError::is_generally_ignored);
 				}
 				if flags & !flags!(Shift) == flags!(Alt) {
-					return this.force_close(root, mi.bookmarks).map(|_| None).map(SelectedTextKeyResult::Action).map_err(SelectedTextInputError::from).pass_or_fail(SelectedTextInputError::is_generally_ignored);
+					return this.force_close(root, mi).map(|_| None).map(SelectedTextKeyResult::Action).map_err(SelectedTextInputError::from).pass_or_fail(SelectedTextInputError::is_generally_ignored);
 				}
 			}
 
 			if key == KeyCode::ArrowRight {
-				if flags & !flags!(Ctrl) == 0 && this.selection.is_none() && this.cursor == this.value.len() && this.valuefix.is_some() {
+				if flags & !flags!(Ctrl) == 0 && this.selection.is_none() && this.cursor == this.value.len() && this.valuefix.as_ref().is_some_and(|valuefix| valuefix.1.is_editable()) {
 					return this.move_to_valuefix(consts, root, path).map(SelectedTextKeyResult::Action).map_err(SelectedTextInputError::from).pass_or_fail(SelectedTextInputError::is_generally_ignored);
 				}
 				if (flags) & !flags!(Shift) == flags!(Alt) {
-					return this.force_open((flags & !flags!(Alt)) == flags!(Shift), root, mi.bookmarks).map(|_| None).map(SelectedTextKeyResult::Action).map_err(SelectedTextInputError::from).pass_or_fail(SelectedTextInputError::is_generally_ignored);
+					return this.force_open((flags & !flags!(Alt)) == flags!(Shift), root, mi).map(|_| None).map(SelectedTextKeyResult::Action).map_err(SelectedTextInputError::from).pass_or_fail(SelectedTextInputError::is_generally_ignored);
 				}
 			}
-
-			ActionResult::Success(this.0.on_key_press(key, ch, flags).into())
+			
+			let cursor_before = this.cursor;
+			let result = this.0.on_key_press(key, ch, flags).into();
+			if this.cursor != cursor_before {
+				this.recache_cached_cursor_x(consts);
+			}
+			ActionResult::Success(result)
 		}
 		match on_key_press0(self, key, ch, flags, consts, root, path, mi).alert_err(alerts) {
 			ActionResult::Pass => ActionResult::Pass,
@@ -333,8 +331,9 @@ impl SelectedText {
 				left_margin + NbtElement::INITIAL_DEPTH_WIDTH + SelectedText::PREFIXING_SPACE_WIDTH,
 				offset + path_minus_name_width,
 				HEADER_SIZE,
-				Some((path.path_str().to_string(), TextColor::TreeKey, true)),
-				Some((root.value().0.into_owned(), TextColor::TreeKey, false)),
+				Some((path.path_str().to_string(), TextColor::TreeKey)),
+				Some((root.value().0.into_owned(), TextColor::TreeValueDesc)),
+				TextColor::TreeValueDesc,
 				OwnedIndices::new(),
 				cached_cursor_x,
 				snap_to_ends,
@@ -360,10 +359,11 @@ impl SelectedText {
 				mouse_x,
 			})
 		}
-		let k = key.map(|x| (x.to_owned(), TextColor::TreeKey, true));
-		let v = Some(element.value()).map(|(a, c)| (a.into_owned(), c, c != TextColor::TreeKey));
+		let k = key.map(|x| (x.to_owned(), TextColor::TreeKey));
+		let v = Some(element.value()).map(|(a, c)| (a.into_owned(), c));
+		let seperator_color = element.seperator_color();
 
-		SelectedText::from_raw(target_x, mouse_x + horizontal_scroll, y * 16 + HEADER_SIZE, k, v, indices, cached_cursor_x, snap_to_ends)
+		SelectedText::from_raw(target_x, mouse_x + horizontal_scroll, y * 16 + HEADER_SIZE, k, v, seperator_color, indices, cached_cursor_x, snap_to_ends)
 	}
 
 	pub fn save(&self, root: &mut NbtElement, path: &mut FilePath) -> ActionResult<WorkbenchAction, SaveSelectedTextError> {
@@ -379,7 +379,7 @@ impl SelectedText {
 		if !self.editable {
 			return Err(MoveToKeyfixError::Save(SaveSelectedTextError::NonEditable))
 		}
-		if self.valuefix.is_some() || !self.suffix.0.is_empty() {
+		if self.valuefix.as_ref().is_some_and(|valuefix| valuefix.1.is_editable()) || !self.suffix.0.is_empty() {
 			return Err(MoveToKeyfixError::AlreadyAtKey)
 		}
 
@@ -406,7 +406,7 @@ impl SelectedText {
 		if !self.editable {
 			return Err(MoveToValuefixError::Save(SaveSelectedTextError::NonEditable))
 		}
-		if self.keyfix.is_some() || !self.prefix.0.is_empty() {
+		if self.keyfix.as_ref().is_some_and(|keyfix| keyfix.1.is_editable()) || !self.prefix.0.is_empty() {
 			return Err(MoveToValuefixError::AlreadyAtValue)
 		}
 
@@ -488,10 +488,10 @@ impl SelectedText {
 
 	pub fn shift_down<'m1, 'm2: 'm1>(&mut self, consts: TabConstants, root: &mut NbtElement, mi: &'m1 mut MutableIndices<'m2>) -> Result<WorkbenchAction, ShiftSelectedTextError> { self.shift(consts, root, mi, |idx| idx.checked_add(1)) }
 
-	pub fn force_close(&self, root: &mut NbtElement, bookmarks: &mut MarkedLines) -> Result<(), CloseElementError> { close_element(root, &self.indices, bookmarks) }
+	pub fn force_close<'m1, 'm2: 'm1>(&self, root: &mut NbtElement, mi: &'m1 mut MutableIndices<'m2>) -> Result<(), CloseElementError> { close_element(root, &self.indices, mi) }
 
-	pub fn force_open(&self, expand: bool, root: &mut NbtElement, bookmarks: &mut MarkedLines) -> Result<(), AmbiguiousOpenElementError> {
-		if expand { Ok(expand_element(root, &self.indices, bookmarks)?) } else { Ok(open_element(root, &self.indices, bookmarks)?) }
+	pub fn force_open<'m1, 'm2: 'm1>(&self, expand: bool, root: &mut NbtElement, mi: &'m1 mut MutableIndices<'m2>) -> Result<(), AmbiguiousOpenElementError> {
+		if expand { Ok(expand_element(root, &self.indices, mi)?) } else { Ok(open_element(root, &self.indices, mi)?) }
 	}
 }
 

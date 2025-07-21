@@ -974,14 +974,36 @@ impl NbtElement {
 			Nbt::Long(x) => (x.value(), TextColor::TreePrimitive),
 			Nbt::Float(x) => (x.value(), TextColor::TreePrimitive),
 			Nbt::Double(x) => (x.value(), TextColor::TreePrimitive),
-			Nbt::ByteArray(x) => (x.value(), TextColor::TreeKey),
+			Nbt::ByteArray(x) => (x.value(), TextColor::TreeValueDesc),
 			Nbt::String(x) => (x.value(), TextColor::TreeString),
-			Nbt::List(x) => (x.value(), TextColor::TreeKey),
-			Nbt::Compound(x) => (x.value(), TextColor::TreeKey),
-			Nbt::IntArray(x) => (x.value(), TextColor::TreeKey),
-			Nbt::LongArray(x) => (x.value(), TextColor::TreeKey),
-			Nbt::Chunk(x) => (x.value(), TextColor::TreeKey),
-			Nbt::Region(x) => (x.value(), TextColor::TreeKey),
+			Nbt::List(x) => (x.value(), TextColor::TreeValueDesc),
+			Nbt::Compound(x) => (x.value(), TextColor::TreeValueDesc),
+			Nbt::IntArray(x) => (x.value(), TextColor::TreeValueDesc),
+			Nbt::LongArray(x) => (x.value(), TextColor::TreeValueDesc),
+			Nbt::Chunk(x) => (x.value(), TextColor::TreeValueDesc),
+			Nbt::Region(x) => (x.value(), TextColor::TreeValueDesc),
+		}
+	}
+	
+	#[must_use]
+	pub fn seperator_color(&self) -> TextColor {
+		use NbtPattern as Nbt;
+		
+		match self.as_pattern() {
+			Nbt::Byte(_) => TextColor::TreeKey,
+			Nbt::Short(_) => TextColor::TreeKey,
+			Nbt::Int(_) => TextColor::TreeKey,
+			Nbt::Long(_) => TextColor::TreeKey,
+			Nbt::Float(_) => TextColor::TreeKey,
+			Nbt::Double(_) => TextColor::TreeKey,
+			Nbt::ByteArray(_) => TextColor::TreeValueDesc,
+			Nbt::String(_) => TextColor::TreeKey,
+			Nbt::List(_) => TextColor::TreeValueDesc,
+			Nbt::Compound(_) => TextColor::TreeValueDesc,
+			Nbt::IntArray(_) => TextColor::TreeValueDesc,
+			Nbt::LongArray(_) => TextColor::TreeValueDesc,
+			Nbt::Chunk(_) => TextColor::TreeValueDesc,
+			Nbt::Region(_) => TextColor::TreeValueDesc,
 		}
 	}
 

@@ -917,12 +917,12 @@ impl Workbench {
 			let is_open = value.is_open();
 			let tab = self.tabs.active_tab_mut();
 			if expand {
-				expand_element(&mut tab.root, &indices, &mut tab.bookmarks).alert_err(&mut self.alerts);
+				expand_element(&mut tab.root, &indices, mutable_indices!(tab)).alert_err(&mut self.alerts);
 			} else {
 				if is_open {
-					close_element(&mut tab.root, &indices, &mut tab.bookmarks).alert_err(&mut self.alerts);
+					close_element(&mut tab.root, &indices, mutable_indices!(tab)).alert_err(&mut self.alerts);
 				} else {
-					open_element(&mut tab.root, &indices, &mut tab.bookmarks).alert_err(&mut self.alerts);
+					open_element(&mut tab.root, &indices, mutable_indices!(tab)).alert_err(&mut self.alerts);
 				}
 			};
 			ActionResult::Success(())

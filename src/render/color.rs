@@ -20,12 +20,14 @@ pub enum TextColor {
 
 	TreeString,
 	TreeKey,
+	TreeValueDesc,
 	TreePrimitive,
 
 	Custom(u32),
 }
 
 impl TextColor {
+	#[must_use]
 	pub fn to_raw(self) -> u32 {
 		match self {
 			Self::Black => 0x000000,
@@ -47,10 +49,21 @@ impl TextColor {
 
 			Self::TreeString => 0xDB6AC0,
 			Self::TreeKey => 0x8BC3F3,
+			Self::TreeValueDesc => 0x537491,
 			Self::TreePrimitive => 0xF1B073,
 
 			Self::Custom(value) => value & 0xFFFFFF,
 		}
+	}
+	
+	#[must_use]
+	pub fn is_non_editable(self) -> bool {
+		matches!(self, Self::TreeValueDesc)
+	}
+
+	#[must_use]
+	pub fn is_editable(self) -> bool {
+		!self.is_non_editable()
 	}
 }
 

@@ -274,15 +274,15 @@ impl SearchPredicate {
 		match &self.inner {
 			SearchPredicateInner::String(matcher) => {
 				let (value, color) = kv.1.value();
-				((flags & 0b01) > 0 && color != TextColor::TreeKey && value.contains(matcher)) || ((flags & 0b10) > 0 && kv.0.is_some_and(|k| k.contains(matcher)))
+				((flags & 0b01) > 0 && color.is_non_editable() && value.contains(matcher)) || ((flags & 0b10) > 0 && kv.0.is_some_and(|k| k.contains(matcher)))
 			}
 			SearchPredicateInner::StringCaseInsensitive(matcher) => {
 				let (value, color) = kv.1.value();
-				((flags & 0b01) > 0 && color != TextColor::TreeKey && value.contains_ignore_ascii_case(matcher)) || ((flags & 0b10) > 0 && kv.0.is_some_and(|k| k.contains_ignore_ascii_case(matcher)))
+				((flags & 0b01) > 0 && color.is_non_editable() && value.contains_ignore_ascii_case(matcher)) || ((flags & 0b10) > 0 && kv.0.is_some_and(|k| k.contains_ignore_ascii_case(matcher)))
 			}
 			SearchPredicateInner::Regex(regex) => {
 				let (value, color) = kv.1.value();
-				((flags & 0b01) > 0 && color != TextColor::TreeKey && regex.is_match(&value)) || ((flags & 0b10) > 0 && kv.0.is_some_and(|k| regex.is_match(k)))
+				((flags & 0b01) > 0 && color.is_non_editable() && regex.is_match(&value)) || ((flags & 0b10) > 0 && kv.0.is_some_and(|k| regex.is_match(k)))
 			}
 			SearchPredicateInner::Snbt((k, element)) => ((flags & 0b01) == 0 || element.matches(kv.1)) && ((flags & 0b10) == 0 || k.as_ref().map(|k| k.as_str()) == kv.0),
 			SearchPredicateInner::SnbtExactMatch((k, element)) => ((flags & 0b01) == 0 || element.eq(kv.1)) && ((flags & 0b10) == 0 || k.as_ref().map(|k| k.as_str()) == kv.0),

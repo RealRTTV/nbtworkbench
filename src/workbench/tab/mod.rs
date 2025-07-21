@@ -532,6 +532,8 @@ impl Tab {
 			return Ok(());
 		}
 
+		if !std::fs::exists(&self.path)? { return Ok(()); }
+		
 		let bytes = std::fs::read(&self.path)?;
 		let (value, format) = Tab::parse_raw(&self.path, bytes)?;
 

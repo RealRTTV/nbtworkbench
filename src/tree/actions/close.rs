@@ -4,16 +4,17 @@ use thiserror::Error;
 
 use crate::elements::element::NbtElement;
 use crate::tree::indices::Indices;
+use crate::tree::MutableIndices;
 use crate::tree::navigate::{NavigationError, NavigationInformationMut};
 #[cfg(target_arch = "wasm32")]
 use crate::wasm::{FakeScope as Scope, fake_scope as scope};
 use crate::workbench::marked_line::MarkedLines;
 
 #[rustfmt::skip]
-pub fn close_element(
+pub fn close_element<'m1, 'm2: 'm1>(
 	root: &mut NbtElement,
 	indices: &Indices,
-	bookmarks: &mut MarkedLines
+	mi: &'m1 mut MutableIndices<'m2>
 ) -> Result<(), CloseElementError> {
 	let NavigationInformationMut { element, true_line_number, line_number, .. } = root.navigate_mut(&indices)?;
 	if element.is_primitive() {
@@ -33,12 +34,13 @@ pub fn close_element(
 	let height_after = element.height();
 	let height_lost = height_before - height_after;
 
-	for bookmark in &mut bookmarks[true_line_number + 1..true_line_number + true_height] {
+	for bookmark in &mut mi.bookmarks[true_line_number + 1..true_line_number + true_height] {
 		*bookmark = bookmark.hidden(line_number);
 	}
-	bookmarks[true_line_number + true_height..].decrement(height_lost, 0);
+	mi.bookmarks[true_line_number + true_height..].decrement(height_lost, 0);
 
 	root.recache_along_indices(&indices);
+	mi.recache_all_line_number_caches(root);
 
 	Ok(())
 }
