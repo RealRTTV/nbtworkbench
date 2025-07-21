@@ -1,40 +1,31 @@
-use std::{borrow::Cow, sync::Arc, time::Duration};
+use std::borrow::Cow;
 use std::ops::DerefMut;
+use std::sync::Arc;
+use std::time::Duration;
+
 use serde::{Deserialize, Serialize};
 #[cfg(target_arch = "wasm32")] use wasm_bindgen::JsValue;
-use wgpu::{
-	util::{BufferInitDescriptor, DeviceExt},
-	*,
-};
+use wgpu::util::{BufferInitDescriptor, DeviceExt};
+use wgpu::*;
+use winit::application::ApplicationHandler;
+use winit::dpi::{PhysicalPosition, PhysicalSize};
+use winit::event::*;
+use winit::event_loop::{ActiveEventLoop, EventLoop};
 #[cfg(target_arch = "wasm32")] use winit::platform::web::WindowExtWebSys;
 #[cfg(target_os = "windows")]
 use winit::platform::windows::WindowAttributesExtWindows;
-use winit::{
-	application::ApplicationHandler,
-	dpi::{PhysicalPosition, PhysicalSize},
-	event::*,
-	event_loop::{ActiveEventLoop, EventLoop},
-	window::{Icon, Window, WindowAttributes, WindowId},
-};
+use winit::window::{Icon, Window, WindowAttributes, WindowId};
 use zune_inflate::DeflateOptions;
 
-use crate::{
-	WORKBENCH,
-	action_result::ActionResult,
-	config::get_theme,
-	error,
-	render::{
-		VertexBufferBuilder,
-		assets::{ATLAS_HEIGHT, ATLAS_WIDTH, HEADER_SIZE, ICON_HEIGHT, ICON_WIDTH, UNICODE_LEN, atlas, icon},
-		widget::{
-			alert::manager::Alertable,
-			search_box::{SEARCH_BOX_END_X, SEARCH_BOX_START_X},
-		},
-	},
-	util::Timestamp,
-	window_properties,
-	workbench::Workbench,
-};
+use crate::action_result::ActionResult;
+use crate::config::get_theme;
+use crate::render::VertexBufferBuilder;
+use crate::render::assets::{ATLAS_HEIGHT, ATLAS_WIDTH, HEADER_SIZE, ICON_HEIGHT, ICON_WIDTH, UNICODE_LEN, atlas, icon};
+use crate::render::widget::alert::manager::Alertable;
+use crate::render::widget::search_box::{SEARCH_BOX_END_X, SEARCH_BOX_START_X};
+use crate::util::Timestamp;
+use crate::workbench::Workbench;
+use crate::{WORKBENCH, error, window_properties};
 
 pub const WINDOW_HEIGHT: u32 = 420;
 pub const WINDOW_WIDTH: u32 = 720;
@@ -53,7 +44,6 @@ pub async fn run() -> ! {
 		fn resumed(&mut self, _: &ActiveEventLoop) {}
 		fn window_event(&mut self, _: &ActiveEventLoop, window_id: WindowId, event: WindowEvent) {
 			if self.window.id() != window_id {
-				dbg!(self.window.id(), window_id);
 				return;
 			}
 

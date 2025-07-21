@@ -1,47 +1,43 @@
+use std::borrow::Cow;
+use std::fmt::{Debug, Display, Error, Formatter};
+use std::mem::{ManuallyDrop, MaybeUninit};
+use std::ops::{Index, IndexMut};
+use std::slice::{Iter, IterMut};
 #[cfg(not(target_arch = "wasm32"))] use std::thread::Scope;
-use std::{
-	borrow::Cow,
-	fmt::{Debug, Display, Error, Formatter},
-	mem::{ManuallyDrop, MaybeUninit},
-	ops::{Index, IndexMut},
-	slice::{Iter, IterMut},
-};
 
 use compact_str::CompactString;
+use thiserror::Error;
 
-#[cfg(target_arch = "wasm32")] use crate::wasm::FakeScope as Scope;
-use crate::{
-	elements::{
-		ComplexNbtElementVariant, Matches, NbtElementAndKey, NbtElementAndKeyRef, NbtElementAndKeyRefMut, NbtElementVariant, PrimitiveNbtElementVariant,
-		array::{NbtByteArray, NbtIntArray, NbtLongArray},
-		byte::NbtByte,
-		chunk::NbtChunk,
-		compound::{CompoundEntry, NbtCompound},
-		double::NbtDouble,
-		float::NbtFloat,
-		int::NbtInt,
-		list::NbtList,
-		long::NbtLong,
-		region::NbtRegion,
-		result::NbtParseResult,
-		short::NbtShort,
-		string::NbtString,
-	},
-	render::{RenderContext, color::TextColor, vertex_buffer_builder::VertexBufferBuilder},
-	serialization::{
-		decoder::{BigEndianDecoder, Decoder},
-		encoder::UncheckedBufWriter,
-		formatter::{PrettyDisplay, PrettyFormatter},
-	},
-	tree::{
-		indices::{Indices, OwnedIndices},
-		navigate::{IterativeNavigationInformationMut, NavigationError, NavigationInformation, NavigationInformationMut, ParentIterativeNavigationInformationMut, ParentNavigationError, ParentNavigationInformation, ParentNavigationInformationMut},
-		traverse::{TraversalError, TraversalInformation, TraversalInformationMut},
-	},
-	util::{self, StrExt, Vec2u, width_ascii},
-	workbench::{element_action::ElementAction, marked_line::MarkedLines, DropResult},
+use crate::elements::array::{NbtByteArray, NbtIntArray, NbtLongArray};
+use crate::elements::byte::NbtByte;
+use crate::elements::chunk::NbtChunk;
+use crate::elements::compound::{CompoundEntry, NbtCompound};
+use crate::elements::double::NbtDouble;
+use crate::elements::float::NbtFloat;
+use crate::elements::int::NbtInt;
+use crate::elements::list::NbtList;
+use crate::elements::long::NbtLong;
+use crate::elements::region::NbtRegion;
+use crate::elements::result::NbtParseResult;
+use crate::elements::short::NbtShort;
+use crate::elements::string::NbtString;
+use crate::elements::{ComplexNbtElementVariant, Matches, NbtElementAndKey, NbtElementAndKeyRef, NbtElementAndKeyRefMut, NbtElementVariant, PrimitiveNbtElementVariant};
+use crate::render::TreeRenderContext;
+use crate::render::color::TextColor;
+use crate::render::vertex_buffer_builder::VertexBufferBuilder;
+use crate::serialization::decoder::{BigEndianDecoder, Decoder, LittleEndianDecoder};
+use crate::serialization::encoder::UncheckedBufWriter;
+use crate::serialization::formatter::{PrettyDisplay, PrettyFormatter};
+use crate::tree::indices::{Indices, OwnedIndices};
+use crate::tree::navigate::{
+	IterativeNavigationInformationMut, NavigationError, NavigationInformation, NavigationInformationMut, ParentIterativeNavigationInformationMut, ParentNavigationError, ParentNavigationInformation, ParentNavigationInformationMut,
 };
-use crate::serialization::decoder::LittleEndianDecoder;
+use crate::tree::traverse::{TraversalError, TraversalInformation, TraversalInformationMut};
+use crate::util::{self, StrExt, Vec2u, width_ascii};
+#[cfg(target_arch = "wasm32")] use crate::wasm::FakeScope as Scope;
+use crate::workbench::DropResult;
+use crate::workbench::element_action::ElementAction;
+use crate::workbench::marked_line::MarkedLines;
 
 #[repr(C)]
 pub union NbtElement {
@@ -177,15 +173,20 @@ impl NbtElement {
 	create_constructor!(region, Region, NbtRegion);
 }
 
+#[derive(Debug, Error)]
+pub enum SNBTParseError {
+	#[error("Could not parse SNBT (failed at index {0})")]
+	Index(usize),
+}
+
 /// FromStr
 impl NbtElement {
-	// todo: add error type
-	pub fn from_str(mut s: &str) -> Result<NbtElementAndKey, usize> {
+	pub fn from_str(mut s: &str) -> Result<NbtElementAndKey, SNBTParseError> {
 		let total_len = s.len();
 		s = s.trim();
 
 		if s.is_empty() {
-			return Err(total_len - s.len())
+			return Err(SNBTParseError::Index(total_len - s.len()))
 		}
 
 		let prefix = s.snbt_string_read().ok().and_then(|(prefix, s2)| {
@@ -194,9 +195,9 @@ impl NbtElement {
 				prefix
 			})
 		});
-		let (s, element) = Self::from_str0(s, Self::parse_int).map(|(s, x)| (s.trim_start(), x)).map_err(|x| total_len - x)?;
+		let (s, element) = Self::from_str0(s, Self::parse_int).map(|(s, x)| (s.trim_start(), x)).map_err(|x| SNBTParseError::Index(total_len - x))?;
 		if !s.is_empty() {
-			return Err(total_len - s.len())
+			return Err(SNBTParseError::Index(total_len - s.len()))
 		}
 		Ok((prefix, element))
 	}
@@ -598,11 +599,11 @@ impl NbtElement {
 impl NbtElement {
 	const ICON_WIDTH: usize = 16;
 	const TOGGLE_WIDTH: usize = 16;
-	
+
 	pub const INITIAL_DEPTH_WIDTH: usize = Self::TOGGLE_WIDTH + Self::ICON_WIDTH;
 	pub const DEPTH_INCREMENT_WIDTH: usize = Self::ICON_WIDTH;
-	
-	pub fn render(&self, remaining_scroll: &mut usize, builder: &mut VertexBufferBuilder, str: Option<&str>, tail: bool, ctx: &mut RenderContext) {
+
+	pub fn render(&self, remaining_scroll: &mut usize, builder: &mut VertexBufferBuilder, str: Option<&str>, tail: bool, ctx: &mut TreeRenderContext) {
 		use NbtPattern as Nbt;
 
 		match self.as_pattern() {
@@ -753,8 +754,7 @@ impl NbtElement {
 
 /// Immutable "getter" operations
 impl NbtElement {
-	/// Please minimize usage of this and instead rely upon [`NbtElement::as_pattern`] and [`NbtElement::as_pattern_mut`] as they are more stable
-	#[deprecated = "use `NbtElement::is_*`"]
+	/// Please minimize usage of this and instead rely upon [`NbtElement::as_pattern`] and [`NbtElement::as_pattern_mut`] as they are more stable and represent this type better
 	#[must_use]
 	pub const fn id(&self) -> u8 { unsafe { self.id.id } }
 
@@ -815,7 +815,7 @@ impl NbtElement {
 	#[must_use]
 	pub fn has_keys(&self) -> bool {
 		use NbtPattern as Nbt;
-		
+
 		match self.as_pattern() {
 			Nbt::Compound(_) | Nbt::Chunk(_) => true,
 			_ => false,
@@ -1029,12 +1029,12 @@ impl NbtElement {
 			let is_open = self.is_open();
 			let len = self.len().unwrap_or(0);
 
-			if *y < 16 && *y >= 8 && current_depth == x && can_insert {
+			if *y < 16 && *y >= 8 && current_depth + 1 == x && can_insert {
 				indices.push(0);
 				return DropResult::Dropped;
 			}
 
-			if !is_open && *y < 24 && *y >= 16 && current_depth == x && can_insert {
+			if !is_open && *y < 24 && *y >= 16 && current_depth + 1 == x && can_insert {
 				indices.push(len);
 				return DropResult::Dropped;
 			}
@@ -1386,10 +1386,11 @@ impl NbtElement {
 		})
 	}
 
+	// most annoying bug, these overwrite the id lmao
 	pub fn set_value(&mut self, value: String) -> Result<String, String> {
 		use NbtPatternMut as Nbt;
 
-		match self.as_pattern_mut() {
+		let result = match self.as_pattern_mut() {
 			Nbt::Byte(byte) => {
 				let before = byte.value().into_owned();
 				if value.parse().map(|x| byte.value = x).is_ok() { Ok(before) } else { Err(value) }
@@ -1417,9 +1418,10 @@ impl NbtElement {
 			Nbt::String(string) => Ok(core::mem::replace(string, NbtString::new(value.into())).str.as_str().to_owned()),
 			_ => {
 				std::hint::cold_path();
-				return Err(value)
+				Err(value)
 			}
-		}
+		};
+		result
 	}
 
 	#[must_use]

@@ -2,11 +2,10 @@
 
 use thiserror::Error;
 
-use crate::{
-	elements::element::NbtElement,
-	tree::actions::{expand::ExpandElementError, open::OpenElementError},
-	workbench::marked_line::MarkedLines,
-};
+use crate::elements::element::NbtElement;
+use crate::tree::actions::expand::ExpandElementError;
+use crate::tree::actions::open::OpenElementError;
+use crate::workbench::marked_line::MarkedLines;
 
 pub mod add;
 pub mod remove;

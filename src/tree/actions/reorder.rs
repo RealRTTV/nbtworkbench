@@ -1,20 +1,14 @@
 use thiserror::Error;
 
-use crate::{
-	elements::{
-		compound::CompoundMap,
-		element::{NbtElement, NbtPatternMut},
-	},
-	hash,
-	history::WorkbenchAction,
-	tree::{
-		MutableIndices,
-		indices::OwnedIndices,
-		navigate::{NavigationError, NavigationInformationMut},
-	},
-	util::{self, InvertMappingError, ReorderMappingError, invert_mapping},
-	workbench::marked_line::MarkedLines,
-};
+use crate::elements::compound::CompoundMap;
+use crate::elements::element::{NbtElement, NbtPatternMut};
+use crate::hash;
+use crate::history::WorkbenchAction;
+use crate::tree::MutableIndices;
+use crate::tree::indices::OwnedIndices;
+use crate::tree::navigate::{NavigationError, NavigationInformationMut};
+use crate::util::{self, InvertMappingError, ReorderMappingError, invert_mapping};
+use crate::workbench::marked_line::MarkedLines;
 
 #[rustfmt::skip]
 #[allow(non_snake_case)]

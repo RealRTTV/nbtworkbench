@@ -1,31 +1,25 @@
+use std::array;
+use std::borrow::Cow;
+use std::fmt::{Display, Formatter};
+use std::hint::likely;
+use std::mem::MaybeUninit;
+use std::slice::{Iter, IterMut};
 #[cfg(not(target_arch = "wasm32"))] use std::thread::{Scope, scope};
-use std::{
-	array,
-	borrow::Cow,
-	fmt::{Display, Formatter},
-	hint::likely,
-	mem::MaybeUninit,
-	slice::{Iter, IterMut},
-};
 
+use crate::elements::chunk::NbtChunk;
+use crate::elements::result::NbtParseResult;
+use crate::elements::{ComplexNbtElementVariant, Matches, NbtElement, NbtElementVariant};
+use crate::render::TreeRenderContext;
+use crate::render::assets::{CONNECTION_UV, HEADER_SIZE, JUST_OVERLAPPING_BASE_TEXT_Z, JUST_OVERLAPPING_BOOKMARK_Z, LINE_NUMBER_CONNECTOR_Z, LINE_NUMBER_SEPARATOR_UV, REGION_GRID_UV, REGION_UV};
+use crate::render::color::TextColor;
+use crate::render::vertex_buffer_builder::VertexBufferBuilder;
+use crate::serialization::decoder::Decoder;
+use crate::serialization::encoder::UncheckedBufWriter;
+use crate::serialization::formatter::{PrettyDisplay, PrettyFormatter};
+use crate::util::Vec2u;
 #[cfg(target_arch = "wasm32")]
 use crate::wasm::{FakeScope as Scope, fake_scope as scope};
-use crate::{
-	elements::{ComplexNbtElementVariant, Matches, NbtElement, NbtElementVariant, chunk::NbtChunk, result::NbtParseResult},
-	render::{
-		RenderContext,
-		assets::{CONNECTION_UV, HEADER_SIZE, JUST_OVERLAPPING_BASE_TEXT_Z, JUST_OVERLAPPING_BOOKMARK_Z, LINE_NUMBER_CONNECTOR_Z, LINE_NUMBER_SEPARATOR_UV, REGION_GRID_UV, REGION_UV},
-		color::TextColor,
-		vertex_buffer_builder::VertexBufferBuilder,
-	},
-	serialization::{
-		decoder::Decoder,
-		encoder::UncheckedBufWriter,
-		formatter::{PrettyDisplay, PrettyFormatter},
-	},
-	util::Vec2u,
-	workbench::marked_line::MarkedLines,
-};
+use crate::workbench::marked_line::MarkedLines;
 
 #[repr(C)]
 pub struct NbtRegion {
@@ -35,6 +29,7 @@ pub struct NbtRegion {
 	end_x: u32,
 	loaded_chunks: u16,
 	flags: u8,
+	_id: u8,
 }
 
 impl Matches for NbtRegion {
@@ -66,6 +61,7 @@ impl Clone for NbtRegion {
 			end_x: self.end_x,
 			loaded_chunks: self.loaded_chunks,
 			flags: self.flags,
+			_id: Self::ID,
 		}
 	}
 }
@@ -79,6 +75,7 @@ impl Default for NbtRegion {
 			flags: 0b00,
 			loaded_chunks: 0,
 			end_x: 0,
+			_id: Self::ID,
 		}
 	}
 }
@@ -241,7 +238,7 @@ impl NbtElementVariant for NbtRegion {
 
 	fn to_le_bytes(&self, _writer: &mut UncheckedBufWriter) {}
 
-	fn render(&self, builder: &mut VertexBufferBuilder, name: Option<&str>, remaining_scroll: &mut usize, tail: bool, ctx: &mut RenderContext) {
+	fn render(&self, builder: &mut VertexBufferBuilder, name: Option<&str>, remaining_scroll: &mut usize, tail: bool, ctx: &mut TreeRenderContext) {
 		use std::fmt::Write as _;
 
 		builder.draw_texture_z(ctx.pos() - (20, 2), LINE_NUMBER_CONNECTOR_Z, LINE_NUMBER_SEPARATOR_UV, (2, 2));

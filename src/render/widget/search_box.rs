@@ -1,39 +1,33 @@
-use std::{
-	fmt::{Display, Formatter},
-	ops::{Deref, DerefMut},
-};
+use std::fmt::{Display, Formatter};
+use std::ops::{Deref, DerefMut};
 
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use winit::{event::MouseButton, keyboard::KeyCode};
 use winit::dpi::PhysicalSize;
-use crate::{
-	action_result::ActionResult,
-	config,
-	elements::{Matches, NbtElementAndKey, NbtElementAndKeyRef, compound::CompoundEntry, element::NbtElement},
-	flags,
-	render::{
-		assets::{
-			AND_SELECTION_OPERATION_UV, BOOKMARK_UV, DARK_STRIPE_UV, HIDDEN_BOOKMARK_UV, OR_SELECTION_OPERATION_UV, REGEX_SEARCH_MODE_UV, REPLACE_SELECTION_OPERATION_UV, SEARCH_BOX_SELECTION_Z, SEARCH_BOX_Z, SEARCH_KEYS_AND_VALUES_UV,
-			SEARCH_KEYS_UV, SEARCH_VALUES_UV, SNBT_SEARCH_MODE_UV, STRING_SEARCH_MODE_UV, XOR_SELECTION_OPERATION_UV,
-		},
-		color::TextColor,
-		vertex_buffer_builder::VertexBufferBuilder,
-		widget::{
-			alert::manager::AlertManager,
-			notification::{Notification, NotificationKind, manager::NotificationManager},
-			replace_box::ReplaceBox,
-			text::{Cachelike, SearchBoxKeyResult, Text, get_cursor_idx},
-		},
-		window::Theme,
-	},
-	util::{StrExt, Timestamp, Vec2u, create_regex},
-	workbench::{
-		marked_line::{MarkedLine, MarkedLines},
-		tab::Tab,
-		SortAlgorithm,
-	},
+use winit::event::MouseButton;
+use winit::keyboard::KeyCode;
+
+use crate::action_result::ActionResult;
+use crate::elements::compound::CompoundEntry;
+use crate::elements::element::NbtElement;
+use crate::elements::{Matches, NbtElementAndKey, NbtElementAndKeyRef};
+use crate::render::assets::{
+	AND_SELECTION_OPERATION_UV, BOOKMARK_UV, DARK_STRIPE_UV, HIDDEN_BOOKMARK_UV, OR_SELECTION_OPERATION_UV, REGEX_SEARCH_MODE_UV, REPLACE_SELECTION_OPERATION_UV, SEARCH_BOX_SELECTION_Z, SEARCH_BOX_Z, SEARCH_KEYS_AND_VALUES_UV, SEARCH_KEYS_UV,
+	SEARCH_VALUES_UV, SNBT_SEARCH_MODE_UV, STRING_SEARCH_MODE_UV, XOR_SELECTION_OPERATION_UV,
 };
+use crate::render::color::TextColor;
+use crate::render::vertex_buffer_builder::VertexBufferBuilder;
+use crate::render::widget::alert::manager::AlertManager;
+use crate::render::widget::notification::manager::NotificationManager;
+use crate::render::widget::notification::{Notification, NotificationKind};
+use crate::render::widget::replace_box::ReplaceBox;
+use crate::render::widget::text::{Cachelike, SearchBoxKeyResult, Text, get_cursor_idx};
+use crate::render::window::Theme;
+use crate::util::{StrExt, Timestamp, Vec2u, create_regex};
+use crate::workbench::SortAlgorithm;
+use crate::workbench::marked_line::{MarkedLine, MarkedLines};
+use crate::workbench::tab::Tab;
+use crate::{config, flags};
 
 pub const SEARCH_BOX_START_X: usize = 332;
 pub const SEARCH_BOX_END_X: usize = 2;
@@ -122,7 +116,7 @@ impl Display for SearchOperation {
 			Self::And => "And (intersection)",
 			Self::Or => "Or (union)",
 			Self::Xor => "Xor (symmetric difference)",
-			Self::B => "B (replace) [default behaviour]",
+			Self::B => "Overwrite [default behaviour]",
 		})
 	}
 }

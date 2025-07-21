@@ -52,7 +52,7 @@ macro_rules! primitive {
 
 				fn to_le_bytes(&self, writer: &mut $crate::serialization::encoder::UncheckedBufWriter) { writer.write(self.value.to_le_bytes().as_ref()); }
 
-				fn render(&self, builder: &mut $crate::render::vertex_buffer_builder::VertexBufferBuilder, name: Option<&str>, _remaining_scroll: &mut usize, _tail: bool, ctx: &mut $crate::render::RenderContext) {
+				fn render(&self, builder: &mut $crate::render::vertex_buffer_builder::VertexBufferBuilder, name: Option<&str>, _remaining_scroll: &mut usize, _tail: bool, ctx: &mut $crate::render::TreeRenderContext) {
 					use ::std::fmt::Write as _;
 
 					ctx.line_number();

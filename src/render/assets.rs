@@ -4,10 +4,8 @@ pub use ZOffset::*;
 use lazy_static::lazy_static;
 use zune_png::zune_core::options::DecoderOptions;
 
-use crate::{
-	render::window::Theme,
-	util::{Timestamp, Vec2u},
-};
+use crate::render::window::Theme;
+use crate::util::{Timestamp, Vec2u};
 
 pub const HEADER_SIZE: usize = 48;
 

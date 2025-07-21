@@ -1,47 +1,40 @@
-use fxhash::FxHashSet;
 use winit::dpi::PhysicalSize;
 use winit::event::MouseButton;
 
-use crate::{
-	action_result::ActionResult,
-	config,
-	render::{
-		assets::{DIM_LIGHTBULB_UV, LIGHTBULB_UV},
-		color::TextColor,
-		vertex_buffer_builder::VertexBufferBuilder,
-		widget::{Widget, WidgetContext, WidgetContextMut},
-		window::Theme,
-	},
-	util::{AxisAlignedBoundingBox, Vec2u},
-};
+use crate::action_result::ActionResult;
+use crate::config;
+use crate::render::assets::{DIM_LIGHTBULB_UV, LIGHTBULB_UV};
+use crate::render::color::TextColor;
+use crate::render::vertex_buffer_builder::VertexBufferBuilder;
+use crate::render::widget::{HorizontalWidgetAlignmentPreference, VerticalWidgetAlignmentPreference, Widget, WidgetAlignment, WidgetContext, WidgetContextMut};
+use crate::render::window::Theme;
+use crate::util::{AABB, Vec2u};
+use crate::workbench::mouse::MouseManager;
 
+#[derive(Default, Copy, Clone)]
 pub struct ThemeButton;
 
 impl Widget for ThemeButton {
-	fn new() -> Self
-	where Self: Sized {
-		Self
-	}
+	fn alignment(&self) -> WidgetAlignment { WidgetAlignment::new(HorizontalWidgetAlignmentPreference::Static(312), VerticalWidgetAlignmentPreference::Static(26)) }
 
-	fn bounds(&self, _window_dims: PhysicalSize<u32>) -> AxisAlignedBoundingBox { AxisAlignedBoundingBox::new(312, 328, 26, 42) }
-
-	fn is_valid_mouse_button(button: MouseButton) -> bool { matches!(button, MouseButton::Left | MouseButton::Right) }
-
-	fn on_mouse_down(&mut self, _button: MouseButton, _ctx: &mut WidgetContextMut) -> ActionResult {
+	fn dimensions(&self, _containment_dims: PhysicalSize<u32>) -> PhysicalSize<u32> { PhysicalSize::new(16, 16) }
+	
+	fn is_valid_mouse_button(&self, button: MouseButton, pos: Vec2u, dims: PhysicalSize<u32>) -> bool { matches!(button, MouseButton::Left | MouseButton::Right) }
+	
+	fn on_mouse_down(&mut self, button: MouseButton, pos: Vec2u, dims: PhysicalSize<u32>, ctx: &mut WidgetContextMut) -> ActionResult {
 		config::set_theme(match config::get_theme() {
 			Theme::Light => Theme::Dark,
 			Theme::Dark => Theme::Light,
 		});
 		ActionResult::Success(())
 	}
-
-	fn render(&self, builder: &mut VertexBufferBuilder, mouse: Vec2u, window_dims: PhysicalSize<u32>, _ctx: &WidgetContext, _held_mouse_keys: &FxHashSet<MouseButton>) {
-		let aabb = self.bounds(window_dims);
-		let is_within_bounds = aabb.contains(mouse);
+	
+	fn render_at(&self, pos: Vec2u, dims: PhysicalSize<u32>, builder: &mut VertexBufferBuilder, mouse: &MouseManager, ctx: &WidgetContext) {
+		let is_within_bounds = AABB::from_pos_and_dims(pos, dims).contains(mouse.coords);
 		if is_within_bounds {
 			builder.color = TextColor::White.to_raw();
-			builder.draw_tooltip(&["Change Theme (Ctrl + Alt + T)"], mouse, false);
+			builder.draw_tooltip(&["Change Theme (Ctrl + Alt + T)"], mouse.coords, false);
 		}
-		builder.draw_texture(aabb.low(), if is_within_bounds { DIM_LIGHTBULB_UV } else { LIGHTBULB_UV }, (16, 16));
+		builder.draw_texture(pos, if is_within_bounds { DIM_LIGHTBULB_UV } else { LIGHTBULB_UV }, dims);
 	}
 }

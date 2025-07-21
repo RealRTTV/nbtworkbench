@@ -1,29 +1,24 @@
+use std::borrow::Cow;
+use std::fmt::{Display, Formatter, Write};
+use std::hint::likely;
+use std::slice::{Iter, IterMut};
 #[cfg(not(target_arch = "wasm32"))] use std::thread::{Scope, scope};
-use std::{
-	borrow::Cow,
-	fmt::{Display, Formatter, Write},
-	hint::likely,
-	slice::{Iter, IterMut},
-};
 
+use crate::elements::compound::NbtCompound;
+use crate::elements::element::id_to_string_name;
+use crate::elements::result::NbtParseResult;
+use crate::elements::{ComplexNbtElementVariant, Matches, NbtElement, NbtElementVariant};
+use crate::render::TreeRenderContext;
+use crate::render::assets::{CONNECTION_UV, JUST_OVERLAPPING_BASE_TEXT_Z, LIST_GHOST_UV, LIST_UV};
+use crate::render::color::TextColor;
+use crate::render::vertex_buffer_builder::VertexBufferBuilder;
+use crate::render::widget::selected_text::SelectedText;
+use crate::serialization::decoder::Decoder;
+use crate::serialization::encoder::UncheckedBufWriter;
+use crate::serialization::formatter::{PrettyDisplay, PrettyFormatter};
+use crate::util::Vec2u;
 #[cfg(target_arch = "wasm32")]
 use crate::wasm::{FakeScope as Scope, fake_scope as scope};
-use crate::{
-	elements::{ComplexNbtElementVariant, Matches, NbtElement, NbtElementVariant, compound::NbtCompound, element::id_to_string_name, result::NbtParseResult},
-	render::{
-		RenderContext,
-		assets::{CONNECTION_UV, JUST_OVERLAPPING_BASE_TEXT_Z, LIST_GHOST_UV, LIST_UV},
-		color::TextColor,
-		vertex_buffer_builder::VertexBufferBuilder,
-	},
-	serialization::{
-		decoder::Decoder,
-		encoder::UncheckedBufWriter,
-		formatter::{PrettyDisplay, PrettyFormatter},
-	},
-	util::Vec2u,
-};
-use crate::render::widget::selected_text::SelectedText;
 
 #[repr(C)]
 pub struct NbtList {
@@ -33,6 +28,7 @@ pub struct NbtList {
 	end_x: u32,
 	elements_bitset: u16,
 	open: bool,
+	_id: u8,
 }
 
 impl Matches for NbtList {
@@ -52,6 +48,7 @@ impl Default for NbtList {
 			end_x: 0,
 			elements_bitset: 0,
 			open: false,
+			_id: Self::ID,
 		}
 	}
 }
@@ -69,6 +66,7 @@ impl Clone for NbtList {
 			end_x: self.end_x,
 			elements_bitset: self.elements_bitset,
 			open: self.open,
+			_id: Self::ID,
 		}
 	}
 }
@@ -189,6 +187,7 @@ impl NbtElementVariant for NbtList {
 			end_x: 0,
 			elements_bitset: 1 << element,
 			open: false,
+			_id: Self::ID,
 		};
 		list.recache();
 		ok(list)
@@ -224,7 +223,7 @@ impl NbtElementVariant for NbtList {
 		}
 	}
 
-	fn render(&self, builder: &mut VertexBufferBuilder, name: Option<&str>, remaining_scroll: &mut usize, tail: bool, ctx: &mut RenderContext) {
+	fn render(&self, builder: &mut VertexBufferBuilder, name: Option<&str>, remaining_scroll: &mut usize, tail: bool, ctx: &mut TreeRenderContext) {
 		let mut y_before = ctx.pos().y;
 
 		'head: {
@@ -322,6 +321,7 @@ impl ComplexNbtElementVariant for NbtList {
 			open: false,
 			elements_bitset: 0,
 			end_x: 0,
+			_id: Self::ID,
 		};
 		this.recache_elements_bitset();
 		this

@@ -7,19 +7,23 @@ pub mod primitive;
 pub mod region;
 pub mod string;
 
+use std::borrow::Cow;
+use std::fmt::Display;
+use std::slice;
 #[cfg(not(target_arch = "wasm32"))] use std::thread::Scope;
-use std::{borrow::Cow, fmt::Display, slice};
 
 pub use primitive::*;
 
+use crate::elements::element::NbtElement;
+use crate::elements::result::NbtParseResult;
+use crate::render::TreeRenderContext;
+use crate::render::vertex_buffer_builder::VertexBufferBuilder;
+use crate::serialization::decoder::Decoder;
+use crate::serialization::encoder::UncheckedBufWriter;
+use crate::serialization::formatter::PrettyDisplay;
+use crate::util::Vec2u;
 #[cfg(target_arch = "wasm32")] use crate::wasm::FakeScope as Scope;
-use crate::{
-	elements::{element::NbtElement, result::NbtParseResult},
-	render::{RenderContext, vertex_buffer_builder::VertexBufferBuilder},
-	serialization::{decoder::Decoder, encoder::UncheckedBufWriter, formatter::PrettyDisplay},
-	util::Vec2u,
-	workbench::marked_line::MarkedLines,
-};
+use crate::workbench::marked_line::MarkedLines;
 
 /// # Shorthands
 /// * `kv`
@@ -135,7 +139,7 @@ pub trait NbtElementVariant: Clone + PartialEq + Display + Matches + Default + P
 
 	fn to_le_bytes(&self, writer: &mut UncheckedBufWriter);
 
-	fn render(&self, builder: &mut VertexBufferBuilder, name: Option<&str>, remaining_scroll: &mut usize, tail: bool, ctx: &mut RenderContext);
+	fn render(&self, builder: &mut VertexBufferBuilder, name: Option<&str>, remaining_scroll: &mut usize, tail: bool, ctx: &mut TreeRenderContext);
 
 	#[must_use]
 	fn value(&self) -> Cow<'_, str>;

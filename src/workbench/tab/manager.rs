@@ -1,4 +1,6 @@
-use crate::{util::Timestamp, window_properties, workbench::tab::Tab};
+use crate::util::Timestamp;
+use crate::window_properties;
+use crate::workbench::tab::Tab;
 
 pub struct TabManager {
 	tabs: Vec<Tab>,

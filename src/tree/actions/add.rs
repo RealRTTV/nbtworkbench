@@ -1,14 +1,11 @@
 use thiserror::Error;
 
-use crate::{
-	elements::{ComplexNbtElementVariant, NbtElementAndKey, element::NbtElement},
-	history::WorkbenchAction,
-	tree::{
-		MutableIndices,
-		indices::OwnedIndices,
-		navigate::{ParentNavigationError, ParentNavigationInformationMut},
-	},
-};
+use crate::elements::element::NbtElement;
+use crate::elements::{ComplexNbtElementVariant, NbtElementAndKey};
+use crate::history::WorkbenchAction;
+use crate::tree::MutableIndices;
+use crate::tree::indices::OwnedIndices;
+use crate::tree::navigate::{ParentNavigationError, ParentNavigationInformationMut};
 
 #[rustfmt::skip]
 pub fn add_element<'m1, 'm2: 'm1>(

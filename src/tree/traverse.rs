@@ -1,10 +1,9 @@
 use itertools::Itertools;
 use thiserror::Error;
 
-use crate::{
-	elements::{ComplexNbtElementVariant, element::NbtElement},
-	tree::{Indices, OwnedIndices},
-};
+use crate::elements::ComplexNbtElementVariant;
+use crate::elements::element::NbtElement;
+use crate::tree::{Indices, OwnedIndices};
 
 fn find_traversal_child_idx(element: &NbtElement, indices: &Indices, y: &mut usize, line_number: &mut usize, true_line_number: &mut usize) -> Result<usize, TraversalError> {
 	let initial_remaining_y = *y;
@@ -13,6 +12,7 @@ fn find_traversal_child_idx(element: &NbtElement, indices: &Indices, y: &mut usi
 		parent: element.display_name(),
 	})?)
 		.map(|idx| &element[idx])
+		.filter_map(NbtElement::as_nonnull)
 		.find_position(|child| {
 			let (height, true_height) = child.heights();
 			if *y > height {
@@ -51,7 +51,7 @@ impl<'a> TraversalInformation<'a> {
 		{
 			let height = element.height();
 
-			if y > height {
+			if y >= height {
 				return Err(TraversalError::BeyondFullHeight { y, height });
 			}
 		}
@@ -205,4 +205,17 @@ pub enum TraversalError {
 	IndexOutOfBounds { indices: OwnedIndices, idx: usize, parent: &'static str },
 	#[error("Tried to find child within node @ {indices} with {remaining_y} y to go. (Your caches are likely bad)")]
 	BeyondParentHeight { indices: OwnedIndices, remaining_y: usize },
+}
+
+impl TraversalError {
+	#[must_use]
+	pub const fn is_generally_ignored(&self) -> bool {
+		match self {
+			Self::BeyondFullHeight { .. } => true,
+			Self::OutsideDepthRegion { .. } => true,
+			Self::ParentWasPrimitive { .. } => false,
+			Self::IndexOutOfBounds { .. } => false,
+			Self::BeyondParentHeight { .. } => false,
+		}
+	}
 }

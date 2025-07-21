@@ -1,15 +1,11 @@
 use thiserror::Error;
 
-use crate::{
-	elements::element::NbtElement,
-	history::WorkbenchAction,
-	tree::{
-		MutableIndices,
-		indices::{Indices, OwnedIndices},
-		navigate::{NavigationError, NavigationInformation, NavigationInformationMut},
-	},
-	workbench::marked_line::MarkedLineSlice,
-};
+use crate::elements::element::NbtElement;
+use crate::history::WorkbenchAction;
+use crate::tree::MutableIndices;
+use crate::tree::indices::{Indices, OwnedIndices};
+use crate::tree::navigate::{NavigationError, NavigationInformation, NavigationInformationMut};
+use crate::workbench::marked_line::MarkedLineSlice;
 
 #[rustfmt::skip]
 pub fn swap_element_same_depth<'m1, 'm2: 'm1>(

@@ -1,22 +1,16 @@
-use std::{
-	hint::{likely, unlikely},
-	ops::{Deref, DerefMut},
-	time::Duration,
-};
+use std::hint::{likely, unlikely};
+use std::ops::{Deref, DerefMut};
+use std::time::Duration;
 
 use winit::keyboard::KeyCode;
 
-use crate::{
-	flags,
-	history::WorkbenchAction,
-	render::{
-		assets::{SELECTION_UV, ZOffset},
-		color::TextColor,
-		vertex_buffer_builder::VertexBufferBuilder,
-		widget::text::KeyResult::{Escape, Finish, GenericAction, NoAction},
-	},
-	util::{CharExt, LinkedQueue, StrExt, Timestamp, Vec2u, get_clipboard, is_jump_char_boundary, is_utf8_char_boundary, set_clipboard},
-};
+use crate::flags;
+use crate::history::WorkbenchAction;
+use crate::render::assets::{SELECTION_UV, ZOffset};
+use crate::render::color::TextColor;
+use crate::render::vertex_buffer_builder::VertexBufferBuilder;
+use crate::render::widget::text::KeyResult::{Escape, Finish, GenericAction, NoAction};
+use crate::util::{CharExt, LinkedQueue, StrExt, Timestamp, Vec2u, get_clipboard, is_jump_char_boundary, is_utf8_char_boundary, set_clipboard};
 
 pub const TEXT_DOUBLE_CLICK_INTERVAL: Duration = Duration::from_millis(250);
 pub const CURSOR_BLINK_RATE: Duration = Duration::from_millis(500);

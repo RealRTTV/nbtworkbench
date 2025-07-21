@@ -1,33 +1,24 @@
-use std::{
-	alloc::{Layout, alloc, dealloc},
-	array,
-	borrow::Cow,
-	fmt::{Display, Formatter},
-	mem::{ManuallyDrop, MaybeUninit},
-	ops::Deref,
-	ptr::NonNull,
-};
+use std::alloc::{Layout, alloc, dealloc};
+use std::array;
+use std::borrow::Cow;
+use std::fmt::{Display, Formatter};
+use std::mem::{ManuallyDrop, MaybeUninit};
+use std::ops::Deref;
+use std::ptr::NonNull;
 
 use compact_str::CompactString;
 
-use crate::{
-	elements::{Matches, NbtElementVariant, PrimitiveNbtElementVariant, result::NbtParseResult},
-	render::{
-		RenderContext,
-		assets::{JUST_OVERLAPPING_BASE_TEXT_Z, STRING_GHOST_UV, STRING_UV},
-		color::TextColor,
-		vertex_buffer_builder::VertexBufferBuilder,
-	},
-	serialization::{
-		decoder::Decoder,
-		encoder::UncheckedBufWriter,
-		formatter::{PrettyDisplay, PrettyFormatter},
-	},
-	util::{StrExt, Vec2u},
-};
-use crate::render::assets::BASE_Z;
+use crate::elements::result::NbtParseResult;
+use crate::elements::{Matches, NbtElementVariant, PrimitiveNbtElementVariant};
+use crate::render::TreeRenderContext;
+use crate::render::assets::{BASE_Z, JUST_OVERLAPPING_BASE_TEXT_Z, STRING_GHOST_UV, STRING_UV};
+use crate::render::color::TextColor;
+use crate::render::vertex_buffer_builder::VertexBufferBuilder;
+use crate::serialization::decoder::Decoder;
+use crate::serialization::encoder::UncheckedBufWriter;
+use crate::serialization::formatter::{PrettyDisplay, PrettyFormatter};
+use crate::util::{StrExt, Vec2u};
 
-#[repr(transparent)]
 #[derive(Clone, PartialEq, Default)]
 pub struct NbtString {
 	pub str: TwentyThree,
@@ -70,7 +61,7 @@ impl NbtElementVariant for NbtString {
 
 	fn to_le_bytes(&self, writer: &mut UncheckedBufWriter) { writer.write_le_str(self.str.as_str()); }
 
-	fn render(&self, builder: &mut VertexBufferBuilder, name: Option<&str>, _remaining_scroll: &mut usize, _tail: bool, ctx: &mut RenderContext) {
+	fn render(&self, builder: &mut VertexBufferBuilder, name: Option<&str>, _remaining_scroll: &mut usize, _tail: bool, ctx: &mut TreeRenderContext) {
 		use std::fmt::Write as _;
 
 		ctx.line_number();
@@ -115,7 +106,7 @@ impl Default for TwentyThree {
 			data[22] = 192;
 
 			Self {
-				stack: ManuallyDrop::new(StackTwentyThree { data }),
+				stack: ManuallyDrop::new(StackTwentyThree { data, _id: NbtString::ID }),
 			}
 		}
 	}
@@ -133,6 +124,7 @@ impl Clone for TwentyThree {
 						len: self.heap.len,
 						_pad: [const { MaybeUninit::<u8>::uninit() }; 22 - size_of::<usize>() - size_of::<NonNull<u8>>()],
 						variant: 254,
+						_id: NbtString::ID,
 					}),
 				}
 			} else {
@@ -159,6 +151,7 @@ impl TwentyThree {
 						len,
 						_pad: [const { MaybeUninit::<u8>::uninit() }; 22 - size_of::<usize>() - size_of::<NonNull<u8>>()],
 						variant: 254,
+						_id: NbtString::ID,
 					}),
 				};
 				core::mem::forget(owned);
@@ -167,11 +160,14 @@ impl TwentyThree {
 				let ptr = s.as_ptr();
 				let res = Self {
 					stack: ManuallyDrop::new(if len == 23 {
-						StackTwentyThree { data: ptr.cast::<[u8; 23]>().read() }
+						StackTwentyThree {
+							data: ptr.cast::<[u8; 23]>().read(),
+							_id: NbtString::ID,
+						}
 					} else {
 						let mut data = array::from_fn::<u8, 23, _>(|idx| s.as_bytes().get(idx).copied().unwrap_or(0));
 						data[22] = 192 + len as u8;
-						StackTwentyThree { data }
+						StackTwentyThree { data, _id: NbtString::ID }
 					}),
 				};
 				core::mem::forget(s);
@@ -223,6 +219,7 @@ struct HeapTwentyThree {
 	len: usize,
 	_pad: [MaybeUninit<u8>; 22 - size_of::<usize>() - size_of::<NonNull<u8>>()],
 	variant: u8,
+	_id: u8,
 }
 
 unsafe impl Send for HeapTwentyThree {}
@@ -232,4 +229,5 @@ unsafe impl Sync for HeapTwentyThree {}
 #[derive(Copy, Clone)]
 struct StackTwentyThree {
 	data: [u8; 23],
+	_id: u8,
 }

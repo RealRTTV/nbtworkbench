@@ -1,24 +1,16 @@
-use std::{
-	path::Path,
-	sync::atomic::{AtomicBool, Ordering},
-};
+use std::path::Path;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::{Result, ensure};
 use fxhash::FxHashMap;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 
-use crate::{
-	error,
-	render::{
-		widget::{
-			replace_box::ReplaceBy,
-			search_box::{SearchFlags, SearchMode, SearchOperation},
-		},
-		window::Theme,
-	},
-	workbench::SortAlgorithm,
-};
+use crate::error;
+use crate::render::widget::replace_box::ReplaceBy;
+use crate::render::widget::search_box::{SearchFlags, SearchMode, SearchOperation};
+use crate::render::window::Theme;
+use crate::workbench::SortAlgorithm;
 
 #[derive(Serialize, Deserialize, Default)]
 struct Config {

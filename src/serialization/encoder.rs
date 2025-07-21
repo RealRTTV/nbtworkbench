@@ -1,9 +1,7 @@
-use std::{
-	alloc::{Layout, alloc, dealloc, realloc},
-	hint::likely,
-	io::Write,
-	mem::MaybeUninit,
-};
+use std::alloc::{Layout, alloc, dealloc, realloc};
+use std::hint::likely;
+use std::io::Write;
+use std::mem::MaybeUninit;
 
 pub struct UncheckedBufWriter {
 	buf: *mut MaybeUninit<u8>,

@@ -1,6 +1,8 @@
 #![feature(maybe_uninit_array_assume_init)]
 
-use std::{fs::write, io::Read, mem::MaybeUninit};
+use std::fs::write;
+use std::io::Read;
+use std::mem::MaybeUninit;
 
 use flate2::Compression;
 

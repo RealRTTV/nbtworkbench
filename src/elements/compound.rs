@@ -1,36 +1,29 @@
+use std::borrow::Cow;
+use std::cmp::Ordering;
+use std::fmt::{Display, Formatter, Write};
+use std::hint::likely;
+use std::ops::Deref;
+use std::slice::{Iter, IterMut};
 #[cfg(not(target_arch = "wasm32"))] use std::thread::{Scope, scope};
-use std::{
-	borrow::Cow,
-	cmp::Ordering,
-	fmt::{Display, Formatter, Write},
-	hint::likely,
-	ops::Deref,
-	slice::{Iter, IterMut},
-};
 
 use compact_str::CompactString;
-use hashbrown::hash_table::{Entry::*, HashTable};
+use hashbrown::hash_table::Entry::*;
+use hashbrown::hash_table::HashTable;
 
+use crate::elements::result::NbtParseResult;
+use crate::elements::{ComplexNbtElementVariant, Matches, NbtElement, NbtElementAndKey, NbtElementAndKeyRef, NbtElementAndKeyRefMut, NbtElementVariant};
+use crate::render::TreeRenderContext;
+use crate::render::assets::{COMPOUND_GHOST_UV, COMPOUND_ROOT_UV, COMPOUND_UV, CONNECTION_UV, HEADER_SIZE, JUST_OVERLAPPING_BASE_TEXT_Z};
+use crate::render::color::TextColor;
+use crate::render::vertex_buffer_builder::VertexBufferBuilder;
+use crate::render::widget::selected_text::SelectedText;
+use crate::serialization::decoder::Decoder;
+use crate::serialization::encoder::UncheckedBufWriter;
+use crate::serialization::formatter::{PrettyDisplay, PrettyFormatter};
+use crate::util::{self, StrExt, Vec2u, width_ascii};
 #[cfg(target_arch = "wasm32")]
 use crate::wasm::{FakeScope as Scope, fake_scope as scope};
-use crate::{
-	config,
-	elements::{ComplexNbtElementVariant, Matches, NbtElement, NbtElementAndKey, NbtElementAndKeyRef, NbtElementAndKeyRefMut, NbtElementVariant, result::NbtParseResult},
-	hash,
-	render::{
-		RenderContext,
-		assets::{COMPOUND_GHOST_UV, COMPOUND_ROOT_UV, COMPOUND_UV, CONNECTION_UV, HEADER_SIZE, JUST_OVERLAPPING_BASE_TEXT_Z},
-		color::TextColor,
-		vertex_buffer_builder::VertexBufferBuilder,
-	},
-	serialization::{
-		decoder::Decoder,
-		encoder::UncheckedBufWriter,
-		formatter::{PrettyDisplay, PrettyFormatter},
-	},
-	util::{self, StrExt, Vec2u, width_ascii},
-};
-use crate::render::widget::selected_text::SelectedText;
+use crate::{config, hash};
 
 #[repr(C)]
 pub struct NbtCompound {
@@ -39,6 +32,7 @@ pub struct NbtCompound {
 	true_height: u32,
 	end_x: u32,
 	open: bool,
+	_id: u8,
 }
 
 impl Matches for NbtCompound {
@@ -57,6 +51,7 @@ impl Clone for NbtCompound {
 			true_height: self.true_height,
 			end_x: self.end_x,
 			open: self.open,
+			_id: Self::ID,
 		}
 	}
 }
@@ -69,6 +64,7 @@ impl Default for NbtCompound {
 			open: false,
 			true_height: 1,
 			end_x: 0,
+			_id: Self::ID,
 		}
 	}
 }
@@ -196,7 +192,7 @@ impl NbtElementVariant for NbtCompound {
 		writer.write(&[0x00]);
 	}
 
-	fn render(&self, builder: &mut VertexBufferBuilder, name: Option<&str>, remaining_scroll: &mut usize, tail: bool, ctx: &mut RenderContext) {
+	fn render(&self, builder: &mut VertexBufferBuilder, name: Option<&str>, remaining_scroll: &mut usize, tail: bool, ctx: &mut TreeRenderContext) {
 		let pos = ctx.pos();
 		let mut y_before = pos.y;
 
@@ -318,6 +314,7 @@ impl ComplexNbtElementVariant for NbtCompound {
 			true_height: 0,
 			end_x: 0,
 			open: false,
+			_id: Self::ID,
 		};
 		this.recache();
 		this

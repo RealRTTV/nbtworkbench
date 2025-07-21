@@ -1,13 +1,13 @@
 use std::fmt::{Debug, Formatter};
+
 use anyhow::{Context, Result};
 
-use crate::{
-	elements::element::NbtElement,
-	history::WorkbenchAction,
-	tree::MutableIndices,
-	util::LinkedQueue,
-	workbench::{tab::FilePath, HeldEntry},
-};
+use crate::elements::element::NbtElement;
+use crate::history::WorkbenchAction;
+use crate::tree::MutableIndices;
+use crate::util::LinkedQueue;
+use crate::workbench::HeldEntry;
+use crate::workbench::tab::FilePath;
 
 pub struct HistoryMananger {
 	undos: LinkedQueue<WorkbenchAction>,
@@ -16,9 +16,7 @@ pub struct HistoryMananger {
 }
 
 impl Debug for HistoryMananger {
-	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-		write!(f, "undos = {}, redos = {}, unsaved_changes = {}", self.undos.len(), self.redos.len(), self.unsaved_changes)
-	}
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result { write!(f, "undos = {}, redos = {}, unsaved_changes = {}", self.undos.len(), self.redos.len(), self.unsaved_changes) }
 }
 
 impl HistoryMananger {
@@ -32,6 +30,12 @@ impl HistoryMananger {
 	}
 
 	pub fn on_save(&mut self) { self.unsaved_changes = false; }
+
+	pub fn append_all(&mut self, iter: impl IntoIterator<Item = WorkbenchAction>) {
+		for action in iter {
+			self.append(action);
+		}
+	}
 
 	pub fn append(&mut self, mut action: WorkbenchAction) {
 		action.shrink_to_fit();

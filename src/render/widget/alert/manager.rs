@@ -1,10 +1,17 @@
-use crate::render::{vertex_buffer_builder::VertexBufferBuilder, widget::alert::Alert};
+use std::ops::BitOrAssign;
+
+use crate::render::assets::HEADER_SIZE;
+use crate::render::widget::alert::Alert;
+use crate::render::widget::vertical_list::VerticalList;
+use crate::render::widget::{HorizontalWidgetAlignmentPreference, VerticalWidgetAlignmentPreference, Widget, WidgetAlignment};
 
 pub struct AlertManager {
 	alerts: Vec<Alert>,
 }
 
 impl AlertManager {
+	const ALIGNMENT: WidgetAlignment = WidgetAlignment::new(HorizontalWidgetAlignmentPreference::Right, VerticalWidgetAlignmentPreference::Static(HEADER_SIZE as _));
+
 	#[must_use]
 	pub const fn new() -> Self { Self { alerts: Vec::new() } }
 
@@ -14,12 +21,15 @@ impl AlertManager {
 		self.alerts.insert(0, alert);
 	}
 
-	pub fn render(&mut self, y: &mut usize, builder: &mut VertexBufferBuilder) {
-		self.alerts.retain_mut(|alert| !alert.is_invisible());
-		for alert in &mut self.alerts {
-			alert.render(builder, *y);
-			*y += alert.height();
-		}
+	pub fn cleanup(&mut self) { self.alerts.retain(|alert| alert.is_visible()) }
+
+	#[must_use]
+	pub fn as_vertical_list(&mut self) -> VerticalList { VerticalList::new(self.alerts.iter_mut().map(|alert| alert as &mut dyn Widget), Self::ALIGNMENT) }
+}
+
+impl BitOrAssign for AlertManager {
+	fn bitor_assign(&mut self, rhs: Self) {
+		self.alerts.extend(rhs.alerts);
 	}
 }
 

@@ -3,10 +3,8 @@
 use compact_str::{CompactString, ToCompactString};
 use thiserror::Error;
 
-use crate::{
-	elements::element::NbtElement,
-	tree::{Indices, OwnedIndices},
-};
+use crate::elements::element::NbtElement;
+use crate::tree::{Indices, OwnedIndices};
 
 pub struct NavigationInformation<'a> {
 	pub idx: Option<usize>,

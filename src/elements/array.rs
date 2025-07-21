@@ -164,7 +164,7 @@ macro_rules! array {
 					}
 				}
 
-				fn render(&self, builder: &mut $crate::render::vertex_buffer_builder::VertexBufferBuilder, key: Option<&str>, remaining_scroll: &mut usize, tail: bool, ctx: &mut $crate::render::RenderContext) {
+				fn render(&self, builder: &mut $crate::render::vertex_buffer_builder::VertexBufferBuilder, key: Option<&str>, remaining_scroll: &mut usize, tail: bool, ctx: &mut $crate::render::TreeRenderContext) {
 					use ::std::fmt::Write as _;
 
 					'head: {
@@ -316,7 +316,10 @@ macro_rules! array {
 					let mut end_x = 0;
 					if self.is_open() {
 						for child in self.children() {
-							end_x = usize::max(end_x, $crate::elements::element::NbtElement::DEPTH_INCREMENT_WIDTH + $crate::render::widget::selected_text::SelectedText::PREFIXING_SPACE_WIDTH + $crate::util::StrExt::width(child.value().0.as_ref()));
+							end_x = usize::max(
+								end_x,
+								$crate::elements::element::NbtElement::DEPTH_INCREMENT_WIDTH + $crate::render::widget::selected_text::SelectedText::PREFIXING_SPACE_WIDTH + $crate::util::StrExt::width(child.value().0.as_ref()),
+							);
 						}
 					}
 					self.end_x = end_x as u32;

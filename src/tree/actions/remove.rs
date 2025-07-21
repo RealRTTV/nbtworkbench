@@ -1,14 +1,11 @@
 use thiserror::Error;
 
-use crate::{
-	elements::{NbtElementAndKey, element::NbtElement},
-	history::WorkbenchAction,
-	tree::{
-		MutableIndices,
-		indices::OwnedIndices,
-		navigate::{ParentNavigationError, ParentNavigationInformationMut},
-	},
-};
+use crate::elements::NbtElementAndKey;
+use crate::elements::element::NbtElement;
+use crate::history::WorkbenchAction;
+use crate::tree::MutableIndices;
+use crate::tree::indices::OwnedIndices;
+use crate::tree::navigate::{ParentNavigationError, ParentNavigationInformationMut};
 
 #[rustfmt::skip]
 pub fn remove_element<'m1, 'm2: 'm1>(

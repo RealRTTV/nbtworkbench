@@ -2,16 +2,12 @@
 
 use thiserror::Error;
 
+use crate::elements::element::NbtElement;
+use crate::tree::indices::Indices;
+use crate::tree::navigate::{NavigationError, NavigationInformationMut};
 #[cfg(target_arch = "wasm32")]
 use crate::wasm::{FakeScope as Scope, fake_scope as scope};
-use crate::{
-	elements::element::NbtElement,
-	tree::{
-		indices::Indices,
-		navigate::{NavigationError, NavigationInformationMut},
-	},
-	workbench::marked_line::MarkedLines,
-};
+use crate::workbench::marked_line::MarkedLines;
 
 #[rustfmt::skip]
 pub fn close_element(

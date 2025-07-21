@@ -1,17 +1,18 @@
-use std::{
-	fmt::Formatter,
-	fs::{read, File},
-	path::{Path, PathBuf},
-	sync::atomic::{AtomicU64, Ordering},
-};
+use std::fmt::Formatter;
+use std::fs::{File, read};
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use glob::glob;
 
+use crate::elements::element::NbtElement;
+use crate::history::WorkbenchAction;
+use crate::render::widget::replace_box::{ReplaceBox, SearchReplacement};
+use crate::render::widget::search_box::{SearchBox, SearchFlags, SearchMode, SearchPredicate, SearchPredicateInner};
+use crate::util::create_regex;
+use crate::workbench::Workbench;
 use crate::workbench::tab::NbtFileFormat;
-use crate::{config, elements::element::NbtElement, error, history::WorkbenchAction, log, mutable_indices, render::widget::{
-	replace_box::{ReplaceBox, SearchReplacement},
-	search_box::{SearchBox, SearchFlags, SearchMode, SearchPredicate, SearchPredicateInner},
-}, util::create_regex, workbench::Workbench};
+use crate::{config, error, log, mutable_indices};
 
 struct SearchResult {
 	path: PathBuf,
@@ -99,8 +100,8 @@ fn get_search_predicate(args: &mut Vec<String>) -> SearchPredicate {
 				search_flags,
 				inner: if exact_match { SearchPredicateInner::SnbtExactMatch((key, snbt)) } else { SearchPredicateInner::Snbt((key, snbt)) },
 			},
-			Err(idx) => {
-				error!(r#"Invalid snbt at index {idx}, valid snbt look like: `key:"minecraft:air"` or `{{id:"minecraft:looting",lvl:3s}}` (note that some terminals use "" to contain one parameter and that inner ones will have to be escaped)"#);
+			Err(e) => {
+				error!(r#"{e}, valid snbt look like: `key:"minecraft:air"` or `{{id:"minecraft:looting",lvl:3s}}` (note that some terminals use "" to contain one parameter and that inner ones will have to be escaped)"#);
 				std::process::exit(1);
 			}
 		},

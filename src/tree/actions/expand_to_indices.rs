@@ -1,10 +1,10 @@
 use thiserror::Error;
 
-use crate::{
-	elements::element::NbtElement,
-	tree::{actions::RecacheBookmarkError, indices::Indices, navigate::IterativeNavigationInformationMutItem},
-	workbench::marked_line::MarkedLines,
-};
+use crate::elements::element::NbtElement;
+use crate::tree::actions::RecacheBookmarkError;
+use crate::tree::indices::Indices;
+use crate::tree::navigate::IterativeNavigationInformationMutItem;
+use crate::workbench::marked_line::MarkedLines;
 
 #[rustfmt::skip]
 pub fn expand_element_to_indices(

@@ -1,14 +1,11 @@
-use std::{hint::unlikely, ops::BitAnd};
+use std::hint::unlikely;
+use std::ops::BitAnd;
 
 use winit::dpi::PhysicalSize;
 
-use crate::{
-	render::{
-		TextColor,
-		assets::{BASE_TEXT_Z, BASE_Z, TOOLTIP_UV, TOOLTIP_Z, ZOffset},
-	},
-	util::{StrExt, Vec2u},
-};
+use crate::render::TextColor;
+use crate::render::assets::{BASE_TEXT_Z, BASE_Z, TOOLTIP_UV, TOOLTIP_Z, ZOffset};
+use crate::util::{StrExt, Vec2u};
 
 pub struct VertexBufferBuilder {
 	vertices: Vec<f32>,
@@ -237,10 +234,8 @@ impl VertexBufferBuilder {
 		self.text_vertices.reserve_exact(98304);
 		self.text_indices.reserve_exact(36864);
 	}
-	
-	pub fn window_dims(&self) -> PhysicalSize<u32> {
-		PhysicalSize::new((self.window_dims.width / self.scale) as u32, (self.window_dims.height / self.scale) as u32)
-	}
+
+	pub fn window_dims(&self) -> PhysicalSize<u32> { PhysicalSize::new((self.window_dims.width / self.scale) as u32, (self.window_dims.height / self.scale) as u32) }
 
 	#[must_use]
 	pub fn window_width(&self) -> usize { (self.window_dims.width / self.scale) as usize }

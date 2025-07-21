@@ -1,48 +1,36 @@
-use std::{
-	fmt::{Display, Formatter},
-	ops::{Deref, DerefMut},
-};
+use std::fmt::{Display, Formatter};
+use std::ops::{Deref, DerefMut};
 
 use compact_str::ToCompactString;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use winit::{event::MouseButton, keyboard::KeyCode};
 use winit::dpi::PhysicalSize;
-use crate::{
-	action_result::ActionResult,
-	config,
-	elements::{Matches, NbtElementAndKey, NbtElementAndKeyRef, compound::CompoundEntry, element::NbtElement},
-	error, flags,
-	history::WorkbenchAction,
-	mutable_indices,
-	render::{
-		assets::{DARK_STRIPE_UV, REPLACE_BOX_SELECTION_Z, REPLACE_BOX_Z, REPLACE_BY_BOOKMARKED_LINES, REPLACE_BY_SEARCH_HITS},
-		color::TextColor,
-		vertex_buffer_builder::VertexBufferBuilder,
-		widget::{
-			alert::manager::AlertManager,
-			notification::{Notification, NotificationKind, manager::NotificationManager},
-			search_box::{SEARCH_BOX_END_X, SEARCH_BOX_START_X, SearchBox, SearchFlags, SearchMode},
-			text::{Cachelike, ReplaceBoxKeyResult, Text, get_cursor_idx},
-		},
-		window::Theme,
-	},
-	tree::{
-		MutableIndices,
-		actions::{
-			rename::{RenameElementError, rename_element},
-			replace::{ReplaceElementError, replace_element},
-		},
-		indices::{Indices, OwnedIndices},
-		indices_for_true,
-	},
-	util::{StrExt, Timestamp, Vec2u, create_regex},
-	workbench::{
-		tab::{FilePath, Tab},
-		SortAlgorithm,
-	},
-};
+use winit::event::MouseButton;
+use winit::keyboard::KeyCode;
+
+use crate::action_result::{ActionResult, IntoFailingActionResult};
+use crate::elements::compound::CompoundEntry;
+use crate::elements::element::{NbtElement, SNBTParseError};
+use crate::elements::{Matches, NbtElementAndKey, NbtElementAndKeyRef};
+use crate::history::WorkbenchAction;
+use crate::render::assets::{DARK_STRIPE_UV, REPLACE_BOX_SELECTION_Z, REPLACE_BOX_Z, REPLACE_BY_BOOKMARKED_LINES, REPLACE_BY_SEARCH_HITS};
+use crate::render::color::TextColor;
+use crate::render::vertex_buffer_builder::VertexBufferBuilder;
+use crate::render::widget::alert::manager::AlertManager;
+use crate::render::widget::notification::manager::NotificationManager;
+use crate::render::widget::notification::{Notification, NotificationKind};
+use crate::render::widget::search_box::{SEARCH_BOX_END_X, SEARCH_BOX_START_X, SearchBox, SearchFlags, SearchMode};
+use crate::render::widget::text::{Cachelike, ReplaceBoxKeyResult, Text, get_cursor_idx};
+use crate::render::window::Theme;
+use crate::tree::actions::rename::{RenameElementError, rename_element};
+use crate::tree::actions::replace::{ReplaceElementError, replace_element};
+use crate::tree::indices::{Indices, OwnedIndices};
+use crate::tree::{MutableIndices, indices_for_true};
+use crate::util::{StrExt, Timestamp, Vec2u, create_regex};
+use crate::workbench::SortAlgorithm;
+use crate::workbench::tab::{FilePath, Tab};
+use crate::{config, error, flags, mutable_indices};
 
 #[derive(Copy, Clone, Default, Serialize, Deserialize)]
 pub enum ReplaceBy {
@@ -358,11 +346,12 @@ impl ReplaceBox {
 					None
 				};
 				match replacement.replace(alternative_root, key_str, element_str.filter(|&(_, color)| color != TextColor::TreeKey).map(|(x, _)| x), mi, &current_indices) {
-					Ok((action, replaced)) => {
+					ActionResult::Success((action, replaced)) => {
 						actions.push(action);
 						element_replaced = replaced;
 					}
-					Err(e) => errors.push(e),
+					ActionResult::Pass => {}
+					ActionResult::Failure(e) => errors.push(e),
 				}
 			}
 
@@ -418,8 +407,9 @@ impl ReplaceBox {
 	#[must_use]
 	pub fn replace_by_bookmarked_lines<'m1, 'm2: 'm1>(&self, mi: &'m1 mut MutableIndices<'m2>, root: &mut NbtElement) -> (Notification, Option<WorkbenchAction>) {
 		let start = Timestamp::now();
-		let Some(replacement) = BookmarkedBasedSearchReplacement::new(&self.value) else {
-			return (Notification::new(format!("Invalid replacement syntax ({})", self.value), TextColor::Red, NotificationKind::Replace), None)
+		let replacement = match BookmarkedBasedSearchReplacement::new(&self.value) {
+			Ok(replacement) => replacement,
+			Err(e) => return (Notification::new(format!("Invalid replacement syntax: {e}"), TextColor::Red, NotificationKind::Replace), None),
 		};
 		let (bulk, errors) = Self::replace_by_bookmarked_lines0(mi, root, &replacement);
 		let bulk_len = if let WorkbenchAction::Bulk { actions } = &bulk { actions.len() } else { 0 };
@@ -459,8 +449,9 @@ impl ReplaceBox {
 		while let Some(indices) = mutable_indices.temp.pop() {
 			let Some(indices) = indices.take() else { continue };
 			match replacement.replace(root, indices, &mut fake_path, &mut mutable_indices) {
-				Ok(action) => actions.push(action),
-				Err(e) => errors.push(e),
+				ActionResult::Success(action) => actions.push(action),
+				ActionResult::Pass => {}
+				ActionResult::Failure(e) => errors.push(e),
 			}
 		}
 
@@ -561,7 +552,7 @@ impl SearchReplacement {
 		(flags & 0b01) > 0 && !matches!(self.inner, SearchReplacementInner::Snbt { .. })
 	}
 
-	pub fn replace<'m1, 'm2: 'm1>(&self, root: &mut NbtElement, key: Option<String>, value: Option<String>, mi: &'m1 mut MutableIndices<'m2>, indices: &Indices) -> Result<(WorkbenchAction, bool), ReplacementError> {
+	pub fn replace<'m1, 'm2: 'm1>(&self, root: &mut NbtElement, key: Option<String>, value: Option<String>, mi: &'m1 mut MutableIndices<'m2>, indices: &Indices) -> ActionResult<(WorkbenchAction, bool), ReplacementError> {
 		#[must_use]
 		fn replace_case_sensitivity(value: &str, find: &str, replacement: &str, case_sensitive: bool) -> String { if case_sensitive { value.replace(find, replacement) } else { value.replace_ignore_ascii_case(find, replacement) } }
 
@@ -570,14 +561,24 @@ impl SearchReplacement {
 			SearchReplacementInner::Substring { find, replacement, case_sensitive } => {
 				let key = key.map(|key| replace_case_sensitivity(&key, find, replacement, *case_sensitive).into());
 				let value = value.map(|value| replace_case_sensitivity(&value, find, replacement, *case_sensitive).into());
-				Ok((rename_element(root, indices.to_owned(), key, value, &mut fake_path)?.into_action(), false))
+				let action = match rename_element(root, indices.to_owned(), key, value, &mut fake_path) {
+					ActionResult::Success(result) => result.into_action(),
+					ActionResult::Pass => return ActionResult::Pass,
+					ActionResult::Failure(e) => return ActionResult::Failure(e.into()),
+				};
+				ActionResult::Success((action, false))
 			}
 			SearchReplacementInner::Regex { regex, replacement } => {
 				let key = key.map(|key| regex.replace_all(&key, replacement).into());
 				let value = value.map(|value| regex.replace_all(&value, replacement).into());
-				Ok((rename_element(root, indices.to_owned(), key, value, &mut fake_path)?.into_action(), false))
+				let action = match rename_element(root, indices.to_owned(), key, value, &mut fake_path) {
+					ActionResult::Success(result) => result.into_action(),
+					ActionResult::Pass => return ActionResult::Pass,
+					ActionResult::Failure(e) => return ActionResult::Failure(e.into()),
+				};
+				ActionResult::Success((action, false))
 			}
-			SearchReplacementInner::Snbt { replacement, .. } => Ok((replace_element(root, replacement.clone(), indices.to_owned(), mi)?.into_action(), true)),
+			SearchReplacementInner::Snbt { replacement, .. } => ActionResult::Success((replace_element(root, replacement.clone(), indices.to_owned(), mi).failure_on_err()?.into_action(), true)),
 		}
 	}
 }
@@ -593,27 +594,32 @@ pub enum BookmarkedBasedSearchReplacementInner {
 }
 
 impl BookmarkedBasedSearchReplacement {
-	pub fn new(value: &str) -> Option<Self> {
+	pub fn new(value: &str) -> Result<Self, SNBTParseError> {
 		let search_mode = config::get_search_mode();
 		let search_flags = config::get_search_flags();
 
 		let inner = match search_mode {
 			SearchMode::String => BookmarkedBasedSearchReplacementInner::String(value.to_owned()),
 			SearchMode::Regex => BookmarkedBasedSearchReplacementInner::String(value.to_owned()),
-			SearchMode::Snbt => BookmarkedBasedSearchReplacementInner::Snbt(NbtElement::from_str(value).ok()?),
+			SearchMode::Snbt => BookmarkedBasedSearchReplacementInner::Snbt(NbtElement::from_str(value)?),
 		};
 
-		Some(Self { search_flags, inner })
+		Ok(Self { search_flags, inner })
 	}
 
-	pub fn replace<'m1, 'm2: 'm1>(&self, root: &mut NbtElement, indices: OwnedIndices, path: &mut FilePath, mi: &'m1 mut MutableIndices<'m2>) -> Result<WorkbenchAction, ReplacementError> {
+	pub fn replace<'m1, 'm2: 'm1>(&self, root: &mut NbtElement, indices: OwnedIndices, path: &mut FilePath, mi: &'m1 mut MutableIndices<'m2>) -> ActionResult<WorkbenchAction, ReplacementError> {
 		match &self.inner {
 			BookmarkedBasedSearchReplacementInner::String(str) => {
 				let key = self.search_flags.has_key().then(|| str.to_compact_string());
 				let value = self.search_flags.has_value().then(|| str.to_owned());
-				Ok(rename_element(root, indices, key, value, path)?.into_action())
+				let action = match rename_element(root, indices.to_owned(), key, value, path) {
+					ActionResult::Success(result) => result.into_action(),
+					ActionResult::Pass => return ActionResult::Pass,
+					ActionResult::Failure(e) => return ActionResult::Failure(e.into()),
+				};
+				ActionResult::Success(action)
 			}
-			BookmarkedBasedSearchReplacementInner::Snbt(replacement) => Ok(replace_element(root, replacement.clone(), indices, mi)?.into_action()),
+			BookmarkedBasedSearchReplacementInner::Snbt(replacement) => ActionResult::Success(replace_element(root, replacement.clone(), indices, mi).failure_on_err()?.into_action()),
 		}
 	}
 }

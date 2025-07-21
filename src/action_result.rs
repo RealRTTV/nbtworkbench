@@ -65,7 +65,7 @@ pub type AnyhowActionResult<S = ()> = ActionResult<S, anyhow::Error>;
 pub enum ActionResult<S = (), E = ()> {
 	/// When the action finishes successfully.
 	Success(S),
-	/// When the action fails, but encourages trying other fallthrough actions before resulting to a failure.
+	/// When the action does nothing.
 	Pass,
 	/// This action was attempted, and failed - all other fallthrough actions should not be attempted and an error should be emitted.
 	Failure(E),
@@ -74,6 +74,30 @@ pub enum ActionResult<S = (), E = ()> {
 impl<S, E> ActionResult<S, E> {
 	#[must_use]
 	pub fn passed(&self) -> bool { matches!(self, Self::Pass) }
+
+	pub fn map_success<S2>(self, f: impl FnOnce(S) -> S2) -> ActionResult<S2, E> {
+		match self {
+			Self::Success(s) => ActionResult::<S2, E>::Success(f(s)),
+			Self::Pass => ActionResult::<S2, E>::Pass,
+			Self::Failure(e) => ActionResult::<S2, E>::Failure(e),
+		}
+	}
+
+	pub fn flatten_pass(self, pass: Result<S, E>) -> Result<S, E> {
+		match self {
+			Self::Success(s) => Ok(s),
+			Self::Pass => pass,
+			Self::Failure(e) => Err(e),
+		}
+	}
+
+	pub fn map_failure<E2>(self, f: impl FnOnce(E) -> E2) -> ActionResult<S, E2> {
+		match self {
+			Self::Success(s) => ActionResult::<S, E2>::Success(s),
+			Self::Pass => ActionResult::<S, E2>::Pass,
+			Self::Failure(e) => ActionResult::<S, E2>::Failure(f(e)),
+		}
+	}
 }
 
 /// [`ActionResult`]-esc type for ? syntax. Returns [`ActionResult::Failure`] on failure.

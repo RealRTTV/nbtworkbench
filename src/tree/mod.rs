@@ -126,9 +126,8 @@ mod callback_info {
 
 pub use callback_info::CallbackInfo;
 
-use crate::{
-	elements::element::NbtElement,
-	render::widget::selected_text::SelectedText,
-	tree::indices::{Indices, OwnedIndices},
-	workbench::{marked_line::MarkedLines, FileUpdateSubscription},
-};
+use crate::elements::element::NbtElement;
+use crate::render::widget::selected_text::SelectedText;
+use crate::tree::indices::{Indices, OwnedIndices};
+use crate::workbench::FileUpdateSubscription;
+use crate::workbench::marked_line::MarkedLines;

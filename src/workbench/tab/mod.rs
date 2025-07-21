@@ -1,55 +1,46 @@
-use std::{
-	ffi::OsStr,
-	fmt::Display,
-	io::Read,
-	path::{Path, PathBuf},
-	time::Duration,
-};
+use std::ffi::OsStr;
+use std::fmt::Display;
+use std::io::{Read, Write};
+use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, ensure};
 use compact_str::CompactString;
 use flate2::Compression;
+use itertools::Either;
 use thiserror::Error;
 use winit::dpi::PhysicalSize;
 use zune_inflate::DeflateDecoder;
 
-use crate::{
-	elements::{
-		ComplexNbtElementVariant, NbtElementVariant,
-		array::{NbtByteArray, NbtIntArray, NbtLongArray},
-		byte::NbtByte,
-		chunk::NbtChunk,
-		compound::NbtCompound,
-		double::NbtDouble,
-		element::NbtElement,
-		float::NbtFloat,
-		int::NbtInt,
-		list::NbtList,
-		long::NbtLong,
-		region::NbtRegion,
-		short::NbtShort,
-		string::NbtString,
-	},
-	history::{WorkbenchAction, manager::HistoryMananger},
-	render::{
-		RenderContext,
-		assets::{
-			BASE_Z, CONNECTION_UV, FROM_CLIPBOARD_GHOST_UV, FROM_CLIPBOARD_UV, GZIP_FILE_TYPE_UV, HEADER_SIZE, HELD_SCROLLBAR_UV, JUST_OVERLAPPING_BASE_Z, LINE_NUMBER_SEPARATOR_UV, LITTLE_ENDIAN_HEADER_NBT_FILE_TYPE_UV,
-			LITTLE_ENDIAN_NBT_FILE_TYPE_UV, MCA_FILE_TYPE_UV, NBT_FILE_TYPE_UV, SCROLLBAR_Z, SNBT_FILE_TYPE_UV, STEAL_ANIMATION_OVERLAY_UV, UNHELD_SCROLLBAR_UV, ZLIB_FILE_TYPE_UV, ZOffset,
-		},
-		color::TextColor,
-		vertex_buffer_builder::VertexBufferBuilder,
-		widget::{
-			selected_text::{SaveSelectedTextError, SelectedText, SelectedTextConstructionError},
-			text::{TEXT_DOUBLE_CLICK_INTERVAL, get_cursor_left_jump_idx, get_cursor_right_jump_idx},
-		},
-	},
-	util::{StrExt, Timestamp, Vec2u, drop_on_separate_thread},
-	workbench::{
-		marked_line::MarkedLines,
-		FileUpdateSubscription, HeldEntry,
-	},
+use crate::elements::array::{NbtByteArray, NbtIntArray, NbtLongArray};
+use crate::elements::byte::NbtByte;
+use crate::elements::chunk::NbtChunk;
+use crate::elements::compound::NbtCompound;
+use crate::elements::double::NbtDouble;
+use crate::elements::element::NbtElement;
+use crate::elements::float::NbtFloat;
+use crate::elements::int::NbtInt;
+use crate::elements::list::NbtList;
+use crate::elements::long::NbtLong;
+use crate::elements::region::NbtRegion;
+use crate::elements::short::NbtShort;
+use crate::elements::string::NbtString;
+use crate::elements::{ComplexNbtElementVariant, NbtElementVariant};
+use crate::history::WorkbenchAction;
+use crate::history::manager::HistoryMananger;
+use crate::render::TreeRenderContext;
+use crate::render::assets::{
+	BASE_Z, CONNECTION_UV, FROM_CLIPBOARD_GHOST_UV, FROM_CLIPBOARD_UV, GZIP_FILE_TYPE_UV, HEADER_SIZE, HELD_SCROLLBAR_UV, JUST_OVERLAPPING_BASE_Z, LINE_NUMBER_SEPARATOR_UV, LITTLE_ENDIAN_HEADER_NBT_FILE_TYPE_UV, LITTLE_ENDIAN_NBT_FILE_TYPE_UV,
+	MCA_FILE_TYPE_UV, NBT_FILE_TYPE_UV, SCROLLBAR_Z, SNBT_FILE_TYPE_UV, STEAL_ANIMATION_OVERLAY_UV, UNHELD_SCROLLBAR_UV, ZLIB_FILE_TYPE_UV, ZOffset,
 };
+use crate::render::color::TextColor;
+use crate::render::vertex_buffer_builder::VertexBufferBuilder;
+use crate::render::widget::selected_text::{SaveSelectedTextError, SelectedText, SelectedTextConstructionError};
+use crate::render::widget::text::{TEXT_DOUBLE_CLICK_INTERVAL, get_cursor_left_jump_idx, get_cursor_right_jump_idx};
+use crate::tree::traverse::TraversalError;
+use crate::util::{StrExt, Timestamp, Vec2u, drop_on_separate_thread};
+use crate::workbench::marked_line::MarkedLines;
+use crate::workbench::{FileUpdateSubscription, HeldEntry};
 
 pub mod manager;
 
@@ -158,7 +149,17 @@ impl Tab {
 	}
 
 	pub fn save_selected_text(&mut self) -> Result<(), SaveSelectedTextError> {
-		if let Some(action) = WorkbenchAction::bulk(self.selected_text.iter_mut().map(|text| text.save(&mut self.root, &mut self.path)).collect::<Result<Vec<WorkbenchAction>, SaveSelectedTextError>>()?) {
+		if let Some(action) = WorkbenchAction::bulk(
+			self.selected_text
+				.iter_mut()
+				.map(|text| text.save(&mut self.root, &mut self.path))
+				.map(|res| res.map_success(Some).flatten_pass(Ok(None)))
+				.flat_map(|res| match res {
+					Ok(iter) => Either::Left(iter.into_iter().map(|x| Ok(x))),
+					Err(e) => Either::Right(std::iter::once(Err(e))),
+				})
+				.collect::<Result<Vec<WorkbenchAction>, SaveSelectedTextError>>()?,
+		) {
 			self.history.append(action);
 		}
 		Ok(())
@@ -209,7 +210,7 @@ impl Tab {
 		Ok(())
 	}
 
-	pub fn render(&self, builder: &mut VertexBufferBuilder, ctx: &mut RenderContext, held: bool, skip_tooltips: bool, steal_delta: f32) {
+	pub fn render(&self, builder: &mut VertexBufferBuilder, ctx: &mut TreeRenderContext, held: bool, skip_tooltips: bool, steal_delta: f32) {
 		let TabConstants { horizontal_scroll, scroll, .. } = self.consts();
 		let horizontal_scroll_before = core::mem::replace(&mut builder.horizontal_scroll, horizontal_scroll);
 		// let start = std::time::Instant::now();
@@ -346,8 +347,11 @@ impl Tab {
 					}
 					text.cursor = right;
 				}
+
+				self.selected_text = Some(text);
 				Ok(())
-			}
+			},
+			Err(SelectedTextConstructionError::Traversal(e)) if e.is_generally_ignored() => Ok(()), // ignored
 			Err(e) => {
 				self.selected_text = None;
 				self.last_selected_text_interaction = (0, 0, Timestamp::UNIX_EPOCH);
@@ -361,7 +365,12 @@ impl Tab {
 
 		let free_space = 48 + left_margin;
 		if let Some(selected_text) = self.selected_text.as_ref() {
-			let pos = left_margin + selected_text.indices.len() * 16 + 32 + SelectedText::PREFIXING_SPACE_WIDTH + selected_text.prefix.0.width() + selected_text.keyfix.as_ref().map_or(0, |x| x.0.width()) + selected_text.value.split_at(selected_text.cursor).0.width();
+			let pos = left_margin
+				+ selected_text.indices.len() * 16
+				+ 32 + SelectedText::PREFIXING_SPACE_WIDTH
+				+ selected_text.prefix.0.width()
+				+ selected_text.keyfix.as_ref().map_or(0, |x| x.0.width())
+				+ selected_text.value.split_at(selected_text.cursor).0.width();
 			if pos + free_space < self.window_dims.width as usize {
 				self.horizontal_scroll = 0;
 			} else if pos + free_space >= self.window_dims.width as usize + horizontal_scroll {
@@ -393,7 +402,6 @@ impl Tab {
 		}
 	}
 
-	#[deprecated = "Use `Tab::consts`"]
 	#[must_use]
 	pub fn left_margin(&self) -> usize { ((self.root.true_height() + self.held_entry.as_ref().map_or(0, |held_entry| held_entry.kv.1.true_height())).ilog10() as usize + 1) * 8 + 4 + 8 }
 
@@ -402,7 +410,6 @@ impl Tab {
 		self.scroll = self.scroll();
 	}
 
-	#[deprecated = "Use `Tab::consts`"]
 	#[must_use]
 	pub fn scroll(&self) -> usize {
 		let height = self.root.height() * 16 + 32 + 15;
@@ -411,7 +418,6 @@ impl Tab {
 		scroll.min(max) & !15
 	}
 
-	#[deprecated = "Use `Tab::consts`"]
 	#[must_use]
 	pub fn horizontal_scroll(&self) -> usize {
 		let left_margin = self.left_margin();
@@ -682,7 +688,11 @@ impl ChunkFileFormat {
 				let _ = flate2::read::ZlibEncoder::new(data.to_be_file().as_slice(), Compression::best()).read_to_end(&mut vec);
 				vec
 			}
-			Self::Lz4 => lz4_flex::compress(&data.to_be_file()),
+			Self::Lz4 => {
+				let mut vec = vec![];
+				let _ = lz4_java_wrc::Lz4BlockOutput::new(&mut vec).write_all(&data.to_be_file());
+				vec
+			}
 		}
 	}
 

@@ -1,15 +1,11 @@
-use std::{
-	cmp::Ordering,
-	collections::Bound,
-	convert::identity,
-	ops::{BitAndAssign, BitOrAssign, BitXorAssign, Deref, DerefMut, Index, IndexMut, RangeBounds},
-};
+use std::cmp::Ordering;
+use std::collections::Bound;
+use std::convert::identity;
+use std::ops::{BitAndAssign, BitOrAssign, BitXorAssign, Deref, DerefMut, Index, IndexMut, RangeBounds};
 
-use crate::{
-	elements::element::NbtElement,
-	render::assets::{BOOKMARK_UV, HIDDEN_BOOKMARK_UV},
-	util::{Vec2u, intersection_two_sorted_no_duplicates, symmetric_difference_two_sorted_no_duplicates, union_two_sorted_no_duplicates},
-};
+use crate::elements::element::NbtElement;
+use crate::render::assets::{BOOKMARK_UV, HIDDEN_BOOKMARK_UV};
+use crate::util::{Vec2u, intersection_two_sorted_no_duplicates, symmetric_difference_two_sorted_no_duplicates, union_two_sorted_no_duplicates};
 
 macro_rules! slice {
     ($($t:tt)*) => {

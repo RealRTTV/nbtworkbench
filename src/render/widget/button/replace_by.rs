@@ -1,56 +1,46 @@
-use fxhash::FxHashSet;
 use winit::dpi::PhysicalSize;
 use winit::event::MouseButton;
 
-use crate::{
-	action_result::ActionResult,
-	config,
-	render::{
-		assets::{HOVERED_WIDGET_UV, REPLACE_BOX_SELECTION_Z},
-		color::TextColor,
-		vertex_buffer_builder::VertexBufferBuilder,
-		widget::{
-			Widget, WidgetContext, WidgetContextMut,
-			search_box::SEARCH_BOX_END_X,
-		},
-	},
-	util::{AxisAlignedBoundingBox, Vec2u},
-};
+use crate::action_result::ActionResult;
+use crate::config;
+use crate::render::assets::{HOVERED_WIDGET_UV, REPLACE_BOX_SELECTION_Z};
+use crate::render::color::TextColor;
+use crate::render::vertex_buffer_builder::VertexBufferBuilder;
+use crate::render::widget::search_box::SEARCH_BOX_END_X;
+use crate::render::widget::{HorizontalWidgetAlignmentPreference, VerticalWidgetAlignmentPreference, Widget, WidgetAlignment, WidgetContext, WidgetContextMut};
+use crate::util::{AABB, Vec2u};
+use crate::workbench::mouse::MouseManager;
 
+#[derive(Default, Copy, Clone)]
 pub struct ReplaceByButton;
 
 impl Widget for ReplaceByButton {
-	fn new() -> Self
-	where Self: Sized {
-		Self
-	}
+	fn alignment(&self) -> WidgetAlignment { WidgetAlignment::new(HorizontalWidgetAlignmentPreference::Static(-(SEARCH_BOX_END_X as i32)), VerticalWidgetAlignmentPreference::Static(50)) }
 
-	fn bounds(&self, window_dims: PhysicalSize<u32>) -> AxisAlignedBoundingBox { AxisAlignedBoundingBox::new(window_dims.width as usize - SEARCH_BOX_END_X - 17, window_dims.width as usize - SEARCH_BOX_END_X - 1, 50, 66) }
+	fn dimensions(&self, _containment_dims: PhysicalSize<u32>) -> PhysicalSize<u32> { PhysicalSize::new(16, 16) }
+	fn is_valid_mouse_button(&self, button: MouseButton, pos: Vec2u, dims: PhysicalSize<u32>) -> bool { matches!(button, MouseButton::Left | MouseButton::Right) }
+	fn on_mouse_down(&mut self, button: MouseButton, pos: Vec2u, dims: PhysicalSize<u32>, ctx: &mut WidgetContextMut) -> ActionResult {
+		if !(ctx.search_box.is_selected() || ctx.replace_box.is_selected()) {
+			return ActionResult::Pass
+		}
 
-	fn is_valid_mouse_button(button: MouseButton) -> bool { matches!(button, MouseButton::Left | MouseButton::Right) }
-
-	fn on_mouse_down(&mut self, button: MouseButton, ctx: &mut WidgetContextMut) -> ActionResult {
 		let reverse = matches!(button, MouseButton::Right) ^ ctx.shift;
 		config::set_replace_by(if reverse { config::get_replace_by().rev_cycle() } else { config::get_replace_by().cycle() });
 		ActionResult::Success(())
 	}
-
-	fn is_clickable(&self, ctx: &WidgetContext) -> bool { ctx.search_box.is_selected() || ctx.replace_box.is_selected() }
-
 	fn is_visible(&self, ctx: &WidgetContext) -> bool { ctx.search_box.is_selected() || ctx.replace_box.is_selected() }
 
-	fn render(&self, builder: &mut VertexBufferBuilder, mouse: Vec2u, window_dims: PhysicalSize<u32>, _ctx: &WidgetContext, held_mouse_keys: &FxHashSet<MouseButton>) {
-		let aabb = self.bounds(window_dims);
-		let widget_uv = self.get_widget_uv(mouse, window_dims, held_mouse_keys);
+	fn render_at(&self, pos: Vec2u, dims: PhysicalSize<u32>, builder: &mut VertexBufferBuilder, mouse: &MouseManager, ctx: &WidgetContext) {
+		let widget_uv = super::get_button_widget_uv(self, AABB::from_pos_and_dims(pos, dims), dims, mouse);
 		let replace_by = config::get_replace_by();
 		let uv = replace_by.uv();
 
 		if widget_uv == HOVERED_WIDGET_UV {
 			builder.color = TextColor::White.to_raw();
-			builder.draw_tooltip(&[&format!("Replace by {replace_by}")], mouse, false);
+			builder.draw_tooltip(&[&format!("Replace by {replace_by}")], mouse.coords, false);
 		}
 
-		builder.draw_texture_z(aabb.low(), REPLACE_BOX_SELECTION_Z, widget_uv, (16, 16));
-		builder.draw_texture_z(aabb.low(), REPLACE_BOX_SELECTION_Z, uv, (16, 16));
+		builder.draw_texture_z(pos, REPLACE_BOX_SELECTION_Z, widget_uv, dims);
+		builder.draw_texture_z(pos, REPLACE_BOX_SELECTION_Z, uv, dims);
 	}
 }

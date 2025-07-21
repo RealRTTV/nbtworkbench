@@ -1,14 +1,13 @@
-use std::{
-	borrow::{Borrow, BorrowMut},
-	fmt::{Debug, Display, Formatter},
-	iter::Copied,
-	ops::{Deref, DerefMut, Index, IndexMut},
-	slice,
-};
+use std::borrow::{Borrow, BorrowMut};
+use std::fmt::{Debug, Display, Formatter};
+use std::iter::Copied;
+use std::ops::{Deref, DerefMut, Index, IndexMut};
+use std::slice;
 
 use itertools::{Itertools, Position};
 
-use crate::{elements::element::NbtElement, util};
+use crate::elements::element::NbtElement;
+use crate::util;
 
 #[repr(transparent)]
 pub struct Indices([usize]);
@@ -120,16 +119,12 @@ impl Indices {
 
 	#[must_use]
 	pub fn is_root(&self) -> bool { self.0.is_empty() }
-	
-	#[must_use]
-	pub fn end_x(&self, left_margin: usize) -> usize {
-		Self::end_x_from_depth(self.len(), left_margin)
-	}
 
 	#[must_use]
-	pub fn end_x_from_depth(depth: usize, left_margin: usize) -> usize {
-		left_margin + NbtElement::INITIAL_DEPTH_WIDTH + depth * NbtElement::DEPTH_INCREMENT_WIDTH
-	}
+	pub fn end_x(&self, left_margin: usize) -> usize { Self::end_x_from_depth(self.len(), left_margin) }
+
+	#[must_use]
+	pub fn end_x_from_depth(depth: usize, left_margin: usize) -> usize { left_margin + NbtElement::INITIAL_DEPTH_WIDTH + depth * NbtElement::DEPTH_INCREMENT_WIDTH }
 }
 
 impl<T: Into<Vec<usize>>> From<T> for OwnedIndices {

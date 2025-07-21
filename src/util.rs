@@ -1,18 +1,17 @@
 use core::time::Duration;
-use std::{
-	alloc::{Allocator, Layout},
-	cmp::Ordering,
-	fmt::{Debug, Formatter},
-	hint::likely,
-	iter,
-	mem::MaybeUninit,
-	ops::{Add, Sub},
-};
-use std::ops::{AddAssign, Div, DivAssign, Mul, MulAssign, SubAssign};
+use std::alloc::{Allocator, Layout};
+use std::cmp::Ordering;
+use std::fmt::{Debug, Formatter};
+use std::hint::likely;
+use std::iter;
+use std::mem::MaybeUninit;
+use std::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Sub, SubAssign};
+
 use compact_str::{CompactString, ToCompactString};
 use regex::{Regex, RegexBuilder};
 use thiserror::Error;
 use winit::dpi::{PhysicalPosition, PhysicalSize};
+
 use crate::render::vertex_buffer_builder::VertexBufferBuilder;
 #[cfg(target_arch = "wasm32")]
 pub use crate::wasm::{get_clipboard, set_clipboard};
@@ -49,7 +48,7 @@ impl Timestamp {
 	}
 
 	#[must_use]
-	pub fn elapsed(self) -> Duration { self - Self::UNIX_EPOCH }
+	pub fn elapsed(self) -> Duration { Self::now() - self }
 
 	#[must_use]
 	pub const fn saturating_sub(self, rhs: Self) -> Duration { self.since_epoch.saturating_sub(rhs.since_epoch) }
@@ -175,7 +174,7 @@ pub struct SinglyLinkedNode<T> {
 }
 
 #[must_use]
-pub fn smoothstep64(x: f64) -> f64 {
+pub fn smoothstep(x: f64) -> f64 {
 	let x = x.clamp(0.0, 1.0);
 	3.0 * x * x - 2.0 * x * x * x
 }
@@ -919,10 +918,17 @@ impl Vec2u {
 			y: self.y.saturating_sub(rhs.y),
 		}
 	}
-	
+
 	#[must_use]
-	pub fn angle(self) -> f64 {
-		f64::atan2(self.y as f64, self.x as f64)
+	pub fn angle(self) -> f64 { f64::atan2(self.y as f64, self.x as f64) }
+
+	#[must_use]
+	pub fn relative_to(self, aabb: AABB) -> Option<Self> {
+		if aabb.contains(self) {
+			Some(self - aabb.low())
+		} else {
+			None
+		}
 	}
 }
 
@@ -958,7 +964,10 @@ impl<T: Into<(usize, usize)>> Add<T> for Vec2u {
 
 	fn add(self, rhs: T) -> Self::Output {
 		let (x, y) = rhs.into();
-		Self { x: self.x.wrapping_add(x), y: self.y.wrapping_add(y) }
+		Self {
+			x: self.x.wrapping_add(x),
+			y: self.y.wrapping_add(y),
+		}
 	}
 }
 
@@ -975,7 +984,10 @@ impl<T: Into<(usize, usize)>> Sub<T> for Vec2u {
 
 	fn sub(self, rhs: T) -> Self::Output {
 		let (x, y) = rhs.into();
-		Self { x: self.x.wrapping_sub(x), y: self.y.wrapping_sub(y) }
+		Self {
+			x: self.x.wrapping_sub(x),
+			y: self.y.wrapping_sub(y),
+		}
 	}
 }
 
@@ -990,12 +1002,7 @@ impl<T: Into<(usize, usize)>> SubAssign<T> for Vec2u {
 impl Mul for Vec2u {
 	type Output = Self;
 
-	fn mul(self, rhs: Self) -> Self::Output {
-		Self {
-			x: self.x * rhs.x,
-			y: self.y * rhs.y,
-		}
-	}
+	fn mul(self, rhs: Self) -> Self::Output { Self { x: self.x * rhs.x, y: self.y * rhs.y } }
 }
 
 impl MulAssign for Vec2u {
@@ -1005,15 +1012,22 @@ impl MulAssign for Vec2u {
 	}
 }
 
+impl Mul<usize> for Vec2u {
+	type Output = Self;
+
+	fn mul(self, rhs: usize) -> Self::Output { Self::new(self.x * rhs, self.y * rhs) }
+}
+
 impl Div for Vec2u {
 	type Output = Self;
 
-	fn div(self, rhs: Self) -> Self::Output {
-		Self {
-			x: self.x / rhs.x,
-			y: self.y / rhs.y,
-		}
-	}
+	fn div(self, rhs: Self) -> Self::Output { Self { x: self.x / rhs.x, y: self.y / rhs.y } }
+}
+
+impl Div<usize> for Vec2u {
+	type Output = Self;
+
+	fn div(self, rhs: usize) -> Self::Output { Self::new(self.x / rhs, self.y / rhs) }
 }
 
 impl DivAssign for Vec2u {
@@ -1031,34 +1045,21 @@ pub struct Vec2d {
 
 impl Vec2d {
 	#[must_use]
-	pub const fn new(x: f64, y: f64) -> Self {
-		Self { x, y, }
-	}
-	
+	pub const fn new(x: f64, y: f64) -> Self { Self { x, y } }
+
 	#[must_use]
-	pub fn round(self) -> Self {
-		Self {
-			x: self.x.round(),
-			y: self.y.round(),
-		}
-	}
-	
+	pub fn round(self) -> Self { Self { x: self.x.round(), y: self.y.round() } }
+
 	#[must_use]
-	pub fn distance_squared(self) -> f64 {
-		self.x * self.x + self.y * self.y
-	}
+	pub fn distance_squared(self) -> f64 { self.x * self.x + self.y * self.y }
 }
 
 impl Debug for Vec2d {
-	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-		write!(f, "({x},{y})", x = self.x, y = self.y)
-	}
+	fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result { write!(f, "({x},{y})", x = self.x, y = self.y) }
 }
 
 impl From<(f64, f64)> for Vec2d {
-	fn from(value: (f64, f64)) -> Self {
-		Self::new(value.0, value.1)
-	}
+	fn from(value: (f64, f64)) -> Self { Self::new(value.0, value.1) }
 }
 
 impl From<Vec2d> for (f64, f64) {
@@ -1066,39 +1067,19 @@ impl From<Vec2d> for (f64, f64) {
 }
 
 impl From<Vec2d> for Vec2u {
-	fn from(vec: Vec2d) -> Self {
-		Self {
-			x: vec.x as usize,
-			y: vec.y as usize,
-		}
-	}
+	fn from(vec: Vec2d) -> Self { Self { x: vec.x as usize, y: vec.y as usize } }
 }
 
 impl From<Vec2u> for Vec2d {
-	fn from(vec: Vec2u) -> Self {
-		Self {
-			x: vec.x as f64,
-			y: vec.y as f64,
-		}
-	}
+	fn from(vec: Vec2u) -> Self { Self { x: vec.x as f64, y: vec.y as f64 } }
 }
 
 impl From<PhysicalSize<f64>> for Vec2d {
-	fn from(value: PhysicalSize<f64>) -> Self {
-		Self {
-			x: value.width,
-			y: value.height,
-		}
-	}
+	fn from(value: PhysicalSize<f64>) -> Self { Self { x: value.width, y: value.height } }
 }
 
 impl From<PhysicalPosition<f64>> for Vec2d {
-	fn from(value: PhysicalPosition<f64>) -> Self {
-		Self {
-			x: value.x,
-			y: value.y,
-		}
-	}
+	fn from(value: PhysicalPosition<f64>) -> Self { Self { x: value.x, y: value.y } }
 }
 
 impl<T: Into<(f64, f64)>> Add<T> for Vec2d {
@@ -1138,12 +1119,7 @@ impl<T: Into<(f64, f64)>> SubAssign<T> for Vec2d {
 impl Mul for Vec2d {
 	type Output = Self;
 
-	fn mul(self, rhs: Self) -> Self::Output {
-		Self {
-			x: self.x * rhs.x,
-			y: self.y * rhs.y,
-		}
-	}
+	fn mul(self, rhs: Self) -> Self::Output { Self { x: self.x * rhs.x, y: self.y * rhs.y } }
 }
 
 impl MulAssign for Vec2d {
@@ -1156,12 +1132,7 @@ impl MulAssign for Vec2d {
 impl Div for Vec2d {
 	type Output = Self;
 
-	fn div(self, rhs: Self) -> Self::Output {
-		Self {
-			x: self.x / rhs.x,
-			y: self.y / rhs.y,
-		}
-	}
+	fn div(self, rhs: Self) -> Self::Output { Self { x: self.x / rhs.x, y: self.y / rhs.y } }
 }
 
 impl DivAssign for Vec2d {
@@ -1174,12 +1145,7 @@ impl DivAssign for Vec2d {
 impl Mul<f64> for Vec2d {
 	type Output = Self;
 
-	fn mul(self, rhs: f64) -> Self::Output {
-		Self {
-			x: self.x * rhs,
-			y: self.y * rhs,
-		}
-	}
+	fn mul(self, rhs: f64) -> Self::Output { Self { x: self.x * rhs, y: self.y * rhs } }
 }
 
 impl MulAssign<f64> for Vec2d {
@@ -1192,12 +1158,7 @@ impl MulAssign<f64> for Vec2d {
 impl Div<f64> for Vec2d {
 	type Output = Self;
 
-	fn div(self, rhs: f64) -> Self::Output {
-		Self {
-			x: self.x / rhs,
-			y: self.y / rhs,
-		}
-	}
+	fn div(self, rhs: f64) -> Self::Output { Self { x: self.x / rhs, y: self.y / rhs } }
 }
 
 impl DivAssign<f64> for Vec2d {
@@ -1208,19 +1169,29 @@ impl DivAssign<f64> for Vec2d {
 }
 
 #[derive(Copy, Clone)]
-pub struct AxisAlignedBoundingBox {
+pub struct AABB {
 	low: Vec2u,
 	high: Vec2u,
 }
 
-impl AxisAlignedBoundingBox {
+impl AABB {
+	pub const NIL: Self = Self::new(0, 0, 0, 0);
+
 	#[must_use]
-	pub fn new(x0: usize, x1: usize, y0: usize, y1: usize) -> Self {
+	pub const fn new(x0: usize, x1: usize, y0: usize, y1: usize) -> Self {
 		let (x0, x1) = if likely(x0 < x1) { (x0, x1) } else { (x1, x0) };
 		let (y0, y1) = if likely(y0 < y1) { (y0, y1) } else { (y1, y0) };
 		Self {
 			low: Vec2u::new(x0, y0),
 			high: Vec2u::new(x1, y1),
+		}
+	}
+
+	#[must_use]
+	pub const fn from_pos_and_dims(pos: Vec2u, dims: PhysicalSize<u32>) -> Self {
+		Self {
+			low: pos,
+			high: Vec2u::new(pos.x + dims.width as usize, pos.y + dims.height as usize),
 		}
 	}
 
@@ -1239,6 +1210,15 @@ impl AxisAlignedBoundingBox {
 
 	#[must_use]
 	pub fn high(self) -> Vec2u { self.high }
+
+	#[must_use]
+	pub fn width(self) -> usize { self.high.x - self.low.x }
+
+	#[must_use]
+	pub fn height(self) -> usize { self.high.y - self.low.y }
+	
+	#[must_use]
+	pub fn dims(self) -> PhysicalSize<u32> { PhysicalSize::new(self.width() as _, self.height() as _) }
 }
 
 #[cfg(test)]

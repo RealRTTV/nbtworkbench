@@ -1,47 +1,37 @@
 use std::cmp::Ordering;
 #[cfg(not(target_arch = "wasm32"))] use std::fs::OpenOptions;
 
-use anyhow::{Context, anyhow, bail};
+use anyhow::{Context, bail};
 #[cfg(not(target_arch = "wasm32"))]
 use notify::{EventKind, PollWatcher, RecursiveMode, Watcher};
 
+use crate::elements::NbtElementVariant;
+use crate::elements::array::{NbtByteArray, NbtIntArray, NbtLongArray};
+use crate::elements::byte::NbtByte;
+use crate::elements::chunk::NbtChunk;
+use crate::elements::compound::{CompoundEntry, NbtCompound};
+use crate::elements::double::NbtDouble;
+use crate::elements::element::{NbtElement, NbtPattern};
+use crate::elements::float::NbtFloat;
+use crate::elements::int::NbtInt;
+use crate::elements::list::NbtList;
+use crate::elements::long::NbtLong;
+use crate::elements::short::NbtShort;
+use crate::elements::string::NbtString;
+use crate::history::WorkbenchAction;
+use crate::render::assets::{ACTION_WHEEL_Z, COPY_FORMATTED_UV, COPY_RAW_UV, INSERT_FROM_CLIPBOARD_UV, INVERT_BOOKMARKS_UV, SORT_COMPOUND_BY_NAME_UV, SORT_COMPOUND_BY_TYPE_UV};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::render::assets::{OPEN_ARRAY_IN_HEX_UV, OPEN_IN_TXT_UV};
-use crate::{
-	elements::{
-		NbtElementVariant,
-		array::{NbtByteArray, NbtIntArray, NbtLongArray},
-		byte::NbtByte,
-		chunk::NbtChunk,
-		compound::{CompoundEntry, NbtCompound},
-		double::NbtDouble,
-		element::{NbtElement, NbtPattern},
-		float::NbtFloat,
-		int::NbtInt,
-		list::NbtList,
-		long::NbtLong,
-		short::NbtShort,
-		string::NbtString,
-	},
-	history::WorkbenchAction,
-	render::{
-		assets::{ACTION_WHEEL_Z, COPY_FORMATTED_UV, COPY_RAW_UV, INSERT_FROM_CLIPBOARD_UV, INVERT_BOOKMARKS_UV, SORT_COMPOUND_BY_NAME_UV, SORT_COMPOUND_BY_TYPE_UV},
-		vertex_buffer_builder::VertexBufferBuilder,
-	},
-	serialization::encoder::UncheckedBufWriter,
-	tree::{
-		MutableIndices,
-		actions::{add::add_element, reorder::reorder_element},
-		indices::OwnedIndices,
-		navigate::NavigationInformation,
-	},
-	util::{StrExt, Timestamp, get_clipboard, set_clipboard},
-	workbench::{
-		marked_line::MarkedLine,
-		FileUpdateSubscription,
-		FileUpdateSubscriptionType,
-	},
-};
+use crate::render::vertex_buffer_builder::VertexBufferBuilder;
+use crate::serialization::encoder::UncheckedBufWriter;
+use crate::tree::MutableIndices;
+use crate::tree::actions::add::add_element;
+use crate::tree::actions::reorder::reorder_element;
+use crate::tree::indices::OwnedIndices;
+use crate::tree::navigate::NavigationInformation;
+use crate::util::{StrExt, Timestamp, get_clipboard, set_clipboard};
+use crate::workbench::marked_line::MarkedLine;
+use crate::workbench::{FileUpdateSubscription, FileUpdateSubscriptionType};
 
 #[derive(Copy, Clone, PartialEq, Eq)]
 pub enum ElementAction {
@@ -178,6 +168,7 @@ impl ElementAction {
 			#[cfg(not(target_arch = "wasm32"))]
 			action @ (Self::OpenArrayInHex | Self::OpenInTxt) => {
 				use std::io::Write;
+
 				use NbtPattern as Nbt;
 
 				let NavigationInformation { key, element, .. } = root.navigate(&indices).context("Could not navigate indices")?;
@@ -255,7 +246,7 @@ impl ElementAction {
 			}
 			Self::InsertFromClipboard => {
 				let clipboard = get_clipboard().context("Could not get clipboard")?;
-				let kv = NbtElement::from_str(&clipboard).map_err(|idx| anyhow!("Could not parse clipboard as SNBT (failed at index {idx})"))?;
+				let kv = NbtElement::from_str(&clipboard)?;
 				indices.push(0);
 				Ok(Some(add_element(root, kv, indices, mi).context("Failed to insert element")?.into_action()))
 			}

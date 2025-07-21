@@ -2,23 +2,19 @@ use anyhow::Result;
 use compact_str::CompactString;
 use thiserror::Error;
 
-use crate::{
-	elements::{NbtElementAndKey, element::NbtElement},
-	tree::{
-		MutableIndices,
-		actions::{
-			add::{AddElementError, AddElementResult, add_element},
-			remove::{RemoveElementError, RemoveElementResult, remove_element},
-			rename::{RenameElementError, rename_element},
-			reorder::{ReorderElementError, reorder_element},
-			replace::{ReplaceElementError, ReplaceElementResult, replace_element},
-			swap::{SwapElementErrorSameDepth, swap_element_same_depth},
-		},
-		indices::OwnedIndices,
-	},
-	util::LinkedQueue,
-	workbench::{tab::FilePath, HeldEntry},
-};
+use crate::elements::NbtElementAndKey;
+use crate::elements::element::NbtElement;
+use crate::tree::MutableIndices;
+use crate::tree::actions::add::{AddElementError, AddElementResult, add_element};
+use crate::tree::actions::remove::{RemoveElementError, RemoveElementResult, remove_element};
+use crate::tree::actions::rename::{RenameElementError, rename_element};
+use crate::tree::actions::reorder::{ReorderElementError, reorder_element};
+use crate::tree::actions::replace::{ReplaceElementError, ReplaceElementResult, replace_element};
+use crate::tree::actions::swap::{SwapElementErrorSameDepth, swap_element_same_depth};
+use crate::tree::indices::OwnedIndices;
+use crate::util::LinkedQueue;
+use crate::workbench::HeldEntry;
+use crate::workbench::tab::FilePath;
 
 pub mod manager;
 
@@ -91,17 +87,20 @@ impl WorkbenchAction {
 		}
 	}
 
-	pub fn undo<'m1, 'm2: 'm1>(self, root: &mut NbtElement, mi: &'m1 mut MutableIndices<'m2>, path: &mut FilePath, held_entry: &mut Option<HeldEntry>) -> Result<Self, WorkbenchActionError> {
+	pub fn undo<'m1, 'm2: 'm1>(self, root: &mut NbtElement, mi: &'m1 mut MutableIndices<'m2>, path: &mut FilePath, held_entry: &mut Option<HeldEntry>) -> Result<Self, UndoWorkbenchActionError> {
 		Ok(match self {
 			Self::Add { indices } => remove_element(root, indices, mi)?.into_action(),
 			Self::Remove { kv, indices } => add_element(root, kv, indices, mi)?.into_action(),
 			Self::Replace { indices, kv: value } => replace_element(root, value, indices, mi)?.into_action(),
-			Self::Rename { indices, key, value } => rename_element(root, indices, key, value, path)?.into_action(),
+			Self::Rename { indices, key, value } => rename_element(root, indices, key, value, path)
+				.map_failure(UndoWorkbenchActionError::from)
+				.flatten_pass(Err(UndoWorkbenchActionError::Passed))?
+				.into_action(),
 			Self::Swap { parent, a, b } => swap_element_same_depth(root, parent, a, b, mi)?.into_action(),
 			Self::Reorder { indices, mapping } => reorder_element(root, indices, mapping, mi)?.into_action(),
 			Self::AddFromHeldEntry { indices, mut indices_history, old_kv } => {
 				if held_entry.is_some() {
-					return Err(WorkbenchActionError::AddFromHeldEntry(AddFromHeldEntryError::HasHeldEntry))
+					return Err(UndoWorkbenchActionError::AddFromHeldEntry(AddFromHeldEntryError::HasHeldEntry))
 				}
 
 				let (indices, kv) = if let Some(old_kv) = old_kv {
@@ -110,7 +109,7 @@ impl WorkbenchAction {
 				} else {
 					let RemoveElementResult { indices, kv, replaces } = remove_element(root, indices, mi)?;
 					if replaces {
-						return Err(WorkbenchActionError::AddFromHeldEntry(AddFromHeldEntryError::ExpectedOldKVPair))
+						return Err(UndoWorkbenchActionError::AddFromHeldEntry(AddFromHeldEntryError::ExpectedOldKVPair))
 					}
 					(indices, kv)
 				};
@@ -119,7 +118,7 @@ impl WorkbenchAction {
 				Self::RemoveToHeldEntry
 			}
 			Self::RemoveToHeldEntry => {
-				let HeldEntry { kv, mut indices_history } = held_entry.take().ok_or(WorkbenchActionError::RemoveToHeldEntry(RemoveToHeldEntryError::ExpectedHeldEntry))?;
+				let HeldEntry { kv, mut indices_history } = held_entry.take().ok_or(UndoWorkbenchActionError::RemoveToHeldEntry(RemoveToHeldEntryError::ExpectedHeldEntry))?;
 				if let Some(indices) = indices_history.pop() {
 					let AddElementResult { indices, old_kv } = add_element(root, kv, indices, mi)?;
 					Self::AddFromHeldEntry { indices, indices_history, old_kv }
@@ -129,13 +128,13 @@ impl WorkbenchAction {
 			}
 			Self::DiscardHeldEntry { held_entry: new_held_entry } => {
 				if held_entry.is_some() {
-					return Err(WorkbenchActionError::DiscardHeldEntry(DiscardHeldEntryError::HasHeldEntry))
+					return Err(UndoWorkbenchActionError::DiscardHeldEntry(DiscardHeldEntryError::HasHeldEntry))
 				}
 				*held_entry = Some(new_held_entry);
 				Self::RemoveToHeldEntry
 			}
 			Self::CreateHeldEntry => {
-				let held_entry = held_entry.take().ok_or(WorkbenchActionError::CreateHeldEntry(CreateHeldEntryError::ExpectedHeldEntry))?;
+				let held_entry = held_entry.take().ok_or(UndoWorkbenchActionError::CreateHeldEntry(CreateHeldEntryError::ExpectedHeldEntry))?;
 				Self::DiscardHeldEntry { held_entry }
 			}
 			Self::Bulk { actions } => Self::Bulk {
@@ -144,7 +143,7 @@ impl WorkbenchAction {
 					.into_iter()
 					.rev()
 					.map(|action| action.undo(root, mi, path, held_entry))
-					.collect::<Result<Vec<_>, WorkbenchActionError>>()?
+					.collect::<Result<Vec<_>, UndoWorkbenchActionError>>()?
 					.into_boxed_slice(),
 			},
 		})
@@ -165,7 +164,7 @@ impl WorkbenchAction {
 }
 
 #[derive(Error, Debug)]
-pub enum WorkbenchActionError {
+pub enum UndoWorkbenchActionError {
 	#[error(transparent)]
 	Add(#[from] AddElementError),
 	#[error(transparent)]
@@ -186,6 +185,8 @@ pub enum WorkbenchActionError {
 	DiscardHeldEntry(#[from] DiscardHeldEntryError),
 	#[error(transparent)]
 	CreateHeldEntry(#[from] CreateHeldEntryError),
+	#[error("Workbench Action was passed rather than successful.")]
+	Passed,
 }
 
 #[derive(Error, Debug)]

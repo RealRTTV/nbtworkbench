@@ -1,11 +1,11 @@
-use std::{hint::likely, marker::PhantomData};
+use std::hint::likely;
+use std::marker::PhantomData;
 
 use compact_str::CompactString;
 
-use crate::{
-	config,
-	elements::{compound::CompoundMap, result::NbtParseResult},
-};
+use crate::config;
+use crate::elements::compound::CompoundMap;
+use crate::elements::result::NbtParseResult;
 
 pub trait Decoder<'a>: Send {
 	fn new(data: &'a [u8]) -> Self

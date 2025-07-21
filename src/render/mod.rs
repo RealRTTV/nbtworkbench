@@ -6,21 +6,17 @@ pub mod vertex_buffer_builder;
 pub mod widget;
 pub mod window;
 
-use crate::{
-	elements::element::NbtElement,
-	render::{
-		assets::{
-			BASE_TEXT_Z, BASE_Z, BOOKMARK_UV, BOOKMARK_Z, END_LINE_NUMBER_SEPARATOR_UV, HEADER_SIZE, HIDDEN_BOOKMARK_UV, INSERTION_CHUNK_UV, INSERTION_UV, INVALID_STRIPE_UV, LINE_NUMBER_SEPARATOR_UV, LINE_NUMBER_Z, SCROLLBAR_BOOKMARK_Z,
-			SELECTED_TOGGLE_OFF_UV, SELECTED_TOGGLE_ON_UV, TEXT_UNDERLINE_UV, TOGGLE_Z, UNSELECTED_TOGGLE_OFF_UV, UNSELECTED_TOGGLE_ON_UV,
-		},
-		color::TextColor,
-		vertex_buffer_builder::VertexBufferBuilder,
-	},
-	util::{StrExt, Vec2u},
-	workbench::marked_line::MarkedLineSlice,
+use crate::elements::element::NbtElement;
+use crate::render::assets::{
+	BASE_TEXT_Z, BASE_Z, BOOKMARK_UV, BOOKMARK_Z, END_LINE_NUMBER_SEPARATOR_UV, HEADER_SIZE, HIDDEN_BOOKMARK_UV, INSERTION_CHUNK_UV, INSERTION_UV, INVALID_STRIPE_UV, LINE_NUMBER_SEPARATOR_UV, LINE_NUMBER_Z, SCROLLBAR_BOOKMARK_Z,
+	SELECTED_TOGGLE_OFF_UV, SELECTED_TOGGLE_ON_UV, TEXT_UNDERLINE_UV, TOGGLE_Z, UNSELECTED_TOGGLE_OFF_UV, UNSELECTED_TOGGLE_ON_UV,
 };
+use crate::render::color::TextColor;
+use crate::render::vertex_buffer_builder::VertexBufferBuilder;
+use crate::util::{StrExt, Vec2u};
+use crate::workbench::marked_line::MarkedLineSlice;
 
-pub struct RenderContext<'a> {
+pub struct TreeRenderContext<'a> {
 	selecting_key: bool,
 	selected_text_y: Option<usize>,
 	selected_key: Option<Box<str>>,
@@ -42,7 +38,7 @@ pub struct RenderContext<'a> {
 	freehand: bool,
 }
 
-impl<'a> RenderContext<'a> {
+impl<'a> TreeRenderContext<'a> {
 	#[must_use]
 	#[allow(clippy::type_complexity)] // forbidden is fine to be like that, c'mon
 	pub fn new(selected_text_y: Option<usize>, selected_key: Option<Box<str>>, selected_value: Option<Box<str>>, selecting_key: bool, ghost: Option<(&'a NbtElement, Vec2u)>, left_margin: usize, mouse: Vec2u, freehand: bool) -> Self {

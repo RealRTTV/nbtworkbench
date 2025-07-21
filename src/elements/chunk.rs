@@ -1,34 +1,25 @@
-use std::{
-	borrow::Cow,
-	fmt::{Display, Formatter},
-	hint::likely,
-	ops::{Deref, DerefMut},
-};
+use std::borrow::Cow;
+use std::fmt::{Display, Formatter};
+use std::hint::likely;
+use std::io::Read;
+use std::ops::{Deref, DerefMut};
 
 use zune_inflate::{DeflateDecoder, DeflateOptions};
 
+use crate::elements::compound::{CompoundEntry, NbtCompound};
+use crate::elements::result::{NbtParseResult, err, from_opt, from_result, ok};
+use crate::elements::{ComplexNbtElementVariant, Matches, NbtElement, NbtElementVariant};
+use crate::render::TreeRenderContext;
+use crate::render::assets::{CHUNK_GHOST_UV, CHUNK_UV, CONNECTION_UV, HEADER_SIZE, JUST_OVERLAPPING_BASE_TEXT_Z};
+use crate::render::color::TextColor;
+use crate::render::vertex_buffer_builder::VertexBufferBuilder;
+use crate::serialization::decoder::Decoder;
+use crate::serialization::encoder::UncheckedBufWriter;
+use crate::serialization::formatter::{PrettyDisplay, PrettyFormatter};
+use crate::util::{StrExt, Timestamp, Vec2u};
 #[cfg(target_arch = "wasm32")]
 use crate::wasm::{FakeScope as Scope, fake_scope as scope};
-use crate::{
-	elements::{
-		ComplexNbtElementVariant, Matches, NbtElement, NbtElementVariant,
-		compound::{CompoundEntry, NbtCompound},
-		result::{NbtParseResult, err, from_opt, from_result, ok},
-	},
-	render::{
-		RenderContext,
-		assets::{CHUNK_GHOST_UV, CHUNK_UV, CONNECTION_UV, HEADER_SIZE, JUST_OVERLAPPING_BASE_TEXT_Z},
-		color::TextColor,
-		vertex_buffer_builder::VertexBufferBuilder,
-	},
-	serialization::{
-		decoder::Decoder,
-		encoder::UncheckedBufWriter,
-		formatter::{PrettyDisplay, PrettyFormatter},
-	},
-	util::{StrExt, Timestamp, Vec2u},
-	workbench::tab::ChunkFileFormat,
-};
+use crate::workbench::tab::ChunkFileFormat;
 
 #[repr(C)]
 pub struct NbtChunk {
@@ -38,6 +29,7 @@ pub struct NbtChunk {
 	format: ChunkFileFormat,
 	pub x: u8,
 	pub z: u8,
+	_id: u8,
 }
 
 impl Matches for NbtChunk {
@@ -56,6 +48,7 @@ impl Default for NbtChunk {
 			format: ChunkFileFormat::default(),
 			x: 0,
 			z: 0,
+			_id: Self::ID,
 		}
 	}
 }
@@ -68,6 +61,7 @@ impl Clone for NbtChunk {
 			format: self.format,
 			x: self.x,
 			z: self.z,
+			_id: Self::ID,
 		}
 	}
 }
@@ -167,7 +161,14 @@ impl NbtElementVariant for NbtChunk {
 					NbtElement::from_be_file(&from_result(DeflateDecoder::new_with_options(data, DeflateOptions::default().set_confirm_checksum(false)).decode_zlib())?)?,
 				),
 				3 => (ChunkFileFormat::Nbt, NbtElement::from_be_file(data)?),
-				4 => (ChunkFileFormat::Lz4, NbtElement::from_be_file(&from_result(lz4_flex::decompress(data, data.len()))?)?),
+				4 => (
+					ChunkFileFormat::Lz4,
+					NbtElement::from_be_file(&{
+						let mut vec = vec![];
+						from_result(lz4_java_wrc::Lz4BlockInput::new(data).read_to_end(&mut vec))?;
+						vec
+					})?,
+				),
 				_ => return err("Unknown compression format"),
 			};
 			return ok(NbtChunk::new(from_opt(element.into_compound(), "Chunk was not of type compound")?, pos, compression, last_modified));
@@ -199,7 +200,7 @@ impl NbtElementVariant for NbtChunk {
 
 	fn to_le_bytes(&self, _writer: &mut UncheckedBufWriter) {}
 
-	fn render(&self, builder: &mut VertexBufferBuilder, _name: Option<&str>, remaining_scroll: &mut usize, tail: bool, ctx: &mut RenderContext) {
+	fn render(&self, builder: &mut VertexBufferBuilder, _name: Option<&str>, remaining_scroll: &mut usize, tail: bool, ctx: &mut TreeRenderContext) {
 		use std::fmt::Write as _;
 
 		let mut y_before = ctx.pos().y;
@@ -309,6 +310,7 @@ impl NbtChunk {
 			inner: Box::new(inner),
 			format: compression,
 			last_modified,
+			_id: Self::ID,
 		}
 	}
 

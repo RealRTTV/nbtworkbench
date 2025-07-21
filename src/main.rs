@@ -82,7 +82,7 @@ macro_rules! get_interaction_information {
 	($self:ident) => {{
 		let tab = $self.tabs.active_tab_mut();
 		let consts = tab.consts();
-		$crate::workbench::Workbench::get_interaction_information_raw(consts, $self.mouse, &mut tab.root)
+		$crate::workbench::Workbench::get_interaction_information_raw(consts, $self.mouse.coords, &mut tab.root)
 	}};
 }
 
@@ -124,7 +124,9 @@ pub fn window_properties() -> parking_lot::MutexGuard<'static, render::window::W
 /// * rename `line_number` and `true_line_number` to `y` and `line_number` respectively
 /// * add high-quality Safety rustdoc to **all** created unsafe fns
 /// * if you want to optimize something, optimize [`NbtElement::recache`]
-/// * use `thiserror` for [`tree::actions`]
+/// * add HStack and VStack equivelents for rendering
+/// * remove all magic constants
+/// * refactor rendering to use `u32` instead of `usize`
 /// # Long-Term Goals
 /// * smart screen
 /// * add multi-cursor
@@ -156,6 +158,3 @@ pub fn main() -> ! {
 		_ => pollster::block_on(render::window::run()),
 	}
 }
-
-// required so chunk coordinates function with the hardcoded spacing offset
-static_assertions::const_assert_eq!(render::vertex_buffer_builder::VertexBufferBuilder::CHAR_WIDTH[b':' as usize], render::vertex_buffer_builder::VertexBufferBuilder::CHAR_WIDTH[b',' as usize]);

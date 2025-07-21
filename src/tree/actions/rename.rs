@@ -1,18 +1,16 @@
-use std::{ffi::OsStr, path::PathBuf};
+use std::ffi::OsStr;
+use std::path::PathBuf;
 
 use compact_str::{CompactString, ToCompactString};
 use thiserror::Error;
 
-use crate::{
-	elements::element::NbtElement,
-	history::WorkbenchAction,
-	tree::{
-		indices::OwnedIndices,
-		navigate::{ParentNavigationError, ParentNavigationInformationMut},
-	},
-	window_properties,
-	workbench::tab::{FilePath, FilePathError},
-};
+use crate::action_result::{ActionResult, IntoFailingActionResult};
+use crate::elements::element::NbtElement;
+use crate::history::WorkbenchAction;
+use crate::tree::indices::OwnedIndices;
+use crate::tree::navigate::{ParentNavigationError, ParentNavigationInformationMut};
+use crate::window_properties;
+use crate::workbench::tab::{FilePath, FilePathError};
 
 #[rustfmt::skip]
 pub fn rename_element(
@@ -21,18 +19,20 @@ pub fn rename_element(
 	key: Option<CompactString>,
 	value: Option<String>,
 	path: &mut FilePath
-) -> Result<RenameElementResult, RenameElementError> {
+) -> ActionResult<RenameElementResult, RenameElementError> {
 	if key.is_none() && value.is_none() {
-		return Ok(RenameElementResult { indices, key, value });
+		return ActionResult::Pass;
 	}
 
 	match root.navigate_parent_mut(&indices) {
 		Ok(ParentNavigationInformationMut { parent, idx, .. }) => {
 			let old_key = if let Some(key) = key {
+				let new_key = key.clone();
 				if let Some(result) = parent.update_key(idx, key.clone()) {
 					match result {
-						Some(key) => Some(key),
-						None => return Err(RenameElementError::DuplicateKey { idx, indices, key }),
+						Some(old_key) if old_key == new_key => None,
+						Some(old_key) => Some(old_key),
+						None => return ActionResult::Failure(RenameElementError::DuplicateKey { idx, indices, key }),
 					}
 				} else {
 					None
@@ -42,34 +42,40 @@ pub fn rename_element(
 			};
 
 			let old_value = if let Some(value) = value {
+				let new_value = value.clone();
 				// no drops dw, well except for the value, but that's a simple thing dw
 				let child = &mut parent[idx];
 				match child.set_value(value) {
+					Ok(old_value) if old_value == new_value => None,
 					Ok(old_value) => Some(old_value),
-					Err(value) => return Err(RenameElementError::InvalidValue { value, child: child.display_name() }),
+					Err(value) => return ActionResult::Failure(RenameElementError::InvalidValue { value, child: child.display_name() }),
 				}
 			} else {
 				None
 			};
 
-			Ok(RenameElementResult { indices, key: old_key, value: old_value })
+			if old_key.is_none() && old_value.is_none() {
+				ActionResult::Pass
+			} else {
+				ActionResult::Success(RenameElementResult { indices, key: old_key, value: old_value })
+			}
 		}
 		Err(ParentNavigationError::EmptyIndices) => {
 			if let Some(key) = key.clone()
 				&& value.is_none()
 			{
-				let old_path = path.set_path(key)?;
+				let old_path = path.set_path(key).map_err(RenameElementError::from).failure_on_err()?;
 				window_properties().set_window_title(format!("{name} - NBT Workbench", name = path.name()).as_str());
-				Ok(RenameElementResult {
+				ActionResult::Success(RenameElementResult {
 					indices,
 					key: Some(old_path.to_string_lossy().into_owned().into()),
 					value
 				})
 			} else {
-				Err(RenameElementError::InvalidRootRenaming { key, value })
+				ActionResult::Failure(RenameElementError::InvalidRootRenaming { key, value })
 			}
 		}
-		Err(e) => Err(e.into()),
+		Err(e) => ActionResult::Failure(e.into()),
 	}
 }
 
