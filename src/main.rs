@@ -127,6 +127,7 @@ pub fn window_properties() -> parking_lot::MutexGuard<'static, render::window::W
 /// * add HStack and VStack equivelents for rendering
 /// * remove all magic constants
 /// * refactor rendering to use `u32` instead of `usize`
+/// * minimize usage of `anyhow`
 /// # Long-Term Goals
 /// * smart screen
 /// * add multi-cursor

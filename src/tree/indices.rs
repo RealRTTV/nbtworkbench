@@ -10,6 +10,7 @@ use crate::elements::element::NbtElement;
 use crate::util;
 
 #[repr(transparent)]
+#[derive(PartialEq, Eq)]
 pub struct Indices([usize]);
 
 impl Indices {
@@ -21,7 +22,7 @@ impl Indices {
 }
 
 #[repr(transparent)]
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct OwnedIndices(Vec<usize>);
 
 impl Debug for OwnedIndices {
@@ -101,6 +102,9 @@ impl Indices {
 
 	#[must_use]
 	pub fn encompasses(&self, inner: &Self) -> bool { util::encompasses(&self.0, &inner.0) }
+	
+	#[must_use]
+	pub fn is_parent_for(&self, child: &Self) -> bool { util::is_parent_for(&self.0, &child.0) }
 
 	#[must_use]
 	pub fn len(&self) -> usize { self.0.len() }

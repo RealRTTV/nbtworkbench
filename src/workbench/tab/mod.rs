@@ -2,16 +2,17 @@ use std::ffi::OsStr;
 use std::fmt::Display;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::mpsc::TryRecvError;
 use std::time::Duration;
 
-use anyhow::{Context, Result, anyhow, ensure};
+use anyhow::{Context, Result, anyhow, ensure, bail};
 use compact_str::CompactString;
 use flate2::Compression;
 use itertools::Either;
 use thiserror::Error;
 use winit::dpi::PhysicalSize;
 use zune_inflate::DeflateDecoder;
-
+use crate::{config, mutable_indices, window_properties};
 use crate::elements::array::{NbtByteArray, NbtIntArray, NbtLongArray};
 use crate::elements::byte::NbtByte;
 use crate::elements::chunk::NbtChunk;
@@ -29,17 +30,18 @@ use crate::elements::{ComplexNbtElementVariant, NbtElementVariant};
 use crate::history::WorkbenchAction;
 use crate::history::manager::HistoryMananger;
 use crate::render::TreeRenderContext;
-use crate::render::assets::{
-	BASE_Z, CONNECTION_UV, FROM_CLIPBOARD_GHOST_UV, FROM_CLIPBOARD_UV, GZIP_FILE_TYPE_UV, HEADER_SIZE, HELD_SCROLLBAR_UV, JUST_OVERLAPPING_BASE_Z, LINE_NUMBER_SEPARATOR_UV, LITTLE_ENDIAN_HEADER_NBT_FILE_TYPE_UV, LITTLE_ENDIAN_NBT_FILE_TYPE_UV,
-	MCA_FILE_TYPE_UV, NBT_FILE_TYPE_UV, SCROLLBAR_Z, SNBT_FILE_TYPE_UV, STEAL_ANIMATION_OVERLAY_UV, UNHELD_SCROLLBAR_UV, ZLIB_FILE_TYPE_UV, ZOffset,
-};
+use crate::render::assets::{BASE_Z, CONNECTION_UV, FROM_CLIPBOARD_GHOST_UV, FROM_CLIPBOARD_UV, GZIP_FILE_TYPE_UV, HEADER_SIZE, HELD_SCROLLBAR_UV, JUST_OVERLAPPING_BASE_Z, LINE_NUMBER_SEPARATOR_UV, LITTLE_ENDIAN_HEADER_NBT_FILE_TYPE_UV, LITTLE_ENDIAN_NBT_FILE_TYPE_UV, MCA_FILE_TYPE_UV, NBT_FILE_TYPE_UV, SCROLLBAR_Z, SNBT_FILE_TYPE_UV, STEAL_ANIMATION_OVERLAY_UV, UNHELD_SCROLLBAR_UV, ZLIB_FILE_TYPE_UV, ZOffset, LINE_NUMBER_CONNECTOR_Z};
 use crate::render::color::TextColor;
 use crate::render::vertex_buffer_builder::VertexBufferBuilder;
 use crate::render::widget::selected_text::{SaveSelectedTextError, SelectedText, SelectedTextConstructionError};
 use crate::render::widget::text::{TEXT_DOUBLE_CLICK_INTERVAL, get_cursor_left_jump_idx, get_cursor_right_jump_idx};
+use crate::serialization::decoder::{BigEndianDecoder, Decoder};
+use crate::serialization::encoder::UncheckedBufWriter;
+use crate::tree::actions::replace::replace_element;
+use crate::tree::navigate::NavigationInformation;
 use crate::util::{StrExt, Timestamp, Vec2u, drop_on_separate_thread};
 use crate::workbench::marked_line::MarkedLines;
-use crate::workbench::{FileUpdateSubscription, HeldEntry};
+use crate::workbench::{FileUpdateSubscription, FileUpdateSubscriptionType, HeldEntry, SortAlgorithm};
 
 pub mod manager;
 
@@ -87,7 +89,7 @@ impl Tab {
 	pub const AUTOSAVE_MAXIMUM_LINES: usize = 1_000_000;
 
 	pub fn new(nbt: NbtElement, path: FilePath, format: NbtFileFormat, window_dims: PhysicalSize<u32>) -> Result<Self> {
-		ensure!(nbt.is_compound() || nbt.is_list(), "Parsed NBT was not a Compound or List");
+		ensure!(nbt.is_compound() || nbt.is_list() || nbt.is_region(), "Parsed NBT was not a Compound, List or Region");
 
 		Ok(Self {
 			root: nbt,
@@ -145,6 +147,11 @@ impl Tab {
 			last_double_click_interaction: (0, Timestamp::UNIX_EPOCH),
 			steal_animation_data: None,
 		}
+	}
+	
+	pub fn new_from_path(path: &Path, buf: &[u8], window_dims: PhysicalSize<u32>) -> Result<Self> {
+		let (nbt, format) = Tab::parse_raw(path, buf)?;
+		Tab::new(nbt, FilePath::new(path).map_err(|path| anyhow!("Invalid file path: {path:?}"))?, format, window_dims)
 	}
 
 	pub fn save_selected_text(&mut self) -> Result<(), SaveSelectedTextError> {
@@ -216,7 +223,8 @@ impl Tab {
 		{
 			let mut remaining_scroll = builder.scroll() / 16;
 			if remaining_scroll == 0 {
-				builder.draw_texture(ctx.pos() - (16, 0), CONNECTION_UV, (16, 9));
+				builder.draw_texture_z(ctx.pos - (20, 2), LINE_NUMBER_CONNECTOR_Z, LINE_NUMBER_SEPARATOR_UV, (2, 2));
+				builder.draw_texture(ctx.pos - (16, 0), CONNECTION_UV, (16, 9));
 			}
 			self.root.render(&mut remaining_scroll, builder, Some(&self.path.name()), true, ctx);
 		}
@@ -227,7 +235,6 @@ impl Tab {
 		} else {
 			ctx.render_line_numbers(builder, &self.bookmarks);
 		}
-		ctx.render_key_value_errors(builder);
 		builder.horizontal_scroll = horizontal_scroll_before;
 
 		if builder.window_height() >= HEADER_SIZE {
@@ -479,22 +486,75 @@ impl Tab {
 		}
 		self.modify_horizontal_scroll(|x| x);
 	}
+	
+	pub fn try_update_subscription(&mut self) -> Result<()> {
+		let Some(subscription) = &mut self.subscription else { return Ok(()) };
+		if let Err(e) = subscription.watcher.poll().map_err(|x| anyhow!("{x}")) {
+			self.subscription = None;
+			return Err(e);
+		};
+		match subscription.rx.try_recv() {
+			Ok(data) => {
+				let kv = match subscription.r#type {
+					FileUpdateSubscriptionType::Snbt => {
+						let s = core::str::from_utf8(&data).context("File was not a valid UTF8 string")?;
+						let sort = config::set_sort_algorithm(SortAlgorithm::None);
+						let kv = NbtElement::from_str(s)?;
+						config::set_sort_algorithm(sort);
+						kv
+					}
+					kind => {
+						let (id, prefix, width): (u8, &[u8], usize) = match kind {
+							FileUpdateSubscriptionType::ByteArray => (NbtByteArray::ID, &[], 1),
+							FileUpdateSubscriptionType::IntArray => (NbtIntArray::ID, &[], 4),
+							FileUpdateSubscriptionType::LongArray => (NbtLongArray::ID, &[], 8),
+							FileUpdateSubscriptionType::ByteList => (NbtList::ID, &[NbtByte::ID], 1),
+							FileUpdateSubscriptionType::ShortList => (NbtList::ID, &[NbtShort::ID], 2),
+							FileUpdateSubscriptionType::IntList => (NbtList::ID, &[NbtInt::ID], 4),
+							FileUpdateSubscriptionType::LongList => (NbtList::ID, &[NbtLong::ID], 8),
+							FileUpdateSubscriptionType::Snbt => bail!("Explicit SNBT parsing was skipped??"),
+						};
+						let mut buf = UncheckedBufWriter::new();
+						buf.write(prefix);
+						ensure!(data.len() % width == 0, "Hex data was of an incorrect length, length was {len} bytes, should be multiples of {width}", len = data.len());
+						let buf = buf.finish();
+						let mut decoder = BigEndianDecoder::new(&buf);
+						let value = NbtElement::from_bytes(id, &mut decoder).context("Could not read bytes for array")?;
+						let NavigationInformation { key, .. } = self.root.navigate(&subscription.indices).context("Failed to navigate subscription indices")?;
+						let key = key.map(CompactString::from);
+						(key, value)
+					}
+				};
+				let action = replace_element(&mut self.root, kv, subscription.indices.clone(), mutable_indices!(self)).context("Failed to replace element")?.into_action();
+				self.history.append(action);
+				self.refresh_scrolls();
+			}
+			Err(TryRecvError::Disconnected) => {
+				self.subscription = None;
+				bail!("Could not update; file subscription disconnected.");
+			}
+			Err(TryRecvError::Empty) => {
+				// do nothing ig
+			}
+		}
+		Ok(())
+	}
 
-	pub fn parse_raw(path: impl AsRef<Path>, buf: Vec<u8>) -> Result<(NbtElement, NbtFileFormat)> {
+	pub fn parse_raw(path: impl AsRef<Path>, buf: &[u8]) -> Result<(NbtElement, NbtFileFormat)> {
 		let path = path.as_ref();
 		Ok(if let Some("mca" | "mcr") = path.extension().and_then(OsStr::to_str) {
-			(NbtElement::from_be_mca(buf.as_slice()).context("Failed to parse MCA file")?, NbtFileFormat::Mca)
+			(NbtElement::from_be_mca(buf).context("Failed to parse MCA file")?, NbtFileFormat::Mca)
 		} else if let Some(0x1F8B) = buf.first_chunk::<2>().copied().map(u16::from_be_bytes) {
 			(
-				NbtElement::from_be_file(&DeflateDecoder::new(buf.as_slice()).decode_gzip().context("Failed to decode gzip compressed NBT")?).context("Failed to parse NBT")?,
+				NbtElement::from_be_file(&DeflateDecoder::new(buf).decode_gzip().context("Failed to decode gzip compressed NBT")?).context("Failed to parse NBT")?,
 				NbtFileFormat::Gzip,
 			)
 		} else if let Some(0x7801 | 0x789C | 0x78DA) = buf.first_chunk::<2>().copied().map(u16::from_be_bytes) {
 			(
-				NbtElement::from_be_file(&DeflateDecoder::new(buf.as_slice()).decode_zlib().context("Failed to decode zlib compressed NBT")?).context("Failed to parse NBT")?,
+				NbtElement::from_be_file(&DeflateDecoder::new(buf).decode_zlib().context("Failed to decode zlib compressed NBT")?).context("Failed to parse NBT")?,
 				NbtFileFormat::Zlib,
 			)
-		} else if let result = NbtElement::from_be_file(buf.as_slice()).context("Tried to parse uncompressed NBT")
+		} else if let result = NbtElement::from_be_file(buf).context("Tried to parse uncompressed NBT")
 			&& {
 				#[cfg(debug_assertions)]
 				if result.is_err() {
@@ -504,7 +564,7 @@ impl Tab {
 			} && let Ok(nbt) = result
 		{
 			(nbt, NbtFileFormat::Nbt)
-		} else if let result = NbtElement::from_le_file(buf.as_slice()).context("Tried to parse uncompressed little-endian NBT")
+		} else if let result = NbtElement::from_le_file(buf).context("Tried to parse uncompressed little-endian NBT")
 			&& {
 				#[cfg(debug_assertions)]
 				if result.is_err() {
@@ -516,7 +576,7 @@ impl Tab {
 			(nbt, if header { NbtFileFormat::LittleEndianHeaderNbt } else { NbtFileFormat::LittleEndianNbt })
 		} else {
 			(
-				core::str::from_utf8(&buf)
+				core::str::from_utf8(buf)
 					.ok()
 					.and_then(|s| NbtElement::from_str(s).ok())
 					.context(anyhow!("Failed to find file type for file {}", path.file_name().unwrap_or(&OsStr::new("")).to_string_lossy()))?
@@ -525,6 +585,23 @@ impl Tab {
 			)
 		})
 	}
+
+	#[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
+	pub fn from_file_dialog(window_dims: PhysicalSize<u32>) -> Result<Self> {
+		let dialog = native_dialog::FileDialogBuilder::default()
+			.set_location("~/Downloads")
+			.add_filters(Tab::FILE_TYPE_FILTERS.iter().copied().map(|(a, b)| (a.to_owned(), b.iter().map(|x| x.to_string()).collect::<Vec<_>>())))
+			.open_single_file();
+		let dialog_result = dialog.show();
+		window_properties().ignore_events_for(Duration::from_millis(50));
+		let path = dialog_result?.context("Failed to select file dialog")?;
+		let bytes = std::fs::read(&path)?;
+		let tab = Self::new_from_path(&path, &bytes, window_dims)?;
+		Ok(tab)
+	}
+
+	#[cfg(target_arch = "wasm32")]
+	pub fn from_file_dialog(window_dims: PhysicalSize<u32>) -> Result<Tab> { crate::wasm::try_open_dialog(); }
 
 	#[cfg(not(target_arch = "wasm32"))]
 	pub fn refresh(&mut self) -> Result<()> {
@@ -535,7 +612,7 @@ impl Tab {
 		if !std::fs::exists(&self.path)? { return Ok(()); }
 		
 		let bytes = std::fs::read(&self.path)?;
-		let (value, format) = Tab::parse_raw(&self.path, bytes)?;
+		let (value, format) = Tab::parse_raw(&self.path, &bytes)?;
 
 		self.bookmarks.clear();
 		self.scroll = 0;

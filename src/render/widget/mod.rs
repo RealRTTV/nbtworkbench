@@ -35,12 +35,6 @@ impl<'a> WidgetContext<'a> {
 	pub fn new(tabs: &'a TabManager, search_box: &'a SearchBox, replace_box: &'a ReplaceBox, shift: bool) -> Self { Self { tabs, search_box, replace_box, shift } }
 }
 
-#[must_use]
-#[derive(Default)]
-pub struct WidgetAccumulatedResult {
-	pub open_file_requests: usize,
-}
-
 #[allow(dead_code)]
 pub struct WidgetContextMut<'w> {
 	tabs: &'w mut TabManager,
@@ -49,7 +43,6 @@ pub struct WidgetContextMut<'w> {
 	alerts: &'w mut AlertManager,
 	notifications: &'w mut NotificationManager,
 	shift: bool,
-	accumulated: WidgetAccumulatedResult,
 }
 
 impl<'w> WidgetContextMut<'w> {
@@ -62,13 +55,8 @@ impl<'w> WidgetContextMut<'w> {
 			alerts,
 			notifications,
 			shift,
-			accumulated: WidgetAccumulatedResult::default(),
 		}
 	}
-
-	pub fn open_file_request(&mut self) { self.accumulated.open_file_requests += 1; }
-
-	pub fn take_accumulated(&mut self) -> WidgetAccumulatedResult { core::mem::take(&mut self.accumulated) }
 
 	#[must_use]
 	pub fn as_ref(&'w self) -> WidgetContext<'w> {

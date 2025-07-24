@@ -8,11 +8,10 @@ use std::assert_matches::debug_assert_matches;
 use std::fmt::{Display, Formatter, Write};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
-use std::sync::mpsc::TryRecvError;
 #[cfg(not(target_arch = "wasm32"))] use std::thread::scope;
 use std::time::Duration;
 
-use anyhow::{Context, Result, anyhow, bail, ensure};
+use anyhow::{Context, Result, anyhow};
 use compact_str::{CompactString, ToCompactString, format_compact};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -34,7 +33,7 @@ use crate::elements::long::NbtLong;
 use crate::elements::region::NbtRegion;
 use crate::elements::short::NbtShort;
 use crate::elements::string::NbtString;
-use crate::elements::{NbtElementAndKey, NbtElementVariant};
+use crate::elements::NbtElementAndKey;
 use crate::history::WorkbenchAction;
 use crate::render::TreeRenderContext;
 use crate::render::assets::{
@@ -65,17 +64,13 @@ use crate::render::widget::text::{TEXT_DOUBLE_CLICK_INTERVAL, get_cursor_idx, ge
 use crate::render::widget::vertical_list::VerticalList;
 use crate::render::widget::{HorizontalWidgetAlignmentPreference, VerticalWidgetAlignmentPreference, Widget, WidgetAlignment, WidgetContext, WidgetContextMut};
 use crate::render::window::{MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH, Theme, WINDOW_HEIGHT, WINDOW_WIDTH};
-use crate::serialization::decoder::{BigEndianDecoder, Decoder};
-use crate::serialization::encoder::UncheckedBufWriter;
 use crate::tree::actions::add::{AddElementResult, add_element};
 use crate::tree::actions::close::close_element;
 use crate::tree::actions::expand::expand_element;
 use crate::tree::actions::expand_to_indices::expand_element_to_indices;
 use crate::tree::actions::open::open_element;
 use crate::tree::actions::remove::{RemoveElementResult, remove_element};
-use crate::tree::actions::replace::replace_element;
 use crate::tree::indices::{Indices, OwnedIndices};
-use crate::tree::navigate::NavigationInformation;
 use crate::tree::traverse::{TraversalError, TraversalInformation, TraversalInformationMut};
 use crate::util::{self, AABB, LinkedQueue, StrExt, Timestamp, Vec2d, Vec2u, drop_on_separate_thread, get_clipboard, nth, set_clipboard};
 #[cfg(target_arch = "wasm32")] use crate::wasm::fake_scope as scope;
@@ -128,7 +123,6 @@ pub struct Workbench {
 	pub scale: f32,
 	search_box: SearchBox,
 	replace_box: ReplaceBox,
-	ignore_event_end: Timestamp,
 	debug_menu: bool,
 
 	search_flags_button: SearchFlagsButton,
@@ -164,7 +158,6 @@ impl Workbench {
 			scale: 0.0,
 			search_box: SearchBox::uninit(),
 			replace_box: ReplaceBox::uninit(),
-			ignore_event_end: Timestamp::UNIX_EPOCH,
 			debug_menu: false,
 
 			search_flags_button: unsafe { core::mem::zeroed() },
@@ -199,7 +192,6 @@ impl Workbench {
 			scale: 1.0,
 			search_box: SearchBox::new(),
 			replace_box: ReplaceBox::new(),
-			ignore_event_end: Timestamp::UNIX_EPOCH,
 			debug_menu: false,
 
 			exact_match_button: Default::default(),
@@ -229,7 +221,7 @@ impl Workbench {
 			if let Some(path) = &std::env::args().nth(1).and_then(|x| PathBuf::from_str(&x).ok())
 				&& let Ok(buf) = std::fs::read(path)
 			{
-				if workbench.on_open_file(path, buf).alert_err(&mut workbench.alerts).is_some() {
+				if workbench.on_open_file(path, &buf).alert_err(&mut workbench.alerts).is_some() {
 					break 'create_tab;
 				}
 			}
@@ -319,17 +311,7 @@ impl Workbench {
 								let aabb = AABB::from_pos_and_dims(pos, dims);
 								if let Some(pos) = self.mouse.coords.relative_to(aabb) {
 								    // hardcoded to mouse_down only for now
-								    let result = widget.on_mouse_input(state, button, pos, dims, &mut ctx);
-								    if result == ActionResult::Success(()) {
-								    	let $crate::render::widget::WidgetAccumulatedResult { open_file_requests } = ctx.take_accumulated();
-
-								    	for _ in 0..open_file_requests {
-								    		self.open_file()?;
-								    	}
-
-								    	return ActionResult::Success(());
-								    }
-								    result?
+								    widget.on_mouse_input(state, button, pos, dims, &mut ctx)?;
 								}
 							)*
 						};
@@ -376,7 +358,7 @@ impl Workbench {
 					self.click_tab(button)?;
 				}
 				if AABB::new(0, 16, 24, 46).contains(self.mouse.coords) {
-					self.open_file()?;
+					self.tabs.add(Tab::from_file_dialog(self.window_dims).alert_err(&mut self.alerts).failure_on_err()?);
 				}
 
 				if button == MouseButton::Left && AABB::new(0, usize::MAX, HEADER_SIZE, usize::MAX).contains(self.mouse.coords) && self.tabs.active_tab().held_entry.is_some() {
@@ -470,10 +452,8 @@ impl Workbench {
 		ActionResult::Pass
 	}
 
-	#[deprecated = "refactor to UFCS only"]
-	pub fn on_open_file(&mut self, path: &Path, buf: Vec<u8>) -> Result<()> {
-		let (nbt, format) = Tab::parse_raw(path, buf)?;
-		let tab = Tab::new(nbt, FilePath::new(path).map_err(|path| anyhow!("Invalid file path: {path:?}"))?, format, self.window_dims)?;
+	pub fn on_open_file(&mut self, path: &Path, buf: &[u8]) -> Result<()> {
+		let tab = Tab::new_from_path(path, buf, self.window_dims)?;
 		self.tabs.add(tab);
 		Ok(())
 	}
@@ -499,63 +479,6 @@ impl Workbench {
 			}
 		}
 		ActionResult::Success(())
-	}
-
-	#[deprecated = "refactor to UFCS only"]
-	pub fn try_subscription(&mut self) -> Result<()> {
-		for tab in &mut self.tabs {
-			let Some(subscription) = &mut tab.subscription else { continue };
-			if let Err(e) = subscription.watcher.poll().map_err(|x| anyhow!("{x}")) {
-				tab.subscription = None;
-				return Err(e);
-			};
-			match subscription.rx.try_recv() {
-				Ok(data) => {
-					let kv = match subscription.r#type {
-						FileUpdateSubscriptionType::Snbt => {
-							let s = core::str::from_utf8(&data).context("File was not a valid UTF8 string")?;
-							let sort = config::set_sort_algorithm(SortAlgorithm::None);
-							let kv = NbtElement::from_str(s)?;
-							config::set_sort_algorithm(sort);
-							kv
-						}
-						kind => {
-							let (id, prefix, width): (u8, &[u8], usize) = match kind {
-								FileUpdateSubscriptionType::ByteArray => (NbtByteArray::ID, &[], 1),
-								FileUpdateSubscriptionType::IntArray => (NbtIntArray::ID, &[], 4),
-								FileUpdateSubscriptionType::LongArray => (NbtLongArray::ID, &[], 8),
-								FileUpdateSubscriptionType::ByteList => (NbtList::ID, &[NbtByte::ID], 1),
-								FileUpdateSubscriptionType::ShortList => (NbtList::ID, &[NbtShort::ID], 2),
-								FileUpdateSubscriptionType::IntList => (NbtList::ID, &[NbtInt::ID], 4),
-								FileUpdateSubscriptionType::LongList => (NbtList::ID, &[NbtLong::ID], 8),
-								FileUpdateSubscriptionType::Snbt => bail!("Explicit SNBT parsing was skipped??"),
-							};
-							let mut buf = UncheckedBufWriter::new();
-							buf.write(prefix);
-							ensure!(data.len() % width == 0, "Hex data was of an incorrect length, length was {len} bytes, should be multiples of {width}", len = data.len());
-							let buf = buf.finish();
-							let mut decoder = BigEndianDecoder::new(&buf);
-							let value = NbtElement::from_bytes(id, &mut decoder).context("Could not read bytes for array")?;
-							let NavigationInformation { key, .. } = tab.root.navigate(&subscription.indices).context("Failed to navigate subscription indices")?;
-							let key = key.map(CompactString::from);
-							(key, value)
-						}
-					};
-					let action = replace_element(&mut tab.root, kv, subscription.indices.clone(), mutable_indices!(tab)).context("Failed to replace element")?.into_action();
-					tab.history.append(action);
-					tab.refresh_scrolls();
-				}
-				Err(TryRecvError::Disconnected) => {
-					tab.subscription = None;
-					bail!("Could not update; file subscription disconnected.");
-				}
-				Err(TryRecvError::Empty) => {
-					// do nothing ig
-				}
-			}
-		}
-
-		Ok(())
 	}
 
 	#[deprecated = "refactor to UFCS only"]
@@ -827,25 +750,6 @@ impl Workbench {
 		ActionResult::Pass
 	}
 
-	#[deprecated = "refactor to UFCS only"]
-	#[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
-	fn open_file(&mut self) -> ActionResult {
-		let dialog = native_dialog::FileDialogBuilder::default()
-			.set_location("~/Downloads")
-			.add_filters(Tab::FILE_TYPE_FILTERS.iter().copied().map(|(a, b)| (a.to_owned(), b.iter().map(|x| x.to_string()).collect::<Vec<_>>())))
-			.open_single_file();
-		let dialog_result = dialog.show();
-		self.ignore_event_end = Timestamp::now() + Duration::from_millis(50);
-		let path = dialog_result.alert_err(&mut self.alerts).failure_on_err()?.failure_on_err()?;
-		let bytes = std::fs::read(&path).alert_err(&mut self.alerts).failure_on_err()?;
-		self.on_open_file(&path, bytes).alert_err(&mut self.alerts);
-		ActionResult::Success(())
-	}
-
-	#[deprecated = "refactor to UFCS only"]
-	#[cfg(target_arch = "wasm32")]
-	fn open_file(&mut self) -> ActionResult { crate::wasm::try_open_dialog(); }
-
 	#[must_use]
 	pub fn get_interaction_information_raw(consts: TabConstants, mouse: Vec2u, root: &mut NbtElement) -> InteractionInformation {
 		let TabConstants { left_margin, scroll, horizontal_scroll } = consts;
@@ -1049,6 +953,7 @@ impl Workbench {
 							}
 							tab.refresh_scrolls();
 							tab.refresh_selected_text_horizontal_scroll();
+							return Success(());
 						}
 						Pass => {}
 						Failure(()) => return Failure(()),
@@ -1138,7 +1043,7 @@ impl Workbench {
 					return Success(());
 				}
 				if key == KeyCode::KeyO && flags == flags!(Ctrl) {
-					self.open_file()?;
+					self.tabs.add(Tab::from_file_dialog(self.window_dims).alert_err(&mut self.alerts).failure_on_err()?);
 					return Success(());
 				}
 				if key == KeyCode::KeyS && flags & (!flags!(Shift)) == flags!(Ctrl) {
@@ -1371,33 +1276,13 @@ impl Workbench {
 			tab.held_entry.as_ref().map(|entry| {
 				(
 					&entry.kv.1,
-					Vec2u::new(((self.mouse.coords.x + horizontal_scroll - left_margin) & !15) + left_margin, ((self.mouse.coords.y - HEADER_SIZE) & !0b0111) + HEADER_SIZE),
+					self.mouse.coords + (horizontal_scroll, 0)
 				)
 			})
 		} else {
 			None
 		};
-		let selected_text_y = tab.selected_text.as_ref().map(|x| x.y).and_then(|x| x.checked_sub(builder.scroll()));
-		let (selected_key, selected_value, selecting_key) = if let Some(SelectedText(selected)) = tab.selected_text.as_ref()
-			&& selected.editable
-		{
-			if selected.keyfix.is_some() {
-				// Health: __20.0__
-				(selected.keyfix.clone().map(|x| x.0.clone().into_boxed_str()), Some(selected.value.clone().into_boxed_str()), false)
-			} else if selected.valuefix.is_some() {
-				// __Health__: 20.0
-				(Some(selected.value.clone().into_boxed_str()), selected.valuefix.clone().map(|x| x.0.clone().into_boxed_str()), true)
-			} else if !selected.suffix.0.is_empty() {
-				// __Banana__: 4 entries
-				(Some(selected.value.clone().into_boxed_str()), None, false)
-			} else {
-				// __20.0__
-				(None, Some(selected.value.clone().into_boxed_str()), false)
-			}
-		} else {
-			(None, None, false)
-		};
-		let mut ctx = TreeRenderContext::new(selected_text_y, selected_key, selected_value, selecting_key, ghost, left_margin, self.mouse.coords, tab.freehand_mode);
+		let mut ctx = TreeRenderContext::new(ghost, left_margin, self.mouse.coords, tab.freehand_mode, builder.scroll(), tab.selected_text.as_ref());
 		if self.mouse.coords.y >= HEADER_SIZE && self.action_wheel.is_none() && !ReplaceBox::is_within_bounds(self.mouse.coords, builder.window_dims()) {
 			builder.draw_texture_region_z((0, self.mouse.coords.y & !15), BASE_Z, HOVERED_STRIPE_UV, (builder.window_width(), 16), (14, 14));
 		}
@@ -1494,6 +1379,7 @@ impl Workbench {
 				}
 			}
 		}
+		
 		if (self.tabs.active_tab().held_entry.is_some() || self.tabs.active_tab().freehand_mode || ((self.tabs.active_tab().selected_text.is_some() || self.search_box.is_selected()) && self.last_mouse_state == ElementState::Pressed))
 			&& self.action_wheel.is_none()
 			&& self.scrollbar_offset.is_none()
@@ -1503,9 +1389,16 @@ impl Workbench {
 			self.try_replace_box_scroll();
 			self.try_extend_drag_selection();
 		}
+		
 		self.alerts.cleanup();
 		self.notifications.cleanup();
+		
 		self.hover_widgets();
+		
+		for tab in &mut self.tabs {
+			tab.try_update_subscription().alert_err(&mut self.alerts);
+		}
+		
 		if self.tabs.active_tab().steal_animation_data.is_some()
 			&& let ActionResult::Success(()) = self.try_steal(false)
 		{
@@ -1759,8 +1652,6 @@ impl Workbench {
 		}
 	}
 
-	pub fn should_ignore_event(&self) -> bool { Timestamp::now() < self.ignore_event_end }
-
 	#[allow(clippy::cognitive_complexity, clippy::match_same_arms, clippy::too_many_lines)]
 	#[must_use]
 	fn char_from_key(&self, key: KeyCode) -> Option<char> {
@@ -1768,310 +1659,86 @@ impl Workbench {
 		if ctrl {
 			return None
 		}
-		Some(match key {
-			KeyCode::Digit1 =>
-				if shift {
-					'!'
-				} else {
-					'1'
-				},
-			KeyCode::Digit2 =>
-				if shift {
-					'@'
-				} else {
-					'2'
-				},
-			KeyCode::Digit3 =>
-				if shift {
-					'#'
-				} else {
-					'3'
-				},
-			KeyCode::Digit4 =>
-				if shift {
-					'$'
-				} else {
-					'4'
-				},
-			KeyCode::Digit5 =>
-				if shift {
-					'%'
-				} else {
-					'5'
-				},
-			KeyCode::Digit6 =>
-				if shift {
-					'^'
-				} else {
-					'6'
-				},
-			KeyCode::Digit7 =>
-				if shift {
-					'&'
-				} else {
-					'7'
-				},
-			KeyCode::Digit8 =>
-				if shift {
-					'*'
-				} else {
-					'8'
-				},
-			KeyCode::Digit9 =>
-				if shift {
-					'('
-				} else {
-					'9'
-				},
-			KeyCode::Digit0 =>
-				if shift {
-					')'
-				} else {
-					'0'
-				},
-			KeyCode::KeyA =>
-				if shift {
-					'A'
-				} else {
-					'a'
-				},
-			KeyCode::KeyB =>
-				if shift {
-					'B'
-				} else {
-					'b'
-				},
-			KeyCode::KeyC =>
-				if shift {
-					'C'
-				} else {
-					'c'
-				},
-			KeyCode::KeyD =>
-				if shift {
-					'D'
-				} else {
-					'd'
-				},
-			KeyCode::KeyE =>
-				if shift {
-					'E'
-				} else {
-					'e'
-				},
-			KeyCode::KeyF =>
-				if shift {
-					'F'
-				} else {
-					'f'
-				},
-			KeyCode::KeyG =>
-				if shift {
-					'G'
-				} else {
-					'g'
-				},
-			KeyCode::KeyH =>
-				if shift {
-					'H'
-				} else {
-					'h'
-				},
-			KeyCode::KeyI =>
-				if shift {
-					'I'
-				} else {
-					'i'
-				},
-			KeyCode::KeyJ =>
-				if shift {
-					'J'
-				} else {
-					'j'
-				},
-			KeyCode::KeyK =>
-				if shift {
-					'K'
-				} else {
-					'k'
-				},
-			KeyCode::KeyL =>
-				if shift {
-					'L'
-				} else {
-					'l'
-				},
-			KeyCode::KeyM =>
-				if shift {
-					'M'
-				} else {
-					'm'
-				},
-			KeyCode::KeyN =>
-				if shift {
-					'N'
-				} else {
-					'n'
-				},
-			KeyCode::KeyO =>
-				if shift {
-					'O'
-				} else {
-					'o'
-				},
-			KeyCode::KeyP =>
-				if shift {
-					'P'
-				} else {
-					'p'
-				},
-			KeyCode::KeyQ =>
-				if shift {
-					'Q'
-				} else {
-					'q'
-				},
-			KeyCode::KeyR =>
-				if shift {
-					'R'
-				} else {
-					'r'
-				},
-			KeyCode::KeyS =>
-				if shift {
-					'S'
-				} else {
-					's'
-				},
-			KeyCode::KeyT =>
-				if shift {
-					'T'
-				} else {
-					't'
-				},
-			KeyCode::KeyU =>
-				if shift {
-					'U'
-				} else {
-					'u'
-				},
-			KeyCode::KeyV =>
-				if shift {
-					'V'
-				} else {
-					'v'
-				},
-			KeyCode::KeyW =>
-				if shift {
-					'W'
-				} else {
-					'w'
-				},
-			KeyCode::KeyX =>
-				if shift {
-					'X'
-				} else {
-					'x'
-				},
-			KeyCode::KeyY =>
-				if shift {
-					'Y'
-				} else {
-					'y'
-				},
-			KeyCode::KeyZ =>
-				if shift {
-					'Z'
-				} else {
-					'z'
-				},
-			KeyCode::Space => ' ',
-			KeyCode::Numpad0 => '0',
-			KeyCode::Numpad1 => '1',
-			KeyCode::Numpad2 => '2',
-			KeyCode::Numpad3 => '3',
-			KeyCode::Numpad4 => '4',
-			KeyCode::Numpad5 => '5',
-			KeyCode::Numpad6 => '6',
-			KeyCode::Numpad7 => '7',
-			KeyCode::Numpad8 => '8',
-			KeyCode::Numpad9 => '9',
-			KeyCode::NumpadAdd => '+',
-			KeyCode::NumpadDivide => '/',
-			KeyCode::NumpadDecimal => '.',
-			KeyCode::NumpadComma => ',',
-			KeyCode::NumpadEqual => '=',
-			KeyCode::NumpadMultiply => '*',
-			KeyCode::NumpadSubtract => '-',
-			KeyCode::Quote =>
-				if shift {
-					'"'
-				} else {
-					'\''
-				},
-			KeyCode::Backslash =>
-				if shift {
-					'|'
-				} else {
-					'\\'
-				},
-			KeyCode::Semicolon =>
-				if shift {
-					':'
-				} else {
-					';'
-				},
-			KeyCode::Comma =>
-				if shift {
-					'<'
-				} else {
-					','
-				},
-			KeyCode::Equal =>
-				if shift {
-					'+'
-				} else {
-					'='
-				},
-			KeyCode::Backquote =>
-				if shift {
-					'~'
-				} else {
-					'`'
-				},
-			KeyCode::BracketLeft =>
-				if shift {
-					'{'
-				} else {
-					'['
-				},
-			KeyCode::Minus =>
-				if shift {
-					'_'
-				} else {
-					'-'
-				},
-			KeyCode::Period =>
-				if shift {
-					'>'
-				} else {
-					'.'
-				},
-			KeyCode::BracketRight =>
-				if shift {
-					'}'
-				} else {
-					']'
-				},
-			KeyCode::Slash =>
-				if shift {
-					'?'
-				} else {
-					'/'
-				},
-			KeyCode::Tab => '\t',
-			_ => return None,
-		})
+		
+		macro_rules! gen_match {
+            ($($variant:ident => $regular:literal else $shift:literal),* $(,)?) => {
+	            Some(match key {
+		            $(
+		            KeyCode::$variant => if shift { $shift } else { $regular },
+		            )*
+		            _ => return None,
+	            })
+            };
+		}
+		
+		gen_match! {
+			Digit1 => '!' else '1',
+			Digit2 => '@' else '2',
+			Digit3 => '#' else '3',
+			Digit4 => '$' else '4',
+			Digit5 => '%' else '5',
+			Digit6 => '^' else '6',
+			Digit7 => '&' else '7',
+			Digit8 => '*' else '8',
+			Digit9 => '(' else '9',
+			Digit0 => ')' else '0',
+			KeyA => 'A' else 'a',
+			KeyB => 'B' else 'b',
+			KeyC => 'C' else 'c',
+			KeyD => 'D' else 'd',
+			KeyE => 'E' else 'e',
+			KeyF => 'F' else 'f',
+			KeyG => 'G' else 'g',
+			KeyH => 'H' else 'h',
+			KeyI => 'I' else 'i',
+			KeyJ => 'J' else 'j',
+			KeyK => 'K' else 'k',
+			KeyL => 'L' else 'l',
+			KeyM => 'M' else 'm',
+			KeyN => 'N' else 'n',
+			KeyO => 'O' else 'o',
+			KeyP => 'P' else 'p',
+			KeyQ => 'Q' else 'q',
+			KeyR => 'R' else 'r',
+			KeyS => 'S' else 's',
+			KeyT => 'T' else 't',
+			KeyU => 'U' else 'u',
+			KeyV => 'V' else 'v',
+			KeyW => 'W' else 'w',
+			KeyX => 'X' else 'x',
+			KeyY => 'Y' else 'y',
+			KeyZ => 'Z' else 'z',
+			Space => ' ' else ' ',
+			Numpad0 => '0' else '0',
+			Numpad1 => '1' else '1',
+			Numpad2 => '2' else '2',
+			Numpad3 => '3' else '3',
+			Numpad4 => '4' else '4',
+			Numpad5 => '5' else '5',
+			Numpad6 => '6' else '6',
+			Numpad7 => '7' else '7',
+			Numpad8 => '8' else '8',
+			Numpad9 => '9' else '9',
+			NumpadAdd => '+' else '+',
+			NumpadDivide => '/' else '/',
+			NumpadDecimal => '.' else '.',
+			NumpadComma => ',' else ',',
+			NumpadEqual => '=' else '=',
+			NumpadMultiply => '*' else '*',
+			NumpadSubtract => '-' else '-',
+			Quote => '"' else '\'',
+			Backslash => '|' else '\\',
+			Semicolon => ':' else ';',
+			Comma => '<' else ',',
+			Equal => '+' else '=',
+			Backquote => '~' else '`',
+			BracketLeft => '{' else '[',
+			Minus => '_' else '-',
+			Period => '>' else '.',
+			BracketRight => '}' else ']',
+			Slash => '?' else '/',
+			Tab => '\t' else '\t',
+		}
 	}
 }
 

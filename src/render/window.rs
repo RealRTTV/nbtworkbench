@@ -49,7 +49,7 @@ pub async fn run() -> ! {
 
 			#[cfg(target_arch = "wasm32")]
 			crate::wasm::on_input();
-			if self.workbench.should_ignore_event() {
+			if window_properties().should_ignore_events() {
 				return;
 			}
 			if State::input(event.clone(), self.workbench) == ActionResult::Pass {
@@ -537,7 +537,7 @@ impl<'window> State<'window> {
 	fn input(event: WindowEvent, workbench: &mut Workbench) -> ActionResult {
 		match event {
 			WindowEvent::DroppedFile(file) if let Some(data) = std::fs::read(&file).alert_err(&mut workbench.alerts) => {
-				workbench.on_open_file(&file, data).alert_err(&mut workbench.alerts);
+				workbench.on_open_file(&file, &data).alert_err(&mut workbench.alerts);
 				ActionResult::Success(())
 			}
 			WindowEvent::KeyboardInput { event, .. } => workbench.on_key_input(event),
@@ -565,8 +565,7 @@ impl<'window> State<'window> {
 			self.last_tick = Timestamp::now();
 			workbench.tick();
 		}
-		workbench.try_subscription().alert_err(&mut workbench.alerts);
-
+		
 		if self.previous_theme != get_theme() {
 			self.queue.write_texture(
 				TexelCopyTextureInfo {
@@ -761,21 +760,38 @@ impl<'window> State<'window> {
 }
 
 pub enum WindowProperties {
-	Real(Arc<Window>),
+	Real {
+		window: Arc<Window>,
+		ignore_event_end: Timestamp,
+	},
 	Fake,
 }
 
 impl WindowProperties {
-	pub const fn new(window: Arc<Window>) -> Self { Self::Real(window) }
+	pub const fn new(window: Arc<Window>) -> Self { Self::Real { window, ignore_event_end: Timestamp::UNIX_EPOCH } }
 
-	pub fn set_window_title(&self, title: &str) -> &Self {
-		if let Self::Real(window) = self {
+	pub fn set_window_title(&self, title: &str) {
+		if let Self::Real { window, .. } = self {
 			window.set_title(title);
 			#[cfg(target_arch = "wasm32")]
 			if let Some(document) = web_sys::window().and_then(|window| window.document()) {
 				let _ = document.set_title(title);
 			}
 		}
-		self
+	}
+	
+	pub fn ignore_events_for(&mut self, duration: Duration)  {
+		if let Self::Real { ignore_event_end, .. } = self {
+			*ignore_event_end = Timestamp::now() + duration;
+		}
+	}
+	
+	#[must_use]
+	pub fn should_ignore_events(&self) -> bool {
+		if let Self::Real { ignore_event_end, .. } = self {
+			Timestamp::now() < *ignore_event_end
+		} else  {
+			false
+		}
 	}
 }

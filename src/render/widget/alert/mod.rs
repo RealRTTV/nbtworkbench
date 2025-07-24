@@ -106,7 +106,7 @@ impl Widget for Alert {
 	
 	fn dimensions(&self, _containment_dims: PhysicalSize<u32>) -> PhysicalSize<u32> { PhysicalSize::new(self.width as _, self.height() as _) }
 
-	fn is_valid_mouse_button(&self, button: MouseButton, pos: Vec2u, dims: PhysicalSize<u32>) -> bool {
+	fn is_valid_mouse_button(&self, button: MouseButton, _pos: Vec2u, _dims: PhysicalSize<u32>) -> bool {
 		matches!(button, MouseButton::Left | MouseButton::Middle | MouseButton::Right)
 	}
 
@@ -128,7 +128,7 @@ impl Widget for Alert {
 
 	fn is_currently_hovering(&self) -> bool { self.is_currently_hovering }
 	
-	fn on_hovering(&mut self, pos: Vec2u, dims: PhysicalSize<u32>, ctx: &mut WidgetContextMut) {
+	fn on_hovering(&mut self, pos: Vec2u, dims: PhysicalSize<u32>, _ctx: &mut WidgetContextMut) {
 		if !self.is_actually_within_bounds(pos, dims) { self.is_currently_hovering = false; return }
 		self.is_currently_hovering = true;
 		if self.time_elapsed_override.is_none() {
@@ -136,7 +136,7 @@ impl Widget for Alert {
 		}
 	}
 
-	fn on_stop_hovering(&mut self, ctx: &mut WidgetContextMut) {
+	fn on_stop_hovering(&mut self, _ctx: &mut WidgetContextMut) {
 		self.is_currently_hovering = false;
 		if let Some(time_elapsed) = self.time_elapsed_override.take() {
 			self.timestamp = Timestamp::now() - time_elapsed;
@@ -145,7 +145,7 @@ impl Widget for Alert {
 
 	fn is_visible(&self, _ctx: &WidgetContext) -> bool { self.is_visible() }
 
-	fn render_at(&self, mut pos: Vec2u, dims: PhysicalSize<u32>, builder: &mut VertexBufferBuilder, mouse: &MouseManager, ctx: &WidgetContext) {
+	fn render_at(&self, mut pos: Vec2u, dims: PhysicalSize<u32>, builder: &mut VertexBufferBuilder, _mouse: &MouseManager, _ctx: &WidgetContext) {
 		use core::fmt::Write;
 
 		pos.x += self.get_inset();

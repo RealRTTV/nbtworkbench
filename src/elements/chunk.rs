@@ -3,14 +3,14 @@ use std::fmt::{Display, Formatter};
 use std::hint::likely;
 use std::io::Read;
 use std::ops::{Deref, DerefMut};
-
+use std::slice::{Iter, IterMut};
 use zune_inflate::{DeflateDecoder, DeflateOptions};
 
 use crate::elements::compound::{CompoundEntry, NbtCompound};
 use crate::elements::result::{NbtParseResult, err, from_opt, from_result, ok};
 use crate::elements::{ComplexNbtElementVariant, Matches, NbtElement, NbtElementVariant};
 use crate::render::TreeRenderContext;
-use crate::render::assets::{CHUNK_GHOST_UV, CHUNK_UV, CONNECTION_UV, HEADER_SIZE, JUST_OVERLAPPING_BASE_TEXT_Z};
+use crate::render::assets::{CHUNK_GHOST_UV, CHUNK_UV};
 use crate::render::color::TextColor;
 use crate::render::vertex_buffer_builder::VertexBufferBuilder;
 use crate::serialization::decoder::Decoder;
@@ -19,6 +19,7 @@ use crate::serialization::formatter::{PrettyDisplay, PrettyFormatter};
 use crate::util::{StrExt, Timestamp, Vec2u};
 #[cfg(target_arch = "wasm32")]
 use crate::wasm::{FakeScope as Scope, fake_scope as scope};
+use crate::workbench::marked_line::MarkedLines;
 use crate::workbench::tab::ChunkFileFormat;
 
 #[repr(C)]
@@ -107,6 +108,8 @@ impl NbtElementVariant for NbtChunk {
 	const ID: u8 = 64 | 1;
 	const UV: Vec2u = CHUNK_UV;
 	const GHOST_UV: Vec2u = CHUNK_GHOST_UV;
+	const VALUE_COLOR: TextColor = TextColor::TreePrimitive;
+	const SEPERATOR_COLOR: TextColor = TextColor::TreeValueDesc;
 
 	fn from_str0(mut s: &str) -> Result<(&str, Self), usize>
 	where Self: Sized {
@@ -200,11 +203,7 @@ impl NbtElementVariant for NbtChunk {
 
 	fn to_le_bytes(&self, _writer: &mut UncheckedBufWriter) {}
 
-	fn render(&self, builder: &mut VertexBufferBuilder, _name: Option<&str>, remaining_scroll: &mut usize, tail: bool, ctx: &mut TreeRenderContext) {
-		use std::fmt::Write as _;
-
-		let mut y_before = ctx.pos().y;
-
+	fn render(&self, builder: &mut VertexBufferBuilder, key: Option<&str>, remaining_scroll: &mut usize, tail: bool, ctx: &mut TreeRenderContext) {
 		'head: {
 			if *remaining_scroll > 0 {
 				*remaining_scroll -= 1;
@@ -212,90 +211,21 @@ impl NbtElementVariant for NbtChunk {
 				break 'head;
 			}
 
-			let pos = ctx.pos();
+			let pos = ctx.pos;
 
 			ctx.line_number();
 			builder.draw_texture(pos, self.uv(), (16, 16));
 			if !self.is_empty() {
 				ctx.draw_toggle(pos - (16, 0), self.is_open(), builder);
 			}
-			ctx.check_for_invalid_key(|key| !key.parse::<usize>().is_ok_and(|x| (0..=31).contains(&x)));
-			ctx.check_for_invalid_value(|value| !value.parse::<usize>().is_ok_and(|z| (0..=31).contains(&z)));
-			ctx.render_errors(pos, builder);
-			if ctx.forbid(pos) {
-				builder.settings(pos + (20, 0), false, JUST_OVERLAPPING_BASE_TEXT_Z);
-				builder.color = TextColor::TreeKey.to_raw();
-				let _ = write!(builder, "{}, {}", self.x, self.z);
-			}
-
-			ctx.offset_pos(0, 16);
-			y_before += 16;
+			ctx.mark_possible_invalid_key(builder, |key| key.parse::<usize>().is_ok_and(|x| (0..=31).contains(&x)));
+			ctx.mark_possible_invalid_value(builder, |value| value.parse::<usize>().is_ok_and(|x| (0..=31).contains(&x)));
+			ctx.try_render_text::<Self>(key, self.value(), builder);
+			
+			ctx.pos += (0, 16);
 		}
-
-		let x_before = ctx.pos().x - 16;
-
-		if self.is_open() {
-			ctx.offset_pos(16, 0);
-
-			{
-				let children_contains_forbidden = 'f: {
-					let mut y = ctx.pos().y;
-					for CompoundEntry { key: _, value } in self.children() {
-						if ctx.selected_text_y() == Some(y.saturating_sub(*remaining_scroll * 16)) && ctx.selected_text_y().is_some_and(|y| y >= HEADER_SIZE) {
-							break 'f true;
-						}
-						y += value.height() * 16;
-					}
-					false
-				};
-				if children_contains_forbidden {
-					let mut y = ctx.pos().y;
-					for CompoundEntry { key: name, value } in self.children() {
-						ctx.check_for_key_duplicate(|text, _| text == name, false);
-						if ctx.selected_text_y() == Some(y.saturating_sub(*remaining_scroll * 16)) && y.saturating_sub(*remaining_scroll * 16) >= HEADER_SIZE && ctx.has_duplicate_key_error() {
-							ctx.set_red_line_number(y.saturating_sub(*remaining_scroll * 16), 1);
-							ctx.draw_error_underline(ctx.pos().x, y.saturating_sub(*remaining_scroll * 16), builder);
-							break;
-						}
-						y += value.height() * 16;
-					}
-				}
-			}
-
-			for (idx, CompoundEntry { key, value }) in self.children().enumerate() {
-				let pos = ctx.pos();
-				if pos.y > builder.window_height() {
-					break;
-				}
-
-				let height = value.height();
-				if *remaining_scroll >= height {
-					*remaining_scroll -= height;
-					ctx.skip_line_numbers(value.true_height());
-					continue;
-				}
-
-				if *remaining_scroll == 0 {
-					builder.draw_texture(pos - (16, 0), CONNECTION_UV, (16, (idx != self.len() - 1) as usize * 7 + 9));
-				}
-				ctx.check_for_key_duplicate(|text, _| self.inner.map.has(text) && key != text, false);
-				if ctx.has_duplicate_key_error() && Some(pos.y) == ctx.selected_text_y() {
-					ctx.set_red_line_number(pos.y, 0);
-				}
-				value.render(remaining_scroll, builder, Some(key), tail && idx == self.len() - 1, ctx);
-			}
-
-			if !tail {
-				let len = (ctx.pos().y - y_before) / 16;
-				for i in 0..len {
-					builder.draw_texture((x_before, y_before + i * 16), CONNECTION_UV, (8, 16));
-				}
-			}
-
-			ctx.offset_pos(-16, 0);
-		} else {
-			ctx.skip_line_numbers(self.true_height() - 1);
-		}
+		
+		ctx.render_complex_body_kv(self, builder, remaining_scroll, tail, TreeRenderContext::draw_held_entry_bar, TreeRenderContext::draw_held_entry_bar);
 	}
 
 	fn value(&self) -> Cow<'_, str> { Cow::Owned(format!("{}, {}", self.x, self.z)) }
@@ -333,4 +263,104 @@ impl NbtChunk {
 
 	#[must_use]
 	pub fn uv(&self) -> Vec2u { if self.is_unloaded() { Self::GHOST_UV } else { Self::UV } }
+}
+
+impl ComplexNbtElementVariant for NbtChunk {
+	type Entry = <NbtCompound as ComplexNbtElementVariant>::Entry;
+	const ROOT_UV: Vec2u = NbtChunk::UV;
+
+	fn new(entries: Vec<Self::Entry>) -> Self
+	where
+		Self: Sized
+	{
+		Self::new(NbtCompound::new(entries), (0, 0), ChunkFileFormat::default(), 0)
+	}
+
+	fn height(&self) -> usize {
+		<NbtCompound as ComplexNbtElementVariant>::height(&self.inner)
+	}
+
+	fn true_height(&self) -> usize {
+		<NbtCompound as ComplexNbtElementVariant>::true_height(&self.inner)
+	}
+
+	fn len(&self) -> usize {
+		<NbtCompound as ComplexNbtElementVariant>::len(&self.inner)
+	}
+
+	fn is_empty(&self) -> bool {
+		<NbtCompound as ComplexNbtElementVariant>::is_empty(&self.inner)
+	}
+
+	fn can_insert(&self, value: &NbtElement) -> bool {
+		<NbtCompound as ComplexNbtElementVariant>::can_insert(&self.inner, value)
+	}
+
+	fn is_open(&self) -> bool {
+		<NbtCompound as ComplexNbtElementVariant>::is_open(&self.inner)
+	}
+
+	fn end_x(&self) -> usize {
+		<NbtCompound as ComplexNbtElementVariant>::end_x(&self.inner)
+	}
+
+	unsafe fn toggle(&mut self) {
+		<NbtCompound as ComplexNbtElementVariant>::toggle(&mut self.inner)
+	}
+
+	unsafe fn insert(&mut self, idx: usize, entry: Self::Entry) -> Result<Option<Self::Entry>, Self::Entry> {
+		<NbtCompound as ComplexNbtElementVariant>::insert(&mut self.inner, idx, entry)
+	}
+
+	unsafe fn remove(&mut self, idx: usize) -> Option<Self::Entry> {
+		<NbtCompound as ComplexNbtElementVariant>::remove(&mut self.inner, idx)
+	}
+
+	unsafe fn replace(&mut self, idx: usize, entry: Self::Entry) -> Result<Option<Self::Entry>, Self::Entry> {
+		<NbtCompound as ComplexNbtElementVariant>::replace(&mut self.inner, idx, entry)
+	}
+
+	unsafe fn swap(&mut self, a: usize, b: usize) {
+		<NbtCompound as ComplexNbtElementVariant>::swap(&mut self.inner, a, b)
+	}
+
+	unsafe fn shut<'a, 'b>(&'b mut self, scope: &'a std::thread::Scope<'a, 'b>) {
+		<NbtCompound as ComplexNbtElementVariant>::shut(&mut self.inner, scope)
+	}
+
+	unsafe fn expand<'a, 'b>(&'b mut self, scope: &'a std::thread::Scope<'a, 'b>) {
+		<NbtCompound as ComplexNbtElementVariant>::expand(&mut self.inner, scope)
+	}
+
+	fn recache(&mut self) {
+		<NbtCompound as ComplexNbtElementVariant>::recache(&mut self.inner)
+	}
+
+	fn on_style_change(&mut self, bookmarks: &mut MarkedLines) -> bool {
+		<NbtCompound as ComplexNbtElementVariant>::on_style_change(&mut self.inner, bookmarks)
+	}
+
+	fn get(&self, idx: usize) -> Option<&Self::Entry> {
+		<NbtCompound as ComplexNbtElementVariant>::get(&self.inner, idx)
+	}
+
+	fn get_mut(&mut self, idx: usize) -> Option<&mut Self::Entry> {
+		<NbtCompound as ComplexNbtElementVariant>::get_mut(&mut self.inner, idx)
+	}
+
+	unsafe fn get_unchecked(&self, idx: usize) -> &Self::Entry {
+		<NbtCompound as ComplexNbtElementVariant>::get_unchecked(&self.inner, idx)
+	}
+
+	unsafe fn get_unchecked_mut(&mut self, idx: usize) -> &mut Self::Entry {
+		<NbtCompound as ComplexNbtElementVariant>::get_unchecked_mut(&mut self.inner, idx)
+	}
+
+	fn children(&self) -> Iter<'_, Self::Entry> {
+		<NbtCompound as ComplexNbtElementVariant>::children(&self.inner)
+	}
+
+	fn children_mut(&mut self) -> IterMut<'_, Self::Entry> {
+		<NbtCompound as ComplexNbtElementVariant>::children_mut(&mut self.inner)
+	}
 }

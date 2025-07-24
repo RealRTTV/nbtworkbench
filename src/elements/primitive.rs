@@ -31,6 +31,10 @@ macro_rules! primitive {
 				const UV: $crate::util::Vec2u = $uv;
 
 				const GHOST_UV: $crate::util::Vec2u = $ghost_uv;
+				
+				const VALUE_COLOR: $crate::render::color::TextColor = $crate::render::color::TextColor::TreePrimitive;
+				
+				const SEPERATOR_COLOR: $crate::render::color::TextColor = $crate::render::color::TextColor::TreePrimitive;
 
 				fn from_str0(s: &str) -> Result<(&str, Self), usize>
 				where Self: Sized {
@@ -52,25 +56,12 @@ macro_rules! primitive {
 
 				fn to_le_bytes(&self, writer: &mut $crate::serialization::encoder::UncheckedBufWriter) { writer.write(self.value.to_le_bytes().as_ref()); }
 
-				fn render(&self, builder: &mut $crate::render::vertex_buffer_builder::VertexBufferBuilder, name: Option<&str>, _remaining_scroll: &mut usize, _tail: bool, ctx: &mut $crate::render::TreeRenderContext) {
-					use ::std::fmt::Write as _;
-
+				fn render(&self, builder: &mut $crate::render::vertex_buffer_builder::VertexBufferBuilder, key: Option<&str>, _remaining_scroll: &mut usize, _tail: bool, ctx: &mut $crate::render::TreeRenderContext) {
 					ctx.line_number();
-					builder.draw_texture(ctx.pos(), Self::UV, (16, 16));
-					ctx.check_for_invalid_value(|value| value.parse::<<Self as $crate::elements::PrimitiveNbtElementVariant>::InnerType>().is_err());
-					ctx.render_errors(ctx.pos(), builder);
-					if ctx.forbid(ctx.pos()) {
-						builder.settings(ctx.pos() + (20, 0), false, $crate::render::assets::JUST_OVERLAPPING_BASE_TEXT_Z);
-						if let Some(key) = name {
-							builder.color = $crate::render::color::TextColor::TreeKey.to_raw();
-							let _ = write!(builder, "{key}: ");
-						};
-
-						builder.color = $crate::render::color::TextColor::TreePrimitive.to_raw();
-						let _ = write!(builder, "{}", self.value);
-					}
-
-					ctx.offset_pos(0, 16);
+					builder.draw_texture(ctx.pos, Self::UV, (16, 16));
+					ctx.mark_possible_invalid_value(builder, |value| value.parse::<<Self as $crate::elements::PrimitiveNbtElementVariant>::InnerType>().is_ok());
+					ctx.try_render_text::<Self>(key, self.value(), builder);
+					ctx.pos += (0, 16);
 				}
 
 				fn value(&self) -> ::std::borrow::Cow<'_, str> { ::std::borrow::Cow::Owned(format!("{}", self.value)) }

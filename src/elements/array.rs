@@ -99,6 +99,10 @@ macro_rules! array {
 				const UV: $crate::util::Vec2u = $uv;
 
 				const GHOST_UV: $crate::util::Vec2u = $ghost_uv;
+				
+				const VALUE_COLOR: $crate::render::color::TextColor = $crate::render::color::TextColor::TreeValueDesc;
+				
+				const SEPERATOR_COLOR: $crate::render::color::TextColor = <Self as $crate::elements::NbtElementVariant>::VALUE_COLOR;
 
 				fn from_str0(mut s: &str) -> Result<(&str, Self), usize> {
 					s = s.strip_prefix('[').ok_or(s.len())?.trim_start();
@@ -165,86 +169,8 @@ macro_rules! array {
 				}
 
 				fn render(&self, builder: &mut $crate::render::vertex_buffer_builder::VertexBufferBuilder, key: Option<&str>, remaining_scroll: &mut usize, tail: bool, ctx: &mut $crate::render::TreeRenderContext) {
-					use ::std::fmt::Write as _;
-
-					'head: {
-						if *remaining_scroll > 0 {
-							*remaining_scroll -= 1;
-							ctx.skip_line_numbers(1);
-							break 'head;
-						}
-
-						let pos = ctx.pos();
-
-						ctx.line_number();
-						builder.draw_texture_z(pos, $crate::render::assets::BASE_Z, Self::UV, (16, 16));
-						if !self.is_empty() {
-							ctx.draw_toggle(pos - (16, 0), self.open, builder);
-						}
-						ctx.render_errors(pos, builder);
-						if ctx.forbid(pos) {
-							builder.settings(pos + (20, 0), false, $crate::render::assets::JUST_OVERLAPPING_BASE_TEXT_Z);
-							if let Some(key) = key {
-								builder.color = $crate::render::color::TextColor::TreeKey.to_raw();
-								let _ = write!(builder, "{key}");
-								builder.color = $crate::render::color::TextColor::TreeValueDesc.to_raw();
-								let _ = write!(builder, ": ");
-							};
-
-							builder.color = $crate::render::color::TextColor::TreeValueDesc.to_raw();
-							let _ = write!(builder, "{}", self.value());
-						}
-
-						if ctx.draw_held_entry_bar(pos + (16, 16), builder, |x, y| pos == (x - 16, y - 8), |x| self.can_insert(x)) {
-						} else if self.height() == 1 && ctx.draw_held_entry_bar(pos + (16, 16), builder, |x, y| pos == (x - 16, y - 16), |x| self.can_insert(x)) {
-						}
-
-						ctx.offset_pos(0, 16);
-					}
-
-					if self.open {
-						ctx.offset_pos(16, 0);
-
-						for (idx, element) in self.children().enumerate() {
-							let pos = ctx.pos();
-							if pos.y > builder.window_height() {
-								break;
-							}
-
-							if *remaining_scroll > 0 {
-								*remaining_scroll -= 1;
-								ctx.skip_line_numbers(1);
-								continue;
-							}
-
-							ctx.draw_held_entry_bar(pos, builder, |x, y| pos == (x, y), |x| self.can_insert(x));
-
-							builder.draw_texture(pos - (16, 0), $crate::render::assets::CONNECTION_UV, (16, (idx != self.len() - 1) as usize * 7 + 9));
-							if !tail {
-								builder.draw_texture(pos - (32, 0), $crate::render::assets::CONNECTION_UV, (8, 16));
-							}
-
-							ctx.line_number();
-							builder.draw_texture_z(pos, $crate::render::assets::BASE_Z, Self::ChildType::UV, (16, 16));
-							ctx.check_for_invalid_value(|value| value.parse::<<Self::ChildType as $crate::elements::PrimitiveNbtElementVariant>::InnerType>().is_err());
-							ctx.render_errors(pos, builder);
-							let str = ::compact_str::format_compact!("{}", Self::transmute(element));
-							if ctx.forbid(pos) {
-								builder.settings(pos + (20, 0), false, $crate::render::assets::JUST_OVERLAPPING_BASE_TEXT_Z);
-								builder.color = $crate::render::color::TextColor::TreePrimitive.to_raw();
-								let _ = write!(builder, "{str}");
-							}
-
-							ctx.offset_pos(0, 16);
-
-							let pos = ctx.pos();
-							ctx.draw_held_entry_bar(pos, builder, |x, y| pos == (x, y + 8), |x| self.can_insert(x));
-						}
-
-						ctx.offset_pos(-16, 0);
-					} else {
-						ctx.skip_line_numbers(self.len());
-					}
+					ctx.render_complex_head(self, builder, key, remaining_scroll, $crate::render::TreeRenderContext::draw_held_entry_bar);
+					ctx.render_complex_body(self, builder, remaining_scroll, tail, $crate::render::TreeRenderContext::draw_held_entry_bar, $crate::render::TreeRenderContext::draw_held_entry_bar);
 				}
 
 				fn value(&self) -> ::std::borrow::Cow<'_, str> {

@@ -175,6 +175,7 @@ pub enum ZOffset {
 	JUST_OVERLAPPING_BOOKMARK_Z  = 141,
 	SELECTED_TEXT_Z              = 170,
 	SELECTED_TEXT_SELECTION_Z    = 171,
+	TEXT_UNDERLINE_Z             = 180,
 	ACTION_WHEEL_Z               = 190,
 	SCROLLBAR_BOOKMARK_Z         = 199,
 	SCROLLBAR_Z                  = 200,

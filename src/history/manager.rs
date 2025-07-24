@@ -1,6 +1,6 @@
 use std::fmt::{Debug, Formatter};
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 
 use crate::elements::element::NbtElement;
 use crate::history::WorkbenchAction;
@@ -45,14 +45,14 @@ impl HistoryMananger {
 	}
 
 	pub fn undo<'m1, 'm2: 'm1>(&mut self, root: &mut NbtElement, mi: &'m1 mut MutableIndices<'m2>, path: &mut FilePath, held_entry: &mut Option<HeldEntry>) -> Result<()> {
-		let action = self.undos.pop().context("No actions to undo")?;
+		let Some(action) = self.undos.pop() else { return Ok(()) };
 		let undo_action = action.undo(root, mi, path, held_entry)?;
 		self.redos.push(undo_action);
 		Ok(())
 	}
 
 	pub fn redo<'m1, 'm2: 'm1>(&mut self, root: &mut NbtElement, mi: &'m1 mut MutableIndices<'m2>, path: &mut FilePath, held_entry: &mut Option<HeldEntry>) -> Result<()> {
-		let action = self.redos.pop().context("No actions to undo")?;
+		let Some(action) = self.redos.pop() else { return Ok(()) };
 		let undo_action = action.undo(root, mi, path, held_entry)?;
 		self.undos.push(undo_action);
 		Ok(())

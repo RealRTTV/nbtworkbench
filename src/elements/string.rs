@@ -5,13 +5,13 @@ use std::fmt::{Display, Formatter};
 use std::mem::{ManuallyDrop, MaybeUninit};
 use std::ops::Deref;
 use std::ptr::NonNull;
-
-use compact_str::CompactString;
+use std::str::FromStr;
+use compact_str::{CompactString, ToCompactString};
 
 use crate::elements::result::NbtParseResult;
 use crate::elements::{Matches, NbtElementVariant, PrimitiveNbtElementVariant};
 use crate::render::TreeRenderContext;
-use crate::render::assets::{BASE_Z, JUST_OVERLAPPING_BASE_TEXT_Z, STRING_GHOST_UV, STRING_UV};
+use crate::render::assets::{BASE_Z, STRING_GHOST_UV, STRING_UV};
 use crate::render::color::TextColor;
 use crate::render::vertex_buffer_builder::VertexBufferBuilder;
 use crate::serialization::decoder::Decoder;
@@ -40,6 +40,8 @@ impl NbtElementVariant for NbtString {
 	const ID: u8 = 8;
 	const UV: Vec2u = STRING_UV;
 	const GHOST_UV: Vec2u = STRING_GHOST_UV;
+	const VALUE_COLOR: TextColor = TextColor::TreeString;
+	const SEPERATOR_COLOR: TextColor = TextColor::TreeKey;
 
 	fn from_str0(s: &str) -> Result<(&str, Self), usize>
 	where Self: Sized {
@@ -61,24 +63,11 @@ impl NbtElementVariant for NbtString {
 
 	fn to_le_bytes(&self, writer: &mut UncheckedBufWriter) { writer.write_le_str(self.str.as_str()); }
 
-	fn render(&self, builder: &mut VertexBufferBuilder, name: Option<&str>, _remaining_scroll: &mut usize, _tail: bool, ctx: &mut TreeRenderContext) {
-		use std::fmt::Write as _;
-
+	fn render(&self, builder: &mut VertexBufferBuilder, key: Option<&str>, _remaining_scroll: &mut usize, _tail: bool, ctx: &mut TreeRenderContext) {
 		ctx.line_number();
-		builder.draw_texture_z(ctx.pos(), BASE_Z, Self::UV, (16, 16));
-
-		ctx.render_errors(ctx.pos(), builder);
-		if ctx.forbid(ctx.pos()) {
-			builder.settings(ctx.pos() + (20, 0), false, JUST_OVERLAPPING_BASE_TEXT_Z);
-			if let Some(name) = name {
-				builder.color = TextColor::TreeKey.to_raw();
-				let _ = write!(builder, "{name}: ");
-			}
-			builder.color = TextColor::TreeString.to_raw();
-			let _ = write!(builder, "{}", self.str.as_str());
-		}
-
-		ctx.offset_pos(0, 16);
+		builder.draw_texture_z(ctx.pos, BASE_Z, Self::UV, (16, 16));
+		ctx.try_render_text::<Self>(key, self.value(), builder);
+		ctx.pos += (0, 16);
 	}
 
 	fn value(&self) -> Cow<'_, str> { Cow::Borrowed(self.str.as_str()) }
@@ -109,6 +98,14 @@ impl Default for TwentyThree {
 				stack: ManuallyDrop::new(StackTwentyThree { data, _id: NbtString::ID }),
 			}
 		}
+	}
+}
+
+impl FromStr for TwentyThree {
+	type Err = !;
+
+	fn from_str(s: &str) -> Result<Self, Self::Err> {
+		Ok(Self::new(s.to_compact_string()))
 	}
 }
 

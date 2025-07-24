@@ -1,5 +1,5 @@
 use std::fmt::Write;
-use std::ops::{Deref, DerefMut};
+use std::ops::{Deref, DerefMut, Range};
 
 use compact_str::ToCompactString;
 use thiserror::Error;
@@ -27,7 +27,6 @@ use crate::tree::navigate::{NavigationError, NavigationInformation, ParentNaviga
 use crate::tree::traverse::{TraversalError, TraversalInformation};
 use crate::tree::{MutableIndices, line_number_at};
 use crate::util::StrExt;
-use crate::workbench::marked_line::MarkedLines;
 use crate::workbench::tab::{FilePath, TabConstants};
 
 #[derive(Clone, Debug)]
@@ -285,6 +284,37 @@ impl SelectedText {
 	pub fn set_indices(&mut self, indices: OwnedIndices, root: &NbtElement) {
 		self.indices = indices;
 		self.recache_y(root);
+	}
+	
+	#[must_use]
+	pub fn is_editing_key(&self) -> bool {
+		self.keyfix.is_none() && self.prefix.0.is_empty() && !self.suffix.0.is_empty() && self.valuefix.is_some()
+	}
+	
+	#[must_use]
+	pub fn key_span(&self, left_margin: usize) -> Option<Range<usize>> {
+		self.keyfix.as_ref()
+			.map(|keyfix| &*keyfix.0)
+			.or(Some(&*self.value).filter(|_| self.is_editing_key()))
+			.map(|key| {
+				let start = self.indices.end_x(left_margin) + Self::PREFIXING_SPACE_WIDTH;
+				let width = key.width();
+				start..start + width
+			})
+	}
+
+	#[must_use]
+	pub fn is_editing_value(&self) -> bool {
+		self.keyfix.is_some() && !self.prefix.0.is_empty() && self.suffix.0.is_empty() && self.valuefix.is_none()
+	}
+
+	#[must_use]
+	pub fn value_span(&self, left_margin: usize) -> Option<Range<usize>> {
+		self.valuefix.as_ref()
+			.map(|valuefix| &*valuefix.0)
+			.map(|valuefix| (self.indices.end_x(left_margin) + Self::PREFIXING_SPACE_WIDTH, valuefix))
+			.or_else(|| Some((self.indices.end_x(left_margin) + Self::PREFIXING_SPACE_WIDTH + self.keyfix.as_ref().map_or(0, |keyfix| keyfix.0.width()) + self.prefix.0.width(), &*self.value)))
+			.map(|(start, value)| start..start + value.width())
 	}
 
 	pub fn render(&self, builder: &mut VertexBufferBuilder, left_margin: usize) {
@@ -603,4 +633,14 @@ impl SelectedTextInputError {
 			Self::MoveSelectedText(e) => e.is_generally_ignored(),
 		}
 	}
+}
+
+#[derive(Error, Debug)]
+pub enum SelectedTextKeyValueError {
+	#[error("This value is not valid for this type.")]
+	InvalidValue,
+	#[error("This key is not valid for this type.")]
+	InvalidKey,
+	#[error("This key is duplicate of another.")]
+	DuplicateKey,
 }

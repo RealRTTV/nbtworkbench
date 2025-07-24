@@ -5,18 +5,18 @@ use std::hint::likely;
 use std::mem::MaybeUninit;
 use std::slice::{Iter, IterMut};
 #[cfg(not(target_arch = "wasm32"))] use std::thread::{Scope, scope};
-
+use winit::dpi::PhysicalSize;
 use crate::elements::chunk::NbtChunk;
 use crate::elements::result::NbtParseResult;
 use crate::elements::{ComplexNbtElementVariant, Matches, NbtElement, NbtElementVariant};
 use crate::render::TreeRenderContext;
-use crate::render::assets::{CONNECTION_UV, HEADER_SIZE, JUST_OVERLAPPING_BASE_TEXT_Z, JUST_OVERLAPPING_BOOKMARK_Z, LINE_NUMBER_CONNECTOR_Z, LINE_NUMBER_SEPARATOR_UV, REGION_GRID_UV, REGION_UV};
+use crate::render::assets::{CONNECTION_UV, HEADER_SIZE, JUST_OVERLAPPING_BOOKMARK_Z, REGION_GRID_UV, REGION_UV};
 use crate::render::color::TextColor;
 use crate::render::vertex_buffer_builder::VertexBufferBuilder;
 use crate::serialization::decoder::Decoder;
 use crate::serialization::encoder::UncheckedBufWriter;
 use crate::serialization::formatter::{PrettyDisplay, PrettyFormatter};
-use crate::util::Vec2u;
+use crate::util::{Vec2u, AABB};
 #[cfg(target_arch = "wasm32")]
 use crate::wasm::{FakeScope as Scope, fake_scope as scope};
 use crate::workbench::marked_line::MarkedLines;
@@ -135,6 +135,8 @@ impl NbtElementVariant for NbtRegion {
 	const ID: u8 = 64 | 0;
 	const UV: Vec2u = REGION_UV;
 	const GHOST_UV: Vec2u = REGION_UV;
+	const VALUE_COLOR: TextColor = TextColor::TreeValueDesc;
+	const SEPERATOR_COLOR: TextColor = Self::VALUE_COLOR;
 
 	fn from_str0(mut s: &str) -> Result<(&str, Self), usize>
 	where Self: Sized {
@@ -238,54 +240,14 @@ impl NbtElementVariant for NbtRegion {
 
 	fn to_le_bytes(&self, _writer: &mut UncheckedBufWriter) {}
 
-	fn render(&self, builder: &mut VertexBufferBuilder, name: Option<&str>, remaining_scroll: &mut usize, tail: bool, ctx: &mut TreeRenderContext) {
-		use std::fmt::Write as _;
-
-		builder.draw_texture_z(ctx.pos() - (20, 2), LINE_NUMBER_CONNECTOR_Z, LINE_NUMBER_SEPARATOR_UV, (2, 2));
-
-		'head: {
-			if *remaining_scroll > 0 {
-				*remaining_scroll -= 1;
-				ctx.skip_line_numbers(1);
-				break 'head;
-			}
-
-			let pos = ctx.pos();
-
-			// not used on the grid layout
-			if !self.is_grid_layout() {
-				ctx.line_number();
-			} else {
-				ctx.skip_line_numbers(1);
-			}
-			// fun hack for connection
-			builder.draw_texture(pos, self.uv(), (16, 16));
-			builder.draw_texture(pos - (16, 0), CONNECTION_UV, (16, 9));
-			if !self.is_empty() {
-				ctx.draw_toggle(pos - (16, 0), self.is_open(), builder);
-			}
-			ctx.render_errors(pos, builder);
-			if ctx.forbid(pos) {
-				builder.settings(pos + (20, 0), false, JUST_OVERLAPPING_BASE_TEXT_Z);
-				if let Some(key) = name {
-					builder.color = TextColor::TreeKey.to_raw();
-					let _ = write!(builder, "{key}");
-				}
-				
-				builder.color = TextColor::TreeValueDesc.to_raw();
-				let _ = write!(builder, ": {}", self.value());
-			}
-
-			ctx.offset_pos(0, 16);
-		}
-
-		ctx.offset_pos(16, 0);
+	fn render(&self, builder: &mut VertexBufferBuilder, key: Option<&str>, remaining_scroll: &mut usize, tail: bool, ctx: &mut TreeRenderContext) {
+		ctx.render_complex_head(self, builder, key, remaining_scroll, |_, _, _, _, _| false);
 
 		if self.is_open() {
 			if self.is_grid_layout() {
-				let initial_x_offset = ctx.pos().x;
+				let initial_x_offset = ctx.pos.x;
 				for z in 0..32 {
-					if ctx.pos().y > builder.window_height() {
+					if ctx.pos.y > builder.window_height() {
 						break;
 					}
 
@@ -299,7 +261,7 @@ impl NbtElementVariant for NbtRegion {
 					}
 
 					if *remaining_scroll == 0 {
-						builder.draw_texture(ctx.pos() - (16, 0), CONNECTION_UV, (16, (z != 32 - 1 && tail) as usize * 7 + 9));
+						builder.draw_texture(ctx.pos - (16, 0), CONNECTION_UV, (16, (z != 32 - 1 && tail) as usize * 7 + 9));
 					}
 
 					for x in 0..32 {
@@ -308,50 +270,29 @@ impl NbtElementVariant for NbtRegion {
 						ctx.line_number();
 						ctx.skip_line_numbers(chunk.true_height() - 1);
 
-						builder.draw_texture_z(ctx.pos(), JUST_OVERLAPPING_BOOKMARK_Z, chunk.uv(), (16, 16));
+						builder.draw_texture_z(ctx.pos, JUST_OVERLAPPING_BOOKMARK_Z, chunk.uv(), (16, 16));
 
 						if ctx.mouse.x > ctx.left_margin() && ctx.mouse.y > HEADER_SIZE {
 							let mx = ((ctx.mouse.x - ctx.left_margin()) & !15) + ctx.left_margin();
 							let my = ((ctx.mouse.y - HEADER_SIZE) & !15) + HEADER_SIZE;
-							if ctx.pos() == (mx, my) {
+							if ctx.pos == (mx, my) {
 								let text = chunk.value();
 								builder.color = TextColor::White.to_raw();
-								builder.draw_tooltip(&[&text], ctx.pos(), false);
+								builder.draw_tooltip(&[&text], ctx.pos, false);
 							}
 						}
 
-						let pos = ctx.pos();
-						ctx.draw_held_entry_grid_chunk(pos, builder, |x, y| pos == (x, y) || pos == (x, y - 8), |x| self.can_insert(x));
-
-						ctx.offset_pos(16, 0);
+						let pos = ctx.pos;
+						ctx.draw_held_entry_grid_chunk(pos, builder, AABB::from_pos_and_dims(pos, PhysicalSize::new(16, 16)), self);
+						
+						ctx.pos += (16, 0);
 					}
-
-					ctx.offset_pos(0, 16);
-					let x = ctx.pos().x;
-					ctx.offset_pos(initial_x_offset as isize - x as isize, 0);
+					
+					ctx.pos += (0, 16);
+					ctx.pos = (initial_x_offset, ctx.pos.y).into();
 				}
 			} else {
-				for (idx, value) in self.children().enumerate() {
-					if ctx.pos().y > builder.window_height() {
-						break;
-					}
-
-					let height = value.height();
-					if *remaining_scroll >= height {
-						*remaining_scroll -= height;
-						ctx.skip_line_numbers(value.true_height());
-						continue;
-					}
-
-					if *remaining_scroll == 0 {
-						builder.draw_texture(ctx.pos() - (16, 0), CONNECTION_UV, (16, (idx != self.len() - 1 && tail) as usize * 7 + 9));
-					}
-
-					let pos = ctx.pos();
-					ctx.draw_held_entry_chunk(pos, builder, |x, y| pos == (x, y) || pos == (x, y - 8), |x| self.can_insert(x));
-
-					value.render(&mut *remaining_scroll, builder, None, idx == self.len() - 1 && tail, ctx);
-				}
+				ctx.render_complex_body::<Self>(self, builder, remaining_scroll, tail, |ctx, pos, builder, aabb, region| TreeRenderContext::draw_held_entry_chunk(ctx, pos, builder, AABB::from_pos_and_dims(aabb.low(), PhysicalSize::new(16, 16)), region), |_, _, _, _, _| false);
 			}
 		}
 	}

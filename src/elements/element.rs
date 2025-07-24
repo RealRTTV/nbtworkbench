@@ -620,7 +620,7 @@ impl NbtElement {
 			Nbt::IntArray(int_array) => int_array.render(builder, str, remaining_scroll, tail, ctx),
 			Nbt::LongArray(long_array) => long_array.render(builder, str, remaining_scroll, tail, ctx),
 			Nbt::Chunk(chunk) => chunk.render(builder, str, remaining_scroll, tail, ctx),
-			Nbt::Region(_) => { /* no impl */ }
+			Nbt::Region(region) => region.render(builder, str, remaining_scroll, tail, ctx),
 		}
 	}
 
@@ -968,20 +968,20 @@ impl NbtElement {
 		use NbtPattern as Nbt;
 
 		match self.as_pattern() {
-			Nbt::Byte(x) => (x.value(), TextColor::TreePrimitive),
-			Nbt::Short(x) => (x.value(), TextColor::TreePrimitive),
-			Nbt::Int(x) => (x.value(), TextColor::TreePrimitive),
-			Nbt::Long(x) => (x.value(), TextColor::TreePrimitive),
-			Nbt::Float(x) => (x.value(), TextColor::TreePrimitive),
-			Nbt::Double(x) => (x.value(), TextColor::TreePrimitive),
-			Nbt::ByteArray(x) => (x.value(), TextColor::TreeValueDesc),
-			Nbt::String(x) => (x.value(), TextColor::TreeString),
-			Nbt::List(x) => (x.value(), TextColor::TreeValueDesc),
-			Nbt::Compound(x) => (x.value(), TextColor::TreeValueDesc),
-			Nbt::IntArray(x) => (x.value(), TextColor::TreeValueDesc),
-			Nbt::LongArray(x) => (x.value(), TextColor::TreeValueDesc),
-			Nbt::Chunk(x) => (x.value(), TextColor::TreeValueDesc),
-			Nbt::Region(x) => (x.value(), TextColor::TreeValueDesc),
+			Nbt::Byte(x) => (x.value(), NbtByte::VALUE_COLOR),
+			Nbt::Short(x) => (x.value(), NbtShort::VALUE_COLOR),
+			Nbt::Int(x) => (x.value(), NbtInt::VALUE_COLOR),
+			Nbt::Long(x) => (x.value(), NbtLong::VALUE_COLOR),
+			Nbt::Float(x) => (x.value(), NbtFloat::VALUE_COLOR),
+			Nbt::Double(x) => (x.value(), NbtDouble::VALUE_COLOR),
+			Nbt::ByteArray(x) => (x.value(), NbtByteArray::VALUE_COLOR),
+			Nbt::String(x) => (x.value(), NbtString::VALUE_COLOR),
+			Nbt::List(x) => (x.value(), NbtList::VALUE_COLOR),
+			Nbt::Compound(x) => (x.value(), NbtCompound::VALUE_COLOR),
+			Nbt::IntArray(x) => (x.value(), NbtIntArray::VALUE_COLOR),
+			Nbt::LongArray(x) => (x.value(), NbtLongArray::VALUE_COLOR),
+			Nbt::Chunk(x) => (x.value(), NbtChunk::VALUE_COLOR),
+			Nbt::Region(x) => (x.value(), NbtRegion::VALUE_COLOR),
 		}
 	}
 	

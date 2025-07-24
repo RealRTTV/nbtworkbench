@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 use std::cmp::Ordering;
-use std::fmt::{Display, Formatter, Write};
+use std::fmt::{Display, Formatter};
 use std::hint::likely;
 use std::ops::Deref;
 use std::slice::{Iter, IterMut};
@@ -13,7 +13,7 @@ use hashbrown::hash_table::HashTable;
 use crate::elements::result::NbtParseResult;
 use crate::elements::{ComplexNbtElementVariant, Matches, NbtElement, NbtElementAndKey, NbtElementAndKeyRef, NbtElementAndKeyRefMut, NbtElementVariant};
 use crate::render::TreeRenderContext;
-use crate::render::assets::{COMPOUND_GHOST_UV, COMPOUND_ROOT_UV, COMPOUND_UV, CONNECTION_UV, HEADER_SIZE, JUST_OVERLAPPING_BASE_TEXT_Z};
+use crate::render::assets::{COMPOUND_GHOST_UV, COMPOUND_ROOT_UV, COMPOUND_UV};
 use crate::render::color::TextColor;
 use crate::render::vertex_buffer_builder::VertexBufferBuilder;
 use crate::render::widget::selected_text::SelectedText;
@@ -122,6 +122,8 @@ impl NbtElementVariant for NbtCompound {
 	const ID: u8 = 10;
 	const UV: Vec2u = COMPOUND_UV;
 	const GHOST_UV: Vec2u = COMPOUND_GHOST_UV;
+	const VALUE_COLOR: TextColor = TextColor::TreeValueDesc;
+	const SEPERATOR_COLOR: TextColor = Self::VALUE_COLOR;
 
 	fn from_str0(mut s: &str) -> Result<(&str, Self), usize>
 	where Self: Sized {
@@ -192,113 +194,9 @@ impl NbtElementVariant for NbtCompound {
 		writer.write(&[0x00]);
 	}
 
-	fn render(&self, builder: &mut VertexBufferBuilder, name: Option<&str>, remaining_scroll: &mut usize, tail: bool, ctx: &mut TreeRenderContext) {
-		let pos = ctx.pos();
-		let mut y_before = pos.y;
-
-		'head: {
-			if *remaining_scroll > 0 {
-				*remaining_scroll -= 1;
-				ctx.skip_line_numbers(1);
-				break 'head;
-			}
-
-			ctx.line_number();
-			builder.draw_texture(ctx.pos(), if ctx.pos() == Vec2u::new(ctx.left_margin(), HEADER_SIZE) { Self::ROOT_UV } else { Self::UV }, (16, 16));
-			if !self.is_empty() {
-				ctx.draw_toggle(pos - (16, 0), self.open, builder);
-			}
-			ctx.render_errors(pos, builder);
-			if ctx.forbid(pos) {
-				builder.settings(pos + (20, 0), false, JUST_OVERLAPPING_BASE_TEXT_Z);
-				if let Some(key) = name {
-					builder.color = TextColor::TreeKey.to_raw();
-					let _ = write!(builder, "{key}");
-					builder.color = TextColor::TreeValueDesc.to_raw();
-					let _ = write!(builder, ": ");
-				};
-
-				builder.color = TextColor::TreeValueDesc.to_raw();
-				let _ = write!(builder, "{}", self.value());
-			}
-
-			if ctx.draw_held_entry_bar(pos + (16, 16), builder, |x, y| pos + (16, 8) == (x, y), |x| self.can_insert(x)) {
-			} else if self.height() == 1 && ctx.draw_held_entry_bar(pos + (16, 16), builder, |x, y| pos + (16, 16) == (x, y), |x| self.can_insert(x)) {
-			}
-
-			ctx.offset_pos(0, 16);
-			y_before += 16;
-		}
-
-		let x_before = ctx.pos().x - 16;
-
-		if self.open {
-			ctx.offset_pos(16, 0);
-
-			{
-				let children_contains_forbidden = 'f: {
-					let mut y = ctx.pos().y;
-					for CompoundEntry { key: _, value } in self.children() {
-						if ctx.selected_text_y() == Some(y.saturating_sub(*remaining_scroll * 16)) && ctx.selected_text_y().is_some_and(|y| y >= HEADER_SIZE) {
-							break 'f true;
-						}
-						y += value.height() * 16;
-					}
-					false
-				};
-				if children_contains_forbidden {
-					let mut y = ctx.pos().y;
-					for CompoundEntry { key: name, value } in self.children() {
-						ctx.check_for_key_duplicate(|text, _| text == name, false);
-						if ctx.selected_text_y() != Some(y.saturating_sub(*remaining_scroll * 16)) && y.saturating_sub(*remaining_scroll * 16) >= HEADER_SIZE && ctx.has_duplicate_key_error() {
-							ctx.set_red_line_number(y.saturating_sub(*remaining_scroll * 16), 1);
-							ctx.draw_error_underline(ctx.pos().x, y.saturating_sub(*remaining_scroll * 16), builder);
-							break;
-						}
-						y += value.height() * 16;
-					}
-				}
-			}
-
-			for (idx, CompoundEntry { key, value }) in self.children().enumerate() {
-				let pos = ctx.pos();
-
-				if pos.y > builder.window_height() {
-					break;
-				}
-
-				let height = value.height();
-				if *remaining_scroll >= height {
-					*remaining_scroll -= height;
-					ctx.skip_line_numbers(value.true_height());
-					continue;
-				}
-
-				ctx.draw_held_entry_bar(pos, builder, |x, y| pos == (x, y), |x| self.can_insert(x));
-
-				if *remaining_scroll == 0 {
-					builder.draw_texture(pos - (16, 0), CONNECTION_UV, (16, (idx != self.len() - 1) as usize * 7 + 9));
-				}
-				ctx.check_for_key_duplicate(|text, _| self.map.has(text) && key != text, false);
-				if ctx.has_duplicate_key_error() && ctx.selected_text_y() == Some(pos.y) {
-					ctx.set_red_line_number(pos.y, 0);
-				}
-				value.render(remaining_scroll, builder, Some(key), tail && idx == self.len() - 1, ctx);
-
-				ctx.draw_held_entry_bar(pos, builder, |x, y| pos == (x, y + 8), |x| self.can_insert(x));
-			}
-
-			if !tail {
-				let len = (ctx.pos().y - y_before) / 16;
-				for i in 0..len {
-					builder.draw_texture((x_before, y_before + i * 16), CONNECTION_UV, (8, 16));
-				}
-			}
-
-			ctx.offset_pos(-16, 0);
-		} else {
-			ctx.skip_line_numbers(self.true_height() - 1);
-		}
+	fn render(&self, builder: &mut VertexBufferBuilder, key: Option<&str>, remaining_scroll: &mut usize, tail: bool, ctx: &mut TreeRenderContext) {
+		ctx.render_complex_head(self, builder, key, remaining_scroll, TreeRenderContext::draw_held_entry_bar);
+		ctx.render_complex_body_kv(self, builder, remaining_scroll, tail, TreeRenderContext::draw_held_entry_bar, TreeRenderContext::draw_held_entry_bar);
 	}
 
 	fn value(&self) -> Cow<'_, str> { Cow::Owned(format!("{} {}", self.len(), if self.len() == 1 { "entry" } else { "entries" })) }

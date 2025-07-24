@@ -4,15 +4,15 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use glob::glob;
-
+use winit::dpi::PhysicalSize;
 use crate::elements::element::NbtElement;
 use crate::history::WorkbenchAction;
 use crate::render::widget::replace_box::{ReplaceBox, SearchReplacement};
 use crate::render::widget::search_box::{SearchBox, SearchFlags, SearchMode, SearchPredicate, SearchPredicateInner};
 use crate::util::create_regex;
-use crate::workbench::Workbench;
-use crate::workbench::tab::NbtFileFormat;
+use crate::workbench::tab::{NbtFileFormat, Tab};
 use crate::{config, error, log, mutable_indices};
+use crate::render::window::{WINDOW_HEIGHT, WINDOW_WIDTH};
 
 struct SearchResult {
 	path: PathBuf,
@@ -195,9 +195,6 @@ pub fn find() -> ! {
 			let mut path = root.clone();
 			path.push(p);
 			results.push(s.spawn(|| {
-				let mut workbench = Workbench::new(None).expect("Valid workbench constructable");
-				drop(workbench.tabs.remove(0));
-
 				let bytes = match read(&path) {
 					Ok(bytes) => bytes,
 					Err(e) => {
@@ -209,13 +206,15 @@ pub fn find() -> ! {
 
 				let len = bytes.len() as u64;
 
-				if let Err(e) = workbench.on_open_file(&path, bytes) {
-					error!("File parse error: {e}");
-					increment_progress_bar(&completed, len, total_size, "Searching");
-					return None;
-				}
-
-				let tab = workbench.tabs.remove(0).expect("Expected a tab");
+				let tab = match Tab::new_from_path(&path, &bytes, PhysicalSize::new(WINDOW_WIDTH, WINDOW_HEIGHT)) {
+					Ok(tab) => tab,
+					Err(e) => {
+						error!("File parse error: {e}");
+						increment_progress_bar(&completed, len, total_size, "Searching");
+						return None;
+					}
+				};
+				
 				let bookmarks = SearchBox::search0(&tab.root, &predicate);
 
 				increment_progress_bar(&completed, len, total_size, "Searching");
@@ -265,9 +264,6 @@ pub fn replace() -> ! {
 			let mut path = root.clone();
 			path.push(p);
 			results.push(s.spawn(|| {
-				let mut workbench = Workbench::new(None).expect("Valid workbench constructable");
-				drop(workbench.tabs.remove(0));
-
 				let bytes = match read(&path) {
 					Ok(bytes) => bytes,
 					Err(e) => {
@@ -279,13 +275,15 @@ pub fn replace() -> ! {
 
 				let len = bytes.len() as u64;
 
-				if let Err(e) = workbench.on_open_file(&path, bytes) {
-					error!("File parse error: {e}");
-					increment_progress_bar(&completed, len, total_size, "Replacing");
-					return None;
-				}
+				let mut tab = match Tab::new_from_path(&path, &bytes, PhysicalSize::new(WINDOW_WIDTH, WINDOW_HEIGHT)) {
+					Ok(tab) => tab,
+					Err(e) => {
+						error!("File parse error: {e}");
+						increment_progress_bar(&completed, len, total_size, "Replacing");
+						return None;
+					}
+				};
 
-				let mut tab = workbench.tabs.remove(0).expect("Expected a tab");
 				let (bulk, errors) = ReplaceBox::replace_by_search_box0(mutable_indices!(tab), &mut tab.root, &replacement);
 				for e in errors {
 					error!("Error while replacing line: {e}");
@@ -363,8 +361,6 @@ pub fn reformat() -> ! {
 			s.spawn(|| 'a: {
 				let p = p;
 				let path = pa;
-				let mut workbench = Workbench::new(None).expect("Valid workbench construction");
-				drop(workbench.tabs.remove(0));
 
 				let bytes = match read(&path) {
 					Ok(bytes) => bytes,
@@ -377,17 +373,14 @@ pub fn reformat() -> ! {
 
 				let len = bytes.len() as u64;
 
-				if let Err(e) = workbench.on_open_file(&path, bytes) {
-					error!("File parse error: {e}");
-					increment_progress_bar(&completed, len, total_size, "Reformatting");
-					break 'a;
-				}
-
-				let tab = workbench.tabs.remove(0).expect("Expected a tab");
-				if let NbtFileFormat::Nbt | NbtFileFormat::Snbt | NbtFileFormat::Gzip | NbtFileFormat::Zlib = tab.format {
-				} else {
-					error!("Tab had invalid file format {}", tab.format.to_string());
-				}
+				let tab = match Tab::new_from_path(&path, &bytes, PhysicalSize::new(WINDOW_WIDTH, WINDOW_HEIGHT)) {
+					Ok(tab) => tab,
+					Err(e) => {
+						error!("File parse error: {e}");
+						increment_progress_bar(&completed, len, total_size, "Replacing");
+						break 'a;
+					}
+				};
 
 				let out = format.encode(&tab.root);
 

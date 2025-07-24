@@ -10,12 +10,14 @@ pub mod string;
 use std::borrow::Cow;
 use std::fmt::Display;
 use std::slice;
+use std::str::FromStr;
 #[cfg(not(target_arch = "wasm32"))] use std::thread::Scope;
 
 pub use primitive::*;
 
 use crate::elements::element::NbtElement;
 use crate::elements::result::NbtParseResult;
+use crate::render::color::TextColor;
 use crate::render::TreeRenderContext;
 use crate::render::vertex_buffer_builder::VertexBufferBuilder;
 use crate::serialization::decoder::Decoder;
@@ -128,6 +130,8 @@ pub trait NbtElementVariant: Clone + PartialEq + Display + Matches + Default + P
 	const ID: u8;
 	const UV: Vec2u;
 	const GHOST_UV: Vec2u;
+	const VALUE_COLOR: TextColor;
+	const SEPERATOR_COLOR: TextColor;
 
 	fn from_str0(s: &str) -> Result<(&str, Self), usize>
 	where Self: Sized;
@@ -139,7 +143,7 @@ pub trait NbtElementVariant: Clone + PartialEq + Display + Matches + Default + P
 
 	fn to_le_bytes(&self, writer: &mut UncheckedBufWriter);
 
-	fn render(&self, builder: &mut VertexBufferBuilder, name: Option<&str>, remaining_scroll: &mut usize, tail: bool, ctx: &mut TreeRenderContext);
+	fn render(&self, builder: &mut VertexBufferBuilder, key: Option<&str>, remaining_scroll: &mut usize, tail: bool, ctx: &mut TreeRenderContext);
 
 	#[must_use]
 	fn value(&self) -> Cow<'_, str>;
@@ -149,7 +153,7 @@ pub trait NbtElementVariant: Clone + PartialEq + Display + Matches + Default + P
 }
 
 pub trait PrimitiveNbtElementVariant: NbtElementVariant {
-	type InnerType;
+	type InnerType: FromStr;
 
 	#[must_use]
 	fn new(inner: Self::InnerType) -> Self

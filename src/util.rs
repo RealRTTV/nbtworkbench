@@ -162,6 +162,9 @@ pub fn encompasses_or_equal<T: Ord>(outer: &[T], inner: &[T]) -> bool { outer.le
 pub fn encompasses<T: Ord>(outer: &[T], inner: &[T]) -> bool { outer.len() < inner.len() && outer == &inner[..outer.len()] }
 
 #[must_use]
+pub fn is_parent_for<T: Ord>(parent: &[T], child: &[T]) -> bool { parent.len() == child.len() + 1 && &parent[..child.len()] == child }
+
+#[must_use]
 pub const fn is_utf8_char_boundary(x: u8) -> bool { (x as i8) >= -0x40 }
 
 // importantly, no underscores
@@ -995,7 +998,7 @@ impl<T: Into<(usize, usize)>> SubAssign<T> for Vec2u {
 	fn sub_assign(&mut self, rhs: T) {
 		let (x, y) = rhs.into();
 		self.x = self.x.wrapping_sub(x);
-		self.y = self.x.wrapping_sub(y);
+		self.y = self.y.wrapping_sub(y);
 	}
 }
 
