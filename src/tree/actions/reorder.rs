@@ -105,7 +105,7 @@ impl ReorderElementResult {
 	pub fn into_action(self) -> WorkbenchAction { WorkbenchAction::Reorder { indices: self.indices, mapping: self.mapping } }
 }
 
-#[derive(Error, Debug)]
+#[derive(Debug, Error)]
 pub enum ReorderElementError {
 	#[error(transparent)]
 	Navigation(#[from] NavigationError),

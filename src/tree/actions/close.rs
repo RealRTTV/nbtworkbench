@@ -45,7 +45,7 @@ pub fn close_element<'m1, 'm2: 'm1>(
 	Ok(())
 }
 
-#[derive(Error, Debug)]
+#[derive(Debug, Error)]
 pub enum CloseElementError {
 	#[error(transparent)]
 	Navigation(#[from] NavigationError),

@@ -94,7 +94,7 @@ impl<'a> NavigationInformationMut<'a> {
 	}
 }
 
-#[derive(Error, Debug)]
+#[derive(Debug, Error)]
 pub enum NavigationError {
 	#[error("Tried to index parent node @ {indices} but found out it was primitive.")]
 	ParentWasPrimitive { indices: OwnedIndices },
@@ -224,7 +224,7 @@ impl<'nbt, 'indices> ParentNavigationInformationMut<'nbt, 'indices> {
 	}
 }
 
-#[derive(Error, Debug)]
+#[derive(Debug, Error)]
 pub enum ParentNavigationError {
 	#[error("Indices were empty, root has no parent.")]
 	EmptyIndices,

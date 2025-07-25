@@ -67,7 +67,7 @@ impl AddElementResult {
 	}
 }
 
-#[derive(Error, Debug)]
+#[derive(Debug, Error)]
 pub enum AddElementError {
 	#[error(transparent)]
 	Navigation(#[from] ParentNavigationError),

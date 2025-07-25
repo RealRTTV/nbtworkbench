@@ -69,7 +69,7 @@ impl ReplaceElementResult {
 	pub fn into_action(self) -> WorkbenchAction { WorkbenchAction::Replace { indices: self.indices, kv: self.kv } }
 }
 
-#[derive(Error, Debug)]
+#[derive(Debug, Error)]
 pub enum ReplaceElementError {
 	#[error(transparent)]
 	Navigation(#[from] ParentNavigationError),

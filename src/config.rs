@@ -1,11 +1,10 @@
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use anyhow::{Result, ensure};
 use fxhash::FxHashMap;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
-
+use thiserror::Error;
 use crate::error;
 use crate::render::widget::replace_box::ReplaceBy;
 use crate::render::widget::search_box::{SearchFlags, SearchMode, SearchOperation};
@@ -58,18 +57,28 @@ pub fn read() -> bool {
 	let txt_config = config_dir.join("nbtworkbench/config.txt");
 	let toml_config = config_dir.join("nbtworkbench/config.toml");
 
-	match try_read_string(&toml_config).and_then(|str| try_parse_toml(&str)) {
-		Ok(config) => {
-			*CONFIG.write() = config;
-			return true
+	match try_read_string(&toml_config) {
+		Ok(str) => {
+			match try_parse_toml(&str) {
+				Ok(config) => {
+					*CONFIG.write() = config;
+					return true;
+				}
+				Err(e) => error!("Error parsing config.toml: {e}"),
+			}
 		}
 		Err(e) => error!("Error reading TOML config file: {e}"),
 	}
 
-	match try_read_string(&txt_config).and_then(|str| try_parse_txt(&str)) {
-		Ok(config) => {
-			*CONFIG.write() = config;
-			return true
+	match try_read_string(&txt_config) {
+		Ok(str) => {
+			match try_parse_txt(&str) {
+				Ok(config) => {
+					*CONFIG.write() = config;
+					return true
+				},
+				Err(e) => error!("Error parsing TXT config file: {e}"),
+			}
 		}
 		Err(e) => error!("Error reading TXT config file: {e}"),
 	}
@@ -100,19 +109,25 @@ pub fn read() -> bool {
 	false
 }
 
-fn try_read_string(path: &Path) -> Result<String> {
-	ensure!(std::fs::exists(path)?, "File does not exist");
+fn try_read_string(path: &Path) -> Result<String, StringFromFileError> {
 	let data = std::fs::read(path)?;
 	let data = String::from_utf8(data)?;
 	Ok(data)
 }
 
-fn try_parse_toml(str: &str) -> Result<Config> {
-	let config: Config = toml::from_str(str)?;
-	Ok(config)
+#[derive(Debug, Error)]
+enum StringFromFileError {
+	#[error(transparent)]
+	IO(#[from] std::io::Error),
+	#[error(transparent)]
+	Utf8(#[from] std::string::FromUtf8Error),
 }
 
-fn try_parse_txt(str: &str) -> Result<Config> {
+fn try_parse_toml(str: &str) -> Result<Config, toml::de::Error> {
+	toml::from_str(str)
+}
+
+fn try_parse_txt(str: &str) -> Result<Config, TxtParseError> {
 	let map = str.lines().filter_map(|line| line.split_once('=')).map(|(a, b)| (a.to_owned(), b.to_owned())).collect::<FxHashMap<String, String>>();
 
 	let mut config = Config::default();
@@ -173,6 +188,9 @@ fn try_parse_txt(str: &str) -> Result<Config> {
 
 	Ok(config)
 }
+
+#[derive(Debug, Error)]
+enum TxtParseError {}
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn write() -> bool {

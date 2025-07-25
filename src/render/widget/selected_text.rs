@@ -437,7 +437,7 @@ impl SelectedText {
 		if self.keyfix.as_ref().is_some_and(|keyfix| keyfix.1.is_editable()) || !self.prefix.0.is_empty() {
 			return Err(MoveToValuefixError::AlreadyAtValue)
 		}
-		
+
 		let action = self.save(root, path).map_success(Some).flatten_pass(Ok(None))?;
 
 		let (valuefix, valuefix_color) = self.valuefix.take().ok_or(MoveToValuefixError::NoValue)?;
@@ -521,7 +521,7 @@ impl SelectedText {
 	}
 }
 
-#[derive(Error, Debug)]
+#[derive(Debug, Error)]
 pub enum SelectedTextConstructionError {
 	#[error(transparent)]
 	Traversal(#[from] TraversalError),
@@ -542,7 +542,7 @@ impl SelectedTextConstructionError {
 	}
 }
 
-#[derive(Error, Debug)]
+#[derive(Debug, Error)]
 pub enum SaveSelectedTextError {
 	#[error(transparent)]
 	Rename(#[from] RenameElementError),
@@ -550,7 +550,7 @@ pub enum SaveSelectedTextError {
 	NonEditable,
 }
 
-#[derive(Error, Debug)]
+#[derive(Debug, Error)]
 pub enum MoveSelectedTextError {
 	#[error(transparent)]
 	Save(#[from] SaveSelectedTextError),
@@ -571,7 +571,7 @@ impl MoveSelectedTextError {
 	}
 }
 
-#[derive(Error, Debug)]
+#[derive(Debug, Error)]
 pub enum MoveToKeyfixError {
 	#[error(transparent)]
 	Save(#[from] SaveSelectedTextError),
@@ -581,7 +581,7 @@ pub enum MoveToKeyfixError {
 	NoKey,
 }
 
-#[derive(Error, Debug)]
+#[derive(Debug, Error)]
 pub enum MoveToValuefixError {
 	#[error(transparent)]
 	Save(#[from] SaveSelectedTextError),
@@ -591,7 +591,7 @@ pub enum MoveToValuefixError {
 	NoValue,
 }
 
-#[derive(Error, Debug)]
+#[derive(Debug, Error)]
 pub enum ShiftSelectedTextError {
 	#[error(transparent)]
 	Navigation(#[from] ParentNavigationError),
@@ -601,7 +601,7 @@ pub enum ShiftSelectedTextError {
 	InvalidSiblingIndex { original_index: usize },
 }
 
-#[derive(Error, Debug)]
+#[derive(Debug, Error)]
 pub enum SelectedTextInputError {
 	#[error(transparent)]
 	CloseElement(#[from] CloseElementError),
@@ -631,7 +631,7 @@ impl SelectedTextInputError {
 	}
 }
 
-#[derive(Error, Debug)]
+#[derive(Debug, Error)]
 pub enum SelectedTextKeyValueError {
 	#[error("This value is not valid for this type.")]
 	InvalidValue,

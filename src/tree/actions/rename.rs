@@ -97,7 +97,7 @@ impl RenameElementResult {
 	}
 }
 
-#[derive(Error, Debug)]
+#[derive(Debug, Error)]
 pub enum RenameElementError {
 	#[error(transparent)]
 	Navigation(#[from] ParentNavigationError),

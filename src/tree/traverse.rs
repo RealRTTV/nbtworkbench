@@ -193,7 +193,7 @@ impl<'a> TraversalInformationMut<'a> {
 	}
 }
 
-#[derive(Error, Debug)]
+#[derive(Debug, Error)]
 pub enum TraversalError {
 	#[error("Traversal at y = {y} was beyond tree full height ({height}). (You clicked outside the tree)")]
 	BeyondFullHeight { y: usize, height: usize },

@@ -41,13 +41,13 @@ fn recache_bookmarks_on_open(element: &NbtElement, bookmarks: &mut MarkedLines, 
 	Ok(())
 }
 
-#[derive(Error, Debug)]
+#[derive(Debug, Error)]
 pub enum RecacheBookmarkError {
 	#[error("{element} was primitive when expected to recache the bookmarks of the children")]
 	ElementWasPrimitive { element: &'static str, line_number: usize, true_line_number: usize },
 }
 
-#[derive(Error, Debug)]
+#[derive(Debug, Error)]
 pub enum AmbiguiousOpenElementError {
 	#[error(transparent)]
 	Open(#[from] OpenElementError),

@@ -162,7 +162,7 @@ impl WorkbenchAction {
 	}
 }
 
-#[derive(Error, Debug)]
+#[derive(Debug, Error)]
 pub enum UndoWorkbenchActionError {
 	#[error(transparent)]
 	Add(#[from] AddElementError),
@@ -188,7 +188,7 @@ pub enum UndoWorkbenchActionError {
 	Passed,
 }
 
-#[derive(Error, Debug)]
+#[derive(Debug, Error)]
 pub enum AddFromHeldEntryError {
 	#[error("To remove an element and make a held entry out of it, one cannot have an pre-existing held entry.")]
 	HasHeldEntry,
@@ -196,19 +196,19 @@ pub enum AddFromHeldEntryError {
 	ExpectedOldKVPair,
 }
 
-#[derive(Error, Debug)]
+#[derive(Debug, Error)]
 pub enum RemoveToHeldEntryError {
 	#[error("To remove an element to the held entry. There must not be a pre-existing held entry.")]
 	ExpectedHeldEntry,
 }
 
-#[derive(Error, Debug)]
+#[derive(Debug, Error)]
 pub enum DiscardHeldEntryError {
 	#[error("Could not undo discard of held entry if there was already an entry held.")]
 	HasHeldEntry,
 }
 
-#[derive(Error, Debug)]
+#[derive(Debug, Error)]
 pub enum CreateHeldEntryError {
 	#[error("Expected a held entry to remove.")]
 	ExpectedHeldEntry,

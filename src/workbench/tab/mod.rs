@@ -491,7 +491,7 @@ impl Tab {
 
 	pub fn try_update_subscription(&mut self) -> Result<(), FileUpdateSubscriptionError> {
 		use crate::elements::result::into_result;
-		
+
 		let Some(subscription) = &mut self.subscription else { return Ok(()) };
 		if let Err(e) = subscription.watcher.poll() {
 			self.subscription = None;
@@ -824,7 +824,7 @@ impl FilePath {
 	pub fn name(&self) -> &str { &self.cached_name }
 }
 
-#[derive(Error, Debug)]
+#[derive(Debug, Error)]
 pub enum FilePathError {
 	#[error("Path {0:?} has no name")]
 	PathHasNoName(PathBuf),

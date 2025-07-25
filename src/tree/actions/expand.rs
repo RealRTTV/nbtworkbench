@@ -35,7 +35,7 @@ pub fn expand_element<'m1, 'm2: 'm1>(
 	Ok(())
 }
 
-#[derive(Error, Debug)]
+#[derive(Debug, Error)]
 pub enum ExpandElementError {
 	#[error(transparent)]
 	Navigation(#[from] NavigationError),

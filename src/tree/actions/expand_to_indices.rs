@@ -27,7 +27,7 @@ pub fn expand_element_to_indices(
 	Ok(())
 }
 
-#[derive(Error, Debug)]
+#[derive(Debug, Error)]
 pub enum ExpandElementToIndicesError {
 	#[error(transparent)]
 	RecacheBookmarks(#[from] RecacheBookmarkError),

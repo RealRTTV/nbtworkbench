@@ -787,7 +787,7 @@ pub fn reorder<T>(data: &mut [T], mapping: impl Into<Box<[usize]>>) -> Result<()
 	Ok(())
 }
 
-#[derive(Error, Debug)]
+#[derive(Debug, Error)]
 pub enum ReorderMappingError {
 	#[error("Mapping index ({num}) was out of bounds of length {len}.")]
 	NumberOutOfBounds { num: usize, len: usize },
@@ -811,7 +811,7 @@ pub fn invert_mapping(mapping: &[usize]) -> Result<Box<[usize]>, InvertMappingEr
 	new_mapping.into_iter().collect::<Option<Box<[usize]>>>().ok_or_else(|| InvertMappingError::MissingNumber)
 }
 
-#[derive(Error, Debug)]
+#[derive(Debug, Error)]
 pub enum InvertMappingError {
 	#[error("Duplicate number found in invalid mapping.")]
 	DuplicateNumber,

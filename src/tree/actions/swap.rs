@@ -87,7 +87,7 @@ impl SwapElementResultSameDepth {
 	pub fn into_action(self) -> WorkbenchAction { WorkbenchAction::Swap { parent: self.parent, a: self.a, b: self.b } }
 }
 
-#[derive(Error, Debug)]
+#[derive(Debug, Error)]
 pub enum SwapElementErrorSameDepth {
 	#[error(transparent)]
 	Navigation(#[from] NavigationError),

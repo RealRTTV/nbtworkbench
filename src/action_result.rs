@@ -102,8 +102,8 @@ impl<S, E> ActionResult<S, E> {
 /// Examples:
 /// ```rs
 /// fn apply_action() -> AnyhowActionResult {
-///     let result: Result<i32, anyhow::Error> = { Ok(4) };
-///     let guard: FailingActionResult<i32, anyhow::Error> = result.failure_on_err();
+///     let result: Result<i32, std::io::Error> = { Ok(4) };
+///     let guard: FailingActionResult<i32, std::io::Error> = result.failure_on_err();
 ///     let value: i32 = guard?;
 ///     // ... do stuff
 ///     ActionResult::Success(())

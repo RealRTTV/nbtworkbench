@@ -624,7 +624,7 @@ impl BookmarkedBasedSearchReplacement {
 	}
 }
 
-#[derive(Error, Debug)]
+#[derive(Debug, Error)]
 pub enum ReplacementError {
 	#[error(transparent)]
 	Rename(#[from] RenameElementError),

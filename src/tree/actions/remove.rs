@@ -66,7 +66,7 @@ impl RemoveElementResult {
 	}
 }
 
-#[derive(Error, Debug)]
+#[derive(Debug, Error)]
 pub enum RemoveElementError {
 	#[error(transparent)]
 	Navigation(#[from] ParentNavigationError),
