@@ -35,7 +35,7 @@ pub struct Notification {
 impl Notification {
 	pub fn new(message: impl Into<String>, text_color: TextColor, kind: NotificationKind) -> Self {
 		let message = message.into();
-		let lines = split_lines::<256>(message.clone());
+		let lines = split_lines(message.clone(), 256);
 		Self {
 			timestamp: Timestamp::now(),
 			width: lines.iter().map(|s| s.width()).max().unwrap_or(0) + 10,
@@ -55,7 +55,7 @@ impl Notification {
 
 		let old_display_time = self.message_len * 60 + 3000;
 		let old_width = self.width;
-		let lines = split_lines::<256>(message.clone());
+		let lines = split_lines(message.clone(), 256);
 		self.width = lines.iter().map(|s| s.width()).max().unwrap_or(0) + 10;
 		self.message_len = lines.iter().map(String::len).sum();
 		self.lines = lines.into_boxed_slice();

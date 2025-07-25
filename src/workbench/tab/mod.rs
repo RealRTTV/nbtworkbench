@@ -40,7 +40,7 @@ use crate::serialization::decoder::{BigEndianDecoder, Decoder};
 use crate::serialization::encoder::UncheckedBufWriter;
 use crate::tree::actions::replace::replace_element;
 use crate::tree::navigate::NavigationInformation;
-use crate::util::{StrExt, Timestamp, Vec2u, drop_on_separate_thread};
+use crate::util::{StrExt, Timestamp, Vec2u, drop_on_separate_thread, AABB};
 use crate::workbench::marked_line::MarkedLines;
 use crate::workbench::{FileUpdateSubscription, FileUpdateSubscriptionError, FileUpdateSubscriptionType, HeldEntry, NbtHexRawRepresentationError, SortAlgorithm};
 
@@ -74,6 +74,8 @@ pub struct Tab {
 	pub last_double_click_interaction: (usize, Timestamp),
 	// todo: refactor to own type with OwnedIndices instead of Vec2u
 	pub steal_animation_data: Option<(Timestamp, Vec2u)>,
+	// todo: make widget
+	pub scrollbar_offset: Option<usize>,
 }
 
 impl Tab {
@@ -119,6 +121,7 @@ impl Tab {
 			last_interaction: Timestamp::now(),
 			last_double_click_interaction: (0, Timestamp::UNIX_EPOCH),
 			steal_animation_data: None,
+			scrollbar_offset: None,
 		})
 	}
 
@@ -149,6 +152,7 @@ impl Tab {
 			last_interaction: Timestamp::now(),
 			last_double_click_interaction: (0, Timestamp::UNIX_EPOCH),
 			steal_animation_data: None,
+			scrollbar_offset: None,
 		}
 	}
 
@@ -219,7 +223,7 @@ impl Tab {
 		Ok(())
 	}
 
-	pub fn render(&self, builder: &mut VertexBufferBuilder, ctx: &mut TreeRenderContext, held: bool, skip_tooltips: bool, steal_delta: f32) {
+	pub fn render(&self, builder: &mut VertexBufferBuilder, ctx: &mut TreeRenderContext, skip_tooltips: bool, steal_delta: f32) {
 		let TabConstants { horizontal_scroll, scroll, .. } = self.consts();
 		let horizontal_scroll_before = core::mem::replace(&mut builder.horizontal_scroll, horizontal_scroll);
 		// let start = std::time::Instant::now();
@@ -245,7 +249,7 @@ impl Tab {
 			if height > total & !15 {
 				let scrollbar_height = (total & !15) * total / height;
 				let offset = total * scroll / height + HEADER_SIZE;
-				let held = ((builder.window_width() - 8)..builder.window_width()).contains(&ctx.mouse.x) && (offset..=(offset + scrollbar_height)).contains(&ctx.mouse.y) || held;
+				let held = AABB::new(builder.window_width() - 8, builder.window_width(), offset, offset + scrollbar_height + 1).contains(ctx.mouse) || self.scrollbar_offset.is_some();
 				let uv = if held { HELD_SCROLLBAR_UV } else { UNHELD_SCROLLBAR_UV };
 				builder.draw_texture_z((builder.window_width() - 7, offset), SCROLLBAR_Z, uv, (6, 1));
 				if scrollbar_height > 2 {
@@ -424,9 +428,9 @@ impl Tab {
 
 	#[must_use]
 	pub fn scroll(&self) -> usize {
-		let height = self.root.height() * 16 + 32 + 15;
+		let height = self.root.height() * NbtElement::LINE_HEIGHT + 2 * NbtElement::LINE_HEIGHT + 15;
 		let scroll = self.scroll;
-		let max = (height + HEADER_SIZE).saturating_sub(self.window_dims.width as usize);
+		let max = (height + HEADER_SIZE).saturating_sub(self.window_dims.height as usize);
 		scroll.min(max) & !15
 	}
 
@@ -487,6 +491,22 @@ impl Tab {
 			self.horizontal_scroll += (scroll * SCROLL_MULTIPLIER) as usize;
 		}
 		self.modify_horizontal_scroll(|x| x);
+	}
+	
+	pub fn tick_scrollbar(&mut self, mouse: Vec2u) {
+		let TabConstants { scroll, .. } = self.consts();
+		if let Some(scrollbar_offset) = self.scrollbar_offset
+			&& mouse.y >= HEADER_SIZE
+		{
+			let mouse_y = mouse.y - HEADER_SIZE;
+			let height = self.root.height() * 16 + 32 + 15;
+			let total = self.window_dims.height as usize - HEADER_SIZE;
+			let start = total * scroll / height;
+			let scrollbar_point = start + scrollbar_offset;
+			let dy = mouse_y as isize - scrollbar_point as isize;
+			let pixel_delta = height as isize * dy / total as isize;
+			self.modify_scroll(|scroll| (scroll as isize + pixel_delta).try_into().unwrap_or(0));
+		}
 	}
 
 	pub fn try_update_subscription(&mut self) -> Result<(), FileUpdateSubscriptionError> {

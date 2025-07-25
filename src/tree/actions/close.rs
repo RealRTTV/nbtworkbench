@@ -40,7 +40,7 @@ pub fn close_element<'m1, 'm2: 'm1>(
 	mi.bookmarks[true_line_number + true_height..].decrement(height_lost, 0);
 
 	root.recache_along_indices(&indices);
-	mi.recache_all_line_number_caches(root);
+	mi.recache_all_line_number_caches_from_indices(root);
 
 	Ok(())
 }

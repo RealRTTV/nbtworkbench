@@ -8,7 +8,6 @@ use std::str::Utf8Error;
 
 use compact_str::CompactString;
 use thiserror::Error;
-
 use crate::elements::array::{NbtByteArray, NbtIntArray, NbtLongArray};
 use crate::elements::byte::NbtByte;
 use crate::elements::chunk::NbtChunk;
@@ -605,6 +604,7 @@ impl NbtElement {
 
 	pub const INITIAL_DEPTH_WIDTH: usize = Self::TOGGLE_WIDTH + Self::ICON_WIDTH;
 	pub const DEPTH_INCREMENT_WIDTH: usize = Self::ICON_WIDTH;
+	pub const LINE_HEIGHT: usize = Self::ICON_WIDTH;
 
 	pub fn render(&self, builder: &mut VertexBufferBuilder, str: Option<&str>, tail: bool, ctx: &mut TreeRenderContext) {
 		use NbtPattern as Nbt;
@@ -734,7 +734,7 @@ impl NbtElement {
 	}
 
 	pub fn recache_along_indices<'a>(&'a mut self, indices: &Indices) {
-		// SAFETY: all recache does not change the children indices, this is just an optimization over using the stack with recursion
+		// SAFETY: recache does not change the children indices, this is just an optimization over using the stack with recursion
 		let mut children: Box<[MaybeUninit<&'a mut NbtElement>]> = unsafe { Box::try_new_uninit_slice(indices.len()).unwrap_unchecked() };
 
 		let mut current_child = unsafe { core::ptr::read(core::ptr::addr_of!(self)) };

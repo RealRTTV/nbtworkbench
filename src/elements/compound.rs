@@ -283,7 +283,7 @@ impl ComplexNbtElementVariant for NbtCompound {
 
 	unsafe fn shut<'a, 'b>(&'b mut self, scope: &'a Scope<'a, 'b>) {
 		self.open = false;
-		self.height = self.len() as u32 + 1;
+		self.height = 1;
 		for CompoundEntry { key: _, value: element } in self.children_mut() {
 			if element.is_open() {
 				unsafe { element.shut(scope) };

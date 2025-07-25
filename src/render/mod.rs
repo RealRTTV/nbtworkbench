@@ -279,6 +279,7 @@ impl<'w> TreeRenderContext<'w> {
 		if element.is_open() {
 			let pos_before = self.pos;
 			self.pos += (16, 0);
+			self.push_index();
 
 			for (idx, value) in element.children().enumerate() {
 				let pos = self.pos;

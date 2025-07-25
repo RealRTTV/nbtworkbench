@@ -100,7 +100,7 @@ impl<'m1, 'm2: 'm1> MutableIndices<'m2> {
 		}
 	}
 	
-	pub fn recache_all_line_number_caches(&'m1 mut self, root: &NbtElement) {
+	pub fn recache_all_line_number_caches_from_indices(&'m1 mut self, root: &NbtElement) {
 		self.selected_text.iter_mut().for_each(|text| text.recache_y(root));
 	}
 

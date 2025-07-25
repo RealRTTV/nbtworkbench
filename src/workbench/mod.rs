@@ -71,7 +71,7 @@ use crate::tree::actions::open::open_element;
 use crate::tree::actions::remove::{RemoveElementResult, remove_element};
 use crate::tree::indices::{Indices, OwnedIndices};
 use crate::tree::traverse::{TraversalError, TraversalInformation, TraversalInformationMut};
-use crate::util::{self, AABB, LinkedQueue, StrExt, Timestamp, Vec2d, Vec2u, drop_on_separate_thread, get_clipboard, nth, set_clipboard, ClipboardError};
+use crate::util::{self, AABB, LinkedQueue, StrExt, Timestamp, Vec2d, Vec2u, drop_on_separate_thread, get_clipboard, nth, set_clipboard, ClipboardError, split_lines};
 #[cfg(target_arch = "wasm32")] use crate::wasm::fake_scope as scope;
 use crate::workbench::element_action::ElementAction;
 use crate::workbench::keyboard::{KeyboardManager, Modifiers};
@@ -114,8 +114,6 @@ pub struct Workbench {
 	mouse: MouseManager,
 	// todo: make TabManager a widget and add this
 	tab_scroll: usize,
-	// todo: make widget
-	scrollbar_offset: Option<usize>,
 	// todo: need to rework this
 	action_wheel: Option<Vec2u>,
 	pub cursor_visible: bool,
@@ -151,7 +149,6 @@ impl Workbench {
 			keyboard: KeyboardManager::new(),
 			mouse: MouseManager::new(),
 			tab_scroll: 0,
-			scrollbar_offset: None,
 			action_wheel: None,
 			cursor_visible: false,
 			alerts: AlertManager::new(),
@@ -187,7 +184,6 @@ impl Workbench {
 			keyboard: KeyboardManager::new(),
 			mouse: MouseManager::new(),
 			tab_scroll: 0,
-			scrollbar_offset: None,
 			action_wheel: None,
 			cursor_visible: true,
 			alerts: AlertManager::new(),
@@ -425,8 +421,8 @@ impl Workbench {
 						if height - 48 > total {
 							let start = total * scroll / height + HEADER_SIZE;
 							let end = start + total * total / height;
-							if AABB::new(self.window_dims.width as usize - 7, self.window_dims.width as usize, start, end + 1).contains(self.mouse.coords) {
-								self.scrollbar_offset = Some(self.mouse.coords.y - start);
+							if AABB::new(self.window_dims.width as usize - 8, self.window_dims.width as usize, start, end + 1).contains(self.mouse.coords) {
+								tab.scrollbar_offset = Some(self.mouse.coords.y - start);
 								return ActionResult::Success(());
 							}
 						}
@@ -447,7 +443,7 @@ impl Workbench {
 				}
 
 				self.process_action_wheel()?;
-				self.scrollbar_offset = None;
+				self.tabs.active_tab_mut().scrollbar_offset = None;
 				if button == MouseButton::Left {
 					self.tabs.active_tab_mut().steal_animation_data = None;
 				}
@@ -1136,20 +1132,7 @@ impl Workbench {
 	pub fn on_mouse_move(&mut self, pos: PhysicalPosition<f64>) -> ActionResult {
 		self.raw_mouse = pos.into();
 		self.mouse.coords = (self.raw_mouse / self.scale as f64).into();
-		let tab = self.tabs.active_tab_mut();
-		let TabConstants { scroll, .. } = tab.consts();
-		if let Some(scrollbar_offset) = self.scrollbar_offset
-			&& self.mouse.coords.y >= HEADER_SIZE
-		{
-			let mouse_y = self.mouse.coords.y - HEADER_SIZE;
-			let height = tab.root.height() * 16 + 32 + 15;
-			let total = tab.window_dims.height as usize - HEADER_SIZE;
-			let start = total * scroll / height;
-			let scrollbar_point = start + scrollbar_offset;
-			let dy = mouse_y as isize - scrollbar_point as isize;
-			let pixel_delta = height as isize * dy / total as isize;
-			tab.modify_scroll(|scroll| (scroll as isize + pixel_delta).max(0) as usize);
-		}
+		self.tabs.active_tab_mut().tick_scrollbar(self.mouse.coords);
 		self.hover_widgets();
 		self.try_extend_drag_selection();
 		ActionResult::Success(())
@@ -1299,7 +1282,6 @@ impl Workbench {
 			tab.render(
 				builder,
 				&mut ctx,
-				self.scrollbar_offset.is_some(),
 				self.action_wheel.is_some(),
 				tab.steal_animation_data
 					.as_ref()
@@ -1392,7 +1374,7 @@ impl Workbench {
 
 		if (self.tabs.active_tab().held_entry.is_some() || self.tabs.active_tab().freehand_mode || ((self.tabs.active_tab().selected_text.is_some() || self.search_box.is_selected()) && self.last_mouse_state == ElementState::Pressed))
 			&& self.action_wheel.is_none()
-			&& self.scrollbar_offset.is_none()
+			&& self.tabs.active_tab().scrollbar_offset.is_none()
 		{
 			self.try_mouse_scroll();
 			self.try_search_box_scroll();
@@ -1459,8 +1441,13 @@ impl Workbench {
 		if !self.debug_menu {
 			return
 		}
-
+		
 		let tab = self.tabs.active_tab();
+		let TabConstants { scroll, horizontal_scroll, left_margin, .. } = tab.consts();
+		let traversal_info = tab.root.traverse((self.mouse.coords.y + scroll).saturating_sub(HEADER_SIZE) / 16, Some((self.mouse.coords.x + horizontal_scroll).saturating_sub(left_margin) / 16))
+			.map(|TraversalInformation { indices, line_number, true_line_number, depth, key, element }| format!("idx={indices}, line={line_number}, tline={true_line_number}, depth={depth}, key={key:?}, h={height}, th={true_height}, value={value}", height = element.height(), true_height = element.true_height(), value = element.value().0))
+			.map_err(|e| e.to_string())
+			.unwrap_or_else(|e| e);
 		let lines = [
 			format!("dims: {}x{}", self.window_dims.width, self.window_dims.height),
 			format!("mouse state: {:?}", self.last_mouse_state),
@@ -1511,8 +1498,10 @@ impl Workbench {
 				}
 			),
 			format!("value: h={}, th={}, depth={}", tab.root.height(), tab.root.true_height(), tab.root.end_x()),
+			format!("traversal = {traversal_info}")
 		];
-		for (idx, line) in lines.iter().enumerate() {
+		let max_width = builder.window_width() * 3 / 4;
+		for (idx, line) in lines.iter().rev().flat_map(|line| split_lines(line.clone(), max_width)).enumerate() {
 			if builder.window_height() < (idx + 1) * VertexBufferBuilder::CHAR_HEIGHT {
 				continue
 			}

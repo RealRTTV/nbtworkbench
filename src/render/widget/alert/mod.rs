@@ -33,7 +33,7 @@ impl Alert {
 	pub fn new(title: impl ToString, title_color: TextColor, message: impl ToString) -> Self {
 		let message = message.to_string();
 		let title = title.to_string();
-		let lines = split_lines::<256>(message.clone());
+		let lines = split_lines(message.clone(), 256);
 		Self {
 			timestamp: Timestamp::now(),
 			title_color: title_color.to_raw(),

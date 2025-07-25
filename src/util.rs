@@ -113,7 +113,7 @@ pub fn create_regex(mut str: String, case_sensitive: bool) -> Option<Regex> {
 }
 
 #[must_use]
-pub fn split_lines<const MAX_WIDTH: usize>(s: String) -> Vec<String> {
+pub fn split_lines(s: String, max_width: usize) -> Vec<String> {
 	let mut lines = Vec::new();
 	let mut current_line = String::new();
 	let mut is_previous_byte_ascii_whitespace = true;
@@ -127,7 +127,7 @@ pub fn split_lines<const MAX_WIDTH: usize>(s: String) -> Vec<String> {
 		.filter(|slice| !slice.is_empty())
 		.map(|slice| unsafe { std::str::from_utf8_unchecked(slice) })
 	{
-		if current_line.width() + word.width() > MAX_WIDTH {
+		if current_line.width() + word.width() > max_width {
 			lines.push(current_line.trim_ascii_end().to_string());
 			current_line = String::new();
 		}

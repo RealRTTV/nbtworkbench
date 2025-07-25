@@ -305,7 +305,7 @@ impl ComplexNbtElementVariant for NbtList {
 
 	unsafe fn shut<'a, 'b>(&'b mut self, scope: &'a Scope<'a, 'b>) {
 		self.open = false;
-		self.height = self.len() as u32 + 1;
+		self.height = 1;
 		for element in self.children_mut() {
 			if element.is_open() {
 				unsafe { element.shut(scope) };
@@ -314,12 +314,10 @@ impl ComplexNbtElementVariant for NbtList {
 	}
 
 	unsafe fn expand<'a, 'b>(&'b mut self, scope: &'a Scope<'a, 'b>) {
-		self.open = false;
-		self.height = self.len() as u32 + 1;
+		self.open = !self.is_empty();
+		self.height = self.true_height;
 		for element in self.children_mut() {
-			if element.is_open() {
-				unsafe { element.shut(scope) };
-			}
+			unsafe { element.expand(scope) };
 		}
 	}
 
