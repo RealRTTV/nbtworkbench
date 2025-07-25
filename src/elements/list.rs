@@ -225,9 +225,9 @@ impl NbtElementVariant for NbtList {
 		}
 	}
 
-	fn render(&self, builder: &mut VertexBufferBuilder, key: Option<&str>, remaining_scroll: &mut usize, tail: bool, ctx: &mut TreeRenderContext) {
-		ctx.render_complex_head(self, builder, key, remaining_scroll, TreeRenderContext::draw_held_entry_bar);
-		ctx.render_complex_body(self, builder, remaining_scroll, tail, TreeRenderContext::draw_held_entry_bar, TreeRenderContext::draw_held_entry_bar);
+	fn render(&self, builder: &mut VertexBufferBuilder, key: Option<&str>, tail: bool, ctx: &mut TreeRenderContext) {
+		ctx.render_complex_head(self, builder, key, TreeRenderContext::draw_held_entry_bar);
+		ctx.render_complex_body(self, builder, tail, TreeRenderContext::draw_held_entry_bar, TreeRenderContext::draw_held_entry_bar);
 	}
 
 	fn value(&self) -> Cow<'_, str> {

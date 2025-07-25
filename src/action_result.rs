@@ -1,7 +1,5 @@
 use std::ops::{ControlFlow, FromResidual, Try};
 
-pub type AnyhowActionResult<S = ()> = ActionResult<S, anyhow::Error>;
-
 // todo: add `FailureOnlyActionResult` which has `Try` that only breaks on failure
 /// This should be used for "actions" and in-place of result when there are three distinict return values.
 ///

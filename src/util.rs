@@ -3,7 +3,7 @@ use std::alloc::{Allocator, Layout};
 use std::cmp::Ordering;
 use std::fmt::{Debug, Formatter};
 use std::hint::likely;
-use std::iter;
+use std::{io, iter};
 use std::mem::MaybeUninit;
 use std::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Sub, SubAssign};
 
@@ -16,9 +16,14 @@ use crate::render::vertex_buffer_builder::VertexBufferBuilder;
 #[cfg(target_arch = "wasm32")]
 pub use crate::wasm::{get_clipboard, set_clipboard};
 
-#[must_use]
+#[derive(Debug, Error)]
+pub enum ClipboardError {
+	#[error("Failed to get clipboard: {0}")]
+	ClipboardFailed(String),
+}
+
 #[cfg(not(target_arch = "wasm32"))]
-pub fn get_clipboard() -> Option<String> { cli_clipboard::get_contents().ok() }
+pub fn get_clipboard() -> Result<String, ClipboardError> { cli_clipboard::get_contents().map_err(|e| ClipboardError::ClipboardFailed(e.to_string())) }
 
 #[cfg(not(target_arch = "wasm32"))]
 pub fn set_clipboard(value: String) -> bool { cli_clipboard::set_contents(value).is_ok() }
@@ -883,7 +888,7 @@ pub fn drop_on_separate_thread<T: 'static + Send>(t: T) {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-pub fn open_file(str: &str) -> anyhow::Result<std::process::ExitStatus> {
+pub fn open_file(str: &str) -> Result<std::process::ExitStatus, io::Error> {
 	#[cfg(target_os = "windows")]
 	return Ok(std::process::Command::new("cmd").args(["/c", "start", str]).status()?);
 	#[cfg(target_os = "macos")]

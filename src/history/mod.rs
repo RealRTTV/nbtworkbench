@@ -1,4 +1,3 @@
-use anyhow::Result;
 use compact_str::CompactString;
 use thiserror::Error;
 

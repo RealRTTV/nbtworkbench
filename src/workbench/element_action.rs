@@ -1,17 +1,16 @@
 use std::cmp::Ordering;
 #[cfg(not(target_arch = "wasm32"))] use std::fs::OpenOptions;
 
-use anyhow::{Context, bail};
 #[cfg(not(target_arch = "wasm32"))]
 use notify::{EventKind, PollWatcher, RecursiveMode, Watcher};
-
+use thiserror::Error;
 use crate::elements::NbtElementVariant;
 use crate::elements::array::{NbtByteArray, NbtIntArray, NbtLongArray};
 use crate::elements::byte::NbtByte;
 use crate::elements::chunk::NbtChunk;
 use crate::elements::compound::{CompoundEntry, NbtCompound};
 use crate::elements::double::NbtDouble;
-use crate::elements::element::{NbtElement, NbtPattern};
+use crate::elements::element::{NbtElement, NbtPattern, SNBTParseError};
 use crate::elements::float::NbtFloat;
 use crate::elements::int::NbtInt;
 use crate::elements::list::NbtList;
@@ -25,11 +24,11 @@ use crate::render::assets::{OPEN_ARRAY_IN_HEX_UV, OPEN_IN_TXT_UV};
 use crate::render::vertex_buffer_builder::VertexBufferBuilder;
 use crate::serialization::encoder::UncheckedBufWriter;
 use crate::tree::MutableIndices;
-use crate::tree::actions::add::add_element;
-use crate::tree::actions::reorder::reorder_element;
+use crate::tree::actions::add::{add_element, AddElementError};
+use crate::tree::actions::reorder::{reorder_element, ReorderElementError};
 use crate::tree::indices::OwnedIndices;
-use crate::tree::navigate::NavigationInformation;
-use crate::util::{StrExt, Timestamp, get_clipboard, set_clipboard};
+use crate::tree::navigate::{NavigationError, NavigationInformation};
+use crate::util::{StrExt, Timestamp, get_clipboard, set_clipboard, ClipboardError};
 use crate::workbench::marked_line::MarkedLine;
 use crate::workbench::{FileUpdateSubscription, FileUpdateSubscriptionType};
 
@@ -138,12 +137,12 @@ impl ElementAction {
 		ORDERING[a.value.id() as usize].cmp(&ORDERING[b.value.id() as usize]).then_with(|| a.key.cmp(&b.key))
 	}
 
-	pub fn apply<'m1, 'm2: 'm1>(self, root: &mut NbtElement, mut indices: OwnedIndices, mi: &'m1 mut MutableIndices<'m2>) -> anyhow::Result<Option<WorkbenchAction>> {
+	pub fn apply<'m1, 'm2: 'm1>(self, root: &mut NbtElement, mut indices: OwnedIndices, mi: &'m1 mut MutableIndices<'m2>) -> Result<Option<WorkbenchAction>, ElementActionError> {
 		match self {
 			action @ (Self::CopyRaw | Self::CopyFormatted) => {
 				use core::fmt::Write;
 
-				let NavigationInformation { key, element, .. } = root.navigate(&indices).context("Could not navigate indices")?;
+				let NavigationInformation { key, element, .. } = root.navigate(&indices).map_err(CopyError::from)?;
 
 				let mut buffer = String::new();
 				if let Some(key) = key {
@@ -171,7 +170,7 @@ impl ElementAction {
 
 				use NbtPattern as Nbt;
 
-				let NavigationInformation { key, element, .. } = root.navigate(&indices).context("Could not navigate indices")?;
+				let NavigationInformation { key, element, .. } = root.navigate(&indices).map_err(OpenInFileError::from)?;
 
 				let hash = (Timestamp::now().elapsed().as_millis() as usize).wrapping_mul(element as *const NbtElement as usize);
 				let path = std::env::temp_dir().join(format!("nbtworkbench-{hash:0width$x}.{ext}", width = usize::BITS as usize / 8, ext = if action == Self::OpenArrayInHex { "bin" } else { "txt" }));
@@ -187,9 +186,9 @@ impl ElementAction {
 						}
 					},
 					notify::Config::default().with_manual_polling().with_compare_contents(true),
-				)?;
+				).map_err(OpenInFileError::PollWatcher)?;
 				let subscription_type = {
-					let mut file = OpenOptions::new().write(true).create(true).open(&path)?;
+					let mut file = OpenOptions::new().write(true).create(true).open(&path).map_err(OpenInFileError::from)?;
 					if action == Self::OpenArrayInHex {
 						let mut buffer = UncheckedBufWriter::new();
 						element.to_le_bytes(&mut buffer);
@@ -204,7 +203,7 @@ impl ElementAction {
 							(Nbt::List(_), [NbtLong::ID, _, _, _, _, bytes @ ..]) => (FileUpdateSubscriptionType::LongList, bytes),
 							_ => return Ok(None),
 						};
-						file.write_all(bytes)?;
+						file.write_all(bytes).map_err(OpenInFileError::from)?;
 						subscription_type
 					} else {
 						let mut buffer = UncheckedBufWriter::new();
@@ -224,31 +223,31 @@ impl ElementAction {
 						}
 
 						let contents = buffer.finish();
-						file.write_all(&contents)?;
+						file.write_all(&contents).map_err(OpenInFileError::from)?;
 						FileUpdateSubscriptionType::Snbt
 					}
 				};
-				watcher.watch(&path, RecursiveMode::NonRecursive)?;
-				crate::util::open_file(&path.display().to_string())?;
+				watcher.watch(&path, RecursiveMode::NonRecursive).map_err(OpenInFileError::Watch)?;
+				crate::util::open_file(&path.display().to_string()).map_err(OpenInFileError::from)?;
 				*mi.subscription = Some(FileUpdateSubscription::new(subscription_type, indices, rx, watcher));
 				Ok(None)
 			}
 			action @ (Self::SortCompoundByName | Self::SortCompoundByType) => {
-				let NavigationInformation { element, .. } = root.navigate(&indices).context("Could not navigate indices")?;
+				let NavigationInformation { element, .. } = root.navigate(&indices).map_err(SortElementByError::from)?;
 
 				let mapping = match element.as_pattern() {
 					NbtPattern::Compound(compound) => compound.map.create_sort_mapping(if action == Self::SortCompoundByName { Self::by_name } else { Self::by_type }),
 					NbtPattern::Chunk(chunk) => chunk.map.create_sort_mapping(if action == Self::SortCompoundByName { Self::by_name } else { Self::by_type }),
-					_ => bail!("Could not sort element"),
+					_ => return Err(ElementActionError::SortElementBy(SortElementByError::NonKVMapType)),
 				};
 
-				Ok(Some(reorder_element(root, indices, mapping, mi)?.into_action()))
+				Ok(Some(reorder_element(root, indices, mapping, mi).map_err(SortElementByError::from)?.into_action()))
 			}
 			Self::InsertFromClipboard => {
-				let clipboard = get_clipboard().context("Could not get clipboard")?;
-				let kv = NbtElement::from_str(&clipboard)?;
+				let clipboard = get_clipboard().map_err(InsertFromClipboardError::from)?;
+				let kv = NbtElement::from_str(&clipboard).map_err(InsertFromClipboardError::from)?;
 				indices.push(0);
-				Ok(Some(add_element(root, kv, indices, mi).context("Failed to insert element")?.into_action()))
+				Ok(Some(add_element(root, kv, indices, mi).map_err(InsertFromClipboardError::from)?.into_action()))
 			}
 			Self::InvertBookmarks => {
 				let NavigationInformation {
@@ -256,7 +255,7 @@ impl ElementAction {
 					mut line_number,
 					mut true_line_number,
 					..
-				} = root.navigate(&indices).context("Could not navigate indices")?;
+				} = root.navigate(&indices).map_err(InvertBookmarksError::from)?;
 				let mut queue = Vec::new();
 				queue.push(element);
 				while let Some(element) = queue.pop() {
@@ -278,4 +277,62 @@ impl ElementAction {
 			}
 		}
 	}
+}
+
+#[derive(Debug, Error)]
+pub enum ElementActionError {
+	#[error("Failed to copy to clipboard, reason: {0}")]
+	Copy(#[from] CopyError),
+	#[error("Failed to open in file, reason: {0}")]
+	OpenInFile(#[from] OpenInFileError),
+	#[error("Failed to sort element by *, reason: {0}")]
+	SortElementBy(#[from] SortElementByError),
+	#[error("Failed to insert from clipboard, reason: {0}")]
+	InsertFromClipboard(#[from] InsertFromClipboardError),
+	#[error("Failed to invert bookmarks, reason: {0}")]
+	InvertBookmarks(#[from] InvertBookmarksError),
+}
+
+#[derive(Debug, Error)]
+pub enum CopyError {
+	#[error(transparent)]
+	Navigation(#[from] NavigationError),
+}
+
+#[derive(Debug, Error)]
+pub enum OpenInFileError {
+	#[error(transparent)]
+	Navigation(#[from] NavigationError),
+	#[error("Failed to construct poll watcher, reason: {0}")]
+	PollWatcher(notify::Error),
+	#[error("Failed to watch file, reason: {0}")]
+	Watch(notify::Error),
+	#[error(transparent)]
+	IO(#[from] std::io::Error),
+}
+
+#[derive(Debug, Error)]
+pub enum SortElementByError {
+	#[error("Element did not have a key-value map")]
+	NonKVMapType,
+	#[error(transparent)]
+	Sort(#[from] ReorderElementError),
+	#[error(transparent)]
+	Navigation(#[from] NavigationError),
+}
+
+#[derive(Debug, Error)]
+pub enum InsertFromClipboardError {
+	#[error(transparent)]
+	Clipboard(#[from] ClipboardError),
+	#[error(transparent)]
+	SNBT(#[from] SNBTParseError),
+	#[error(transparent)]
+	Add(#[from] AddElementError),
+}
+
+#[derive(Debug, Error)]
+pub enum InvertBookmarksError {
+	#[error(transparent)]
+	Navigation(#[from] NavigationError),
 }

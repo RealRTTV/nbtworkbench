@@ -168,9 +168,9 @@ macro_rules! array {
 					}
 				}
 
-				fn render(&self, builder: &mut $crate::render::vertex_buffer_builder::VertexBufferBuilder, key: Option<&str>, remaining_scroll: &mut usize, tail: bool, ctx: &mut $crate::render::TreeRenderContext) {
-					ctx.render_complex_head(self, builder, key, remaining_scroll, $crate::render::TreeRenderContext::draw_held_entry_bar);
-					ctx.render_complex_body(self, builder, remaining_scroll, tail, $crate::render::TreeRenderContext::draw_held_entry_bar, $crate::render::TreeRenderContext::draw_held_entry_bar);
+				fn render(&self, builder: &mut $crate::render::vertex_buffer_builder::VertexBufferBuilder, key: Option<&str>, tail: bool, ctx: &mut $crate::render::TreeRenderContext) {
+					ctx.render_complex_head(self, builder, key, $crate::render::TreeRenderContext::draw_held_entry_bar);
+					ctx.render_complex_body(self, builder, tail, $crate::render::TreeRenderContext::draw_held_entry_bar, $crate::render::TreeRenderContext::draw_held_entry_bar);
 				}
 
 				fn value(&self) -> ::std::borrow::Cow<'_, str> {

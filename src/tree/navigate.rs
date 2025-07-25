@@ -229,7 +229,7 @@ pub enum ParentNavigationError {
 	#[error("Indices were empty, root has no parent.")]
 	EmptyIndices,
 	#[error(transparent)]
-	NavigationError(#[from] NavigationError),
+	Navigation(#[from] NavigationError),
 }
 
 pub struct IterativeNavigationInformationMut<'nbt, 'indices> {

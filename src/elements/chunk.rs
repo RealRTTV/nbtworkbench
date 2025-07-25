@@ -203,10 +203,10 @@ impl NbtElementVariant for NbtChunk {
 
 	fn to_le_bytes(&self, _writer: &mut UncheckedBufWriter) {}
 
-	fn render(&self, builder: &mut VertexBufferBuilder, key: Option<&str>, remaining_scroll: &mut usize, tail: bool, ctx: &mut TreeRenderContext) {
+	fn render(&self, builder: &mut VertexBufferBuilder, key: Option<&str>, tail: bool, ctx: &mut TreeRenderContext) {
 		'head: {
-			if *remaining_scroll > 0 {
-				*remaining_scroll -= 1;
+			if ctx.remaining_scroll > 0 {
+				ctx.remaining_scroll -= 1;
 				ctx.skip_line_numbers(1);
 				break 'head;
 			}
@@ -225,7 +225,7 @@ impl NbtElementVariant for NbtChunk {
 			ctx.pos += (0, 16);
 		}
 		
-		ctx.render_complex_body_kv(self, builder, remaining_scroll, tail, TreeRenderContext::draw_held_entry_bar, TreeRenderContext::draw_held_entry_bar);
+		ctx.render_complex_body_kv(self, builder, tail, TreeRenderContext::draw_held_entry_bar, TreeRenderContext::draw_held_entry_bar);
 	}
 
 	fn value(&self) -> Cow<'_, str> { Cow::Owned(format!("{}, {}", self.x, self.z)) }

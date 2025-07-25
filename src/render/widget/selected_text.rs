@@ -236,7 +236,7 @@ impl SelectedText {
 					return this.force_open((flags & !flags!(Alt)) == flags!(Shift), root, mi).map(|_| None).map(SelectedTextKeyResult::Action).map_err(SelectedTextInputError::from).pass_or_fail(SelectedTextInputError::is_generally_ignored);
 				}
 			}
-			
+
 			let cursor_before = this.cursor;
 			let result = this.0.on_key_press(key, ch, flags).into();
 			if this.cursor != cursor_before {
@@ -285,12 +285,12 @@ impl SelectedText {
 		self.indices = indices;
 		self.recache_y(root);
 	}
-	
+
 	#[must_use]
 	pub fn is_editing_key(&self) -> bool {
 		self.keyfix.is_none() && self.prefix.0.is_empty() && !self.suffix.0.is_empty() && self.valuefix.is_some()
 	}
-	
+
 	#[must_use]
 	pub fn key_span(&self, left_margin: usize) -> Option<Range<usize>> {
 		self.keyfix.as_ref()
@@ -413,11 +413,9 @@ impl SelectedText {
 			return Err(MoveToKeyfixError::AlreadyAtKey)
 		}
 
-		// has to be here because of side effects from `self.write`
-		let (keyfix, keyfix_color) = self.keyfix.clone().ok_or(MoveToKeyfixError::NoKey)?;
-
 		let action = self.save(root, path).map_success(Some).flatten_pass(Ok(None))?;
 
+		let (keyfix, keyfix_color) = self.keyfix.take().ok_or(MoveToKeyfixError::NoKey)?;
 		let old_prefix = core::mem::take(&mut self.prefix);
 
 		self.cursor = keyfix.len();
@@ -439,12 +437,10 @@ impl SelectedText {
 		if self.keyfix.as_ref().is_some_and(|keyfix| keyfix.1.is_editable()) || !self.prefix.0.is_empty() {
 			return Err(MoveToValuefixError::AlreadyAtValue)
 		}
-
-		// has to be here because of side effects from `self.write`
-		let (valuefix, valuefix_color) = self.valuefix.clone().ok_or(MoveToValuefixError::NoValue)?;
-
+		
 		let action = self.save(root, path).map_success(Some).flatten_pass(Ok(None))?;
 
+		let (valuefix, valuefix_color) = self.valuefix.take().ok_or(MoveToValuefixError::NoValue)?;
 		let old_suffix = core::mem::take(&mut self.suffix);
 
 		self.cursor = 0;
@@ -497,7 +493,7 @@ impl SelectedText {
 			Ok(if ctrl && let Some((last_idx, parent_indices)) = indices.split_last() {
 				let NavigationInformation { element: parent, line_number, .. } = root.navigate(&parent_indices).map_err(|e| MoveSelectedTextError::Navigation(e))?;
 				let len = parent.len().ok_or_else(|| {
-					MoveSelectedTextError::Save(SaveSelectedTextError::Rename(RenameElementError::Navigation(ParentNavigationError::NavigationError(NavigationError::ParentWasPrimitive {
+					MoveSelectedTextError::Save(SaveSelectedTextError::Rename(RenameElementError::Navigation(ParentNavigationError::Navigation(NavigationError::ParentWasPrimitive {
 						indices: parent_indices.to_owned(),
 					}))))
 				})?;

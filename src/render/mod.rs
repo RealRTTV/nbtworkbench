@@ -28,7 +28,7 @@ pub struct TreeRenderContext<'w> {
 	line_number: usize,
 	pub pos: Vec2u,
 	total_scroll_px: usize,
-	remaining_scroll: usize,
+	pub remaining_scroll: usize,
 	freehand: bool,
 	indices: OwnedIndices,
 	selected_texts: Vec<&'w SelectedText>,
@@ -189,11 +189,10 @@ impl<'w> TreeRenderContext<'w> {
 		element: &Nbt,
 		builder: &mut VertexBufferBuilder,
 		key: Option<&str>,
-		remaining_scroll: &mut usize,
 		mut draw_held_entry: impl FnMut(&Self, Vec2u, &mut VertexBufferBuilder, AABB, &Nbt) -> bool
 	) {
-		if *remaining_scroll > 0 {
-			*remaining_scroll -= 1;
+		if self.remaining_scroll > 0 {
+			self.remaining_scroll -= 1;
 			self.skip_line_numbers(1);
 			return;
 		}
@@ -216,7 +215,6 @@ impl<'w> TreeRenderContext<'w> {
 		&mut self,
 		element: &Nbt,
 		builder: &mut VertexBufferBuilder,
-		remaining_scroll: &mut usize,
 		tail: bool,
 		mut pre_render_draw_held_entry: impl FnMut(&Self, Vec2u, &mut VertexBufferBuilder, AABB, &Nbt) -> bool,
 		mut post_render_draw_held_entry: impl FnMut(&Self, Vec2u, &mut VertexBufferBuilder, AABB, &Nbt) -> bool
@@ -239,18 +237,18 @@ impl<'w> TreeRenderContext<'w> {
 				}
 
 				let height = value.height();
-				if *remaining_scroll >= height {
-					*remaining_scroll -= height;
+				if self.remaining_scroll >= height {
+					self.remaining_scroll -= height;
 					self.skip_line_numbers(value.true_height());
 					continue;
 				}
 
 				pre_render_draw_held_entry(self, pos, builder, AABB::from_pos_and_dims(pos, PhysicalSize::new(16, 8)), element);
 
-				if *remaining_scroll == 0 {
+				if self.remaining_scroll == 0 {
 					builder.draw_texture(pos - (16, 0), CONNECTION_UV, (16, (idx + 1 != element.len()) as usize * 7 + 9));
 				}
-				value.render(remaining_scroll, builder, Some(key), idx + 1 == element.len(), self);
+				value.render(builder, Some(key), idx + 1 == element.len(), self);
 
 				let pos = self.pos;
 				post_render_draw_held_entry(self, pos, builder, AABB::from_pos_and_dims(pos - (0, 8), PhysicalSize::new(16, 8)), element);
@@ -273,7 +271,6 @@ impl<'w> TreeRenderContext<'w> {
 		&mut self,
 		element: &Nbt,
 		builder: &mut VertexBufferBuilder,
-		remaining_scroll: &mut usize,
 		tail: bool,
 		mut pre_render_draw_held_entry: impl FnMut(&Self, Vec2u, &mut VertexBufferBuilder, AABB, &Nbt) -> bool,
 		mut post_render_draw_held_entry: impl FnMut(&Self, Vec2u, &mut VertexBufferBuilder, AABB, &Nbt) -> bool
@@ -292,18 +289,18 @@ impl<'w> TreeRenderContext<'w> {
 				}
 
 				let height = value.height();
-				if *remaining_scroll >= height {
-					*remaining_scroll -= height;
+				if self.remaining_scroll >= height {
+					self.remaining_scroll -= height;
 					self.skip_line_numbers(value.true_height());
 					continue;
 				}
 
 				pre_render_draw_held_entry(self, pos, builder, AABB::from_pos_and_dims(pos, PhysicalSize::new(16, 8)), element);
 
-				if *remaining_scroll == 0 {
+				if self.remaining_scroll == 0 {
 					builder.draw_texture(self.pos - (16, 0), CONNECTION_UV, (16, (idx != element.len() - 1) as usize * 7 + 9));
 				}
-				value.render(remaining_scroll, builder, None, idx == element.len() - 1, self);
+				value.render(builder, None, idx == element.len() - 1, self);
 
 				let pos = self.pos;
 				post_render_draw_held_entry(self, pos, builder, AABB::from_pos_and_dims(pos - (0, 8), PhysicalSize::new(16, 8)), element);

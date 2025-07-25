@@ -102,7 +102,7 @@ pub enum RenameElementError {
 	#[error(transparent)]
 	Navigation(#[from] ParentNavigationError),
 	#[error(transparent)]
-	FilePathError(#[from] FilePathError),
+	FilePath(#[from] FilePathError),
 	#[error("Invalid value '{value}' for {child}.")]
 	InvalidValue { value: String, child: &'static str },
 	#[error("Duplicate key ({key}) @ {nth} child for {indices}", nth = crate::util::nth(idx + 1))]

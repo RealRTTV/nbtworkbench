@@ -34,7 +34,7 @@ macro_rules! primitive {
 				
 				const VALUE_COLOR: $crate::render::color::TextColor = $crate::render::color::TextColor::TreePrimitive;
 				
-				const SEPERATOR_COLOR: $crate::render::color::TextColor = $crate::render::color::TextColor::TreePrimitive;
+				const SEPERATOR_COLOR: $crate::render::color::TextColor = $crate::render::color::TextColor::TreeKey;
 
 				fn from_str0(s: &str) -> Result<(&str, Self), usize>
 				where Self: Sized {
@@ -56,7 +56,7 @@ macro_rules! primitive {
 
 				fn to_le_bytes(&self, writer: &mut $crate::serialization::encoder::UncheckedBufWriter) { writer.write(self.value.to_le_bytes().as_ref()); }
 
-				fn render(&self, builder: &mut $crate::render::vertex_buffer_builder::VertexBufferBuilder, key: Option<&str>, _remaining_scroll: &mut usize, _tail: bool, ctx: &mut $crate::render::TreeRenderContext) {
+				fn render(&self, builder: &mut $crate::render::vertex_buffer_builder::VertexBufferBuilder, key: Option<&str>, _tail: bool, ctx: &mut $crate::render::TreeRenderContext) {
 					ctx.line_number();
 					builder.draw_texture(ctx.pos, Self::UV, (16, 16));
 					ctx.mark_possible_invalid_value(builder, |value| value.parse::<<Self as $crate::elements::PrimitiveNbtElementVariant>::InnerType>().is_ok());

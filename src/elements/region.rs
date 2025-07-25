@@ -240,8 +240,8 @@ impl NbtElementVariant for NbtRegion {
 
 	fn to_le_bytes(&self, _writer: &mut UncheckedBufWriter) {}
 
-	fn render(&self, builder: &mut VertexBufferBuilder, key: Option<&str>, remaining_scroll: &mut usize, tail: bool, ctx: &mut TreeRenderContext) {
-		ctx.render_complex_head(self, builder, key, remaining_scroll, |_, _, _, _, _| false);
+	fn render(&self, builder: &mut VertexBufferBuilder, key: Option<&str>, tail: bool, ctx: &mut TreeRenderContext) {
+		ctx.render_complex_head(self, builder, key, |_, _, _, _, _| false);
 
 		if self.is_open() {
 			if self.is_grid_layout() {
@@ -251,8 +251,8 @@ impl NbtElementVariant for NbtRegion {
 						break;
 					}
 
-					if *remaining_scroll >= 1 {
-						*remaining_scroll -= 1;
+					if ctx.remaining_scroll >= 1 {
+						ctx.remaining_scroll -= 1;
 						for x in 0..32 {
 							ctx.line_number();
 							ctx.skip_line_numbers(self.chunks[z * 32 + x].true_height() - 1);
@@ -260,7 +260,7 @@ impl NbtElementVariant for NbtRegion {
 						continue;
 					}
 
-					if *remaining_scroll == 0 {
+					if ctx.remaining_scroll == 0 {
 						builder.draw_texture(ctx.pos - (16, 0), CONNECTION_UV, (16, (z != 32 - 1 && tail) as usize * 7 + 9));
 					}
 
@@ -292,7 +292,7 @@ impl NbtElementVariant for NbtRegion {
 					ctx.pos = (initial_x_offset, ctx.pos.y).into();
 				}
 			} else {
-				ctx.render_complex_body::<Self>(self, builder, remaining_scroll, tail, |ctx, pos, builder, aabb, region| TreeRenderContext::draw_held_entry_chunk(ctx, pos, builder, AABB::from_pos_and_dims(aabb.low(), PhysicalSize::new(16, 16)), region), |_, _, _, _, _| false);
+				ctx.render_complex_body::<Self>(self, builder, tail, |ctx, pos, builder, aabb, region| TreeRenderContext::draw_held_entry_chunk(ctx, pos, builder, AABB::from_pos_and_dims(aabb.low(), PhysicalSize::new(16, 16)), region), |_, _, _, _, _| false);
 			}
 		}
 	}

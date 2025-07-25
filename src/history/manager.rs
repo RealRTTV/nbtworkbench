@@ -1,9 +1,7 @@
 use std::fmt::{Debug, Formatter};
 
-use anyhow::Result;
-
 use crate::elements::element::NbtElement;
-use crate::history::WorkbenchAction;
+use crate::history::{UndoWorkbenchActionError, WorkbenchAction};
 use crate::tree::MutableIndices;
 use crate::util::LinkedQueue;
 use crate::workbench::HeldEntry;
@@ -44,14 +42,14 @@ impl HistoryMananger {
 		self.unsaved_changes = true;
 	}
 
-	pub fn undo<'m1, 'm2: 'm1>(&mut self, root: &mut NbtElement, mi: &'m1 mut MutableIndices<'m2>, path: &mut FilePath, held_entry: &mut Option<HeldEntry>) -> Result<()> {
+	pub fn undo<'m1, 'm2: 'm1>(&mut self, root: &mut NbtElement, mi: &'m1 mut MutableIndices<'m2>, path: &mut FilePath, held_entry: &mut Option<HeldEntry>) -> Result<(), UndoWorkbenchActionError> {
 		let Some(action) = self.undos.pop() else { return Ok(()) };
 		let undo_action = action.undo(root, mi, path, held_entry)?;
 		self.redos.push(undo_action);
 		Ok(())
 	}
 
-	pub fn redo<'m1, 'm2: 'm1>(&mut self, root: &mut NbtElement, mi: &'m1 mut MutableIndices<'m2>, path: &mut FilePath, held_entry: &mut Option<HeldEntry>) -> Result<()> {
+	pub fn redo<'m1, 'm2: 'm1>(&mut self, root: &mut NbtElement, mi: &'m1 mut MutableIndices<'m2>, path: &mut FilePath, held_entry: &mut Option<HeldEntry>) -> Result<(), UndoWorkbenchActionError> {
 		let Some(action) = self.redos.pop() else { return Ok(()) };
 		let undo_action = action.undo(root, mi, path, held_entry)?;
 		self.undos.push(undo_action);

@@ -11,7 +11,6 @@ use std::str::FromStr;
 #[cfg(not(target_arch = "wasm32"))] use std::thread::scope;
 use std::time::Duration;
 
-use anyhow::{Context, Result, anyhow};
 use compact_str::{CompactString, ToCompactString, format_compact};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -19,7 +18,7 @@ use winit::dpi::{PhysicalPosition, PhysicalSize};
 use winit::event::{ElementState, KeyEvent, MouseButton, MouseScrollDelta};
 use winit::keyboard::{KeyCode, PhysicalKey};
 
-use crate::action_result::{ActionResult, AnyhowActionResult, IntoFailingActionResult};
+use crate::action_result::{ActionResult, IntoFailingActionResult};
 use crate::elements::array::{NbtByteArray, NbtIntArray, NbtLongArray};
 use crate::elements::byte::NbtByte;
 use crate::elements::chunk::NbtChunk;
@@ -72,15 +71,17 @@ use crate::tree::actions::open::open_element;
 use crate::tree::actions::remove::{RemoveElementResult, remove_element};
 use crate::tree::indices::{Indices, OwnedIndices};
 use crate::tree::traverse::{TraversalError, TraversalInformation, TraversalInformationMut};
-use crate::util::{self, AABB, LinkedQueue, StrExt, Timestamp, Vec2d, Vec2u, drop_on_separate_thread, get_clipboard, nth, set_clipboard};
+use crate::util::{self, AABB, LinkedQueue, StrExt, Timestamp, Vec2d, Vec2u, drop_on_separate_thread, get_clipboard, nth, set_clipboard, ClipboardError};
 #[cfg(target_arch = "wasm32")] use crate::wasm::fake_scope as scope;
 use crate::workbench::element_action::ElementAction;
 use crate::workbench::keyboard::{KeyboardManager, Modifiers};
 use crate::workbench::marked_line::MarkedLine;
 use crate::workbench::mouse::MouseManager;
 use crate::workbench::tab::manager::TabManager;
-use crate::workbench::tab::{FilePath, NbtFileFormat, Tab, TabConstants};
+use crate::workbench::tab::{FilePath, NewTabFromPath, NbtFileFormat, Tab, TabConstants, SaveTabError, InvalidRootVariantError, FilePathError};
 use crate::{config, flags, get_interaction_information, hash, mutable_indices};
+use crate::tree::actions::replace::ReplaceElementError;
+use crate::tree::navigate::NavigationError;
 
 #[derive(Debug)]
 pub enum InteractionInformation<'a> {
@@ -174,7 +175,9 @@ impl Workbench {
 		}
 	}
 
-	pub fn new(window_dims: Option<PhysicalSize<u32>>) -> Result<Self> {
+	pub fn new(window_dims: Option<PhysicalSize<u32>>) -> Result<Self, WorkbenchConstructionError> {
+		use crate::elements::result::into_result;
+		
 		let mut workbench = Self {
 			tabs: TabManager::without_tab(),
 			last_mouse_state: ElementState::Released,
@@ -228,7 +231,7 @@ impl Workbench {
 			workbench.tabs.add(Tab::new(
 				if cfg!(debug_assertions) {
 					let sort = config::set_sort_algorithm(SortAlgorithm::None);
-					let result = NbtElement::from_be_file(include_bytes!("../assets/test.nbt")).context("Included debug nbt contains valid data")?;
+					let result = into_result(NbtElement::from_be_file(include_bytes!("../assets/test.nbt")), WorkbenchConstructionError::InvalidDebugFile)?;
 					config::set_sort_algorithm(sort);
 					result
 				} else {
@@ -291,8 +294,9 @@ impl Workbench {
 					&& let tab = self.tabs.active_tab_mut()
 					&& tab.selected_text.is_some()
 				{
-					tab.save_selected_text().alert_err(&mut self.alerts);
-					// do not exit early
+					if tab.save_selected_text().alert_err(&mut self.alerts).is_some() {
+						tab.selected_text.take();
+					}
 				}
 
 				{
@@ -317,6 +321,8 @@ impl Workbench {
 						};
 					}
 
+					let (mut list_0, mut list_1) = (self.notifications.as_vertical_list(), self.alerts.as_vertical_list());
+
 					click_widgets![
 						&mut self.search_mode_button,
 						&mut self.search_operation_button,
@@ -329,8 +335,10 @@ impl Workbench {
 						&mut self.new_tab_button,
 						&mut self.open_file_button,
 						&mut self.replace_by_button,
-						self.alerts.as_vertical_list(),
-						self.notifications.as_vertical_list(),
+						&mut VerticalList::new(
+							[&mut list_0 as &mut dyn Widget, &mut list_1 as &mut dyn Widget],
+							WidgetAlignment::new(HorizontalWidgetAlignmentPreference::Right, VerticalWidgetAlignmentPreference::Static(HEADER_SIZE as _))
+						),
 					];
 					
 					self.alerts |= new_alerts;
@@ -425,11 +433,7 @@ impl Workbench {
 					}
 				} else {
 					if !self.tabs.active_tab().freehand_mode && self.tabs.active_tab().held_entry.is_none() && AABB::new(0, usize::MAX, 24, 46).contains(self.mouse.coords) && button == MouseButton::Left {
-						match self.hold_entry(button) {
-							ActionResult::Success(()) => return ActionResult::Success(()),
-							ActionResult::Pass => {}
-							ActionResult::Failure(e) => self.alerts.alert(e),
-						}
+						self.hold_entry(button)?;
 					}
 				}
 			}
@@ -452,7 +456,7 @@ impl Workbench {
 		ActionResult::Pass
 	}
 
-	pub fn on_open_file(&mut self, path: &Path, buf: &[u8]) -> Result<()> {
+	pub fn on_open_file(&mut self, path: &Path, buf: &[u8]) -> Result<(), NewTabFromPath> {
 		let tab = Tab::new_from_path(path, buf, self.window_dims)?;
 		self.tabs.add(tab);
 		Ok(())
@@ -659,14 +663,15 @@ impl Workbench {
 	}
 
 	#[deprecated = "refactor to UFCS only"]
-	fn hold_entry(&mut self, button: MouseButton) -> AnyhowActionResult {
+	fn hold_entry(&mut self, button: MouseButton) -> ActionResult {
 		if button == MouseButton::Left && self.mouse.coords.x >= 16 + 16 + 4 {
 			let tab = self.tabs.active_tab_mut();
 			let x = self.mouse.coords.x - (16 + 16 + 4);
 			if x / 16 == 13 {
-				let (key, element) = NbtElement::from_str(&get_clipboard().ok_or_else(|| anyhow!("Failed to get clipboard")).failure_on_err()?).failure_on_err()?;
+				let (key, element) = NbtElement::from_str(&get_clipboard().alert_err(&mut self.alerts).failure_on_err()?).alert_err(&mut self.alerts).failure_on_err()?;
 				if element.is_chunk() && !tab.root.is_region() {
-					return ActionResult::Failure(anyhow!("Chunks are not supported for non-region tabs"));
+					self.alerts.alert(Alert::error("Chunks are not supported for non-region tabs"));
+					return ActionResult::Failure(());
 				} else {
 					let old_held_entry = tab.held_entry.replace(HeldEntry::from_aether((key, element)));
 					if let Some(held_entry) = old_held_entry {
@@ -1096,14 +1101,14 @@ impl Workbench {
 						KeyCode::KeyV => {
 							#[derive(Debug, Error)]
 							enum ClipboardParseError {
-								#[error("Failed to get clipboard")]
-								ClipboardFailed,
+								#[error(transparent)]
+								Clipboard(#[from] ClipboardError),
 								#[error(transparent)]
 								SNBT(#[from] SNBTParseError),
 							}
 
 							fn element_from_clipboard() -> Result<NbtElementAndKey, ClipboardParseError> {
-								let clipboard = get_clipboard().ok_or(ClipboardParseError::ClipboardFailed)?;
+								let clipboard = get_clipboard()?;
 								Ok(NbtElement::from_str(&clipboard)?)
 							}
 
@@ -1149,7 +1154,7 @@ impl Workbench {
 		self.try_extend_drag_selection();
 		ActionResult::Success(())
 	}
-	
+
 	pub fn hover_widgets(&mut self) {
 		let mut new_alerts = AlertManager::new();
 		let mut new_notifications = NotificationManager::new();
@@ -1371,15 +1376,20 @@ impl Workbench {
 	}
 
 	pub fn tick(&mut self) {
+		#[derive(Debug, Error)]
+		#[error("Failed to autosave {nth} tab, reason: {e}", nth = nth(idx + 1), e = inner)]
+		struct AutosaveError {
+			inner: SaveTabError,
+			idx: usize,
+		}
+
 		#[cfg(not(target_arch = "wasm32"))]
 		for (idx, tab) in self.tabs.iter_mut().enumerate() {
 			if (tab.last_interaction.elapsed() >= Tab::AUTOSAVE_INTERVAL) && tab.history.has_unsaved_changes() && tab.root.true_height() <= Tab::AUTOSAVE_MAXIMUM_LINES {
-				if let Err(e) = tab.save(false) {
-					self.alerts.alert(e.context(format!("Failed to autosave {nth} tab", nth = nth(idx + 1))));
-				}
+				tab.save(false).map_err(|e| AutosaveError { inner: e, idx }).alert_err(&mut self.alerts);
 			}
 		}
-		
+
 		if (self.tabs.active_tab().held_entry.is_some() || self.tabs.active_tab().freehand_mode || ((self.tabs.active_tab().selected_text.is_some() || self.search_box.is_selected()) && self.last_mouse_state == ElementState::Pressed))
 			&& self.action_wheel.is_none()
 			&& self.scrollbar_offset.is_none()
@@ -1389,16 +1399,16 @@ impl Workbench {
 			self.try_replace_box_scroll();
 			self.try_extend_drag_selection();
 		}
-		
+
 		self.alerts.cleanup();
 		self.notifications.cleanup();
-		
+
 		self.hover_widgets();
-		
+
 		for tab in &mut self.tabs {
 			tab.try_update_subscription().alert_err(&mut self.alerts);
 		}
-		
+
 		if self.tabs.active_tab().steal_animation_data.is_some()
 			&& let ActionResult::Success(()) = self.try_steal(false)
 		{
@@ -1659,9 +1669,9 @@ impl Workbench {
 		if ctrl {
 			return None
 		}
-		
+
 		macro_rules! gen_match {
-            ($($variant:ident => $regular:literal else $shift:literal),* $(,)?) => {
+            ($($variant:ident => $shift:literal else $regular:literal),* $(,)?) => {
 	            Some(match key {
 		            $(
 		            KeyCode::$variant => if shift { $shift } else { $regular },
@@ -1670,7 +1680,7 @@ impl Workbench {
 	            })
             };
 		}
-		
+
 		gen_match! {
 			Digit1 => '!' else '1',
 			Digit2 => '@' else '2',
@@ -1845,6 +1855,40 @@ pub enum FileUpdateSubscriptionType {
 	ShortList,
 	IntList,
 	LongList,
+}
+
+#[derive(Debug, Error)]
+pub enum FileUpdateSubscriptionError {
+	#[error(transparent)]
+	SNBT(#[from] SNBTParseError),
+	#[error(transparent)]
+	Hex(#[from] NbtHexRawRepresentationError),
+	#[error(transparent)]
+	Replacement(#[from] ReplaceElementError),
+	#[error(transparent)]
+	Navigation(#[from] NavigationError),
+	#[error(transparent)]
+	Notify(#[from] notify::Error),
+	#[error("Abruptly disconnected from receiver.")]
+	Disconnected,
+}
+
+#[derive(Debug, Error)]
+pub enum NbtHexRawRepresentationError {
+	#[error("Hex data was of an incorrect length, length was {len} bytes, should be multiples of {width}")]
+	InvalidWidth { len: usize, width: usize },
+	#[error("Failed to parse hex data into NBT{}", if let Some(x) = .0 { format!(", details: {x}") } else { String::new() })]
+	FailedParse(Option<anyhow::Error>)
+}
+
+#[derive(Debug, Error)]
+pub enum WorkbenchConstructionError {
+	#[error("Failed to parse debug file{}", if let Some(x) = .0 { format!(", details: {x}") } else { String::new() })]
+	InvalidDebugFile(Option<anyhow::Error>),
+	#[error(transparent)]
+	FilePath(#[from] FilePathError),
+	#[error(transparent)]
+	InvalidRoot(#[from] InvalidRootVariantError),
 }
 
 pub enum DropResult {

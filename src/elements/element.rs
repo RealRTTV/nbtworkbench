@@ -3,6 +3,7 @@ use std::fmt::{Debug, Display, Error, Formatter};
 use std::mem::{ManuallyDrop, MaybeUninit};
 use std::ops::{Index, IndexMut};
 use std::slice::{Iter, IterMut};
+use std::str::Utf8Error;
 #[cfg(not(target_arch = "wasm32"))] use std::thread::Scope;
 
 use compact_str::CompactString;
@@ -177,6 +178,8 @@ impl NbtElement {
 pub enum SNBTParseError {
 	#[error("Could not parse SNBT (failed at index {0})")]
 	Index(usize),
+	#[error(transparent)]
+	NonString(#[from] Utf8Error),
 }
 
 /// FromStr
@@ -603,24 +606,24 @@ impl NbtElement {
 	pub const INITIAL_DEPTH_WIDTH: usize = Self::TOGGLE_WIDTH + Self::ICON_WIDTH;
 	pub const DEPTH_INCREMENT_WIDTH: usize = Self::ICON_WIDTH;
 
-	pub fn render(&self, remaining_scroll: &mut usize, builder: &mut VertexBufferBuilder, str: Option<&str>, tail: bool, ctx: &mut TreeRenderContext) {
+	pub fn render(&self, builder: &mut VertexBufferBuilder, str: Option<&str>, tail: bool, ctx: &mut TreeRenderContext) {
 		use NbtPattern as Nbt;
 
 		match self.as_pattern() {
-			Nbt::Byte(byte) => byte.render(builder, str, remaining_scroll, tail, ctx),
-			Nbt::Short(short) => short.render(builder, str, remaining_scroll, tail, ctx),
-			Nbt::Int(int) => int.render(builder, str, remaining_scroll, tail, ctx),
-			Nbt::Long(long) => long.render(builder, str, remaining_scroll, tail, ctx),
-			Nbt::Float(float) => float.render(builder, str, remaining_scroll, tail, ctx),
-			Nbt::Double(double) => double.render(builder, str, remaining_scroll, tail, ctx),
-			Nbt::ByteArray(byte_array) => byte_array.render(builder, str, remaining_scroll, tail, ctx),
-			Nbt::String(string) => string.render(builder, str, remaining_scroll, tail, ctx),
-			Nbt::List(list) => list.render(builder, str, remaining_scroll, tail, ctx),
-			Nbt::Compound(compound) => compound.render(builder, str, remaining_scroll, tail, ctx),
-			Nbt::IntArray(int_array) => int_array.render(builder, str, remaining_scroll, tail, ctx),
-			Nbt::LongArray(long_array) => long_array.render(builder, str, remaining_scroll, tail, ctx),
-			Nbt::Chunk(chunk) => chunk.render(builder, str, remaining_scroll, tail, ctx),
-			Nbt::Region(region) => region.render(builder, str, remaining_scroll, tail, ctx),
+			Nbt::Byte(byte) => byte.render(builder, str, tail, ctx),
+			Nbt::Short(short) => short.render(builder, str, tail, ctx),
+			Nbt::Int(int) => int.render(builder, str, tail, ctx),
+			Nbt::Long(long) => long.render(builder, str, tail, ctx),
+			Nbt::Float(float) => float.render(builder, str, tail, ctx),
+			Nbt::Double(double) => double.render(builder, str, tail, ctx),
+			Nbt::ByteArray(byte_array) => byte_array.render(builder, str, tail, ctx),
+			Nbt::String(string) => string.render(builder, str, tail, ctx),
+			Nbt::List(list) => list.render(builder, str, tail, ctx),
+			Nbt::Compound(compound) => compound.render(builder, str, tail, ctx),
+			Nbt::IntArray(int_array) => int_array.render(builder, str, tail, ctx),
+			Nbt::LongArray(long_array) => long_array.render(builder, str, tail, ctx),
+			Nbt::Chunk(chunk) => chunk.render(builder, str, tail, ctx),
+			Nbt::Region(region) => region.render(builder, str, tail, ctx),
 		}
 	}
 

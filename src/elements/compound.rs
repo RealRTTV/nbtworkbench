@@ -194,9 +194,9 @@ impl NbtElementVariant for NbtCompound {
 		writer.write(&[0x00]);
 	}
 
-	fn render(&self, builder: &mut VertexBufferBuilder, key: Option<&str>, remaining_scroll: &mut usize, tail: bool, ctx: &mut TreeRenderContext) {
-		ctx.render_complex_head(self, builder, key, remaining_scroll, TreeRenderContext::draw_held_entry_bar);
-		ctx.render_complex_body_kv(self, builder, remaining_scroll, tail, TreeRenderContext::draw_held_entry_bar, TreeRenderContext::draw_held_entry_bar);
+	fn render(&self, builder: &mut VertexBufferBuilder, key: Option<&str>, tail: bool, ctx: &mut TreeRenderContext) {
+		ctx.render_complex_head(self, builder, key, TreeRenderContext::draw_held_entry_bar);
+		ctx.render_complex_body_kv(self, builder, tail, TreeRenderContext::draw_held_entry_bar, TreeRenderContext::draw_held_entry_bar);
 	}
 
 	fn value(&self) -> Cow<'_, str> { Cow::Owned(format!("{} {}", self.len(), if self.len() == 1 { "entry" } else { "entries" })) }

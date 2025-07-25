@@ -1,4 +1,5 @@
-use std::fmt::Debug;
+use std::error::Error;
+use std::fmt::Display;
 use std::time::Duration;
 
 use winit::dpi::PhysicalSize;
@@ -47,7 +48,7 @@ impl Alert {
 	}
 
 	#[must_use]
-	pub fn error(error: impl Debug) -> Self { Self::new("Error!", TextColor::Red, format!("{error:?}")) }
+	pub fn error(error: impl Display) -> Self { Self::new("Error!", TextColor::Red, format!("{error}")) }
 
 	pub fn log(&self) {
 		if self.title == "Error!" && self.title_color == TextColor::Red.to_raw() {
@@ -186,6 +187,6 @@ impl Widget for Alert {
 	}
 }
 
-impl<E: Debug> From<E> for Alert {
+impl<E: Error> From<E> for Alert {
 	fn from(value: E) -> Self { Self::error(value) }
 }

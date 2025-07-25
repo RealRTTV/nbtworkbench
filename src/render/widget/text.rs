@@ -310,7 +310,7 @@ impl<Additional: Clone, Cache: Cachelike<Additional>> Text<Additional, Cache> {
 		}
 
 		if key == KeyCode::KeyV && flags == flags!(Ctrl) && self.editable {
-			if let Some(clipboard) = get_clipboard() {
+			if let Ok(clipboard) = get_clipboard() {
 				if let Some(selection) = self.selection.take() {
 					let (start, end) = if self.cursor < selection { (self.cursor, selection) } else { (selection, self.cursor) };
 					let (left, right) = self.value.split_at(start);

@@ -117,6 +117,33 @@ pub mod result {
 		#[cfg(not(debug_assertions))]
 		return result.ok();
 	}
+
+	#[must_use]
+	#[cfg_attr(not(debug_assertions), inline(always))]
+	pub fn into_opt<T>(result: NbtParseResult<T>) -> Option<T> {
+		#[cfg(debug_assertions)]
+		return result.ok();
+		#[cfg(not(debug_assertions))]
+		return result;
+	}
+
+	#[must_use]
+	#[cfg_attr(not(debug_assertions), inline(always))]
+	pub fn into_result<T, E>(result: NbtParseResult<T>, f: impl FnOnce(Option<anyhow::Error>) -> E) -> Result<T, E> {
+		#[cfg(debug_assertions)]
+		return result.map_err(|e| f(Some(e)));
+		#[cfg(not(debug_assertions))]
+		return result.ok_or_else(|| f(None));
+	}
+
+	#[must_use]
+	#[cfg_attr(not(debug_assertions), inline(always))]
+	pub fn map<T, U>(result: NbtParseResult<T>, f: impl FnOnce(T) -> U) -> NbtParseResult<U> {
+		#[cfg(debug_assertions)]
+		return result.map(f);
+		#[cfg(not(debug_assertions))]
+		return result.map(f);
+	}
 }
 
 pub trait Matches {
@@ -143,7 +170,7 @@ pub trait NbtElementVariant: Clone + PartialEq + Display + Matches + Default + P
 
 	fn to_le_bytes(&self, writer: &mut UncheckedBufWriter);
 
-	fn render(&self, builder: &mut VertexBufferBuilder, key: Option<&str>, remaining_scroll: &mut usize, tail: bool, ctx: &mut TreeRenderContext);
+	fn render(&self, builder: &mut VertexBufferBuilder, key: Option<&str>, tail: bool, ctx: &mut TreeRenderContext);
 
 	#[must_use]
 	fn value(&self) -> Cow<'_, str>;

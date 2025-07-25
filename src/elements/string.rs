@@ -63,7 +63,7 @@ impl NbtElementVariant for NbtString {
 
 	fn to_le_bytes(&self, writer: &mut UncheckedBufWriter) { writer.write_le_str(self.str.as_str()); }
 
-	fn render(&self, builder: &mut VertexBufferBuilder, key: Option<&str>, _remaining_scroll: &mut usize, _tail: bool, ctx: &mut TreeRenderContext) {
+	fn render(&self, builder: &mut VertexBufferBuilder, key: Option<&str>, _tail: bool, ctx: &mut TreeRenderContext) {
 		ctx.line_number();
 		builder.draw_texture_z(ctx.pos, BASE_Z, Self::UV, (16, 16));
 		ctx.try_render_text::<Self>(key, self.value(), builder);
