@@ -40,6 +40,7 @@ jobs:
         gcc --version || true
         rustup -V
         rustup toolchain list
+        rustup target add ${{ matrix.job.target }}
         rustup default
         cargo -V
         rustc -V
