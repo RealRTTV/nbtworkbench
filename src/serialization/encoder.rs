@@ -54,24 +54,20 @@ impl UncheckedBufWriter {
 	pub const fn remaining(&self) -> usize { Self::BUFFER_WIDTH - 1 - self.buf_len }
 
 	pub fn write(&mut self, bytes: &[u8]) {
-		unsafe {
-			if likely(bytes.len() < self.remaining()) {
-				self.buf.add(self.buf_len).cast::<u8>().copy_from_nonoverlapping(bytes.as_ptr(), bytes.len());
-				self.buf_len += bytes.len();
-			} else {
-				self.write_pushing_cold(bytes);
-			}
+		if likely(bytes.len() < self.remaining()) {
+			unsafe { self.buf.add(self.buf_len).cast::<u8>().copy_from_nonoverlapping(bytes.as_ptr(), bytes.len()) };
+			self.buf_len += bytes.len();
+		} else {
+			unsafe { self.write_pushing_cold(bytes) };
 		}
 	}
 
 	pub fn write_bytes(&mut self, byte: u8, count: usize) {
-		unsafe {
-			if likely(count < self.remaining()) {
-				self.buf.add(self.buf_len).cast::<u8>().write_bytes(byte, count);
-				self.buf_len += count;
-			} else {
-				self.write_bytes_pushing_cold(byte, count);
-			}
+		if likely(count < self.remaining()) {
+			unsafe { self.buf.add(self.buf_len).cast::<u8>().write_bytes(byte, count) };
+			self.buf_len += count;
+		} else {
+			unsafe { self.write_bytes_pushing_cold(byte, count) };
 		}
 	}
 
