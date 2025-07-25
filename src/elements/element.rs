@@ -686,16 +686,12 @@ impl NbtElement {
 /// Navigate & Traverse
 #[allow(dead_code)]
 impl NbtElement {
-	#[must_use]
 	pub fn navigate(&self, indices: &Indices) -> Result<NavigationInformation, NavigationError> { NavigationInformation::from(self, indices) }
 
-	#[must_use]
 	pub fn navigate_mut(&mut self, indices: &Indices) -> Result<NavigationInformationMut, NavigationError> { NavigationInformationMut::from(self, indices) }
 
-	#[must_use]
 	pub fn navigate_parent<'nbt, 'indices>(&'nbt self, indices: &'indices Indices) -> Result<ParentNavigationInformation<'nbt, 'indices>, ParentNavigationError> { ParentNavigationInformation::from(self, indices) }
 
-	#[must_use]
 	pub fn navigate_parent_mut<'nbt, 'indices>(&'nbt mut self, indices: &'indices Indices) -> Result<ParentNavigationInformationMut<'nbt, 'indices>, ParentNavigationError> { ParentNavigationInformationMut::from(self, indices) }
 
 	/// # Safety
@@ -1257,6 +1253,13 @@ impl NbtElement {
 			Nbt::Region(x) => x.can_insert(value),
 			_ => false,
 		}
+	}
+	
+	#[must_use]
+	pub fn replaces(&self) -> bool {
+		use NbtPattern as Nbt;
+		
+		matches!(self.as_pattern(), Nbt::Region(_))
 	}
 }
 
@@ -1854,7 +1857,7 @@ macro_rules! type_conversions {
 			#[doc = stringify!($t)]
 			#[must_use]
 			pub unsafe fn $into_unchecked(self) -> $t {
-				let inner = unsafe { ::std::ptr::read((&raw const self.$field).cast::<$t>()) };
+				let inner = unsafe { ::core::ptr::read((&raw const self.$field).cast::<$t>()) };
 				::std::mem::forget(self);
 				inner
 			}

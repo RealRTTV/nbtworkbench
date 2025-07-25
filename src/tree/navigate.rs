@@ -139,7 +139,7 @@ impl<'nbt, 'indices> ParentNavigationInformation<'nbt, 'indices> {
 		{
 			let len = parent.len().ok_or_else(|| NavigationError::ParentWasPrimitive { indices: parent_indices.to_owned() })?;
 
-			if last >= len {
+			if last > len {
 				return Err(NavigationError::IndexOutOfBounds { idx: last, indices: parent_indices.to_owned() }.into());
 			}
 
@@ -200,7 +200,7 @@ impl<'nbt, 'indices> ParentNavigationInformationMut<'nbt, 'indices> {
 		{
 			let len = parent.len().ok_or_else(|| NavigationError::ParentWasPrimitive { indices: parent_indices.to_owned() })?;
 
-			if last >= len {
+			if last > len {
 				return Err(NavigationError::IndexOutOfBounds { idx: last, indices: parent_indices.to_owned() }.into());
 			}
 
@@ -272,7 +272,7 @@ impl<'nbt, 'indices> Iterator for IterativeNavigationInformationMut<'nbt, 'indic
 	fn next(&mut self) -> Option<Self::Item> {
 		if !core::mem::replace(&mut self.head, true) {
 			return Some(Self::Item {
-				element: unsafe { std::ptr::read(&raw const self.element) },
+				element: unsafe { core::ptr::read(&raw const self.element) },
 				line_number: self.line_number,
 				true_line_number: self.true_line_number,
 				idx: None,
@@ -290,16 +290,16 @@ impl<'nbt, 'indices> Iterator for IterativeNavigationInformationMut<'nbt, 'indic
 			self.true_line_number += sibling.true_height();
 		}
 
-		let (element, child_element) = unsafe {
-			let duplicate_reference = std::ptr::read(&raw const self.element);
+		let (child_element, duplicate_reference) = unsafe {
 			let child_reference = core::mem::transmute::<_, &'nbt mut NbtElement>(self.element[idx].as_nonnull_mut()?);
+			let duplicate_reference = core::ptr::read(&raw const child_reference);
 			(duplicate_reference, child_reference)
 		};
 
-		self.element = child_element;
+		self.element = duplicate_reference;
 
 		Some(Self::Item {
-			element,
+			element: child_element,
 			line_number: self.line_number,
 			true_line_number: self.true_line_number,
 			idx: Some(idx),
@@ -340,7 +340,7 @@ impl<'nbt, 'indices> Iterator for ParentIterativeNavigationInformationMut<'nbt, 
 	fn next(&mut self) -> Option<Self::Item> {
 		if !core::mem::replace(&mut self.head, true) {
 			return Some(Self::Item {
-				element: unsafe { std::ptr::read(&raw const self.element) },
+				element: unsafe { core::ptr::read(&raw const self.element) },
 				line_number: self.line_number,
 				true_line_number: self.true_line_number,
 				idx: None,
@@ -363,16 +363,16 @@ impl<'nbt, 'indices> Iterator for ParentIterativeNavigationInformationMut<'nbt, 
 			self.true_line_number += sibling.true_height();
 		}
 
-		let (element, child_element) = unsafe {
-			let duplicate_reference = std::ptr::read(&raw const self.element);
+		let (child_element, duplicate_reference) = unsafe {
 			let child_reference = core::mem::transmute::<_, &'nbt mut NbtElement>(self.element[idx].as_nonnull_mut()?);
+			let duplicate_reference = core::ptr::read(&raw const child_reference);
 			(duplicate_reference, child_reference)
 		};
 
-		self.element = child_element;
+		self.element = duplicate_reference;
 
 		Some(Self::Item {
-			element,
+			element: child_element,
 			line_number: self.line_number,
 			true_line_number: self.true_line_number,
 			idx: Some(idx),

@@ -4,7 +4,7 @@ use std::borrow::Cow;
 use std::fmt::{Display, Formatter};
 use std::mem::{ManuallyDrop, MaybeUninit};
 use std::ops::Deref;
-use std::ptr::NonNull;
+use core::ptr::NonNull;
 use std::str::FromStr;
 
 use compact_str::{CompactString, ToCompactString};

@@ -458,7 +458,7 @@ impl Workbench {
 		Ok(())
 	}
 
-	#[deprecated = "refactor to UFCS only"]
+	#[deprecated = "refactor to UFCS only to split into smaller helper functions"]
 	fn process_action_wheel(&mut self) -> ActionResult {
 		use core::f64::consts::TAU;
 
@@ -481,7 +481,7 @@ impl Workbench {
 		ActionResult::Success(())
 	}
 
-	#[deprecated = "refactor to UFCS only"]
+	#[deprecated = "refactor to UFCS only to split into smaller helper functions"]
 	fn try_double_click_interaction(&mut self) -> ActionResult {
 		let shift = self.keyboard.shift();
 
@@ -507,7 +507,7 @@ impl Workbench {
 		}
 	}
 
-	#[deprecated = "refactor to UFCS only"]
+	#[deprecated = "refactor to UFCS only to split into smaller helper functions"]
 	fn try_steal(&mut self, can_initialize: bool) -> ActionResult {
 		if self.tabs.active_tab().held_entry.is_some() || self.tabs.active_tab().freehand_mode {
 			return ActionResult::Pass
@@ -527,7 +527,7 @@ impl Workbench {
 		ActionResult::Pass
 	}
 
-	#[deprecated = "refactor to UFCS only"]
+	#[deprecated = "refactor to UFCS only to split into smaller helper functions"]
 	fn steal(&mut self) -> ActionResult {
 		// todo, the fact that these indices aren't seemingly (to me) stored between like a queue might pose an issue in creating a correct workbench action history model -- correct, is still buggy :(
 
@@ -565,7 +565,7 @@ impl Workbench {
 		}
 	}
 
-	#[deprecated = "refactor to UFCS only"]
+	#[deprecated = "refactor to UFCS only to split into smaller helper functions"]
 	fn try_duplicate(&mut self) -> ActionResult {
 		if let InteractionInformation::Content {
 			is_in_left_margin: false,
@@ -589,7 +589,7 @@ impl Workbench {
 		}
 	}
 
-	#[deprecated = "refactor to UFCS only"]
+	#[deprecated = "refactor to UFCS only to split into smaller helper functions"]
 	fn try_copy(&mut self, debug: bool) -> ActionResult {
 		let InteractionInformation::Content { is_in_left_margin: false, key, value, .. } = get_interaction_information!(self) else {
 			return ActionResult::Pass
@@ -610,7 +610,7 @@ impl Workbench {
 		}
 	}
 
-	#[deprecated = "refactor to UFCS only"]
+	#[deprecated = "refactor to UFCS only to split into smaller helper functions"]
 	fn delete(&mut self, clipboard: bool) -> ActionResult {
 		if let InteractionInformation::Content {
 			is_in_left_margin: false, indices, key, value, ..
@@ -632,7 +632,7 @@ impl Workbench {
 		}
 	}
 
-	#[deprecated = "refactor to UFCS only"]
+	#[deprecated = "refactor to UFCS only to split into smaller helper functions"]
 	fn drop_held_entry(&mut self) -> ActionResult {
 		let tab = self.tabs.active_tab_mut();
 		let TabConstants { left_margin, scroll, horizontal_scroll } = tab.consts();
@@ -651,14 +651,13 @@ impl Workbench {
 			let AddElementResult { indices, old_kv } = add_element(&mut tab.root, kv, indices, mutable_indices!(tab)).alert_err(&mut self.alerts).failure_on_err()?;
 			expand_element_to_indices(&mut tab.root, &indices, &mut tab.bookmarks).alert_err(&mut self.alerts);
 			tab.history.append(WorkbenchAction::AddFromHeldEntry { indices, old_kv, indices_history });
-			ActionResult::Success(())
 		} else {
 			tab.history.append(WorkbenchAction::DiscardHeldEntry { held_entry: HeldEntry { kv, indices_history } });
-			ActionResult::Success(())
 		}
+		ActionResult::Success(())
 	}
 
-	#[deprecated = "refactor to UFCS only"]
+	#[deprecated = "refactor to UFCS only to split into smaller helper functions"]
 	fn hold_entry(&mut self, button: MouseButton) -> ActionResult {
 		if button == MouseButton::Left && self.mouse.coords.x >= 16 + 16 + 4 {
 			let tab = self.tabs.active_tab_mut();
@@ -784,7 +783,7 @@ impl Workbench {
 		}
 	}
 
-	#[deprecated = "refactor to UFCS only"]
+	#[deprecated = "refactor to UFCS only to split into smaller helper functions"]
 	fn try_root_style_change(&mut self) -> ActionResult {
 		let tab = self.tabs.active_tab_mut();
 		let TabConstants { left_margin, horizontal_scroll, scroll, .. } = tab.consts();
@@ -805,7 +804,7 @@ impl Workbench {
 		ActionResult::Success(())
 	}
 
-	#[deprecated = "refactor to UFCS only"]
+	#[deprecated = "refactor to UFCS only to split into smaller helper functions"]
 	fn toggle(&mut self, expand: bool, ignore_depth: bool) -> ActionResult {
 		if let InteractionInformation::Content {
 			is_in_left_margin: false,

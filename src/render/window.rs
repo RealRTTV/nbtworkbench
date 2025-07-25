@@ -144,7 +144,7 @@ pub async fn run() -> ! {
 	let state = State::new(&window, window_size).await;
 	*window_properties().deref_mut() = WindowProperties::new(Arc::clone(&window));
 	unsafe {
-		std::ptr::write(&raw mut WORKBENCH, Workbench::new(Some(window_size)).expect("Valid workbench construction"));
+		core::ptr::write(&raw mut WORKBENCH, Workbench::new(Some(window_size)).expect("Valid workbench construction"));
 	}
 	let mut handler = unsafe {
 		Handler {
