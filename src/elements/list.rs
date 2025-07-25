@@ -344,9 +344,9 @@ impl ComplexNbtElementVariant for NbtList {
 
 	fn get_mut(&mut self, idx: usize) -> Option<&mut Self::Entry> { self.elements.get_mut(idx) }
 
-	unsafe fn get_unchecked(&self, idx: usize) -> &Self::Entry { self.elements.get_unchecked(idx) }
+	unsafe fn get_unchecked(&self, idx: usize) -> &Self::Entry { unsafe { self.elements.get_unchecked(idx) } }
 
-	unsafe fn get_unchecked_mut(&mut self, idx: usize) -> &mut Self::Entry { self.elements.get_unchecked_mut(idx) }
+	unsafe fn get_unchecked_mut(&mut self, idx: usize) -> &mut Self::Entry { unsafe { self.elements.get_unchecked_mut(idx) } }
 
 	fn children(&self) -> Iter<'_, Self::Entry> { self.elements.iter() }
 

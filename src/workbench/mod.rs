@@ -174,7 +174,7 @@ impl Workbench {
 
 	pub fn new(window_dims: Option<PhysicalSize<u32>>) -> Result<Self, WorkbenchConstructionError> {
 		use crate::elements::result::into_result;
-		
+
 		let mut workbench = Self {
 			tabs: TabManager::without_tab(),
 			last_mouse_state: ElementState::Released,
@@ -1441,7 +1441,7 @@ impl Workbench {
 		if !self.debug_menu {
 			return
 		}
-		
+
 		let tab = self.tabs.active_tab();
 		let TabConstants { scroll, horizontal_scroll, left_margin, .. } = tab.consts();
 		let traversal_info = tab.root.traverse((self.mouse.coords.y + scroll).saturating_sub(HEADER_SIZE) / 16, Some((self.mouse.coords.x + horizontal_scroll).saturating_sub(left_margin) / 16))

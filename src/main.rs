@@ -1,4 +1,4 @@
-#![allow(semicolon_in_expressions_from_macros, internal_features, incomplete_features, unsafe_op_in_unsafe_fn)]
+#![allow(semicolon_in_expressions_from_macros, internal_features, incomplete_features)]
 #![deny(unused_must_use)]
 #![warn(clippy::pedantic)]
 #![feature(

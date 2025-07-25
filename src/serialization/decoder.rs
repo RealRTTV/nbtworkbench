@@ -77,15 +77,15 @@ impl<'a> Decoder<'a> for BigEndianDecoder<'a> {
 
 	#[allow(unused_mut)]
 	unsafe fn read_ne_bytes<const N: usize>(&mut self) -> [u8; N] {
-		let mut bytes = self.read_raw_bytes::<N>();
+		let mut bytes = unsafe { self.read_raw_bytes::<N>() };
 		#[cfg(target_endian = "little")]
 		bytes.reverse();
 		bytes
 	}
 
 	unsafe fn read_raw_bytes<const N: usize>(&mut self) -> [u8; N] {
-		let array = self.data.cast::<[u8; N]>().read();
-		self.data = self.data.add(N);
+		let array = unsafe { self.data.cast::<[u8; N]>().read() };
+		self.data = unsafe { self.data.add(N) };
 		array
 	}
 
@@ -120,11 +120,11 @@ impl<'a> Decoder<'a> for BigEndianDecoder<'a> {
 	unsafe fn string(&mut self) -> NbtParseResult<CompactString> {
 		use crate::elements::result::*;
 
-		let len = self.u16() as usize;
+		let len = unsafe { self.u16() } as usize;
 		self.assert_len(len)?;
 
-		let out = CompactString::from_utf8_lossy(core::slice::from_raw_parts(self.data, len));
-		self.data = self.data.add(len);
+		let out = CompactString::from_utf8_lossy(unsafe { core::slice::from_raw_parts(self.data, len) });
+		self.data = unsafe { self.data.add(len) };
 		ok(out)
 	}
 }
@@ -221,11 +221,11 @@ impl<'a> Decoder<'a> for LittleEndianDecoder<'a> {
 	unsafe fn string(&mut self) -> NbtParseResult<CompactString> {
 		use crate::elements::result::*;
 
-		let len = self.u16() as usize;
+		let len = unsafe { self.u16() } as usize;
 		self.assert_len(len)?;
 
-		let out = CompactString::from_utf8_lossy(core::slice::from_raw_parts(self.data, len));
-		self.data = self.data.add(len);
+		let out = CompactString::from_utf8_lossy(unsafe { core::slice::from_raw_parts(self.data, len) });
+		self.data = unsafe { self.data.add(len) };
 		ok(out)
 	}
 }

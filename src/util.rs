@@ -208,39 +208,41 @@ pub unsafe fn union_two_sorted_no_duplicates<T: Ord>(a: Vec<T>, b: Vec<T>) -> Ve
 	let mut out = unsafe { Vec::try_with_capacity(a_len + b_len).unwrap_unchecked() };
 
 	while a_ptr < a_end_ptr && b_ptr < b_end_ptr {
-		let a = &mut *a_ptr;
-		let b = &mut *b_ptr;
+		let a = unsafe { &mut *a_ptr };
+		let b = unsafe { &mut *b_ptr };
 
 		match Ord::cmp(a, b) {
 			Ordering::Less => {
-				out.push(a_ptr.cast::<MaybeUninit<T>>().replace(MaybeUninit::uninit()).assume_init());
-				a_ptr = a_ptr.add(1);
+				out.push(unsafe { a_ptr.cast::<MaybeUninit<T>>().replace(MaybeUninit::uninit()).assume_init() });
+				a_ptr = unsafe { a_ptr.add(1) };
 			}
 			Ordering::Equal => {
-				out.push(a_ptr.cast::<MaybeUninit<T>>().replace(MaybeUninit::uninit()).assume_init());
-				b_ptr.cast::<MaybeUninit<T>>().replace(MaybeUninit::uninit()).assume_init_drop();
-				a_ptr = a_ptr.add(1);
-				b_ptr = b_ptr.add(1);
+				out.push(unsafe { a_ptr.cast::<MaybeUninit<T>>().replace(MaybeUninit::uninit()).assume_init() });
+				unsafe { b_ptr.cast::<MaybeUninit<T>>().replace(MaybeUninit::uninit()).assume_init_drop() };
+				a_ptr = unsafe { a_ptr.add(1) };
+				b_ptr = unsafe { b_ptr.add(1) };
 			}
 			Ordering::Greater => {
-				out.push(b_ptr.cast::<MaybeUninit<T>>().replace(MaybeUninit::uninit()).assume_init());
-				b_ptr = b_ptr.add(1);
+				out.push(unsafe { b_ptr.cast::<MaybeUninit<T>>().replace(MaybeUninit::uninit()).assume_init() });
+				b_ptr = unsafe { b_ptr.add(1) };
 			}
 		}
 	}
 
 	if a_ptr < a_end_ptr {
-		let remaining = a_end_ptr.offset_from_unsigned(a_ptr);
-		out.as_mut_ptr().copy_from_nonoverlapping(a_ptr, remaining);
-		out.set_len(out.len() + remaining);
+		let remaining = unsafe { a_end_ptr.offset_from_unsigned(a_ptr) };
+		unsafe { out.as_mut_ptr().copy_from_nonoverlapping(a_ptr, remaining) };
+		unsafe  { out.set_len(out.len() + remaining) };
 	} else {
-		let remaining = b_end_ptr.offset_from_unsigned(b_ptr);
-		out.as_mut_ptr().copy_from_nonoverlapping(b_ptr, remaining);
-		out.set_len(out.len() + remaining);
+		let remaining = unsafe { b_end_ptr.offset_from_unsigned(b_ptr) };
+		unsafe { out.as_mut_ptr().copy_from_nonoverlapping(b_ptr, remaining) };
+		unsafe { out.set_len(out.len() + remaining) };
 	}
 
-	a_alloc.deallocate(a_root_ptr.cast::<u8>(), Layout::array::<T>(a_cap).unwrap_unchecked());
-	b_alloc.deallocate(b_root_ptr.cast::<u8>(), Layout::array::<T>(b_cap).unwrap_unchecked());
+	unsafe {
+		a_alloc.deallocate(a_root_ptr.cast::<u8>(), Layout::array::<T>(a_cap).unwrap_unchecked());
+		b_alloc.deallocate(b_root_ptr.cast::<u8>(), Layout::array::<T>(b_cap).unwrap_unchecked());
+	}
 
 	out
 }
@@ -251,38 +253,40 @@ pub unsafe fn union_two_sorted_no_duplicates<T: Ord>(a: Vec<T>, b: Vec<T>) -> Ve
 pub unsafe fn intersection_two_sorted_no_duplicates<T: Ord>(a: Vec<T>, b: Vec<T>) -> Vec<T> {
 	let (a_root_ptr, a_len, a_cap, a_alloc) = a.into_parts_with_alloc();
 	let mut a_ptr = a_root_ptr.as_ptr();
-	let a_end_ptr = a_ptr.add(a_len);
+	let a_end_ptr = unsafe { a_ptr.add(a_len) };
 
 	let (b_root_ptr, b_len, b_cap, b_alloc) = b.into_parts_with_alloc();
 	let mut b_ptr = b_root_ptr.as_ptr();
-	let b_end_ptr = b_ptr.add(b_len);
+	let b_end_ptr = unsafe { b_ptr.add(b_len) };
 
 	let mut out = Vec::with_capacity(a_len + b_len);
 
 	while a_ptr < a_end_ptr && b_ptr < b_end_ptr {
-		let a = &mut *a_ptr;
-		let b = &mut *b_ptr;
+		let a = unsafe { &mut *a_ptr };
+		let b = unsafe { &mut *b_ptr };
 
 		match Ord::cmp(a, b) {
 			Ordering::Less => {
-				a_ptr.cast::<MaybeUninit<T>>().replace(MaybeUninit::uninit()).assume_init_drop();
-				a_ptr = a_ptr.add(1);
+				unsafe { a_ptr.cast::<MaybeUninit<T>>().replace(MaybeUninit::uninit()).assume_init_drop() };
+				a_ptr = unsafe { a_ptr.add(1) };
 			}
 			Ordering::Equal => {
-				out.push(a_ptr.cast::<MaybeUninit<T>>().replace(MaybeUninit::uninit()).assume_init());
-				b_ptr.cast::<MaybeUninit<T>>().replace(MaybeUninit::uninit()).assume_init_drop();
-				a_ptr = a_ptr.add(1);
-				b_ptr = b_ptr.add(1);
+				out.push(unsafe { a_ptr.cast::<MaybeUninit<T>>().replace(MaybeUninit::uninit()).assume_init() });
+				unsafe { b_ptr.cast::<MaybeUninit<T>>().replace(MaybeUninit::uninit()).assume_init_drop() };
+				a_ptr = unsafe { a_ptr.add(1) };
+				b_ptr = unsafe { b_ptr.add(1) };
 			}
 			Ordering::Greater => {
-				b_ptr.cast::<MaybeUninit<T>>().replace(MaybeUninit::uninit()).assume_init_drop();
-				b_ptr = b_ptr.add(1);
+				unsafe { b_ptr.cast::<MaybeUninit<T>>().replace(MaybeUninit::uninit()).assume_init_drop() };
+				b_ptr = unsafe { b_ptr.add(1) };
 			}
 		}
 	}
 
-	a_alloc.deallocate(a_root_ptr.cast::<u8>(), Layout::array::<T>(a_cap).unwrap_unchecked());
-	b_alloc.deallocate(b_root_ptr.cast::<u8>(), Layout::array::<T>(b_cap).unwrap_unchecked());
+	unsafe {
+		a_alloc.deallocate(a_root_ptr.cast::<u8>(), Layout::array::<T>(a_cap).unwrap_unchecked());
+		b_alloc.deallocate(b_root_ptr.cast::<u8>(), Layout::array::<T>(b_cap).unwrap_unchecked());
+	}
 
 	out
 }
@@ -293,48 +297,53 @@ pub unsafe fn intersection_two_sorted_no_duplicates<T: Ord>(a: Vec<T>, b: Vec<T>
 pub unsafe fn symmetric_difference_two_sorted_no_duplicates<T: Ord>(a: Vec<T>, b: Vec<T>) -> Vec<T> {
 	let (a_root_ptr, a_len, a_cap, a_alloc) = a.into_parts_with_alloc();
 	let mut a_ptr = a_root_ptr.as_ptr();
-	let a_end_ptr = a_ptr.add(a_len);
+	let a_end_ptr = unsafe { a_ptr.add(a_len) };
 
 	let (b_root_ptr, b_len, b_cap, b_alloc) = b.into_parts_with_alloc();
 	let mut b_ptr = b_root_ptr.as_ptr();
-	let b_end_ptr = b_ptr.add(b_len);
+	let b_end_ptr = unsafe { b_ptr.add(b_len) };
 
 	let mut out = Vec::with_capacity(a_len + b_len);
 
 	while a_ptr < a_end_ptr && b_ptr < b_end_ptr {
-		let a = &mut *a_ptr;
-		let b = &mut *b_ptr;
+		let a = unsafe { &mut *a_ptr };
+		let b = unsafe { &mut *b_ptr };
 
 		match Ord::cmp(a, b) {
 			Ordering::Less => {
-				out.push(a_ptr.cast::<MaybeUninit<T>>().replace(MaybeUninit::uninit()).assume_init());
-				a_ptr = a_ptr.add(1);
+				out.push(unsafe { a_ptr.cast::<MaybeUninit<T>>().replace(MaybeUninit::uninit()).assume_init() });
+				a_ptr = unsafe { a_ptr.add(1) };
 			}
 			Ordering::Equal => {
-				a_ptr.cast::<MaybeUninit<T>>().replace(MaybeUninit::uninit()).assume_init_drop();
-				b_ptr.cast::<MaybeUninit<T>>().replace(MaybeUninit::uninit()).assume_init_drop();
-				a_ptr = a_ptr.add(1);
-				b_ptr = b_ptr.add(1);
+				unsafe {
+					a_ptr.cast::<MaybeUninit<T>>().replace(MaybeUninit::uninit()).assume_init_drop();
+					b_ptr.cast::<MaybeUninit<T>>().replace(MaybeUninit::uninit()).assume_init_drop();
+				}
+				unsafe {
+					a_ptr = a_ptr.add(1);
+					b_ptr = b_ptr.add(1);
+				}
 			}
 			Ordering::Greater => {
-				out.push(b_ptr.cast::<MaybeUninit<T>>().replace(MaybeUninit::uninit()).assume_init());
-				b_ptr = b_ptr.add(1);
+				out.push(unsafe { b_ptr.cast::<MaybeUninit<T>>().replace(MaybeUninit::uninit()).assume_init() });
+				b_ptr = unsafe { b_ptr.add(1) };
 			}
 		}
 	}
 
 	if a_ptr < a_end_ptr {
-		let remaining = a_end_ptr.offset_from_unsigned(a_ptr);
-		out.as_mut_ptr().copy_from_nonoverlapping(a_ptr, remaining);
-		out.set_len(out.len() + remaining);
+		let remaining = unsafe { a_end_ptr.offset_from_unsigned(a_ptr) };
+		unsafe { out.as_mut_ptr().copy_from_nonoverlapping(a_ptr, remaining) };
+		unsafe { out.set_len(out.len() + remaining) };
 	} else {
-		let remaining = b_end_ptr.offset_from_unsigned(b_ptr);
-		out.as_mut_ptr().copy_from_nonoverlapping(b_ptr, remaining);
-		out.set_len(out.len() + remaining);
+		let remaining = unsafe { b_end_ptr.offset_from_unsigned(b_ptr) };
+		unsafe { out.as_mut_ptr().copy_from_nonoverlapping(b_ptr, remaining) };
+		unsafe { out.set_len(out.len() + remaining) };
 	}
-
-	a_alloc.deallocate(a_root_ptr.cast::<u8>(), Layout::array::<T>(a_cap).unwrap_unchecked());
-	b_alloc.deallocate(b_root_ptr.cast::<u8>(), Layout::array::<T>(b_cap).unwrap_unchecked());
+	unsafe {
+		a_alloc.deallocate(a_root_ptr.cast::<u8>(), Layout::array::<T>(a_cap).unwrap_unchecked());
+		b_alloc.deallocate(b_root_ptr.cast::<u8>(), Layout::array::<T>(b_cap).unwrap_unchecked());
+	}
 
 	out
 }

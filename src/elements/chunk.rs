@@ -305,37 +305,37 @@ impl ComplexNbtElementVariant for NbtChunk {
 	}
 
 	unsafe fn toggle(&mut self) {
-		<NbtCompound as ComplexNbtElementVariant>::toggle(&mut self.inner)
+		unsafe { <NbtCompound as ComplexNbtElementVariant>::toggle(&mut self.inner) }
 	}
 
 	unsafe fn insert(&mut self, idx: usize, entry: Self::Entry) -> Result<Option<Self::Entry>, Self::Entry> {
-		<NbtCompound as ComplexNbtElementVariant>::insert(&mut self.inner, idx, entry)
+		unsafe { <NbtCompound as ComplexNbtElementVariant>::insert(&mut self.inner, idx, entry) }
 	}
 
 	unsafe fn remove(&mut self, idx: usize) -> Option<Self::Entry> {
-		<NbtCompound as ComplexNbtElementVariant>::remove(&mut self.inner, idx)
+		unsafe { <NbtCompound as ComplexNbtElementVariant>::remove(&mut self.inner, idx) }
 	}
 
 	unsafe fn replace(&mut self, idx: usize, entry: Self::Entry) -> Result<Option<Self::Entry>, Self::Entry> {
-		<NbtCompound as ComplexNbtElementVariant>::replace(&mut self.inner, idx, entry)
+		unsafe { <NbtCompound as ComplexNbtElementVariant>::replace(&mut self.inner, idx, entry) }
 	}
 
 	unsafe fn swap(&mut self, a: usize, b: usize) {
-		<NbtCompound as ComplexNbtElementVariant>::swap(&mut self.inner, a, b)
+		unsafe { <NbtCompound as ComplexNbtElementVariant>::swap(&mut self.inner, a, b) }
 	}
 
 	unsafe fn shut<'a, 'b>(&'b mut self, scope: &'a std::thread::Scope<'a, 'b>) {
-		<NbtCompound as ComplexNbtElementVariant>::shut(&mut self.inner, scope)
+		unsafe { <NbtCompound as ComplexNbtElementVariant>::shut(&mut self.inner, scope) }
 	}
 
 	unsafe fn expand<'a, 'b>(&'b mut self, scope: &'a std::thread::Scope<'a, 'b>) {
-		<NbtCompound as ComplexNbtElementVariant>::expand(&mut self.inner, scope)
+		unsafe { <NbtCompound as ComplexNbtElementVariant>::expand(&mut self.inner, scope) }
 	}
 
 	fn recache(&mut self) {
 		<NbtCompound as ComplexNbtElementVariant>::recache(&mut self.inner)
 	}
-
+	
 	fn on_style_change(&mut self, bookmarks: &mut MarkedLines) -> bool {
 		<NbtCompound as ComplexNbtElementVariant>::on_style_change(&mut self.inner, bookmarks)
 	}
@@ -349,11 +349,11 @@ impl ComplexNbtElementVariant for NbtChunk {
 	}
 
 	unsafe fn get_unchecked(&self, idx: usize) -> &Self::Entry {
-		<NbtCompound as ComplexNbtElementVariant>::get_unchecked(&self.inner, idx)
+		unsafe { <NbtCompound as ComplexNbtElementVariant>::get_unchecked(&self.inner, idx) }
 	}
 
 	unsafe fn get_unchecked_mut(&mut self, idx: usize) -> &mut Self::Entry {
-		<NbtCompound as ComplexNbtElementVariant>::get_unchecked_mut(&mut self.inner, idx)
+		unsafe { <NbtCompound as ComplexNbtElementVariant>::get_unchecked_mut(&mut self.inner, idx) }
 	}
 
 	fn children(&self) -> Iter<'_, Self::Entry> {

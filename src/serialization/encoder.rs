@@ -91,13 +91,13 @@ impl UncheckedBufWriter {
 		let malloc_size = (self.inner_len + Self::BUFFER_WIDTH - 1) & !(Self::BUFFER_WIDTH - 1);
 		let new_size = (self.inner_len + bytes.len() + self.buf_len + Self::BUFFER_WIDTH - 1) & !(Self::BUFFER_WIDTH - 1);
 		self.inner = if self.inner.is_null() {
-			alloc(Layout::array::<u8>(new_size).unwrap_unchecked())
+			unsafe { alloc(Layout::array::<u8>(new_size).unwrap_unchecked()) }
 		} else {
-			realloc(self.inner, Layout::array::<u8>(malloc_size).unwrap_unchecked(), new_size)
+			unsafe { realloc(self.inner, Layout::array::<u8>(malloc_size).unwrap_unchecked(), new_size) }
 		};
-		self.inner.add(self.inner_len).copy_from_nonoverlapping(self.buf.cast::<u8>(), self.buf_len);
+		unsafe { self.inner.add(self.inner_len).copy_from_nonoverlapping(self.buf.cast::<u8>(), self.buf_len) };
 		self.inner_len += self.buf_len;
-		self.inner.add(self.inner_len).copy_from_nonoverlapping(bytes.as_ptr(), bytes.len());
+		unsafe { self.inner.add(self.inner_len).copy_from_nonoverlapping(bytes.as_ptr(), bytes.len()) };
 		self.inner_len += bytes.len();
 		self.buf_len = 0;
 	}
@@ -108,13 +108,13 @@ impl UncheckedBufWriter {
 		let malloc_size = (self.inner_len + Self::BUFFER_WIDTH - 1) & !(Self::BUFFER_WIDTH - 1);
 		let new_size = (self.inner_len + count + self.buf_len + Self::BUFFER_WIDTH - 1) & !(Self::BUFFER_WIDTH - 1);
 		self.inner = if self.inner.is_null() {
-			alloc(Layout::array::<u8>(new_size).unwrap_unchecked())
+			unsafe { alloc(Layout::array::<u8>(new_size).unwrap_unchecked()) }
 		} else {
-			realloc(self.inner, Layout::array::<u8>(malloc_size).unwrap_unchecked(), new_size)
+			unsafe { realloc(self.inner, Layout::array::<u8>(malloc_size).unwrap_unchecked(), new_size) }
 		};
-		self.inner.add(self.inner_len).copy_from_nonoverlapping(self.buf.cast::<u8>(), self.buf_len);
+		unsafe { self.inner.add(self.inner_len).copy_from_nonoverlapping(self.buf.cast::<u8>(), self.buf_len) };
 		self.inner_len += self.buf_len;
-		self.inner.add(self.inner_len).write_bytes(byte, count);
+		unsafe { self.inner.add(self.inner_len).write_bytes(byte, count) };
 		self.inner_len += count;
 		self.buf_len = 0;
 	}
