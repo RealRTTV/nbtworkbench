@@ -247,7 +247,8 @@ impl NbtElementVariant for NbtRegion {
 
 		if self.is_open() {
 			if self.is_grid_layout() {
-				let initial_x_offset = ctx.pos.x;
+				ctx.pos += (16, 0);
+				let initial_x = ctx.pos.x;
 				for z in 0..32 {
 					if ctx.pos.y > builder.window_height() {
 						break;
@@ -289,9 +290,9 @@ impl NbtElementVariant for NbtRegion {
 
 						ctx.pos += (16, 0);
 					}
-
+					
+					ctx.pos.x = initial_x;
 					ctx.pos += (0, 16);
-					ctx.pos = (initial_x_offset, ctx.pos.y).into();
 				}
 			} else {
 				ctx.render_complex_body::<Self>(
