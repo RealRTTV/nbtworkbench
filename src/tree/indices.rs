@@ -102,7 +102,7 @@ impl Indices {
 
 	#[must_use]
 	pub fn encompasses(&self, inner: &Self) -> bool { util::encompasses(&self.0, &inner.0) }
-	
+
 	#[must_use]
 	pub fn is_parent_for(&self, child: &Self) -> bool { util::is_parent_for(&self.0, &child.0) }
 

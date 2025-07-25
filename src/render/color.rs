@@ -55,16 +55,12 @@ impl TextColor {
 			Self::Custom(value) => value & 0xFFFFFF,
 		}
 	}
-	
-	#[must_use]
-	pub fn is_non_editable(self) -> bool {
-		matches!(self, Self::TreeValueDesc)
-	}
 
 	#[must_use]
-	pub fn is_editable(self) -> bool {
-		!self.is_non_editable()
-	}
+	pub fn is_non_editable(self) -> bool { matches!(self, Self::TreeValueDesc) }
+
+	#[must_use]
+	pub fn is_editable(self) -> bool { !self.is_non_editable() }
 }
 
 impl Into<u32> for TextColor {

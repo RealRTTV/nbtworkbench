@@ -565,7 +565,7 @@ impl<'window> State<'window> {
 			self.last_tick = Timestamp::now();
 			workbench.tick();
 		}
-		
+
 		if self.previous_theme != get_theme() {
 			self.queue.write_texture(
 				TexelCopyTextureInfo {
@@ -760,15 +760,17 @@ impl<'window> State<'window> {
 }
 
 pub enum WindowProperties {
-	Real {
-		window: Arc<Window>,
-		ignore_event_end: Timestamp,
-	},
+	Real { window: Arc<Window>, ignore_event_end: Timestamp },
 	Fake,
 }
 
 impl WindowProperties {
-	pub const fn new(window: Arc<Window>) -> Self { Self::Real { window, ignore_event_end: Timestamp::UNIX_EPOCH } }
+	pub const fn new(window: Arc<Window>) -> Self {
+		Self::Real {
+			window,
+			ignore_event_end: Timestamp::UNIX_EPOCH,
+		}
+	}
 
 	pub fn set_window_title(&self, title: &str) {
 		if let Self::Real { window, .. } = self {
@@ -779,19 +781,13 @@ impl WindowProperties {
 			}
 		}
 	}
-	
-	pub fn ignore_events_for(&mut self, duration: Duration)  {
+
+	pub fn ignore_events_for(&mut self, duration: Duration) {
 		if let Self::Real { ignore_event_end, .. } = self {
 			*ignore_event_end = Timestamp::now() + duration;
 		}
 	}
-	
+
 	#[must_use]
-	pub fn should_ignore_events(&self) -> bool {
-		if let Self::Real { ignore_event_end, .. } = self {
-			Timestamp::now() < *ignore_event_end
-		} else  {
-			false
-		}
-	}
+	pub fn should_ignore_events(&self) -> bool { if let Self::Real { ignore_event_end, .. } = self { Timestamp::now() < *ignore_event_end } else { false } }
 }

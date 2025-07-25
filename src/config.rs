@@ -5,6 +5,7 @@ use fxhash::FxHashMap;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
+
 use crate::error;
 use crate::render::widget::replace_box::ReplaceBy;
 use crate::render::widget::search_box::{SearchFlags, SearchMode, SearchOperation};
@@ -58,28 +59,24 @@ pub fn read() -> bool {
 	let toml_config = config_dir.join("nbtworkbench/config.toml");
 
 	match try_read_string(&toml_config) {
-		Ok(str) => {
-			match try_parse_toml(&str) {
-				Ok(config) => {
-					*CONFIG.write() = config;
-					return true;
-				}
-				Err(e) => error!("Error parsing config.toml: {e}"),
+		Ok(str) => match try_parse_toml(&str) {
+			Ok(config) => {
+				*CONFIG.write() = config;
+				return true;
 			}
-		}
+			Err(e) => error!("Error parsing config.toml: {e}"),
+		},
 		Err(e) => error!("Error reading TOML config file: {e}"),
 	}
 
 	match try_read_string(&txt_config) {
-		Ok(str) => {
-			match try_parse_txt(&str) {
-				Ok(config) => {
-					*CONFIG.write() = config;
-					return true
-				},
-				Err(e) => error!("Error parsing TXT config file: {e}"),
+		Ok(str) => match try_parse_txt(&str) {
+			Ok(config) => {
+				*CONFIG.write() = config;
+				return true
 			}
-		}
+			Err(e) => error!("Error parsing TXT config file: {e}"),
+		},
 		Err(e) => error!("Error reading TXT config file: {e}"),
 	}
 
@@ -123,9 +120,7 @@ enum StringFromFileError {
 	Utf8(#[from] std::string::FromUtf8Error),
 }
 
-fn try_parse_toml(str: &str) -> Result<Config, toml::de::Error> {
-	toml::from_str(str)
-}
+fn try_parse_toml(str: &str) -> Result<Config, toml::de::Error> { toml::from_str(str) }
 
 fn try_parse_txt(str: &str) -> Result<Config, TxtParseError> {
 	let map = str.lines().filter_map(|line| line.split_once('=')).map(|(a, b)| (a.to_owned(), b.to_owned())).collect::<FxHashMap<String, String>>();

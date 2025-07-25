@@ -17,8 +17,8 @@ pub use primitive::*;
 
 use crate::elements::element::NbtElement;
 use crate::elements::result::NbtParseResult;
-use crate::render::color::TextColor;
 use crate::render::TreeRenderContext;
+use crate::render::color::TextColor;
 use crate::render::vertex_buffer_builder::VertexBufferBuilder;
 use crate::serialization::decoder::Decoder;
 use crate::serialization::encoder::UncheckedBufWriter;

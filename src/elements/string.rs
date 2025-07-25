@@ -6,6 +6,7 @@ use std::mem::{ManuallyDrop, MaybeUninit};
 use std::ops::Deref;
 use std::ptr::NonNull;
 use std::str::FromStr;
+
 use compact_str::{CompactString, ToCompactString};
 
 use crate::elements::result::NbtParseResult;
@@ -104,9 +105,7 @@ impl Default for TwentyThree {
 impl FromStr for TwentyThree {
 	type Err = !;
 
-	fn from_str(s: &str) -> Result<Self, Self::Err> {
-		Ok(Self::new(s.to_compact_string()))
-	}
+	fn from_str(s: &str) -> Result<Self, Self::Err> { Ok(Self::new(s.to_compact_string())) }
 }
 
 impl Clone for TwentyThree {

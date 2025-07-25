@@ -9,16 +9,21 @@ pub mod window;
 use std::borrow::Cow;
 use std::error::Error;
 use std::ops::Range;
+
 use winit::dpi::PhysicalSize;
+
+use crate::elements::compound::CompoundEntry;
 use crate::elements::element::NbtElement;
 use crate::elements::{ComplexNbtElementVariant, NbtElementVariant};
-use crate::elements::compound::CompoundEntry;
-use crate::render::assets::{BASE_TEXT_Z, BASE_Z, BOOKMARK_UV, BOOKMARK_Z, CONNECTION_UV, END_LINE_NUMBER_SEPARATOR_UV, HEADER_SIZE, HIDDEN_BOOKMARK_UV, INSERTION_CHUNK_UV, INSERTION_UV, INVALID_STRIPE_UV, JUST_OVERLAPPING_BASE_TEXT_Z, LINE_NUMBER_SEPARATOR_UV, LINE_NUMBER_Z, SCROLLBAR_BOOKMARK_Z, SELECTED_TOGGLE_OFF_UV, SELECTED_TOGGLE_ON_UV, TEXT_UNDERLINE_UV, TEXT_UNDERLINE_Z, TOGGLE_Z, UNSELECTED_TOGGLE_OFF_UV, UNSELECTED_TOGGLE_ON_UV};
+use crate::render::assets::{
+	BASE_TEXT_Z, BASE_Z, BOOKMARK_UV, BOOKMARK_Z, CONNECTION_UV, END_LINE_NUMBER_SEPARATOR_UV, HEADER_SIZE, HIDDEN_BOOKMARK_UV, INSERTION_CHUNK_UV, INSERTION_UV, INVALID_STRIPE_UV, JUST_OVERLAPPING_BASE_TEXT_Z, LINE_NUMBER_SEPARATOR_UV,
+	LINE_NUMBER_Z, SCROLLBAR_BOOKMARK_Z, SELECTED_TOGGLE_OFF_UV, SELECTED_TOGGLE_ON_UV, TEXT_UNDERLINE_UV, TEXT_UNDERLINE_Z, TOGGLE_Z, UNSELECTED_TOGGLE_OFF_UV, UNSELECTED_TOGGLE_ON_UV,
+};
 use crate::render::color::TextColor;
 use crate::render::vertex_buffer_builder::VertexBufferBuilder;
 use crate::render::widget::selected_text::{SelectedText, SelectedTextKeyValueError};
 use crate::tree::indices::OwnedIndices;
-use crate::util::{StrExt, Vec2u, AABB};
+use crate::util::{AABB, StrExt, Vec2u};
 use crate::workbench::marked_line::MarkedLineSlice;
 
 pub struct TreeRenderContext<'w> {
@@ -42,7 +47,7 @@ pub struct TreeRenderContext<'w> {
 impl<'w> TreeRenderContext<'w> {
 	#[must_use]
 	#[allow(clippy::type_complexity)] // forbidden is fine to be like that, c'mon
-	pub fn new(ghost: Option<(&'w NbtElement, Vec2u)>, left_margin: usize, mouse: Vec2u, freehand: bool, total_scroll_px: usize, selected_texts: impl IntoIterator<Item=&'w SelectedText>) -> Self {
+	pub fn new(ghost: Option<(&'w NbtElement, Vec2u)>, left_margin: usize, mouse: Vec2u, freehand: bool, total_scroll_px: usize, selected_texts: impl IntoIterator<Item = &'w SelectedText>) -> Self {
 		let selected_texts = selected_texts.into_iter().collect::<Vec<_>>();
 		Self {
 			ghost,
@@ -77,17 +82,11 @@ impl<'w> TreeRenderContext<'w> {
 		}
 	}
 
-	pub fn push_index(&mut self) {
-		self.indices.push(0);
-	}
+	pub fn push_index(&mut self) { self.indices.push(0); }
 
-	pub fn pop_index(&mut self) {
-		self.indices.pop();
-	}
+	pub fn pop_index(&mut self) { self.indices.pop(); }
 
-	pub fn take_child_selected_texts(&mut self) -> Vec<&'w SelectedText> {
-		self.selected_texts_for_errors.extract_if(.., |text| self.indices.is_parent_for(&text.indices)).collect()
-	}
+	pub fn take_child_selected_texts(&mut self) -> Vec<&'w SelectedText> { self.selected_texts_for_errors.extract_if(.., |text| self.indices.is_parent_for(&text.indices)).collect() }
 
 	pub fn mark_line_with_error(&mut self, line_y: usize, error_underline_span: Range<usize>, error: impl Error, builder: &mut VertexBufferBuilder) {
 		self.red_line_numbers_y.push(line_y);
@@ -111,7 +110,9 @@ impl<'w> TreeRenderContext<'w> {
 					self.mark_line_with_error(pos.y, start..start + width, SelectedTextKeyValueError::DuplicateKey, builder);
 				}
 
-				if let Some(text_key_span) = text.key_span(left_margin) && let Some(selected_text_y) = text.y.checked_sub(scroll).filter(|&x| HEADER_SIZE <= x && x < builder.window_height()) {
+				if let Some(text_key_span) = text.key_span(left_margin)
+					&& let Some(selected_text_y) = text.y.checked_sub(scroll).filter(|&x| HEADER_SIZE <= x && x < builder.window_height())
+				{
 					self.mark_line_with_error(selected_text_y, text_key_span, SelectedTextKeyValueError::DuplicateKey, builder);
 				}
 			}
@@ -122,7 +123,11 @@ impl<'w> TreeRenderContext<'w> {
 		let pos = self.pos;
 		let left_margin = self.left_margin();
 		let selected_text = self.selected_texts.iter().find(|text| text.indices == self.indices);
-		if let Some(text) = selected_text && text.is_editing_key() && let Some(key_span) = text.key_span(left_margin) && !is_valid(&text.value) {
+		if let Some(text) = selected_text
+			&& text.is_editing_key()
+			&& let Some(key_span) = text.key_span(left_margin)
+			&& !is_valid(&text.value)
+		{
 			self.mark_line_with_error(pos.y, key_span, SelectedTextKeyValueError::InvalidKey, builder);
 		}
 	}
@@ -131,15 +136,17 @@ impl<'w> TreeRenderContext<'w> {
 		let pos = self.pos;
 		let left_margin = self.left_margin();
 		let selected_text = self.selected_texts.iter().find(|text| text.indices == self.indices);
-		if let Some(text) = selected_text && text.is_editing_value() && let Some(value_span) = text.value_span(left_margin) && !is_valid(&text.value) {
+		if let Some(text) = selected_text
+			&& text.is_editing_value()
+			&& let Some(value_span) = text.value_span(left_margin)
+			&& !is_valid(&text.value)
+		{
 			self.mark_line_with_error(pos.y, value_span, SelectedTextKeyValueError::InvalidValue, builder);
 		}
 	}
 
 	#[must_use]
-	pub fn can_render_text(&self) -> bool {
-		!self.selected_texts.iter().any(|text| text.indices == self.indices)
-	}
+	pub fn can_render_text(&self) -> bool { !self.selected_texts.iter().any(|text| text.indices == self.indices) }
 
 	pub fn try_render_text<Nbt: NbtElementVariant>(&self, key: Option<&str>, value: Cow<'_, str>, builder: &mut VertexBufferBuilder) {
 		use core::fmt::Write;
@@ -184,13 +191,7 @@ impl<'w> TreeRenderContext<'w> {
 		builder.draw_texture_z(Vec2u::from(pos) + (3, 5), TOGGLE_Z, uv, (8, 8));
 	}
 
-	pub fn render_complex_head<Nbt: ComplexNbtElementVariant>(
-		&mut self,
-		element: &Nbt,
-		builder: &mut VertexBufferBuilder,
-		key: Option<&str>,
-		mut draw_held_entry: impl FnMut(&Self, Vec2u, &mut VertexBufferBuilder, AABB, &Nbt) -> bool
-	) {
+	pub fn render_complex_head<Nbt: ComplexNbtElementVariant>(&mut self, element: &Nbt, builder: &mut VertexBufferBuilder, key: Option<&str>, mut draw_held_entry: impl FnMut(&Self, Vec2u, &mut VertexBufferBuilder, AABB, &Nbt) -> bool) {
 		if self.remaining_scroll > 0 {
 			self.remaining_scroll -= 1;
 			self.skip_line_numbers(1);
@@ -211,13 +212,13 @@ impl<'w> TreeRenderContext<'w> {
 		self.pos += (0, 16);
 	}
 
-	pub fn render_complex_body_kv<Nbt: ComplexNbtElementVariant<Entry=CompoundEntry>>(
+	pub fn render_complex_body_kv<Nbt: ComplexNbtElementVariant<Entry = CompoundEntry>>(
 		&mut self,
 		element: &Nbt,
 		builder: &mut VertexBufferBuilder,
 		tail: bool,
 		mut pre_render_draw_held_entry: impl FnMut(&Self, Vec2u, &mut VertexBufferBuilder, AABB, &Nbt) -> bool,
-		mut post_render_draw_held_entry: impl FnMut(&Self, Vec2u, &mut VertexBufferBuilder, AABB, &Nbt) -> bool
+		mut post_render_draw_held_entry: impl FnMut(&Self, Vec2u, &mut VertexBufferBuilder, AABB, &Nbt) -> bool,
 	) {
 		if element.is_open() {
 			let pos_before = self.pos;
@@ -267,15 +268,14 @@ impl<'w> TreeRenderContext<'w> {
 		}
 	}
 
-	pub fn render_complex_body<Nbt: ComplexNbtElementVariant<Entry=NbtElement>>(
+	pub fn render_complex_body<Nbt: ComplexNbtElementVariant<Entry = NbtElement>>(
 		&mut self,
 		element: &Nbt,
 		builder: &mut VertexBufferBuilder,
 		tail: bool,
 		mut pre_render_draw_held_entry: impl FnMut(&Self, Vec2u, &mut VertexBufferBuilder, AABB, &Nbt) -> bool,
-		mut post_render_draw_held_entry: impl FnMut(&Self, Vec2u, &mut VertexBufferBuilder, AABB, &Nbt) -> bool
+		mut post_render_draw_held_entry: impl FnMut(&Self, Vec2u, &mut VertexBufferBuilder, AABB, &Nbt) -> bool,
 	) {
-
 		if element.is_open() {
 			let pos_before = self.pos;
 			self.pos += (16, 0);

@@ -31,9 +31,9 @@ macro_rules! primitive {
 				const UV: $crate::util::Vec2u = $uv;
 
 				const GHOST_UV: $crate::util::Vec2u = $ghost_uv;
-				
+
 				const VALUE_COLOR: $crate::render::color::TextColor = $crate::render::color::TextColor::TreePrimitive;
-				
+
 				const SEPERATOR_COLOR: $crate::render::color::TextColor = $crate::render::color::TextColor::TreeKey;
 
 				fn from_str0(s: &str) -> Result<(&str, Self), usize>

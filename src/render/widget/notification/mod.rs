@@ -112,9 +112,7 @@ impl Notification {
 	}
 
 	#[must_use]
-	fn elapsed(&self) -> Duration {
-		self.time_elapsed_override.unwrap_or(self.timestamp.elapsed())
-	}
+	fn elapsed(&self) -> Duration { self.time_elapsed_override.unwrap_or(self.timestamp.elapsed()) }
 
 	#[must_use]
 	pub fn height(&self) -> usize { 6 + self.lines.len() * 16 }
@@ -131,12 +129,7 @@ impl Notification {
 }
 
 impl Widget for Notification {
-	fn alignment(&self) -> WidgetAlignment {
-		WidgetAlignment::new(
-			HorizontalWidgetAlignmentPreference::Right,
-			VerticalWidgetAlignmentPreference::Top,
-		)
-	}
+	fn alignment(&self) -> WidgetAlignment { WidgetAlignment::new(HorizontalWidgetAlignmentPreference::Right, VerticalWidgetAlignmentPreference::Top) }
 	fn dimensions(&self, _containment_dims: PhysicalSize<u32>) -> PhysicalSize<u32> { PhysicalSize::new(self.width as _, self.height() as _) }
 	fn is_currently_hovering(&self) -> bool { self.time_elapsed_override.is_some() }
 

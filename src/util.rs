@@ -3,9 +3,9 @@ use std::alloc::{Allocator, Layout};
 use std::cmp::Ordering;
 use std::fmt::{Debug, Formatter};
 use std::hint::likely;
-use std::{io, iter};
 use std::mem::MaybeUninit;
 use std::ops::{Add, AddAssign, Div, DivAssign, Mul, MulAssign, Sub, SubAssign};
+use std::{io, iter};
 
 use compact_str::{CompactString, ToCompactString};
 use regex::{Regex, RegexBuilder};
@@ -232,7 +232,7 @@ pub unsafe fn union_two_sorted_no_duplicates<T: Ord>(a: Vec<T>, b: Vec<T>) -> Ve
 	if a_ptr < a_end_ptr {
 		let remaining = unsafe { a_end_ptr.offset_from_unsigned(a_ptr) };
 		unsafe { out.as_mut_ptr().copy_from_nonoverlapping(a_ptr, remaining) };
-		unsafe  { out.set_len(out.len() + remaining) };
+		unsafe { out.set_len(out.len() + remaining) };
 	} else {
 		let remaining = unsafe { b_end_ptr.offset_from_unsigned(b_ptr) };
 		unsafe { out.as_mut_ptr().copy_from_nonoverlapping(b_ptr, remaining) };
@@ -940,13 +940,7 @@ impl Vec2u {
 	pub fn angle(self) -> f64 { f64::atan2(self.y as f64, self.x as f64) }
 
 	#[must_use]
-	pub fn relative_to(self, aabb: AABB) -> Option<Self> {
-		if aabb.contains(self) {
-			Some(self - aabb.low())
-		} else {
-			None
-		}
-	}
+	pub fn relative_to(self, aabb: AABB) -> Option<Self> { if aabb.contains(self) { Some(self - aabb.low()) } else { None } }
 }
 
 impl<T: Into<(usize, usize)> + Clone> PartialEq<T> for Vec2u {
@@ -1233,7 +1227,7 @@ impl AABB {
 
 	#[must_use]
 	pub fn height(self) -> usize { self.high.y - self.low.y }
-	
+
 	#[must_use]
 	pub fn dims(self) -> PhysicalSize<u32> { PhysicalSize::new(self.width() as _, self.height() as _) }
 }

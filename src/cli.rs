@@ -5,14 +5,15 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use glob::glob;
 use winit::dpi::PhysicalSize;
+
 use crate::elements::element::NbtElement;
 use crate::history::WorkbenchAction;
 use crate::render::widget::replace_box::{ReplaceBox, SearchReplacement};
 use crate::render::widget::search_box::{SearchBox, SearchFlags, SearchMode, SearchPredicate, SearchPredicateInner};
+use crate::render::window::{WINDOW_HEIGHT, WINDOW_WIDTH};
 use crate::util::create_regex;
 use crate::workbench::tab::{NbtFileFormat, Tab};
 use crate::{config, error, log, mutable_indices};
-use crate::render::window::{WINDOW_HEIGHT, WINDOW_WIDTH};
 
 struct SearchResult {
 	path: PathBuf,
@@ -214,7 +215,7 @@ pub fn find() -> ! {
 						return None;
 					}
 				};
-				
+
 				let bookmarks = SearchBox::search0(&tab.root, &predicate);
 
 				increment_progress_bar(&completed, len, total_size, "Searching");

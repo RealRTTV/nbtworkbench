@@ -1,9 +1,10 @@
 use winit::dpi::PhysicalSize;
 use winit::event::MouseButton;
+
 use crate::action_result::ActionResult;
 use crate::render::vertex_buffer_builder::VertexBufferBuilder;
 use crate::render::widget::{Widget, WidgetAlignment, WidgetContext, WidgetContextMut};
-use crate::util::{Vec2u, AABB};
+use crate::util::{AABB, Vec2u};
 use crate::workbench::mouse::MouseManager;
 
 pub struct VerticalList<'a> {
@@ -44,7 +45,9 @@ impl<'a> Widget for VerticalList<'a> {
 	fn is_valid_mouse_button(&self, button: MouseButton, pos: Vec2u, dims: PhysicalSize<u32>) -> bool {
 		let mut y = 0;
 		for (aabb, widget) in self.widgets.iter().map(|w| (aabb_of(&**w, &mut y, dims), w)) {
-			if let Some(pos) = pos.relative_to(aabb) && widget.is_valid_mouse_button(button, pos, aabb.dims()) {
+			if let Some(pos) = pos.relative_to(aabb)
+				&& widget.is_valid_mouse_button(button, pos, aabb.dims())
+			{
 				return true;
 			}
 		}
@@ -71,9 +74,7 @@ impl<'a> Widget for VerticalList<'a> {
 		ActionResult::Pass
 	}
 
-	fn is_currently_hovering(&self) -> bool {
-		self.widgets.iter().any(|w| w.is_currently_hovering())
-	}
+	fn is_currently_hovering(&self) -> bool { self.widgets.iter().any(|w| w.is_currently_hovering()) }
 
 	fn on_hovering(&mut self, pos: Vec2u, dims: PhysicalSize<u32>, ctx: &mut WidgetContextMut) {
 		let mut y = 0;
@@ -92,10 +93,8 @@ impl<'a> Widget for VerticalList<'a> {
 		}
 	}
 
-	fn is_visible(&self, ctx: &WidgetContext) -> bool {
-		self.widgets.iter().any(|w| w.is_visible(ctx))
-	}
-	
+	fn is_visible(&self, ctx: &WidgetContext) -> bool { self.widgets.iter().any(|w| w.is_visible(ctx)) }
+
 	fn render_at(&self, pos: Vec2u, list_dims: PhysicalSize<u32>, builder: &mut VertexBufferBuilder, mouse: &MouseManager, ctx: &WidgetContext) {
 		let mut y = 0;
 		for (aabb, widget) in self.widgets.iter().map(|w| (aabb_of(&**w, &mut y, list_dims), w)) {

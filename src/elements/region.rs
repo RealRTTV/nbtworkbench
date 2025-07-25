@@ -5,7 +5,9 @@ use std::hint::likely;
 use std::mem::MaybeUninit;
 use std::slice::{Iter, IterMut};
 #[cfg(not(target_arch = "wasm32"))] use std::thread::{Scope, scope};
+
 use winit::dpi::PhysicalSize;
+
 use crate::elements::chunk::NbtChunk;
 use crate::elements::result::NbtParseResult;
 use crate::elements::{ComplexNbtElementVariant, Matches, NbtElement, NbtElementVariant};
@@ -16,7 +18,7 @@ use crate::render::vertex_buffer_builder::VertexBufferBuilder;
 use crate::serialization::decoder::Decoder;
 use crate::serialization::encoder::UncheckedBufWriter;
 use crate::serialization::formatter::{PrettyDisplay, PrettyFormatter};
-use crate::util::{Vec2u, AABB};
+use crate::util::{AABB, Vec2u};
 #[cfg(target_arch = "wasm32")]
 use crate::wasm::{FakeScope as Scope, fake_scope as scope};
 use crate::workbench::marked_line::MarkedLines;
@@ -284,15 +286,21 @@ impl NbtElementVariant for NbtRegion {
 
 						let pos = ctx.pos;
 						ctx.draw_held_entry_grid_chunk(pos, builder, AABB::from_pos_and_dims(pos, PhysicalSize::new(16, 16)), self);
-						
+
 						ctx.pos += (16, 0);
 					}
-					
+
 					ctx.pos += (0, 16);
 					ctx.pos = (initial_x_offset, ctx.pos.y).into();
 				}
 			} else {
-				ctx.render_complex_body::<Self>(self, builder, tail, |ctx, pos, builder, aabb, region| TreeRenderContext::draw_held_entry_chunk(ctx, pos, builder, AABB::from_pos_and_dims(aabb.low(), PhysicalSize::new(16, 16)), region), |_, _, _, _, _| false);
+				ctx.render_complex_body::<Self>(
+					self,
+					builder,
+					tail,
+					|ctx, pos, builder, aabb, region| TreeRenderContext::draw_held_entry_chunk(ctx, pos, builder, AABB::from_pos_and_dims(aabb.low(), PhysicalSize::new(16, 16)), region),
+					|_, _, _, _, _| false,
+				);
 			}
 		}
 	}

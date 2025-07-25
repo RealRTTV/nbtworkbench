@@ -1,8 +1,8 @@
 use thiserror::Error;
 
 use crate::elements::element::NbtElement;
-use crate::tree::indices::Indices;
 use crate::tree::MutableIndices;
+use crate::tree::indices::Indices;
 use crate::tree::navigate::{NavigationError, NavigationInformationMut};
 use crate::workbench::marked_line::MarkedLines;
 

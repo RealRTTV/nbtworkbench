@@ -8,6 +8,7 @@ use std::str::Utf8Error;
 
 use compact_str::CompactString;
 use thiserror::Error;
+
 use crate::elements::array::{NbtByteArray, NbtIntArray, NbtLongArray};
 use crate::elements::byte::NbtByte;
 use crate::elements::chunk::NbtChunk;
@@ -987,11 +988,11 @@ impl NbtElement {
 			Nbt::Region(x) => (x.value(), NbtRegion::VALUE_COLOR),
 		}
 	}
-	
+
 	#[must_use]
 	pub fn seperator_color(&self) -> TextColor {
 		use NbtPattern as Nbt;
-		
+
 		match self.as_pattern() {
 			Nbt::Byte(_) => TextColor::TreeKey,
 			Nbt::Short(_) => TextColor::TreeKey,

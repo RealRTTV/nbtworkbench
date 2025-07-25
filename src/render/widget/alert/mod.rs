@@ -4,15 +4,16 @@ use std::time::Duration;
 
 use winit::dpi::PhysicalSize;
 use winit::event::MouseButton;
+
+use crate::action_result::ActionResult;
 use crate::render::assets::{ALERT_UV, NOTIFICATION_BAR_BACKDROP_UV, NOTIFICATION_BAR_UV, NOTIFICATION_TEXT_Z, NOTIFICATION_Z};
 use crate::render::color::TextColor;
 use crate::render::vertex_buffer_builder::VertexBufferBuilder;
+use crate::render::widget::notification::{Notification, NotificationKind};
 use crate::render::widget::{HorizontalWidgetAlignmentPreference, VerticalWidgetAlignmentPreference, Widget, WidgetAlignment, WidgetContext, WidgetContextMut};
-use crate::util::{StrExt, Timestamp, Vec2u, smoothstep, split_lines, set_clipboard};
+use crate::util::{StrExt, Timestamp, Vec2u, set_clipboard, smoothstep, split_lines};
 use crate::workbench::mouse::MouseManager;
 use crate::{error, log};
-use crate::action_result::ActionResult;
-use crate::render::widget::notification::{Notification, NotificationKind};
 
 pub mod manager;
 
@@ -77,9 +78,7 @@ impl Alert {
 	}
 
 	#[must_use]
-	fn elapsed(&self) -> Duration {
-		self.time_elapsed_override.unwrap_or(self.timestamp.elapsed())
-	}
+	fn elapsed(&self) -> Duration { self.time_elapsed_override.unwrap_or(self.timestamp.elapsed()) }
 
 	fn height(&self) -> usize { 30 + self.lines.len() * 16 }
 
@@ -98,22 +97,17 @@ impl Alert {
 }
 
 impl Widget for Alert {
-	fn alignment(&self) -> WidgetAlignment {
-		WidgetAlignment::new(
-			HorizontalWidgetAlignmentPreference::Right,
-			VerticalWidgetAlignmentPreference::Top,
-		)
-	}
-	
+	fn alignment(&self) -> WidgetAlignment { WidgetAlignment::new(HorizontalWidgetAlignmentPreference::Right, VerticalWidgetAlignmentPreference::Top) }
+
 	fn dimensions(&self, _containment_dims: PhysicalSize<u32>) -> PhysicalSize<u32> { PhysicalSize::new(self.width as _, self.height() as _) }
 
-	fn is_valid_mouse_button(&self, button: MouseButton, _pos: Vec2u, _dims: PhysicalSize<u32>) -> bool {
-		matches!(button, MouseButton::Left | MouseButton::Middle | MouseButton::Right)
-	}
+	fn is_valid_mouse_button(&self, button: MouseButton, _pos: Vec2u, _dims: PhysicalSize<u32>) -> bool { matches!(button, MouseButton::Left | MouseButton::Middle | MouseButton::Right) }
 
 	fn on_mouse_down(&mut self, button: MouseButton, pos: Vec2u, dims: PhysicalSize<u32>, ctx: &mut WidgetContextMut) -> ActionResult {
-		if !self.is_actually_within_bounds(pos, dims) { return ActionResult::Pass }
-		
+		if !self.is_actually_within_bounds(pos, dims) {
+			return ActionResult::Pass
+		}
+
 		if let MouseButton::Left | MouseButton::Middle = button {
 			self.timestamp = Timestamp::UNIX_EPOCH;
 			self.time_elapsed_override = None;
@@ -128,9 +122,12 @@ impl Widget for Alert {
 	}
 
 	fn is_currently_hovering(&self) -> bool { self.is_currently_hovering }
-	
+
 	fn on_hovering(&mut self, pos: Vec2u, dims: PhysicalSize<u32>, _ctx: &mut WidgetContextMut) {
-		if !self.is_actually_within_bounds(pos, dims) { self.is_currently_hovering = false; return }
+		if !self.is_actually_within_bounds(pos, dims) {
+			self.is_currently_hovering = false;
+			return
+		}
 		self.is_currently_hovering = true;
 		if self.time_elapsed_override.is_none() {
 			self.time_elapsed_override = Some(self.timestamp.elapsed());

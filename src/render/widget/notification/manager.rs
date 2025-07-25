@@ -1,5 +1,6 @@
 use std::collections::hash_map::Entry;
 use std::ops::BitOrAssign;
+
 use fxhash::{FxBuildHasher, FxHashMap};
 
 use crate::render::assets::HEADER_SIZE;
@@ -42,9 +43,7 @@ impl NotificationManager {
 }
 
 impl BitOrAssign for NotificationManager {
-	fn bitor_assign(&mut self, rhs: Self) {
-		self.notifications.extend(rhs.notifications);
-	}
+	fn bitor_assign(&mut self, rhs: Self) { self.notifications.extend(rhs.notifications); }
 }
 
 pub trait Notifiable<U> {

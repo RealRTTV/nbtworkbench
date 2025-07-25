@@ -4,6 +4,7 @@ use std::hint::likely;
 use std::io::Read;
 use std::ops::{Deref, DerefMut};
 use std::slice::{Iter, IterMut};
+
 use zune_inflate::{DeflateDecoder, DeflateOptions};
 
 use crate::elements::compound::{CompoundEntry, NbtCompound};
@@ -221,10 +222,10 @@ impl NbtElementVariant for NbtChunk {
 			ctx.mark_possible_invalid_key(builder, |key| key.parse::<usize>().is_ok_and(|x| (0..=31).contains(&x)));
 			ctx.mark_possible_invalid_value(builder, |value| value.parse::<usize>().is_ok_and(|x| (0..=31).contains(&x)));
 			ctx.try_render_text::<Self>(key, self.value(), builder);
-			
+
 			ctx.pos += (0, 16);
 		}
-		
+
 		ctx.render_complex_body_kv(self, builder, tail, TreeRenderContext::draw_held_entry_bar, TreeRenderContext::draw_held_entry_bar);
 	}
 
@@ -270,97 +271,51 @@ impl ComplexNbtElementVariant for NbtChunk {
 	const ROOT_UV: Vec2u = NbtChunk::UV;
 
 	fn new(entries: Vec<Self::Entry>) -> Self
-	where
-		Self: Sized
-	{
+	where Self: Sized {
 		Self::new(NbtCompound::new(entries), (0, 0), ChunkFileFormat::default(), 0)
 	}
 
-	fn height(&self) -> usize {
-		<NbtCompound as ComplexNbtElementVariant>::height(&self.inner)
-	}
+	fn height(&self) -> usize { <NbtCompound as ComplexNbtElementVariant>::height(&self.inner) }
 
-	fn true_height(&self) -> usize {
-		<NbtCompound as ComplexNbtElementVariant>::true_height(&self.inner)
-	}
+	fn true_height(&self) -> usize { <NbtCompound as ComplexNbtElementVariant>::true_height(&self.inner) }
 
-	fn len(&self) -> usize {
-		<NbtCompound as ComplexNbtElementVariant>::len(&self.inner)
-	}
+	fn len(&self) -> usize { <NbtCompound as ComplexNbtElementVariant>::len(&self.inner) }
 
-	fn is_empty(&self) -> bool {
-		<NbtCompound as ComplexNbtElementVariant>::is_empty(&self.inner)
-	}
+	fn is_empty(&self) -> bool { <NbtCompound as ComplexNbtElementVariant>::is_empty(&self.inner) }
 
-	fn can_insert(&self, value: &NbtElement) -> bool {
-		<NbtCompound as ComplexNbtElementVariant>::can_insert(&self.inner, value)
-	}
+	fn can_insert(&self, value: &NbtElement) -> bool { <NbtCompound as ComplexNbtElementVariant>::can_insert(&self.inner, value) }
 
-	fn is_open(&self) -> bool {
-		<NbtCompound as ComplexNbtElementVariant>::is_open(&self.inner)
-	}
+	fn is_open(&self) -> bool { <NbtCompound as ComplexNbtElementVariant>::is_open(&self.inner) }
 
-	fn end_x(&self) -> usize {
-		<NbtCompound as ComplexNbtElementVariant>::end_x(&self.inner)
-	}
+	fn end_x(&self) -> usize { <NbtCompound as ComplexNbtElementVariant>::end_x(&self.inner) }
 
-	unsafe fn toggle(&mut self) {
-		unsafe { <NbtCompound as ComplexNbtElementVariant>::toggle(&mut self.inner) }
-	}
+	unsafe fn toggle(&mut self) { unsafe { <NbtCompound as ComplexNbtElementVariant>::toggle(&mut self.inner) } }
 
-	unsafe fn insert(&mut self, idx: usize, entry: Self::Entry) -> Result<Option<Self::Entry>, Self::Entry> {
-		unsafe { <NbtCompound as ComplexNbtElementVariant>::insert(&mut self.inner, idx, entry) }
-	}
+	unsafe fn insert(&mut self, idx: usize, entry: Self::Entry) -> Result<Option<Self::Entry>, Self::Entry> { unsafe { <NbtCompound as ComplexNbtElementVariant>::insert(&mut self.inner, idx, entry) } }
 
-	unsafe fn remove(&mut self, idx: usize) -> Option<Self::Entry> {
-		unsafe { <NbtCompound as ComplexNbtElementVariant>::remove(&mut self.inner, idx) }
-	}
+	unsafe fn remove(&mut self, idx: usize) -> Option<Self::Entry> { unsafe { <NbtCompound as ComplexNbtElementVariant>::remove(&mut self.inner, idx) } }
 
-	unsafe fn replace(&mut self, idx: usize, entry: Self::Entry) -> Result<Option<Self::Entry>, Self::Entry> {
-		unsafe { <NbtCompound as ComplexNbtElementVariant>::replace(&mut self.inner, idx, entry) }
-	}
+	unsafe fn replace(&mut self, idx: usize, entry: Self::Entry) -> Result<Option<Self::Entry>, Self::Entry> { unsafe { <NbtCompound as ComplexNbtElementVariant>::replace(&mut self.inner, idx, entry) } }
 
-	unsafe fn swap(&mut self, a: usize, b: usize) {
-		unsafe { <NbtCompound as ComplexNbtElementVariant>::swap(&mut self.inner, a, b) }
-	}
+	unsafe fn swap(&mut self, a: usize, b: usize) { unsafe { <NbtCompound as ComplexNbtElementVariant>::swap(&mut self.inner, a, b) } }
 
-	unsafe fn shut<'a, 'b>(&'b mut self, scope: &'a std::thread::Scope<'a, 'b>) {
-		unsafe { <NbtCompound as ComplexNbtElementVariant>::shut(&mut self.inner, scope) }
-	}
+	unsafe fn shut<'a, 'b>(&'b mut self, scope: &'a std::thread::Scope<'a, 'b>) { unsafe { <NbtCompound as ComplexNbtElementVariant>::shut(&mut self.inner, scope) } }
 
-	unsafe fn expand<'a, 'b>(&'b mut self, scope: &'a std::thread::Scope<'a, 'b>) {
-		unsafe { <NbtCompound as ComplexNbtElementVariant>::expand(&mut self.inner, scope) }
-	}
+	unsafe fn expand<'a, 'b>(&'b mut self, scope: &'a std::thread::Scope<'a, 'b>) { unsafe { <NbtCompound as ComplexNbtElementVariant>::expand(&mut self.inner, scope) } }
 
-	fn recache(&mut self) {
-		<NbtCompound as ComplexNbtElementVariant>::recache(&mut self.inner)
-	}
-	
-	fn on_style_change(&mut self, bookmarks: &mut MarkedLines) -> bool {
-		<NbtCompound as ComplexNbtElementVariant>::on_style_change(&mut self.inner, bookmarks)
-	}
+	fn recache(&mut self) { <NbtCompound as ComplexNbtElementVariant>::recache(&mut self.inner) }
 
-	fn get(&self, idx: usize) -> Option<&Self::Entry> {
-		<NbtCompound as ComplexNbtElementVariant>::get(&self.inner, idx)
-	}
+	fn on_style_change(&mut self, bookmarks: &mut MarkedLines) -> bool { <NbtCompound as ComplexNbtElementVariant>::on_style_change(&mut self.inner, bookmarks) }
 
-	fn get_mut(&mut self, idx: usize) -> Option<&mut Self::Entry> {
-		<NbtCompound as ComplexNbtElementVariant>::get_mut(&mut self.inner, idx)
-	}
+	fn get(&self, idx: usize) -> Option<&Self::Entry> { <NbtCompound as ComplexNbtElementVariant>::get(&self.inner, idx) }
 
-	unsafe fn get_unchecked(&self, idx: usize) -> &Self::Entry {
-		unsafe { <NbtCompound as ComplexNbtElementVariant>::get_unchecked(&self.inner, idx) }
-	}
+	fn get_mut(&mut self, idx: usize) -> Option<&mut Self::Entry> { <NbtCompound as ComplexNbtElementVariant>::get_mut(&mut self.inner, idx) }
 
-	unsafe fn get_unchecked_mut(&mut self, idx: usize) -> &mut Self::Entry {
-		unsafe { <NbtCompound as ComplexNbtElementVariant>::get_unchecked_mut(&mut self.inner, idx) }
-	}
+	unsafe fn get_unchecked(&self, idx: usize) -> &Self::Entry { unsafe { <NbtCompound as ComplexNbtElementVariant>::get_unchecked(&self.inner, idx) } }
 
-	fn children(&self) -> Iter<'_, Self::Entry> {
-		<NbtCompound as ComplexNbtElementVariant>::children(&self.inner)
-	}
+	unsafe fn get_unchecked_mut(&mut self, idx: usize) -> &mut Self::Entry { unsafe { <NbtCompound as ComplexNbtElementVariant>::get_unchecked_mut(&mut self.inner, idx) } }
 
-	fn children_mut(&mut self) -> IterMut<'_, Self::Entry> {
-		<NbtCompound as ComplexNbtElementVariant>::children_mut(&mut self.inner)
-	}
+	fn children(&self) -> Iter<'_, Self::Entry> { <NbtCompound as ComplexNbtElementVariant>::children(&self.inner) }
+
+	fn children_mut(&mut self) -> IterMut<'_, Self::Entry> { <NbtCompound as ComplexNbtElementVariant>::children_mut(&mut self.inner) }
 }

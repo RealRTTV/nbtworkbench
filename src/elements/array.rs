@@ -99,9 +99,9 @@ macro_rules! array {
 				const UV: $crate::util::Vec2u = $uv;
 
 				const GHOST_UV: $crate::util::Vec2u = $ghost_uv;
-				
+
 				const VALUE_COLOR: $crate::render::color::TextColor = $crate::render::color::TextColor::TreeValueDesc;
-				
+
 				const SEPERATOR_COLOR: $crate::render::color::TextColor = <Self as $crate::elements::NbtElementVariant>::VALUE_COLOR;
 
 				fn from_str0(mut s: &str) -> Result<(&str, Self), usize> {

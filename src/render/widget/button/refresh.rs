@@ -27,7 +27,11 @@ impl Widget for RefreshButton {
 	fn render_at(&self, pos: Vec2u, dims: PhysicalSize<u32>, builder: &mut VertexBufferBuilder, mouse: &MouseManager, ctx: &WidgetContext) {
 		let has_path = ctx.tabs.active_tab().path.path().exists();
 		let aabb = AABB::from_pos_and_dims(pos, dims);
-		let widget_uv = if !has_path || cfg!(target_arch = "wasm32") { UNSELECTED_WIDGET_UV } else { super::get_button_widget_uv(self, aabb, dims, mouse) };
+		let widget_uv = if !has_path || cfg!(target_arch = "wasm32") {
+			UNSELECTED_WIDGET_UV
+		} else {
+			super::get_button_widget_uv(self, aabb, dims, mouse)
+		};
 		let is_within_bounds = aabb.contains(mouse.coords);
 
 		let uv = if has_path && !cfg!(target_arch = "wasm32") { REFRESH_UV } else { DISABLED_REFRESH_UV };

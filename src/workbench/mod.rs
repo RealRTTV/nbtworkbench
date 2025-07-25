@@ -19,6 +19,7 @@ use winit::event::{ElementState, KeyEvent, MouseButton, MouseScrollDelta};
 use winit::keyboard::{KeyCode, PhysicalKey};
 
 use crate::action_result::{ActionResult, IntoFailingActionResult};
+use crate::elements::NbtElementAndKey;
 use crate::elements::array::{NbtByteArray, NbtIntArray, NbtLongArray};
 use crate::elements::byte::NbtByte;
 use crate::elements::chunk::NbtChunk;
@@ -32,7 +33,6 @@ use crate::elements::long::NbtLong;
 use crate::elements::region::NbtRegion;
 use crate::elements::short::NbtShort;
 use crate::elements::string::NbtString;
-use crate::elements::NbtElementAndKey;
 use crate::history::WorkbenchAction;
 use crate::render::TreeRenderContext;
 use crate::render::assets::{
@@ -69,19 +69,19 @@ use crate::tree::actions::expand::expand_element;
 use crate::tree::actions::expand_to_indices::expand_element_to_indices;
 use crate::tree::actions::open::open_element;
 use crate::tree::actions::remove::{RemoveElementResult, remove_element};
+use crate::tree::actions::replace::ReplaceElementError;
 use crate::tree::indices::{Indices, OwnedIndices};
+use crate::tree::navigate::NavigationError;
 use crate::tree::traverse::{TraversalError, TraversalInformation, TraversalInformationMut};
-use crate::util::{self, AABB, LinkedQueue, StrExt, Timestamp, Vec2d, Vec2u, drop_on_separate_thread, get_clipboard, nth, set_clipboard, ClipboardError, split_lines};
+use crate::util::{self, AABB, ClipboardError, LinkedQueue, StrExt, Timestamp, Vec2d, Vec2u, drop_on_separate_thread, get_clipboard, nth, set_clipboard, split_lines};
 #[cfg(target_arch = "wasm32")] use crate::wasm::fake_scope as scope;
 use crate::workbench::element_action::ElementAction;
 use crate::workbench::keyboard::{KeyboardManager, Modifiers};
 use crate::workbench::marked_line::MarkedLine;
 use crate::workbench::mouse::MouseManager;
 use crate::workbench::tab::manager::TabManager;
-use crate::workbench::tab::{FilePath, NewTabFromPath, NbtFileFormat, Tab, TabConstants, SaveTabError, InvalidRootVariantError, FilePathError};
+use crate::workbench::tab::{FilePath, FilePathError, InvalidRootVariantError, NbtFileFormat, NewTabFromPath, SaveTabError, Tab, TabConstants};
 use crate::{config, flags, get_interaction_information, hash, mutable_indices};
-use crate::tree::actions::replace::ReplaceElementError;
-use crate::tree::navigate::NavigationError;
 
 #[derive(Debug)]
 pub enum InteractionInformation<'a> {
@@ -101,7 +101,7 @@ pub enum InteractionInformation<'a> {
 		key: Option<CompactString>,
 		value: &'a mut NbtElement,
 		indices: OwnedIndices,
-	}
+	},
 }
 
 pub struct Workbench {
@@ -336,7 +336,7 @@ impl Workbench {
 							WidgetAlignment::new(HorizontalWidgetAlignmentPreference::Right, VerticalWidgetAlignmentPreference::Static(HEADER_SIZE as _))
 						),
 					];
-					
+
 					self.alerts |= new_alerts;
 					self.notifications |= new_notifications;
 				}
@@ -1164,10 +1164,7 @@ impl Workbench {
 				};
 			}
 
-		hover_widgets![
-				self.alerts.as_vertical_list(),
-			    self.notifications.as_vertical_list(),
-		    ];
+		hover_widgets![self.alerts.as_vertical_list(), self.notifications.as_vertical_list(),];
 
 		self.alerts |= new_alerts;
 		self.notifications |= new_notifications;
@@ -1261,12 +1258,7 @@ impl Workbench {
 		let tab = self.tabs.active_tab();
 		let TabConstants { left_margin, horizontal_scroll, .. } = tab.consts();
 		let ghost = if self.mouse.coords.x + horizontal_scroll >= left_margin && self.mouse.coords.y >= HEADER_SIZE {
-			tab.held_entry.as_ref().map(|entry| {
-				(
-					&entry.kv.1,
-					self.mouse.coords + (horizontal_scroll, 0)
-				)
-			})
+			tab.held_entry.as_ref().map(|entry| (&entry.kv.1, self.mouse.coords + (horizontal_scroll, 0)))
 		} else {
 			None
 		};
@@ -1444,8 +1436,26 @@ impl Workbench {
 
 		let tab = self.tabs.active_tab();
 		let TabConstants { scroll, horizontal_scroll, left_margin, .. } = tab.consts();
-		let traversal_info = tab.root.traverse((self.mouse.coords.y + scroll).saturating_sub(HEADER_SIZE) / 16, Some((self.mouse.coords.x + horizontal_scroll).saturating_sub(left_margin) / 16))
-			.map(|TraversalInformation { indices, line_number, true_line_number, depth, key, element }| format!("idx={indices}, line={line_number}, tline={true_line_number}, depth={depth}, key={key:?}, h={height}, th={true_height}, value={value}", height = element.height(), true_height = element.true_height(), value = element.value().0))
+		let traversal_info = tab
+			.root
+			.traverse((self.mouse.coords.y + scroll).saturating_sub(HEADER_SIZE) / 16, Some((self.mouse.coords.x + horizontal_scroll).saturating_sub(left_margin) / 16))
+			.map(
+				|TraversalInformation {
+				     indices,
+				     line_number,
+				     true_line_number,
+				     depth,
+				     key,
+				     element,
+				 }| {
+					format!(
+						"idx={indices}, line={line_number}, tline={true_line_number}, depth={depth}, key={key:?}, h={height}, th={true_height}, value={value}",
+						height = element.height(),
+						true_height = element.true_height(),
+						value = element.value().0
+					)
+				},
+			)
 			.map_err(|e| e.to_string())
 			.unwrap_or_else(|e| e);
 		let lines = [
@@ -1498,7 +1508,7 @@ impl Workbench {
 				}
 			),
 			format!("value: h={}, th={}, depth={}", tab.root.height(), tab.root.true_height(), tab.root.end_x()),
-			format!("traversal = {traversal_info}")
+			format!("traversal = {traversal_info}"),
 		];
 		let max_width = builder.window_width() * 3 / 4;
 		for (idx, line) in lines.iter().rev().flat_map(|line| split_lines(line.clone(), max_width)).enumerate() {
@@ -1867,7 +1877,7 @@ pub enum NbtHexRawRepresentationError {
 	#[error("Hex data was of an incorrect length, length was {len} bytes, should be multiples of {width}")]
 	InvalidWidth { len: usize, width: usize },
 	#[error("Failed to parse hex data into NBT{}", if let Some(x) = .0 { format!(", details: {x}") } else { String::new() })]
-	FailedParse(Option<anyhow::Error>)
+	FailedParse(Option<anyhow::Error>),
 }
 
 #[derive(Debug, Error)]

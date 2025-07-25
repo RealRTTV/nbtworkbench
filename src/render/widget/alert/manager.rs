@@ -1,4 +1,5 @@
 use std::ops::BitOrAssign;
+
 use crate::action_result::ActionResult;
 use crate::render::assets::HEADER_SIZE;
 use crate::render::widget::alert::Alert;
@@ -28,9 +29,7 @@ impl AlertManager {
 }
 
 impl BitOrAssign for AlertManager {
-	fn bitor_assign(&mut self, rhs: Self) {
-		self.alerts.extend(rhs.alerts);
-	}
+	fn bitor_assign(&mut self, rhs: Self) { self.alerts.extend(rhs.alerts); }
 }
 
 pub trait Alertable<U> {
@@ -53,9 +52,7 @@ impl<T, E: Into<Alert>> Alertable<Option<T>> for Result<T, E> {
 
 impl<S, E: Into<Alert>> Alertable<ActionResult<S, ()>> for ActionResult<S, E> {
 	fn alert_err(self, alerts: &mut AlertManager) -> ActionResult<S, ()>
-	where
-		Self: Sized
-	{
+	where Self: Sized {
 		match self {
 			ActionResult::Success(s) => ActionResult::Success(s),
 			ActionResult::Pass => ActionResult::Pass,

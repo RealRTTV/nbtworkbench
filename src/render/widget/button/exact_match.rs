@@ -20,7 +20,7 @@ impl Widget for ExactMatchButton {
 	fn dimensions(&self, _containment_dims: PhysicalSize<u32>) -> PhysicalSize<u32> { PhysicalSize::new(16, 16) }
 
 	fn is_valid_mouse_button(&self, button: MouseButton, _pos: Vec2u, _dims: PhysicalSize<u32>) -> bool { matches!(button, MouseButton::Left | MouseButton::Right) }
-	
+
 	fn on_mouse_down(&mut self, _button: MouseButton, _pos: Vec2u, _dims: PhysicalSize<u32>, _ctx: &mut WidgetContextMut) -> ActionResult {
 		if !config::get_search_mode().has_exact_match_mode() {
 			return ActionResult::Pass

@@ -3,8 +3,8 @@
 use thiserror::Error;
 
 use crate::elements::element::NbtElement;
-use crate::tree::indices::Indices;
 use crate::tree::MutableIndices;
+use crate::tree::indices::Indices;
 use crate::tree::navigate::{NavigationError, NavigationInformationMut};
 #[cfg(target_arch = "wasm32")]
 use crate::wasm::{FakeScope as Scope, fake_scope as scope};

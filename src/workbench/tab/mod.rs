@@ -1,4 +1,3 @@
-use itertools::Itertools;
 use std::ffi::OsStr;
 use std::fmt::Display;
 use std::io::{Read, Write};
@@ -8,12 +7,12 @@ use std::time::Duration;
 
 use compact_str::CompactString;
 use flate2::Compression;
-use itertools::Either;
+use itertools::{Either, Itertools};
 use thiserror::Error;
 use winit::dpi::PhysicalSize;
 use zune_inflate::DeflateDecoder;
 use zune_inflate::errors::InflateDecodeErrors;
-use crate::{config, mutable_indices, window_properties};
+
 use crate::elements::array::{NbtByteArray, NbtIntArray, NbtLongArray};
 use crate::elements::byte::NbtByte;
 use crate::elements::chunk::NbtChunk;
@@ -31,7 +30,10 @@ use crate::elements::{ComplexNbtElementVariant, NbtElementVariant};
 use crate::history::WorkbenchAction;
 use crate::history::manager::HistoryMananger;
 use crate::render::TreeRenderContext;
-use crate::render::assets::{BASE_Z, CONNECTION_UV, FROM_CLIPBOARD_GHOST_UV, FROM_CLIPBOARD_UV, GZIP_FILE_TYPE_UV, HEADER_SIZE, HELD_SCROLLBAR_UV, JUST_OVERLAPPING_BASE_Z, LINE_NUMBER_SEPARATOR_UV, LITTLE_ENDIAN_HEADER_NBT_FILE_TYPE_UV, LITTLE_ENDIAN_NBT_FILE_TYPE_UV, MCA_FILE_TYPE_UV, NBT_FILE_TYPE_UV, SCROLLBAR_Z, SNBT_FILE_TYPE_UV, STEAL_ANIMATION_OVERLAY_UV, UNHELD_SCROLLBAR_UV, ZLIB_FILE_TYPE_UV, ZOffset, LINE_NUMBER_CONNECTOR_Z};
+use crate::render::assets::{
+	BASE_Z, CONNECTION_UV, FROM_CLIPBOARD_GHOST_UV, FROM_CLIPBOARD_UV, GZIP_FILE_TYPE_UV, HEADER_SIZE, HELD_SCROLLBAR_UV, JUST_OVERLAPPING_BASE_Z, LINE_NUMBER_CONNECTOR_Z, LINE_NUMBER_SEPARATOR_UV, LITTLE_ENDIAN_HEADER_NBT_FILE_TYPE_UV,
+	LITTLE_ENDIAN_NBT_FILE_TYPE_UV, MCA_FILE_TYPE_UV, NBT_FILE_TYPE_UV, SCROLLBAR_Z, SNBT_FILE_TYPE_UV, STEAL_ANIMATION_OVERLAY_UV, UNHELD_SCROLLBAR_UV, ZLIB_FILE_TYPE_UV, ZOffset,
+};
 use crate::render::color::TextColor;
 use crate::render::vertex_buffer_builder::VertexBufferBuilder;
 use crate::render::widget::selected_text::{SaveSelectedTextError, SelectedText, SelectedTextConstructionError};
@@ -40,9 +42,10 @@ use crate::serialization::decoder::{BigEndianDecoder, Decoder};
 use crate::serialization::encoder::UncheckedBufWriter;
 use crate::tree::actions::replace::replace_element;
 use crate::tree::navigate::NavigationInformation;
-use crate::util::{StrExt, Timestamp, Vec2u, drop_on_separate_thread, AABB};
+use crate::util::{AABB, StrExt, Timestamp, Vec2u, drop_on_separate_thread};
 use crate::workbench::marked_line::MarkedLines;
 use crate::workbench::{FileUpdateSubscription, FileUpdateSubscriptionError, FileUpdateSubscriptionType, HeldEntry, NbtHexRawRepresentationError, SortAlgorithm};
+use crate::{config, mutable_indices, window_properties};
 
 pub mod manager;
 
@@ -362,12 +365,12 @@ impl Tab {
 
 				self.selected_text = Some(text);
 				Ok(())
-			},
+			}
 			// ignored
 			Err(e) if e.is_generally_ignored() => {
 				self.selected_text = None;
 				Ok(())
-			},
+			}
 			Err(e) => {
 				self.selected_text = None;
 				self.last_selected_text_interaction = (0, 0, Timestamp::UNIX_EPOCH);
@@ -492,7 +495,7 @@ impl Tab {
 		}
 		self.modify_horizontal_scroll(|x| x);
 	}
-	
+
 	pub fn tick_scrollbar(&mut self, mouse: Vec2u) {
 		let TabConstants { scroll, .. } = self.consts();
 		if let Some(scrollbar_offset) = self.scrollbar_offset
@@ -581,8 +584,20 @@ impl Tab {
 			)
 		} else {
 			let result = into_result(map(NbtElement::from_be_file(buf), |nbt| (nbt, NbtFileFormat::Nbt)), NBTParseError::NBT)
-				.or_else(|e1| into_result(map(NbtElement::from_le_file(buf), |(nbt, header)| (nbt, if header { NbtFileFormat::LittleEndianHeaderNbt } else { NbtFileFormat::LittleEndianNbt })), NBTParseError::LittleEndianNBT).map_err(|e2| (e1, e2)))
-				.or_else(|(e1, e2)| core::str::from_utf8(buf).map_err(SNBTParseError::from).and_then(|s| NbtElement::from_str(s)).map(|kv| (kv.1, NbtFileFormat::Snbt)).map_err(|e3| (e1, e2, NBTParseError::SNBT(e3))));
+				.or_else(|e1| {
+					into_result(
+						map(NbtElement::from_le_file(buf), |(nbt, header)| (nbt, if header { NbtFileFormat::LittleEndianHeaderNbt } else { NbtFileFormat::LittleEndianNbt })),
+						NBTParseError::LittleEndianNBT,
+					)
+					.map_err(|e2| (e1, e2))
+				})
+				.or_else(|(e1, e2)| {
+					core::str::from_utf8(buf)
+						.map_err(SNBTParseError::from)
+						.and_then(|s| NbtElement::from_str(s))
+						.map(|kv| (kv.1, NbtFileFormat::Snbt))
+						.map_err(|e3| (e1, e2, NBTParseError::SNBT(e3)))
+				});
 			result.map_err(|(e1, e2, e3)| NBTParseError::Unknown(vec![e1, e2, e3]))?
 		})
 	}
@@ -610,7 +625,9 @@ impl Tab {
 			return Ok(());
 		}
 
-		if !std::fs::exists(&self.path)? { return Ok(()); }
+		if !std::fs::exists(&self.path)? {
+			return Ok(());
+		}
 
 		let bytes = std::fs::read(&self.path)?;
 		let (value, format) = Tab::parse_raw(&self.path, &bytes)?;

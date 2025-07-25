@@ -128,7 +128,9 @@ impl SelectedText {
 			((String::new(), TextColor::White), None)
 		};
 
-		if let Some((key, key_color)) = key && key_color.is_editable() {
+		if let Some((key, key_color)) = key
+			&& key_color.is_editable()
+		{
 			let x = mouse_x as isize - base_x as isize;
 			if (-(Self::PREFIXING_SPACE_WIDTH as isize) <= x || snap_to_ends)
 				&& (x.try_into().unwrap_or(0_usize) < key_width + if has_key_and_value { intersection_width / 2 } else { Self::POSTFIXING_SPACE_WIDTH } || !has_key_and_value && snap_to_ends)
@@ -148,7 +150,9 @@ impl SelectedText {
 			}
 		}
 
-		if let Some((value, value_color)) = value && value_color.is_editable() {
+		if let Some((value, value_color)) = value
+			&& value_color.is_editable()
+		{
 			let x = mouse_x as isize - base_x as isize - key_width as isize - intersection_width as isize;
 			if (-(if has_key_and_value { (intersection_width + 1) / 2 } else { Self::PREFIXING_SPACE_WIDTH } as isize) <= x || !has_key_and_value && snap_to_ends)
 				&& (x.try_into().unwrap_or(0_usize) < value_width + Self::POSTFIXING_SPACE_WIDTH || snap_to_ends)
@@ -205,35 +209,71 @@ impl SelectedText {
 		) -> ActionResult<SelectedTextKeyResult, SelectedTextInputError> {
 			if key == KeyCode::ArrowUp {
 				if flags & !flags!(Ctrl) == 0 {
-					return this.move_up(consts, flags == flags!(Ctrl), root, path).map(SelectedTextKeyResult::Action).map_err(SelectedTextInputError::from).pass_or_fail(SelectedTextInputError::is_generally_ignored);
+					return this
+						.move_up(consts, flags == flags!(Ctrl), root, path)
+						.map(SelectedTextKeyResult::Action)
+						.map_err(SelectedTextInputError::from)
+						.pass_or_fail(SelectedTextInputError::is_generally_ignored);
 				} else if flags == flags!(Ctrl + Shift) {
-					return this.shift_up(consts, root, mi).map(Some).map(SelectedTextKeyResult::Action).map_err(SelectedTextInputError::from).pass_or_fail(SelectedTextInputError::is_generally_ignored);
+					return this
+						.shift_up(consts, root, mi)
+						.map(Some)
+						.map(SelectedTextKeyResult::Action)
+						.map_err(SelectedTextInputError::from)
+						.pass_or_fail(SelectedTextInputError::is_generally_ignored);
 				}
 			}
 
 			if key == KeyCode::ArrowDown {
 				if flags & !flags!(Ctrl) == 0 {
-					return this.move_down(consts, flags == flags!(Ctrl), root, path).map(SelectedTextKeyResult::Action).map_err(SelectedTextInputError::from).pass_or_fail(SelectedTextInputError::is_generally_ignored)
+					return this
+						.move_down(consts, flags == flags!(Ctrl), root, path)
+						.map(SelectedTextKeyResult::Action)
+						.map_err(SelectedTextInputError::from)
+						.pass_or_fail(SelectedTextInputError::is_generally_ignored)
 				} else if flags == flags!(Ctrl + Shift) {
-					return this.shift_down(consts, root, mi).map(Some).map(SelectedTextKeyResult::Action).map_err(SelectedTextInputError::from).pass_or_fail(SelectedTextInputError::is_generally_ignored);
+					return this
+						.shift_down(consts, root, mi)
+						.map(Some)
+						.map(SelectedTextKeyResult::Action)
+						.map_err(SelectedTextInputError::from)
+						.pass_or_fail(SelectedTextInputError::is_generally_ignored);
 				}
 			}
 
 			if key == KeyCode::ArrowLeft {
 				if flags & !flags!(Ctrl) == 0 && this.selection.is_none() && this.cursor == 0 && this.keyfix.as_ref().is_some_and(|keyfix| keyfix.1.is_editable()) {
-					return this.move_to_keyfix(consts, root, path).map(SelectedTextKeyResult::Action).map_err(SelectedTextInputError::from).pass_or_fail(SelectedTextInputError::is_generally_ignored);
+					return this
+						.move_to_keyfix(consts, root, path)
+						.map(SelectedTextKeyResult::Action)
+						.map_err(SelectedTextInputError::from)
+						.pass_or_fail(SelectedTextInputError::is_generally_ignored);
 				}
 				if flags & !flags!(Shift) == flags!(Alt) {
-					return this.force_close(root, mi).map(|_| None).map(SelectedTextKeyResult::Action).map_err(SelectedTextInputError::from).pass_or_fail(SelectedTextInputError::is_generally_ignored);
+					return this
+						.force_close(root, mi)
+						.map(|_| None)
+						.map(SelectedTextKeyResult::Action)
+						.map_err(SelectedTextInputError::from)
+						.pass_or_fail(SelectedTextInputError::is_generally_ignored);
 				}
 			}
 
 			if key == KeyCode::ArrowRight {
 				if flags & !flags!(Ctrl) == 0 && this.selection.is_none() && this.cursor == this.value.len() && this.valuefix.as_ref().is_some_and(|valuefix| valuefix.1.is_editable()) {
-					return this.move_to_valuefix(consts, root, path).map(SelectedTextKeyResult::Action).map_err(SelectedTextInputError::from).pass_or_fail(SelectedTextInputError::is_generally_ignored);
+					return this
+						.move_to_valuefix(consts, root, path)
+						.map(SelectedTextKeyResult::Action)
+						.map_err(SelectedTextInputError::from)
+						.pass_or_fail(SelectedTextInputError::is_generally_ignored);
 				}
 				if (flags) & !flags!(Shift) == flags!(Alt) {
-					return this.force_open((flags & !flags!(Alt)) == flags!(Shift), root, mi).map(|_| None).map(SelectedTextKeyResult::Action).map_err(SelectedTextInputError::from).pass_or_fail(SelectedTextInputError::is_generally_ignored);
+					return this
+						.force_open((flags & !flags!(Alt)) == flags!(Shift), root, mi)
+						.map(|_| None)
+						.map(SelectedTextKeyResult::Action)
+						.map_err(SelectedTextInputError::from)
+						.pass_or_fail(SelectedTextInputError::is_generally_ignored);
 				}
 			}
 
@@ -287,33 +327,32 @@ impl SelectedText {
 	}
 
 	#[must_use]
-	pub fn is_editing_key(&self) -> bool {
-		self.keyfix.is_none() && self.prefix.0.is_empty() && !self.suffix.0.is_empty() && self.valuefix.is_some()
-	}
+	pub fn is_editing_key(&self) -> bool { self.keyfix.is_none() && self.prefix.0.is_empty() && !self.suffix.0.is_empty() && self.valuefix.is_some() }
 
 	#[must_use]
 	pub fn key_span(&self, left_margin: usize) -> Option<Range<usize>> {
-		self.keyfix.as_ref()
-			.map(|keyfix| &*keyfix.0)
-			.or(Some(&*self.value).filter(|_| self.is_editing_key()))
-			.map(|key| {
-				let start = self.indices.end_x(left_margin) + Self::PREFIXING_SPACE_WIDTH;
-				let width = key.width();
-				start..start + width
-			})
+		self.keyfix.as_ref().map(|keyfix| &*keyfix.0).or(Some(&*self.value).filter(|_| self.is_editing_key())).map(|key| {
+			let start = self.indices.end_x(left_margin) + Self::PREFIXING_SPACE_WIDTH;
+			let width = key.width();
+			start..start + width
+		})
 	}
 
 	#[must_use]
-	pub fn is_editing_value(&self) -> bool {
-		self.keyfix.is_some() && !self.prefix.0.is_empty() && self.suffix.0.is_empty() && self.valuefix.is_none()
-	}
+	pub fn is_editing_value(&self) -> bool { self.keyfix.is_some() && !self.prefix.0.is_empty() && self.suffix.0.is_empty() && self.valuefix.is_none() }
 
 	#[must_use]
 	pub fn value_span(&self, left_margin: usize) -> Option<Range<usize>> {
-		self.valuefix.as_ref()
+		self.valuefix
+			.as_ref()
 			.map(|valuefix| &*valuefix.0)
 			.map(|valuefix| (self.indices.end_x(left_margin) + Self::PREFIXING_SPACE_WIDTH, valuefix))
-			.or_else(|| Some((self.indices.end_x(left_margin) + Self::PREFIXING_SPACE_WIDTH + self.keyfix.as_ref().map_or(0, |keyfix| keyfix.0.width()) + self.prefix.0.width(), &*self.value)))
+			.or_else(|| {
+				Some((
+					self.indices.end_x(left_margin) + Self::PREFIXING_SPACE_WIDTH + self.keyfix.as_ref().map_or(0, |keyfix| keyfix.0.width()) + self.prefix.0.width(),
+					&*self.value,
+				))
+			})
 			.map(|(start, value)| start..start + value.width())
 	}
 

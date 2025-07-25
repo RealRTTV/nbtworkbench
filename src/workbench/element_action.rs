@@ -4,6 +4,7 @@ use std::cmp::Ordering;
 #[cfg(not(target_arch = "wasm32"))]
 use notify::{EventKind, PollWatcher, RecursiveMode, Watcher};
 use thiserror::Error;
+
 use crate::elements::NbtElementVariant;
 use crate::elements::array::{NbtByteArray, NbtIntArray, NbtLongArray};
 use crate::elements::byte::NbtByte;
@@ -24,11 +25,11 @@ use crate::render::assets::{OPEN_ARRAY_IN_HEX_UV, OPEN_IN_TXT_UV};
 use crate::render::vertex_buffer_builder::VertexBufferBuilder;
 use crate::serialization::encoder::UncheckedBufWriter;
 use crate::tree::MutableIndices;
-use crate::tree::actions::add::{add_element, AddElementError};
-use crate::tree::actions::reorder::{reorder_element, ReorderElementError};
+use crate::tree::actions::add::{AddElementError, add_element};
+use crate::tree::actions::reorder::{ReorderElementError, reorder_element};
 use crate::tree::indices::OwnedIndices;
 use crate::tree::navigate::{NavigationError, NavigationInformation};
-use crate::util::{StrExt, Timestamp, get_clipboard, set_clipboard, ClipboardError};
+use crate::util::{ClipboardError, StrExt, Timestamp, get_clipboard, set_clipboard};
 use crate::workbench::marked_line::MarkedLine;
 use crate::workbench::{FileUpdateSubscription, FileUpdateSubscriptionType};
 
@@ -186,7 +187,8 @@ impl ElementAction {
 						}
 					},
 					notify::Config::default().with_manual_polling().with_compare_contents(true),
-				).map_err(OpenInFileError::PollWatcher)?;
+				)
+				.map_err(OpenInFileError::PollWatcher)?;
 				let subscription_type = {
 					let mut file = OpenOptions::new().write(true).create(true).open(&path).map_err(OpenInFileError::from)?;
 					if action == Self::OpenArrayInHex {
