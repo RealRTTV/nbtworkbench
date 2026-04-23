@@ -1,7 +1,7 @@
+use std::ops::ControlFlow;
 use winit::dpi::PhysicalSize;
 use winit::event::MouseButton;
 
-use crate::action_result::ActionResult;
 use crate::render::assets::{ENABLED_FREEHAND_MODE_UV, FREEHAND_MODE_UV};
 use crate::render::color::TextColor;
 use crate::render::vertex_buffer_builder::VertexBufferBuilder;
@@ -17,10 +17,10 @@ impl Widget for FreehandModeButton {
 
 	fn dimensions(&self, _containment_dims: PhysicalSize<u32>) -> PhysicalSize<u32> { PhysicalSize::new(16, 16) }
 	fn is_valid_mouse_button(&self, button: MouseButton, _pos: Vec2u, _dims: PhysicalSize<u32>) -> bool { matches!(button, MouseButton::Left | MouseButton::Right) }
-	fn on_mouse_down(&mut self, _button: MouseButton, _pos: Vec2u, _dims: PhysicalSize<u32>, ctx: &mut WidgetContextMut) -> ActionResult {
+	fn on_mouse_down(&mut self, _button: MouseButton, _pos: Vec2u, _dims: PhysicalSize<u32>, ctx: &mut WidgetContextMut) -> ControlFlow<()> {
 		let tab = ctx.tabs.active_tab_mut();
 		tab.freehand_mode = !tab.freehand_mode;
-		ActionResult::Success(())
+		ControlFlow::Break(())
 	}
 
 	fn render_at(&self, pos: Vec2u, dims: PhysicalSize<u32>, builder: &mut VertexBufferBuilder, mouse: &MouseManager, ctx: &WidgetContext) {

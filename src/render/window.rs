@@ -1,15 +1,15 @@
 use std::borrow::Cow;
-use std::ops::DerefMut;
+use std::ops::{ControlFlow, DerefMut};
 use std::sync::Arc;
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 #[cfg(target_arch = "wasm32")] use wasm_bindgen::JsValue;
 use wgpu::util::{BufferInitDescriptor, DeviceExt};
-use wgpu::*;
+use wgpu::{vertex_attr_array, SurfaceError, Surface, Device, Queue, SurfaceConfiguration, RenderPipeline, BindGroup, Texture, Instance, InstanceDescriptor, InstanceFlags, BackendOptions, GlBackendOptions, Gles3MinorVersion, GlFenceBehavior, Dx12BackendOptions, Dx12Compiler, NoopBackendOptions, RequestAdapterOptions, PowerPreference, DeviceDescriptor, Limits, Trace, TextureUsages, PresentMode, CompositeAlphaMode, Extent3d, TextureDescriptor, TextureDimension, TextureFormat, TexelCopyTextureInfo, Origin3d, TextureAspect, TexelCopyBufferLayout, TextureViewDescriptor, SamplerDescriptor, AddressMode, FilterMode, BindGroupLayoutDescriptor, BindGroupLayoutEntry, ShaderStages, BindingType, TextureViewDimension, TextureSampleType, SamplerBindingType, BindGroupDescriptor, BindGroupEntry, BindingResource, ShaderModuleDescriptor, ShaderSource, PipelineLayoutDescriptor, RenderPipelineDescriptor, VertexState, VertexBufferLayout, VertexStepMode, FragmentState, ColorTargetState, BlendState, ColorWrites, PrimitiveState, PrimitiveTopology, FrontFace, Face, PolygonMode, DepthStencilState, CompareFunction, StencilState, DepthBiasState, MultisampleState, Color, CommandEncoderDescriptor, RenderPassDescriptor, RenderPassColorAttachment, Operations, LoadOp, StoreOp, RenderPassDepthStencilAttachment, BufferUsages, IndexFormat};
 use winit::application::ApplicationHandler;
 use winit::dpi::{PhysicalPosition, PhysicalSize};
-use winit::event::*;
+use winit::event::{WindowEvent, TouchPhase, ElementState, MouseButton};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 #[cfg(target_arch = "wasm32")] use winit::platform::web::WindowExtWebSys;
 #[cfg(target_os = "windows")]
@@ -17,7 +17,6 @@ use winit::platform::windows::WindowAttributesExtWindows;
 use winit::window::{Icon, Window, WindowAttributes, WindowId};
 use zune_inflate::DeflateOptions;
 
-use crate::action_result::ActionResult;
 use crate::config::get_theme;
 use crate::render::VertexBufferBuilder;
 use crate::render::assets::{ATLAS_HEIGHT, ATLAS_WIDTH, HEADER_SIZE, ICON_HEIGHT, ICON_WIDTH, UNICODE_LEN, atlas, icon};
@@ -25,81 +24,81 @@ use crate::render::widget::alert::manager::Alertable;
 use crate::render::widget::search_box::{SEARCH_BOX_END_X, SEARCH_BOX_START_X};
 use crate::util::Timestamp;
 use crate::workbench::Workbench;
-use crate::{WORKBENCH, error, window_properties};
+use crate::{WORKBENCH, error, mutable_window_properties};
 
 pub const WINDOW_HEIGHT: u32 = 420;
 pub const WINDOW_WIDTH: u32 = 720;
 pub const MIN_WINDOW_HEIGHT: u32 = HEADER_SIZE as u32 + 64;
 pub const MIN_WINDOW_WIDTH: u32 = 480;
 
+struct Handler<'window> {
+	state: State<'window>,
+	workbench: &'static mut Workbench,
+	window: Arc<Window>,
+}
+
+impl<'window> ApplicationHandler<()> for Handler<'window> {
+	fn resumed(&mut self, _: &ActiveEventLoop) {}
+	fn window_event(&mut self, _: &ActiveEventLoop, window_id: WindowId, event: WindowEvent) {
+		if self.window.id() != window_id {
+			return;
+		}
+
+		#[cfg(target_arch = "wasm32")]
+		crate::wasm::on_input();
+		if mutable_window_properties().should_ignore_events() {
+			return;
+		}
+		if State::input(event.clone(), self.workbench).is_continue() {
+			match event {
+				WindowEvent::RedrawRequested => match self.state.render(self.workbench, self.window.as_ref()) {
+					Ok(()) => {}
+					Err(SurfaceError::Lost | SurfaceError::Outdated) => self.state.surface.configure(&self.state.device, &self.state.config),
+					Err(SurfaceError::OutOfMemory) => std::process::exit(1),
+					Err(SurfaceError::Timeout) => {
+						error!("Frame took too long to process")
+					}
+					Err(SurfaceError::Other) => {
+						error!("Failed to acquire texture")
+					}
+				},
+				WindowEvent::CloseRequested =>
+					if self.workbench.close() == 0 {
+						std::process::exit(0)
+					},
+				WindowEvent::Resized(new_size) => {
+					self.state.resize(self.workbench, new_size);
+					// self.window.request_redraw();
+				}
+				_ => {}
+			}
+		}
+	}
+
+	fn about_to_wait(&mut self, _: &ActiveEventLoop) {
+		#[cfg(target_arch = "wasm32")]
+		{
+			let old_size = self.window.inner_size();
+			let scaling_factor = web_sys::window().map_or(1.0, |window| window.device_pixel_ratio());
+			let new_size: PhysicalSize<u32> = web_sys::window()
+				.map(|window| {
+					PhysicalSize::new(
+						(window.inner_width().ok().as_ref().and_then(JsValue::as_f64).expect("Width must exist") * scaling_factor).ceil() as u32,
+						(window.inner_height().ok().as_ref().and_then(JsValue::as_f64).expect("Height must exist") * scaling_factor).ceil() as u32,
+					)
+				})
+				.expect("Window has dimension properties");
+			if new_size != old_size {
+				let _ = self.window.request_inner_size(new_size);
+				self.state.resize(self.workbench, new_size);
+			}
+		}
+		self.window.request_redraw();
+	}
+}
+
 #[allow(static_mut_refs)]
 pub async fn run() -> ! {
-	struct Handler<'window> {
-		state: State<'window>,
-		workbench: &'static mut Workbench,
-		window: Arc<Window>,
-	}
-
-	impl<'window> ApplicationHandler<()> for Handler<'window> {
-		fn resumed(&mut self, _: &ActiveEventLoop) {}
-		fn window_event(&mut self, _: &ActiveEventLoop, window_id: WindowId, event: WindowEvent) {
-			if self.window.id() != window_id {
-				return;
-			}
-
-			#[cfg(target_arch = "wasm32")]
-			crate::wasm::on_input();
-			if window_properties().should_ignore_events() {
-				return;
-			}
-			if State::input(event.clone(), self.workbench) == ActionResult::Pass {
-				match event {
-					WindowEvent::RedrawRequested => match self.state.render(self.workbench, self.window.as_ref()) {
-						Ok(()) => {}
-						Err(SurfaceError::Lost | SurfaceError::Outdated) => self.state.surface.configure(&self.state.device, &self.state.config),
-						Err(SurfaceError::OutOfMemory) => std::process::exit(1),
-						Err(SurfaceError::Timeout) => {
-							error!("Frame took too long to process")
-						}
-						Err(SurfaceError::Other) => {
-							error!("Failed to acquire texture")
-						}
-					},
-					WindowEvent::CloseRequested =>
-						if self.workbench.close() == 0 {
-							std::process::exit(0)
-						},
-					WindowEvent::Resized(new_size) => {
-						self.state.resize(self.workbench, new_size);
-						// self.window.request_redraw();
-					}
-					_ => {}
-				}
-			}
-		}
-
-		fn about_to_wait(&mut self, _: &ActiveEventLoop) {
-			#[cfg(target_arch = "wasm32")]
-			{
-				let old_size = self.window.inner_size();
-				let scaling_factor = web_sys::window().map_or(1.0, |window| window.device_pixel_ratio());
-				let new_size: PhysicalSize<u32> = web_sys::window()
-					.map(|window| {
-						PhysicalSize::new(
-							(window.inner_width().ok().as_ref().and_then(JsValue::as_f64).expect("Width must exist") * scaling_factor).ceil() as u32,
-							(window.inner_height().ok().as_ref().and_then(JsValue::as_f64).expect("Height must exist") * scaling_factor).ceil() as u32,
-						)
-					})
-					.expect("Window has dimension properties");
-				if new_size != old_size {
-					let _ = self.window.request_inner_size(new_size);
-					self.state.resize(self.workbench, new_size);
-				}
-			}
-			self.window.request_redraw();
-		}
-	}
-
 	let event_loop = EventLoop::builder().build().expect("Event loop was unconstructable");
 	#[allow(unused_mut)]
 	let mut builder = WindowAttributes::default()
@@ -142,7 +141,7 @@ pub async fn run() -> ! {
 		size
 	};
 	let state = State::new(&window, window_size).await;
-	*window_properties().deref_mut() = WindowProperties::new(Arc::clone(&window));
+	*mutable_window_properties().deref_mut() = MutableWindowProperties::new(Arc::clone(&window));
 	unsafe {
 		core::ptr::write(&raw mut WORKBENCH, Workbench::new(Some(window_size)).expect("Valid workbench construction"));
 	}
@@ -513,9 +512,9 @@ impl<'window> State<'window> {
 				a: 1.0,
 			},
 			Theme::Dark => Color {
-				r: 0.11774103726,
-				g: 0.11774103726,
-				b: 0.11774103726,
+				r: 0x1E as f64 / 255.0,
+				g: 0x1E as f64 / 255.0,
+				b: 0x1E as f64 / 255.0,
 				a: 1.0,
 			},
 		}
@@ -527,18 +526,19 @@ impl<'window> State<'window> {
 			self.config.width = new_size.width;
 			self.config.height = new_size.height;
 			self.surface.configure(&self.device, &self.config);
-			workbench.on_window_dims(new_size);
+			unsafe { CACHED_WINDOW_PROPERTIES.window_dims = new_size; }
+			workbench.on_window_dims();
 			for tab in &mut workbench.tabs {
 				tab.refresh_scrolls();
 			}
 		}
 	}
 
-	fn input(event: WindowEvent, workbench: &mut Workbench) -> ActionResult {
+	fn input(event: WindowEvent, workbench: &mut Workbench) -> ControlFlow<()> {
 		match event {
 			WindowEvent::DroppedFile(file) if let Some(data) = std::fs::read(&file).alert_err(&mut workbench.alerts) => {
 				workbench.on_open_file(&file, &data).alert_err(&mut workbench.alerts);
-				ActionResult::Success(())
+				ControlFlow::Break(())
 			}
 			WindowEvent::KeyboardInput { event, .. } => workbench.on_key_input(event),
 			WindowEvent::CursorMoved { position, .. } => workbench.on_mouse_move(position),
@@ -556,7 +556,7 @@ impl<'window> State<'window> {
 					workbench.on_mouse_input(ElementState::Released, MouseButton::Left)
 				}
 			},
-			_ => ActionResult::Pass,
+			_ => ControlFlow::Continue(()),
 		}
 	}
 
@@ -759,12 +759,12 @@ impl<'window> State<'window> {
 	}
 }
 
-pub enum WindowProperties {
+pub enum MutableWindowProperties {
 	Real { window: Arc<Window>, ignore_event_end: Timestamp },
 	Fake,
 }
 
-impl WindowProperties {
+impl MutableWindowProperties {
 	pub const fn new(window: Arc<Window>) -> Self {
 		Self::Real {
 			window,
@@ -790,4 +790,31 @@ impl WindowProperties {
 
 	#[must_use]
 	pub fn should_ignore_events(&self) -> bool { if let Self::Real { ignore_event_end, .. } = self { Timestamp::now() < *ignore_event_end } else { false } }
+}
+
+/// This type describes important caches of the window and is typically accessed as a [`CachedWindowProperties`].
+#[derive(Copy, Clone)]
+pub struct CachedWindowProperties {
+	// rename to raw_window_dims and add calc for window_dims via scale
+	pub window_dims: PhysicalSize<u32>,
+}
+
+impl CachedWindowProperties {
+	#[must_use]
+	pub const fn uninit() -> Self {
+		Self {
+			window_dims: PhysicalSize { width: 0, height: 0 },
+		}
+	}
+	
+	#[must_use]
+	pub fn update_window_dims(&mut self, window_dims: PhysicalSize<u32>) {
+		self.window_dims = window_dims;
+	}
+}
+
+static mut CACHED_WINDOW_PROPERTIES: CachedWindowProperties = CachedWindowProperties::uninit();
+pub fn cached_window_properties() -> CachedWindowProperties {
+	// SAFETY: only reading values, no aliasing possible because this type has no ptrs
+	unsafe { CACHED_WINDOW_PROPERTIES }
 }

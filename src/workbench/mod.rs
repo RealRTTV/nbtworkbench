@@ -4,8 +4,9 @@ pub mod marked_line;
 pub mod mouse;
 pub mod tab;
 
-use std::assert_matches::debug_assert_matches;
+use std::debug_assert_matches;
 use std::fmt::{Display, Formatter, Write};
+use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
 #[cfg(not(target_arch = "wasm32"))] use std::thread::scope;
@@ -18,7 +19,6 @@ use winit::dpi::{PhysicalPosition, PhysicalSize};
 use winit::event::{ElementState, KeyEvent, MouseButton, MouseScrollDelta};
 use winit::keyboard::{KeyCode, PhysicalKey};
 
-use crate::action_result::{ActionResult, IntoFailingActionResult};
 use crate::elements::NbtElementAndKey;
 use crate::elements::array::{NbtByteArray, NbtIntArray, NbtLongArray};
 use crate::elements::byte::NbtByte;
@@ -62,7 +62,7 @@ use crate::render::widget::selected_text::SelectedText;
 use crate::render::widget::text::{TEXT_DOUBLE_CLICK_INTERVAL, get_cursor_idx, get_cursor_left_jump_idx, get_cursor_right_jump_idx};
 use crate::render::widget::vertical_list::VerticalList;
 use crate::render::widget::{HorizontalWidgetAlignmentPreference, VerticalWidgetAlignmentPreference, Widget, WidgetAlignment, WidgetContext, WidgetContextMut};
-use crate::render::window::{MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH, Theme, WINDOW_HEIGHT, WINDOW_WIDTH};
+use crate::render::window::{MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH, Theme, WINDOW_HEIGHT, WINDOW_WIDTH, cached_window_properties};
 use crate::tree::actions::add::{AddElementResult, add_element};
 use crate::tree::actions::close::close_element;
 use crate::tree::actions::expand::expand_element;
@@ -112,8 +112,6 @@ pub struct Workbench {
 	raw_window_dims: PhysicalSize<u32>,
 	keyboard: KeyboardManager,
 	mouse: MouseManager,
-	// todo: make TabManager a widget and add this
-	tab_scroll: usize,
 	// todo: need to rework this
 	action_wheel: Option<Vec2u>,
 	pub cursor_visible: bool,
@@ -148,7 +146,6 @@ impl Workbench {
 			raw_window_dims: PhysicalSize::new(0, 0),
 			keyboard: KeyboardManager::new(),
 			mouse: MouseManager::new(),
-			tab_scroll: 0,
 			action_wheel: None,
 			cursor_visible: false,
 			alerts: AlertManager::new(),
@@ -183,7 +180,6 @@ impl Workbench {
 			raw_window_dims: window_dims.unwrap_or(PhysicalSize::new(WINDOW_WIDTH, WINDOW_HEIGHT)),
 			keyboard: KeyboardManager::new(),
 			mouse: MouseManager::new(),
-			tab_scroll: 0,
 			action_wheel: None,
 			cursor_visible: true,
 			alerts: AlertManager::new(),
@@ -241,7 +237,7 @@ impl Workbench {
 		Ok(workbench)
 	}
 
-	pub fn on_scroll(&mut self, scroll: MouseScrollDelta) -> ActionResult {
+	pub fn on_scroll(&mut self, scroll: MouseScrollDelta) -> ControlFlow<()> {
 		let (h, v) = match scroll {
 			MouseScrollDelta::LineDelta(h, v) => (h, v),
 			MouseScrollDelta::PixelDelta(pos) => (pos.x as f32, pos.y as f32),
@@ -252,16 +248,7 @@ impl Workbench {
 		} else {
 			if AABB::new(0, usize::MAX, 0, 21).contains(self.mouse.coords) {
 				let scroll = if shift { -v } else { -h };
-				self.tab_scroll = ((self.tab_scroll as isize + (scroll * 48.0) as isize).max(0) as usize).min(
-					{
-						let mut tabs_width = 3_usize;
-						for tab in &self.tabs {
-							tabs_width += tab.path.name().width() + 32 + 6 + 6;
-						}
-						tabs_width
-					}
-					.saturating_sub(self.window_dims.width as usize),
-				);
+				self.tabs.on_tab_scroll((scroll * 48.0) as isize, self.window_dims);
 			} else {
 				let tab = self.tabs.active_tab_mut();
 				if shift {
@@ -273,10 +260,10 @@ impl Workbench {
 				}
 			}
 		}
-		ActionResult::Success(())
+		ControlFlow::Break(())
 	}
 
-	pub fn on_mouse_input(&mut self, state: ElementState, button: MouseButton) -> ActionResult {
+	pub fn on_mouse_input(&mut self, state: ElementState, button: MouseButton) -> ControlFlow<()> {
 		self.tabs.active_tab_mut().last_interaction = Timestamp::now();
 		let TabConstants { left_margin, horizontal_scroll, .. } = self.tabs.active_tab().consts();
 		let Modifiers { shift, .. } = self.keyboard.modifiers();
@@ -362,7 +349,7 @@ impl Workbench {
 					self.click_tab(button)?;
 				}
 				if AABB::new(0, 16, 24, 46).contains(self.mouse.coords) {
-					self.tabs.add(Tab::from_file_dialog(self.window_dims).alert_err(&mut self.alerts).failure_on_err()?);
+					self.tabs.add(Tab::from_file_dialog(self.window_dims).alert_err(&mut self.alerts).break_on_none()?);
 				}
 
 				if button == MouseButton::Left && AABB::new(0, usize::MAX, HEADER_SIZE, usize::MAX).contains(self.mouse.coords) && self.tabs.active_tab().held_entry.is_some() {
@@ -382,7 +369,7 @@ impl Workbench {
 								&& depth + 1 == (self.mouse.coords.x + horizontal_scroll - left_margin) / 16
 							{
 								self.action_wheel = Some(Vec2u::new(left_margin + depth * 16 + 16 + 6, y * 16 + HEADER_SIZE + 7));
-								return ActionResult::Success(());
+								return ControlFlow::Break(());
 							}
 						}
 					}
@@ -405,7 +392,7 @@ impl Workbench {
 
 					if button == MouseButton::Left {
 						match self.try_steal(true) {
-							ActionResult::Success(()) => return ActionResult::Success(()),
+							ControlFlow::Break(()) => return ControlFlow::Break(()),
 							result => {
 								self.tabs.active_tab_mut().steal_animation_data = None;
 								result?
@@ -423,7 +410,7 @@ impl Workbench {
 							let end = start + total * total / height;
 							if AABB::new(self.window_dims.width as usize - 8, self.window_dims.width as usize, start, end + 1).contains(self.mouse.coords) {
 								tab.scrollbar_offset = Some(self.mouse.coords.y - start);
-								return ActionResult::Success(());
+								return ControlFlow::Break(());
 							}
 						}
 					}
@@ -449,7 +436,7 @@ impl Workbench {
 				}
 			}
 		}
-		ActionResult::Pass
+		ControlFlow::Continue(())
 	}
 
 	pub fn on_open_file(&mut self, path: &Path, buf: &[u8]) -> Result<(), NewTabFromPath> {
@@ -459,34 +446,34 @@ impl Workbench {
 	}
 
 	#[deprecated = "refactor to UFCS only to split into smaller helper functions"]
-	fn process_action_wheel(&mut self) -> ActionResult {
+	fn process_action_wheel(&mut self) -> ControlFlow<()> {
 		use core::f64::consts::TAU;
 
-		let Some(center) = self.action_wheel.take() else { return ActionResult::Pass };
+		let Some(center) = self.action_wheel.take() else { return ControlFlow::Continue(()) };
 		if center.y < HEADER_SIZE {
-			return ActionResult::Failure(());
+			return ControlFlow::Break(());
 		}
 		let tab = self.tabs.active_tab_mut();
 		let TabConstants { left_margin, scroll, .. } = tab.consts();
 		if (Vec2d::from(center) - Vec2d::from(self.mouse.coords)).distance_squared() <= 8_f64.powi(2) {
-			return ActionResult::Failure(());
+			return ControlFlow::Break(());
 		}
 		let highlight_idx = ((center - self.mouse.coords).angle() / TAU * 8.0 + 3.5).rem_euclid(8.0) as usize;
-		let TraversalInformation { indices, element, .. } = tab.root.traverse((center.y - (HEADER_SIZE + 7) + scroll) / 16, Some((center.x - left_margin) / 16)).alert_err(&mut self.alerts).failure_on_err()?;
+		let TraversalInformation { indices, element, .. } = tab.root.traverse((center.y - (HEADER_SIZE + 7) + scroll) / 16, Some((center.x - left_margin) / 16)).alert_err(&mut self.alerts).break_on_none()?;
 		if let Some(action) = element.actions().get(highlight_idx).copied() {
 			if let Some(Some(action)) = action.apply(&mut tab.root, indices, mutable_indices!(tab)).alert_err(&mut self.alerts) {
 				tab.history.append(action);
 			}
 		}
-		ActionResult::Success(())
+		ControlFlow::Break(())
 	}
 
 	#[deprecated = "refactor to UFCS only to split into smaller helper functions"]
-	fn try_double_click_interaction(&mut self) -> ActionResult {
+	fn try_double_click_interaction(&mut self) -> ControlFlow<()> {
 		let shift = self.keyboard.shift();
 
 		if self.tabs.active_tab().held_entry.is_some() || self.tabs.active_tab().freehand_mode || self.tabs.active_tab().last_selected_text_interaction.2.elapsed() <= LINE_DOUBLE_CLICK_INTERVAL {
-			return ActionResult::Pass
+			return ControlFlow::Continue(());
 		};
 
 		if let InteractionInformation::Content { is_in_left_margin: false, y, .. } = get_interaction_information!(self) {
@@ -500,17 +487,17 @@ impl Workbench {
 				}
 			} else {
 				tab.last_double_click_interaction = (y, Timestamp::now());
-				ActionResult::Pass
+				ControlFlow::Continue(())
 			}
 		} else {
-			ActionResult::Pass
+			ControlFlow::Continue(())
 		}
 	}
 
 	#[deprecated = "refactor to UFCS only to split into smaller helper functions"]
-	fn try_steal(&mut self, can_initialize: bool) -> ActionResult {
+	fn try_steal(&mut self, can_initialize: bool) -> ControlFlow<()> {
 		if self.tabs.active_tab().held_entry.is_some() || self.tabs.active_tab().freehand_mode {
-			return ActionResult::Pass
+			return ControlFlow::Continue(())
 		};
 		let is_grid_layout = self.tabs.active_tab().root.as_region().is_some_and(|region| region.is_grid_layout());
 
@@ -520,23 +507,23 @@ impl Workbench {
 			}
 			if let Some((_, expected)) = self.tabs.active_tab_mut().steal_animation_data.clone() {
 				if expected == (depth + 1, y) || (is_grid_layout && expected == (x, y)) {
-					return ActionResult::Success(())
+					return ControlFlow::Break(())
 				}
 			}
 		}
-		ActionResult::Pass
+		ControlFlow::Continue(())
 	}
 
 	#[deprecated = "refactor to UFCS only to split into smaller helper functions"]
-	fn steal(&mut self) -> ActionResult {
+	fn steal(&mut self) -> ControlFlow<()> {
 		// todo, the fact that these indices aren't seemingly (to me) stored between like a queue might pose an issue in creating a correct workbench action history model -- correct, is still buggy :(
 
 		if self.tabs.active_tab().steal_animation_data.as_ref().is_some_and(|x| x.0.elapsed() >= LINE_DOUBLE_CLICK_INTERVAL) {
-			return ActionResult::Pass
+			return ControlFlow::Continue(())
 		}
 
 		if self.tabs.active_tab().held_entry.is_some() {
-			return ActionResult::Pass
+			return ControlFlow::Continue(())
 		}
 		let is_grid_layout = self.tabs.active_tab().root.as_region().is_some_and(NbtRegion::is_grid_layout);
 
@@ -553,20 +540,20 @@ impl Workbench {
 		{
 			let tab = self.tabs.active_tab_mut();
 
-			let RemoveElementResult { indices, kv: (key, mut value), replaces: _ } = remove_element(&mut tab.root, indices, mutable_indices!(tab)).alert_err(&mut self.alerts).failure_on_err()?;
+			let RemoveElementResult { indices, kv: (key, mut value), replaces: _ } = remove_element(&mut tab.root, indices, mutable_indices!(tab)).alert_err(&mut self.alerts).break_on_none()?;
 
 			// SAFETY: value is detached from all caches
 			scope(|scope| unsafe { value.shut(scope) });
 			tab.history.append(WorkbenchAction::RemoveToHeldEntry);
 			tab.held_entry = Some(HeldEntry::from_indices((key, value), indices));
-			ActionResult::Success(())
+			ControlFlow::Break(())
 		} else {
-			ActionResult::Pass
+			ControlFlow::Continue(())
 		}
 	}
 
 	#[deprecated = "refactor to UFCS only to split into smaller helper functions"]
-	fn try_duplicate(&mut self) -> ActionResult {
+	fn try_duplicate(&mut self) -> ControlFlow<()> {
 		if let InteractionInformation::Content {
 			is_in_left_margin: false,
 			y,
@@ -580,38 +567,38 @@ impl Workbench {
 			*indices.last_mut().expect("y > 0") += 1;
 			let duplicate = value.clone();
 			let tab = self.tabs.active_tab_mut();
-			let result = add_element(&mut tab.root, (key, duplicate), indices, mutable_indices!(tab)).alert_err(&mut self.alerts).failure_on_err()?;
+			let result = add_element(&mut tab.root, (key, duplicate), indices, mutable_indices!(tab)).alert_err(&mut self.alerts).break_on_none()?;
 			tab.history.append(result.into_action());
 			tab.refresh_scrolls();
-			ActionResult::Success(())
+			ControlFlow::Break(())
 		} else {
-			ActionResult::Pass
+			ControlFlow::Continue(())
 		}
 	}
 
 	#[deprecated = "refactor to UFCS only to split into smaller helper functions"]
-	fn try_copy(&mut self, debug: bool) -> ActionResult {
+	fn try_copy(&mut self, debug: bool) -> ControlFlow<()> {
 		let InteractionInformation::Content { is_in_left_margin: false, key, value, .. } = get_interaction_information!(self) else {
-			return ActionResult::Pass
+			return ControlFlow::Continue(())
 		};
 		let mut buf = String::new();
 		let key = key.map(|key| if key.needs_escape() { format_compact!("{key:?}") } else { key });
 		let key_exists = key.is_some();
 		if debug {
-			write!(&mut buf, "{}{}{value:#?}", key.as_deref().unwrap_or(""), if key_exists { ": " } else { "" }).alert_err(&mut self.alerts).failure_on_err()?;
+			write!(&mut buf, "{}{}{value:#?}", key.as_deref().unwrap_or(""), if key_exists { ": " } else { "" }).alert_err(&mut self.alerts).break_on_none()?;
 		} else {
-			write!(&mut buf, "{}{}{value}", key.as_deref().unwrap_or(""), if key_exists { ":" } else { "" }).alert_err(&mut self.alerts).failure_on_err()?;
+			write!(&mut buf, "{}{}{value}", key.as_deref().unwrap_or(""), if key_exists { ":" } else { "" }).alert_err(&mut self.alerts).break_on_none()?;
 		}
 		if set_clipboard(buf) {
-			ActionResult::Success(())
+			ControlFlow::Break(())
 		} else {
 			self.alerts.alert(Alert::error("Could not set clipboard"));
-			ActionResult::Failure(())
+			ControlFlow::Break(())
 		}
 	}
 
 	#[deprecated = "refactor to UFCS only to split into smaller helper functions"]
-	fn delete(&mut self, clipboard: bool) -> ActionResult {
+	fn delete(&mut self, clipboard: bool) -> ControlFlow<()> {
 		if let InteractionInformation::Content {
 			is_in_left_margin: false, indices, key, value, ..
 		} = get_interaction_information!(self)
@@ -624,56 +611,56 @@ impl Workbench {
 				}
 			}
 			let tab = self.tabs.active_tab_mut();
-			let result = remove_element(&mut tab.root, indices, mutable_indices!(tab)).alert_err(&mut self.alerts).failure_on_err()?;
+			let result = remove_element(&mut tab.root, indices, mutable_indices!(tab)).alert_err(&mut self.alerts).break_on_none()?;
 			tab.history.append(result.into_action());
-			ActionResult::Success(())
+			ControlFlow::Break(())
 		} else {
-			ActionResult::Pass
+			ControlFlow::Continue(())
 		}
 	}
 
 	#[deprecated = "refactor to UFCS only to split into smaller helper functions"]
-	fn drop_held_entry(&mut self) -> ActionResult {
+	fn drop_held_entry(&mut self) -> ControlFlow<()> {
 		let tab = self.tabs.active_tab_mut();
 		let TabConstants { left_margin, scroll, horizontal_scroll } = tab.consts();
 
 		if self.mouse.coords.y <= HEADER_SIZE {
-			return ActionResult::Pass
+			return ControlFlow::Continue(())
 		}
 		if self.mouse.coords.x + horizontal_scroll + 16 < left_margin {
-			return ActionResult::Pass
+			return ControlFlow::Continue(())
 		}
 		let y = self.mouse.coords.y - HEADER_SIZE + scroll;
 		let x = (self.mouse.coords.x + horizontal_scroll - left_margin) / 16 - 1;
 
-		let Some(HeldEntry { kv, indices_history }) = tab.held_entry.take() else { return ActionResult::Pass };
+		let Some(HeldEntry { kv, indices_history }) = tab.held_entry.take() else { return ControlFlow::Continue(()) };
 		if let Some(indices) = tab.root.create_drop_indices((kv.0.as_deref(), &kv.1), y, x) {
-			let AddElementResult { indices, old_kv } = add_element(&mut tab.root, kv, indices, mutable_indices!(tab)).alert_err(&mut self.alerts).failure_on_err()?;
+			let AddElementResult { indices, old_kv } = add_element(&mut tab.root, kv, indices, mutable_indices!(tab)).alert_err(&mut self.alerts).break_on_none()?;
 			expand_element_to_indices(&mut tab.root, &indices, &mut tab.bookmarks).alert_err(&mut self.alerts);
 			tab.history.append(WorkbenchAction::AddFromHeldEntry { indices, old_kv, indices_history });
 		} else {
 			tab.history.append(WorkbenchAction::DiscardHeldEntry { held_entry: HeldEntry { kv, indices_history } });
 		}
-		ActionResult::Success(())
+		ControlFlow::Break(())
 	}
 
 	#[deprecated = "refactor to UFCS only to split into smaller helper functions"]
-	fn hold_entry(&mut self, button: MouseButton) -> ActionResult {
+	fn hold_entry(&mut self, button: MouseButton) -> ControlFlow<()> {
 		if button == MouseButton::Left && self.mouse.coords.x >= 16 + 16 + 4 {
 			let tab = self.tabs.active_tab_mut();
 			let x = self.mouse.coords.x - (16 + 16 + 4);
 			if x / 16 == 13 {
-				let (key, element) = NbtElement::from_str(&get_clipboard().alert_err(&mut self.alerts).failure_on_err()?).alert_err(&mut self.alerts).failure_on_err()?;
+				let (key, element) = NbtElement::from_str(&get_clipboard().alert_err(&mut self.alerts).break_on_none()?).alert_err(&mut self.alerts).break_on_none()?;
 				if element.is_chunk() && !tab.root.is_region() {
 					self.alerts.alert(Alert::error("Chunks are not supported for non-region tabs"));
-					return ActionResult::Failure(());
-				} else {
-					let old_held_entry = tab.held_entry.replace(HeldEntry::from_aether((key, element)));
-					if let Some(held_entry) = old_held_entry {
-						tab.history.append(WorkbenchAction::DiscardHeldEntry { held_entry });
-					}
-					tab.history.append(WorkbenchAction::CreateHeldEntry);
+					return ControlFlow::Break(());
 				}
+
+				let old_held_entry = tab.held_entry.replace(HeldEntry::from_aether((key, element)));
+				if let Some(held_entry) = old_held_entry {
+					tab.history.append(WorkbenchAction::DiscardHeldEntry { held_entry });
+				}
+				tab.history.append(WorkbenchAction::CreateHeldEntry);
 			} else {
 				let old_held_entry = tab.held_entry.replace(HeldEntry::from_aether((None, match x / 16 {
 					0 => NbtElement::Byte(NbtByte::default()),
@@ -689,7 +676,7 @@ impl Workbench {
 					10 => NbtElement::List(NbtList::default()),
 					11 => NbtElement::Compound(NbtCompound::default()),
 					12 if tab.root.is_region() => NbtElement::Chunk(NbtChunk::default()),
-					_ => return ActionResult::Pass,
+					_ => return ControlFlow::Continue(()),
 				})));
 				if let Some(held_entry) = old_held_entry {
 					tab.history.append(WorkbenchAction::DiscardHeldEntry { held_entry })
@@ -697,13 +684,13 @@ impl Workbench {
 				tab.history.append(WorkbenchAction::CreateHeldEntry);
 			}
 		}
-		ActionResult::Success(())
+		ControlFlow::Break(())
 	}
 
-	fn click_tab(&mut self, button: MouseButton) -> ActionResult {
-		let mouse_x = self.mouse.coords.x + self.tab_scroll;
+	fn click_tab(&mut self, button: MouseButton) -> ControlFlow<()> {
+		let mouse_x = self.mouse.coords.x + self.tabs.tab_scroll();
 		if mouse_x < 2 {
-			return ActionResult::Pass
+			return ControlFlow::Continue(())
 		}
 
 		let shift = self.keyboard.shift();
@@ -716,38 +703,35 @@ impl Workbench {
 			if x <= width {
 				if button == MouseButton::Middle {
 					drop_on_separate_thread(self.tabs.remove(idx));
-					return ActionResult::Success(());
 				} else if idx == active_tab_idx && x > width - 16 && x < width {
 					if button == MouseButton::Left {
 						tab.format = tab.format.cycle();
-						return ActionResult::Success(());
 					} else if button == MouseButton::Right {
 						tab.format = tab.format.rev_cycle();
-						return ActionResult::Success(());
 					}
 				} else if idx == active_tab_idx && x + 1 >= width - 32 && x < width - 16 {
 					tab.save(shift).alert_err(&mut self.alerts);
-					return ActionResult::Success(());
 				} else if button == MouseButton::Left {
 					self.tabs.set_active_idx(idx);
-					return ActionResult::Success(());
 				}
+
+				return ControlFlow::Break(());
 			}
 
 			x -= width;
 
 			if x < 6 {
-				return ActionResult::Pass;
-			} else {
-				x -= 6;
+				return ControlFlow::Continue(());
 			}
+
+			x -= 6;
 		}
 
 		if button == MouseButton::Middle {
 			self.tabs.add(Tab::new_empty_tab(shift, self.window_dims));
 		}
 
-		ActionResult::Pass
+		ControlFlow::Continue(())
 	}
 
 	#[must_use]
@@ -784,28 +768,28 @@ impl Workbench {
 	}
 
 	#[deprecated = "refactor to UFCS only to split into smaller helper functions"]
-	fn try_root_style_change(&mut self) -> ActionResult {
+	fn try_root_style_change(&mut self) -> ControlFlow<()> {
 		let tab = self.tabs.active_tab_mut();
 		let TabConstants { left_margin, horizontal_scroll, scroll, .. } = tab.consts();
 		if self.mouse.coords.x + horizontal_scroll < left_margin {
-			return ActionResult::Pass
+			return ControlFlow::Continue(())
 		}
 		if self.mouse.coords.y < HEADER_SIZE {
-			return ActionResult::Pass
+			return ControlFlow::Continue(())
 		}
 		let x = (self.mouse.coords.x + horizontal_scroll - left_margin) / 16;
 		let y = (self.mouse.coords.y - HEADER_SIZE) / 16 + scroll / 16;
 		if !(x == 1 && y == 0) {
-			return ActionResult::Pass
+			return ControlFlow::Continue(())
 		}
 		tab.root.on_style_change(&mut tab.bookmarks);
 		tab.root.recache_along_indices(Indices::EMPTY);
 		tab.refresh_scrolls();
-		ActionResult::Success(())
+		ControlFlow::Break(())
 	}
 
 	#[deprecated = "refactor to UFCS only to split into smaller helper functions"]
-	fn toggle(&mut self, expand: bool, ignore_depth: bool) -> ActionResult {
+	fn toggle(&mut self, expand: bool, ignore_depth: bool) -> ControlFlow<()> {
 		if let InteractionInformation::Content {
 			is_in_left_margin: false,
 			x,
@@ -829,15 +813,15 @@ impl Workbench {
 					open_element(&mut tab.root, &indices, mutable_indices!(tab)).alert_err(&mut self.alerts);
 				}
 			};
-			ActionResult::Success(())
+			ControlFlow::Break(())
 		} else {
-			ActionResult::Pass
+			ControlFlow::Continue(())
 		}
 	}
 
-	fn try_select_search_box(&mut self, button: MouseButton) -> ActionResult {
+	fn try_select_search_box(&mut self, button: MouseButton) -> ControlFlow<()> {
 		if !SearchBox::is_within_bounds(self.mouse.coords, self.window_dims) {
-			return ActionResult::Pass
+			return ControlFlow::Continue(())
 		}
 		self.search_box.select(self.mouse.coords.x - SEARCH_BOX_START_X, button);
 		self.replace_box.deselect();
@@ -862,12 +846,12 @@ impl Workbench {
 		} else {
 			self.search_box.last_interaction = (0, Timestamp::now());
 		}
-		ActionResult::Success(())
+		ControlFlow::Break(())
 	}
 
-	fn try_select_replace_box(&mut self, button: MouseButton) -> ActionResult {
+	fn try_select_replace_box(&mut self, button: MouseButton) -> ControlFlow<()> {
 		if !ReplaceBox::is_within_bounds(self.mouse.coords, self.window_dims) {
-			return ActionResult::Pass
+			return ControlFlow::Continue(())
 		}
 		self.replace_box.select(self.mouse.coords.x - SEARCH_BOX_START_X, button);
 		self.search_box.deselect();
@@ -892,43 +876,41 @@ impl Workbench {
 		} else {
 			self.replace_box.last_interaction = (0, Timestamp::now());
 		}
-		ActionResult::Success(())
+		ControlFlow::Break(())
 	}
 
-	fn try_select_text(&mut self, snap_to_ends: bool) -> ActionResult {
+	fn try_select_text(&mut self, snap_to_ends: bool) -> ControlFlow<()> {
 		let tab = self.tabs.active_tab_mut();
 		let consts @ TabConstants { left_margin, scroll, horizontal_scroll, .. } = tab.consts();
 
 		if self.mouse.coords.x + horizontal_scroll < left_margin {
-			return ActionResult::Pass
+			return ControlFlow::Continue(())
 		}
 		if self.mouse.coords.y < HEADER_SIZE {
-			return ActionResult::Pass
+			return ControlFlow::Continue(())
 		}
 
 		let y = (self.mouse.coords.y - HEADER_SIZE) / 16 + scroll / 16;
 		tab.set_selected_text_with_doubleclick(SelectedText::for_y(consts, &tab.root, &tab.path, y, self.mouse.coords.x, snap_to_ends, None))
 			.alert_err(&mut self.alerts)
-			.failure_on_err()?;
-		ActionResult::Success(())
+			.break_on_none()?;
+		ControlFlow::Break(())
 	}
 
-	fn bookmark_line(&mut self, require_left_margin_cursor: bool) -> ActionResult {
+	fn bookmark_line(&mut self, require_left_margin_cursor: bool) -> ControlFlow<()> {
 		if let InteractionInformation::Content { is_in_left_margin, true_line_number, y, .. } = get_interaction_information!(self)
 			&& (is_in_left_margin || !require_left_margin_cursor)
 		{
 			let bookmark = MarkedLine::new(true_line_number, y);
 			let _ = self.tabs.active_tab_mut().bookmarks.toggle(bookmark);
-			ActionResult::Success(())
+			ControlFlow::Break(())
 		} else {
-			ActionResult::Pass
+			ControlFlow::Continue(())
 		}
 	}
 
 	#[allow(clippy::collapsible_if, clippy::too_many_lines, clippy::cognitive_complexity)]
-	pub fn on_key_input(&mut self, key: KeyEvent) -> ActionResult {
-		use ActionResult::{Failure, Pass, Success};
-
+	pub fn on_key_input(&mut self, key: KeyEvent) -> ControlFlow<()> {
 		self.tabs.active_tab_mut().last_interaction = Timestamp::now();
 		let consts = self.tabs.active_tab().consts();
 		if key.state == ElementState::Pressed {
@@ -947,46 +929,45 @@ impl Workbench {
 					let result = selected_text.on_key_press(key, char, flags, consts, &mut tab.root, &mut tab.path, mutable_indices!(tab), &mut self.alerts, &mut tab.history);
 					tab.selected_text = Some(selected_text);
 					match result {
-						Success(remove) => {
+						ControlFlow::Break(remove) => {
 							if remove {
 								tab.selected_text = None;
 							}
 							tab.refresh_scrolls();
 							tab.refresh_selected_text_horizontal_scroll();
-							return Success(());
+							return ControlFlow::Break(());
 						}
-						Pass => {}
-						Failure(()) => return Failure(()),
+						ControlFlow::Continue(()) => {}
 					}
 				}
 				if key == KeyCode::KeyF && flags == flags!(Ctrl) {
 					self.search_box.select(0, MouseButton::Left);
 					self.replace_box.deselect();
-					return Success(());
+					return ControlFlow::Break(());
 				}
 				if key == KeyCode::KeyR && flags == flags!(Ctrl) {
 					self.replace_box.select(0, MouseButton::Left);
 					self.search_box.deselect();
-					return Success(());
+					return ControlFlow::Break(());
 				}
 				if key == KeyCode::Equal && flags & !flags!(Shift) == flags!(Ctrl) {
 					self.set_scale(self.scale + if flags == flags!(Ctrl + Shift) { 1.0 } else { 0.1 });
-					return Success(());
+					return ControlFlow::Break(());
 				}
 				if key == KeyCode::Minus && flags & !flags!(Shift) == flags!(Ctrl) {
 					self.set_scale(self.scale - if flags == flags!(Ctrl + Shift) { 1.0 } else { 0.1 });
-					return Success(());
+					return ControlFlow::Break(());
 				}
 				if self.action_wheel.is_some() && key == KeyCode::Escape && flags == flags!() {
 					self.action_wheel = None;
-					return Success(());
+					return ControlFlow::Break(());
 				}
 				if key == KeyCode::Escape
 					&& flags == flags!()
 					&& let Some(held_entry) = self.tabs.active_tab_mut().held_entry.take()
 				{
 					self.tabs.active_tab_mut().history.append(WorkbenchAction::DiscardHeldEntry { held_entry });
-					return Success(());
+					return ControlFlow::Break(());
 				}
 				if (key == KeyCode::Enter || key == KeyCode::NumpadEnter)
 					&& let tab = self.tabs.active_tab_mut()
@@ -998,7 +979,7 @@ impl Workbench {
 					} else {
 						self.try_select_text(true)?;
 					}
-					return Failure(());
+					return ControlFlow::Break(());
 				}
 				if key == KeyCode::F3 && flags == flags!() {
 					self.debug_menu = !self.debug_menu;
@@ -1018,50 +999,50 @@ impl Workbench {
 					};
 					if let Some(idx) = idx {
 						self.tabs.set_active_idx(idx);
-						return Success(());
+						return ControlFlow::Break(());
 					}
 				}
 				if key == KeyCode::KeyR && flags == flags!(Ctrl) {
 					let tab = self.tabs.active_tab_mut();
 					tab.refresh().alert_err(&mut self.alerts);
-					return Success(());
+					return ControlFlow::Break(());
 				}
 				if key == KeyCode::KeyF && flags == flags!(Ctrl + Shift) {
 					let tab = self.tabs.active_tab_mut();
 					tab.freehand_mode = !tab.freehand_mode;
-					return Success(());
+					return ControlFlow::Break(());
 				}
 				if key == KeyCode::KeyT && flags == flags!(Ctrl + Alt) {
 					config::set_theme(match config::get_theme() {
 						Theme::Light => Theme::Dark,
 						Theme::Dark => Theme::Light,
 					});
-					return Success(());
+					return ControlFlow::Break(());
 				}
 				if key == KeyCode::KeyN && flags & (!flags!(Shift)) == flags!(Ctrl) {
 					self.tabs.add(Tab::new_empty_tab((flags & flags!(Shift)) > 0, self.window_dims));
-					return Success(());
+					return ControlFlow::Break(());
 				}
 				if key == KeyCode::KeyO && flags == flags!(Ctrl) {
-					self.tabs.add(Tab::from_file_dialog(self.window_dims).alert_err(&mut self.alerts).failure_on_err()?);
-					return Success(());
+					self.tabs.add(Tab::from_file_dialog(self.window_dims).alert_err(&mut self.alerts).break_on_none()?);
+					return ControlFlow::Break(());
 				}
 				if key == KeyCode::KeyS && flags & (!flags!(Shift)) == flags!(Ctrl) {
 					let tab = self.tabs.active_tab_mut();
-					tab.save((flags & flags!(Shift)) > 0).alert_err(&mut self.alerts).failure_on_err()?;
+					tab.save((flags & flags!(Shift)) > 0).alert_err(&mut self.alerts).break_on_none()?;
 				}
 				if key == KeyCode::KeyW && flags == flags!(Ctrl) {
 					let active_tab_idx = self.tabs.active_tab_idx();
 					drop_on_separate_thread(self.tabs.remove(active_tab_idx));
-					return Success(());
+					return ControlFlow::Break(());
 				}
 				if key == KeyCode::KeyZ && flags == flags!(Ctrl) {
 					let tab = self.tabs.active_tab_mut();
-					tab.history.undo(&mut tab.root, mutable_indices!(tab), &mut tab.path, &mut tab.held_entry).alert_err(&mut self.alerts).failure_on_err()?;
+					tab.history.undo(&mut tab.root, mutable_indices!(tab), &mut tab.path, &mut tab.held_entry).alert_err(&mut self.alerts).break_on_none()?;
 				}
 				if key == KeyCode::KeyY && flags == flags!(Ctrl) || key == KeyCode::KeyZ && flags == flags!(Ctrl + Shift) {
 					let tab = self.tabs.active_tab_mut();
-					tab.history.redo(&mut tab.root, mutable_indices!(tab), &mut tab.path, &mut tab.held_entry).alert_err(&mut self.alerts).failure_on_err()?;
+					tab.history.redo(&mut tab.root, mutable_indices!(tab), &mut tab.path, &mut tab.held_entry).alert_err(&mut self.alerts).break_on_none()?;
 				}
 				if ((key == KeyCode::Backspace || key == KeyCode::Delete) && flags == flags!()) || (key == KeyCode::KeyX && flags == flags!(Ctrl)) {
 					self.delete(flags & flags!(Ctrl) > 0)?
@@ -1091,7 +1072,7 @@ impl Workbench {
 							if tab.root.is_region() {
 								(None, NbtElement::Chunk(NbtChunk::default()))
 							} else {
-								return Failure(())
+								return ControlFlow::Break(());
 							},
 						KeyCode::KeyV => {
 							#[derive(Debug, Error)]
@@ -1107,16 +1088,16 @@ impl Workbench {
 								Ok(NbtElement::from_str(&clipboard)?)
 							}
 
-							element_from_clipboard().alert_err(&mut self.alerts).failure_on_err()?
+							element_from_clipboard().alert_err(&mut self.alerts).break_on_none()?
 						}
-						_ => return Failure(()),
+						_ => return ControlFlow::Break(()),
 					};
 					let old_held_entry = tab.held_entry.replace(HeldEntry::from_aether(kv));
 					if let Some(held_entry) = old_held_entry {
 						tab.history.append(WorkbenchAction::DiscardHeldEntry { held_entry });
 					}
 					tab.history.append(WorkbenchAction::CreateHeldEntry);
-					return Success(());
+					return ControlFlow::Break(());
 				}
 			}
 		} else if key.state == ElementState::Released {
@@ -1125,16 +1106,16 @@ impl Workbench {
 			}
 		}
 
-		Pass
+		ControlFlow::Continue(())
 	}
 
-	pub fn on_mouse_move(&mut self, pos: PhysicalPosition<f64>) -> ActionResult {
+	pub fn on_mouse_move(&mut self, pos: PhysicalPosition<f64>) -> ControlFlow<()> {
 		self.raw_mouse = pos.into();
 		self.mouse.coords = (self.raw_mouse / self.scale as f64).into();
 		self.tabs.active_tab_mut().tick_scrollbar(self.mouse.coords);
 		self.hover_widgets();
 		self.try_extend_drag_selection();
-		ActionResult::Success(())
+		return ControlFlow::Break(());
 	}
 
 	pub fn hover_widgets(&mut self) {
@@ -1163,7 +1144,7 @@ impl Workbench {
 				};
 			}
 
-		hover_widgets![self.alerts.as_vertical_list(), self.notifications.as_vertical_list(),];
+		hover_widgets![self.alerts.as_vertical_list(), self.notifications.as_vertical_list()];
 
 		self.alerts |= new_alerts;
 		self.notifications |= new_notifications;
@@ -1200,7 +1181,8 @@ impl Workbench {
 		}
 	}
 
-	pub fn on_window_dims(&mut self, window_dims: PhysicalSize<u32>) {
+	pub fn on_window_dims(&mut self) {
+		let window_dims = cached_window_properties().window_dims;
 		let new_dims: Vec2d = window_dims.cast::<f64>().into();
 		let old_dims: Vec2d = self.raw_window_dims.cast::<f64>().into();
 		self.raw_window_dims = window_dims;
@@ -1383,9 +1365,9 @@ impl Workbench {
 		}
 
 		if self.tabs.active_tab().steal_animation_data.is_some()
-			&& let ActionResult::Success(()) = self.try_steal(false)
+			&& let ControlFlow::Break(()) = self.try_steal(false)
 		{
-			if !self.steal().passed() {
+			if self.steal().is_break() {
 				return;
 			}
 		} else {
@@ -1526,7 +1508,7 @@ impl Workbench {
 
 	fn render_tabs(&self, builder: &mut VertexBufferBuilder) {
 		let mut offset = 3;
-		builder.horizontal_scroll = self.tab_scroll;
+		builder.horizontal_scroll = self.tabs.tab_scroll();
 		for (idx, tab) in self.tabs.iter().enumerate() {
 			let remaining_width = tab.path.name().width() + 48 + 3;
 			let uv = if tab.last_close_attempt.elapsed() <= Tab::TAB_CLOSE_DOUBLE_CLICK_INTERVAL {
@@ -1664,13 +1646,14 @@ impl Workbench {
 	#[must_use]
 	fn char_from_key(&self, key: KeyCode) -> Option<char> {
 		let Modifiers { ctrl, shift, .. } = self.keyboard.modifiers();
+		let _ = shift;
 		if ctrl {
 			return None
 		}
 
 		macro_rules! gen_match {
-            ($($variant:ident => $shift:literal else $regular:literal),* $(,)?) => {
-	            Some(match key {
+            (match $key:ident $($variant:ident => $regular:literal shift $shift:literal),* $(,)?) => {
+	            Some(match $key {
 		            $(
 		            KeyCode::$variant => if shift { $shift } else { $regular },
 		            )*
@@ -1679,73 +1662,73 @@ impl Workbench {
             };
 		}
 
-		gen_match! {
-			Digit1 => '!' else '1',
-			Digit2 => '@' else '2',
-			Digit3 => '#' else '3',
-			Digit4 => '$' else '4',
-			Digit5 => '%' else '5',
-			Digit6 => '^' else '6',
-			Digit7 => '&' else '7',
-			Digit8 => '*' else '8',
-			Digit9 => '(' else '9',
-			Digit0 => ')' else '0',
-			KeyA => 'A' else 'a',
-			KeyB => 'B' else 'b',
-			KeyC => 'C' else 'c',
-			KeyD => 'D' else 'd',
-			KeyE => 'E' else 'e',
-			KeyF => 'F' else 'f',
-			KeyG => 'G' else 'g',
-			KeyH => 'H' else 'h',
-			KeyI => 'I' else 'i',
-			KeyJ => 'J' else 'j',
-			KeyK => 'K' else 'k',
-			KeyL => 'L' else 'l',
-			KeyM => 'M' else 'm',
-			KeyN => 'N' else 'n',
-			KeyO => 'O' else 'o',
-			KeyP => 'P' else 'p',
-			KeyQ => 'Q' else 'q',
-			KeyR => 'R' else 'r',
-			KeyS => 'S' else 's',
-			KeyT => 'T' else 't',
-			KeyU => 'U' else 'u',
-			KeyV => 'V' else 'v',
-			KeyW => 'W' else 'w',
-			KeyX => 'X' else 'x',
-			KeyY => 'Y' else 'y',
-			KeyZ => 'Z' else 'z',
-			Space => ' ' else ' ',
-			Numpad0 => '0' else '0',
-			Numpad1 => '1' else '1',
-			Numpad2 => '2' else '2',
-			Numpad3 => '3' else '3',
-			Numpad4 => '4' else '4',
-			Numpad5 => '5' else '5',
-			Numpad6 => '6' else '6',
-			Numpad7 => '7' else '7',
-			Numpad8 => '8' else '8',
-			Numpad9 => '9' else '9',
-			NumpadAdd => '+' else '+',
-			NumpadDivide => '/' else '/',
-			NumpadDecimal => '.' else '.',
-			NumpadComma => ',' else ',',
-			NumpadEqual => '=' else '=',
-			NumpadMultiply => '*' else '*',
-			NumpadSubtract => '-' else '-',
-			Quote => '"' else '\'',
-			Backslash => '|' else '\\',
-			Semicolon => ':' else ';',
-			Comma => '<' else ',',
-			Equal => '+' else '=',
-			Backquote => '~' else '`',
-			BracketLeft => '{' else '[',
-			Minus => '_' else '-',
-			Period => '>' else '.',
-			BracketRight => '}' else ']',
-			Slash => '?' else '/',
-			Tab => '\t' else '\t',
+		gen_match! { match key
+			Digit1 => '1' shift '!',
+			Digit2 => '2' shift '@',
+			Digit3 => '3' shift '#',
+			Digit4 => '4' shift '$',
+			Digit5 => '5' shift '%',
+			Digit6 => '6' shift '^',
+			Digit7 => '7' shift '&',
+			Digit8 => '8' shift '*',
+			Digit9 => '9' shift '(',
+			Digit0 => '0' shift ')',
+			KeyA => 'a' shift 'A',
+			KeyB => 'b' shift 'B',
+			KeyC => 'c' shift 'C',
+			KeyD => 'd' shift 'D',
+			KeyE => 'e' shift 'E',
+			KeyF => 'f' shift 'F',
+			KeyG => 'g' shift 'G',
+			KeyH => 'h' shift 'H',
+			KeyI => 'i' shift 'I',
+			KeyJ => 'j' shift 'J',
+			KeyK => 'k' shift 'K',
+			KeyL => 'l' shift 'L',
+			KeyM => 'm' shift 'M',
+			KeyN => 'n' shift 'N',
+			KeyO => 'o' shift 'O',
+			KeyP => 'p' shift 'P',
+			KeyQ => 'q' shift 'Q',
+			KeyR => 'r' shift 'R',
+			KeyS => 's' shift 'S',
+			KeyT => 't' shift 'T',
+			KeyU => 'u' shift 'U',
+			KeyV => 'v' shift 'V',
+			KeyW => 'w' shift 'W',
+			KeyX => 'x' shift 'X',
+			KeyY => 'y' shift 'Y',
+			KeyZ => 'z' shift 'Z',
+			Space => ' ' shift ' ',
+			Numpad0 => '0' shift '0',
+			Numpad1 => '1' shift '1',
+			Numpad2 => '2' shift '2',
+			Numpad3 => '3' shift '3',
+			Numpad4 => '4' shift '4',
+			Numpad5 => '5' shift '5',
+			Numpad6 => '6' shift '6',
+			Numpad7 => '7' shift '7',
+			Numpad8 => '8' shift '8',
+			Numpad9 => '9' shift '9',
+			NumpadAdd => '+' shift '+',
+			NumpadDivide => '/' shift '/',
+			NumpadDecimal => '.' shift '.',
+			NumpadComma => ',' shift ',',
+			NumpadEqual => '=' shift '=',
+			NumpadMultiply => '*' shift '*',
+			NumpadSubtract => '-' shift '-',
+			Quote => '\'' shift '"',
+			Backslash => '\\' shift '|',
+			Semicolon => ';' shift ':',
+			Comma => ',' shift '<',
+			Equal => '=' shift '+',
+			Backquote => '`' shift '~',
+			BracketLeft => '[' shift '{',
+			Minus => '-' shift '_',
+			Period => '.' shift '>',
+			BracketRight => ']' shift '}',
+			Slash => '/' shift '?',
+			Tab => '\t' shift '\t',
 		}
 	}
 }
@@ -1893,4 +1876,17 @@ pub enum DropResult {
 	Dropped,
 	Missed,
 	Failed,
+}
+
+pub trait BreakOnNone<T> {
+	fn break_on_none(self) -> ControlFlow<(), T> where Self: Sized;
+}
+
+impl<T> BreakOnNone<T> for Option<T> {
+	fn break_on_none(self) -> ControlFlow<(), T> where Self: Sized {
+		match self {
+			None => ControlFlow::Break(()),
+			Some(x) => ControlFlow::Continue(x),
+		}
+	}
 }

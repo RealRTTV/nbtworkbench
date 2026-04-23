@@ -1,7 +1,7 @@
+use std::ops::ControlFlow;
 use winit::dpi::PhysicalSize;
 use winit::event::MouseButton;
 
-use crate::action_result::ActionResult;
 use crate::config;
 use crate::render::assets::{BASE_Z, HOVERED_WIDGET_UV, SORT_COMPOUND_BY_NAME_UV, SORT_COMPOUND_BY_NOTHING_UV, SORT_COMPOUND_BY_TYPE_UV};
 use crate::render::color::TextColor;
@@ -19,11 +19,11 @@ impl Widget for SortAlgorithmButton {
 
 	fn dimensions(&self, _containment_dims: PhysicalSize<u32>) -> PhysicalSize<u32> { PhysicalSize::new(16, 16) }
 	fn is_valid_mouse_button(&self, button: MouseButton, _pos: Vec2u, _dims: PhysicalSize<u32>) -> bool { matches!(button, MouseButton::Left | MouseButton::Right) }
-	fn on_mouse_down(&mut self, button: MouseButton, _pos: Vec2u, _dims: PhysicalSize<u32>, ctx: &mut WidgetContextMut) -> ActionResult {
+	fn on_mouse_down(&mut self, button: MouseButton, _pos: Vec2u, _dims: PhysicalSize<u32>, ctx: &mut WidgetContextMut) -> ControlFlow<()> {
 		let sort_algorithm = config::get_sort_algorithm();
 		let reverse = matches!(button, MouseButton::Right) ^ ctx.shift;
 		config::set_sort_algorithm(if reverse { sort_algorithm.rev_cycle() } else { sort_algorithm.cycle() });
-		ActionResult::Success(())
+		ControlFlow::Break(())
 	}
 
 	fn render_at(&self, pos: Vec2u, dims: PhysicalSize<u32>, builder: &mut VertexBufferBuilder, mouse: &MouseManager, _ctx: &WidgetContext) {

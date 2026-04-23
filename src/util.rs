@@ -89,12 +89,12 @@ pub fn create_regex(mut str: String, case_sensitive: bool) -> Option<Regex> {
 		let mut flags = 0_u8;
 		while let Some(char) = str.pop() {
 			match char {
-				'i' => flags |= 0b000001,
-				'g' => flags |= 0b000010,
-				'm' => flags |= 0b000100,
-				's' => flags |= 0b001000,
-				'u' => flags |= 0b010000,
-				'y' => flags |= 0b100000,
+				'i' => flags |= 1_u8 << 0,
+				'g' => flags |= 1_u8 << 1,
+				'm' => flags |= 1_u8 << 2,
+				's' => flags |= 1_u8 << 3,
+				'u' => flags |= 1_u8 << 4,
+				'y' => flags |= 1_u8 << 5,
 				'/' => break,
 				_ => return None,
 			}
@@ -628,9 +628,8 @@ impl StrExt for str {
 							char.encode_utf8(unsafe { core::slice::from_raw_parts_mut(ptr.add(buf_len), len) });
 							buf_len += len;
 							continue;
-						} else {
-							return Err(self.len());
 						}
+						return Err(self.len());
 					}
 				} else if byte == b'u' {
 					if backslash {
@@ -646,9 +645,8 @@ impl StrExt for str {
 							char.encode_utf8(unsafe { core::slice::from_raw_parts_mut(ptr.add(buf_len), len) });
 							buf_len += len;
 							continue;
-						} else {
-							return Err(self.len());
 						}
+						return Err(self.len());
 					}
 				} else if byte == b'U' {
 					if backslash {
@@ -668,9 +666,8 @@ impl StrExt for str {
 							char.encode_utf8(unsafe { core::slice::from_raw_parts_mut(ptr.add(buf_len), len) });
 							buf_len += len;
 							continue;
-						} else {
-							return Err(self.len());
 						}
+						return Err(self.len());
 					}
 				} else if backslash {
 					return Err(self.len());
@@ -813,9 +810,9 @@ pub fn invert_mapping(mapping: &[usize]) -> Result<Box<[usize]>, InvertMappingEr
 		let reference = new_mapping.get_mut(old_idx).ok_or_else(|| InvertMappingError::IndexOutOfBounds { idx: old_idx, len: mapping.len() })?;
 		if reference.is_some() {
 			return Err(InvertMappingError::DuplicateNumber)
-		} else {
-			*reference = Some(new_idx);
 		}
+		
+		*reference = Some(new_idx);
 	}
 	new_mapping.into_iter().collect::<Option<Box<[usize]>>>().ok_or_else(|| InvertMappingError::MissingNumber)
 }

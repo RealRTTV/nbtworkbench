@@ -1,7 +1,7 @@
+use std::ops::ControlFlow;
 use winit::dpi::PhysicalSize;
 use winit::event::MouseButton;
 
-use crate::action_result::ActionResult;
 use crate::render::vertex_buffer_builder::VertexBufferBuilder;
 use crate::render::widget::{Widget, WidgetAlignment, WidgetContext, WidgetContextMut};
 use crate::util::{AABB, Vec2u};
@@ -54,24 +54,24 @@ impl<'a> Widget for VerticalList<'a> {
 		false
 	}
 
-	fn on_mouse_up(&mut self, button: MouseButton, pos: Vec2u, dims: PhysicalSize<u32>, ctx: &mut WidgetContextMut) -> ActionResult {
+	fn on_mouse_up(&mut self, button: MouseButton, pos: Vec2u, dims: PhysicalSize<u32>, ctx: &mut WidgetContextMut) -> ControlFlow<()> {
 		let mut y = 0;
 		for (aabb, widget) in self.widgets.iter_mut().map(|w| (aabb_of(&**w, &mut y, dims), w)) {
 			if let Some(pos) = pos.relative_to(aabb) {
 				widget.on_mouse_up(button, pos, aabb.dims(), ctx)?;
 			}
 		}
-		ActionResult::Pass
+		ControlFlow::Continue(())
 	}
 
-	fn on_mouse_down(&mut self, button: MouseButton, pos: Vec2u, dims: PhysicalSize<u32>, ctx: &mut WidgetContextMut) -> ActionResult {
+	fn on_mouse_down(&mut self, button: MouseButton, pos: Vec2u, dims: PhysicalSize<u32>, ctx: &mut WidgetContextMut) -> ControlFlow<()> {
 		let mut y = 0;
 		for (aabb, widget) in self.widgets.iter_mut().map(|w| (aabb_of(&**w, &mut y, dims), w)) {
 			if let Some(pos) = pos.relative_to(aabb) {
 				widget.on_mouse_down(button, pos, aabb.dims(), ctx)?;
 			}
 		}
-		ActionResult::Pass
+		ControlFlow::Continue(())
 	}
 
 	fn is_currently_hovering(&self) -> bool { self.widgets.iter().any(|w| w.is_currently_hovering()) }

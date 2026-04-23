@@ -327,6 +327,7 @@ impl<'w> TreeRenderContext<'w> {
 		self.line_number += 1;
 	}
 
+	#[allow(clippy::unreadable_literal, reason = "hex codes")]
 	pub fn render_line_numbers(&self, builder: &mut VertexBufferBuilder, mut bookmarks: &MarkedLineSlice) {
 		use std::fmt::Write as _;
 
@@ -375,6 +376,7 @@ impl<'w> TreeRenderContext<'w> {
 		}
 	}
 
+	#[allow(clippy::unreadable_literal, reason = "hex codes")]
 	pub fn render_grid_line_numbers(&self, builder: &mut VertexBufferBuilder, mut bookmarks: &MarkedLineSlice) {
 		use std::fmt::Write as _;
 

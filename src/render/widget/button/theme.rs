@@ -1,7 +1,7 @@
+use std::ops::ControlFlow;
 use winit::dpi::PhysicalSize;
 use winit::event::MouseButton;
 
-use crate::action_result::ActionResult;
 use crate::config;
 use crate::render::assets::{DIM_LIGHTBULB_UV, LIGHTBULB_UV};
 use crate::render::color::TextColor;
@@ -21,12 +21,12 @@ impl Widget for ThemeButton {
 
 	fn is_valid_mouse_button(&self, button: MouseButton, _pos: Vec2u, _dims: PhysicalSize<u32>) -> bool { matches!(button, MouseButton::Left | MouseButton::Right) }
 
-	fn on_mouse_down(&mut self, _button: MouseButton, _pos: Vec2u, _dims: PhysicalSize<u32>, _ctx: &mut WidgetContextMut) -> ActionResult {
+	fn on_mouse_down(&mut self, _button: MouseButton, _pos: Vec2u, _dims: PhysicalSize<u32>, _ctx: &mut WidgetContextMut) -> ControlFlow<()> {
 		config::set_theme(match config::get_theme() {
 			Theme::Light => Theme::Dark,
 			Theme::Dark => Theme::Light,
 		});
-		ActionResult::Success(())
+		ControlFlow::Break(())
 	}
 
 	fn render_at(&self, pos: Vec2u, dims: PhysicalSize<u32>, builder: &mut VertexBufferBuilder, mouse: &MouseManager, _ctx: &WidgetContext) {

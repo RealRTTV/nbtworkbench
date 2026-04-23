@@ -4,7 +4,7 @@ use std::hint::likely;
 use std::io::Read;
 use std::ops::{Deref, DerefMut};
 use std::slice::{Iter, IterMut};
-
+use itertools::Either;
 use zune_inflate::{DeflateDecoder, DeflateOptions};
 
 use crate::elements::compound::{CompoundEntry, NbtCompound};
@@ -132,52 +132,58 @@ impl NbtElementVariant for NbtChunk {
 
 	fn from_bytes<'a, D: Decoder<'a>>(decoder: &mut D, idx: usize) -> NbtParseResult<Self>
 	where Self: Sized {
-		let bytes = decoder.rest();
-		let (offsets, bytes) = from_opt(bytes.split_first_chunk::<4096>(), "header wasn't big enough")?;
-		let (last_modifieds, bytes) = from_opt(bytes.split_first_chunk::<4096>(), "header wasn't big enough")?;
-		let last_modified = u32::from_be_bytes(unsafe { last_modifieds[idx * 4..=idx * 4 + 3].as_ptr().cast::<[u8; 4]>().read() });
-		let offset = u32::from_be_bytes(unsafe { offsets[idx * 4..=idx * 4 + 3].as_ptr().cast::<[u8; 4]>().read() });
-		if offset < 512 {
-			return ok(NbtChunk::unloaded_from_pos(idx));
-		}
-		let pos = ((idx % 16) as u8, (idx / 16) as u8);
-		let len = (offset as usize & 0xFF) * 4096;
-		// value does include header so we must offset against that
-		let offset = ((offset >> 8) - 2) as usize * 4096;
-		if bytes.len() < offset + len {
-			return err("Offset goes outside bytes");
-		}
-		let data = &bytes[offset..offset + len];
-
-		if let &[a, b, c, d, compression, ref data @ ..] = data {
-			let chunk_len = from_opt((u32::from_be_bytes([a, b, c, d]) as usize).checked_sub(1), "Chunk was inside header.")?;
-			if data.len() < chunk_len {
-				return err("Offset is invalid");
+		fn get_bytes<'a, 'b>(decoder: &'a mut impl Decoder<'b>, idx: usize) -> NbtParseResult<Either<(&'a [u8], u32), NbtChunk>> {
+			let bytes = decoder.rest();
+			let (offsets, bytes) = from_opt(bytes.split_first_chunk::<4096>(), "header wasn't big enough")?;
+			let (last_modifieds, bytes) = from_opt(bytes.split_first_chunk::<4096>(), "header wasn't big enough")?;
+			let last_modified = u32::from_be_bytes(unsafe { last_modifieds[idx * 4..=idx * 4 + 3].as_ptr().cast::<[u8; 4]>().read() });
+			let offset = u32::from_be_bytes(unsafe { offsets[idx * 4..=idx * 4 + 3].as_ptr().cast::<[u8; 4]>().read() });
+			if offset < 512 {
+				return ok(Either::Right(NbtChunk::unloaded_from_pos(idx)));
 			}
-			let data = &data[..chunk_len];
-			let (compression, element) = match compression {
-				1 => (
-					ChunkFileFormat::Gzip,
-					NbtElement::from_be_file(&from_result(DeflateDecoder::new_with_options(data, DeflateOptions::default().set_confirm_checksum(false)).decode_gzip())?)?,
-				),
-				2 => (
-					ChunkFileFormat::Zlib,
-					NbtElement::from_be_file(&from_result(DeflateDecoder::new_with_options(data, DeflateOptions::default().set_confirm_checksum(false)).decode_zlib())?)?,
-				),
-				3 => (ChunkFileFormat::Nbt, NbtElement::from_be_file(data)?),
-				4 => (
-					ChunkFileFormat::Lz4,
-					NbtElement::from_be_file(&{
-						let mut vec = vec![];
-						from_result(lz4_java_wrc::Lz4BlockInput::new(data).read_to_end(&mut vec))?;
-						vec
-					})?,
-				),
-				_ => return err("Unknown compression format"),
-			};
-			return ok(NbtChunk::new(from_opt(element.into_compound(), "Chunk was not of type compound")?, pos, compression, last_modified));
+			let pos = ((idx % 16) as u8, (idx / 16) as u8);
+			let len = (offset as usize & 0xFF) * 4096;
+			// value does include header so we must offset against that
+			let offset = ((offset >> 8) - 2) as usize * 4096;
+			if bytes.len() < offset + len {
+				return err("Offset goes outside bytes");
+			}
+			ok(Either::Left((&bytes[offset..offset + len], last_modified)))
 		}
-		err("Invalid chunk data")
+
+		fn deserialize_chunk(data: &[u8], compression: ChunkFileFormat) -> NbtParseResult<NbtElement> {
+			ok(match compression {
+				ChunkFileFormat::Gzip => NbtElement::from_be_file(&from_result(DeflateDecoder::new_with_options(data, DeflateOptions::default().set_confirm_checksum(false)).decode_gzip())?)?,
+				ChunkFileFormat::Zlib => NbtElement::from_be_file(&from_result(DeflateDecoder::new_with_options(data, DeflateOptions::default().set_confirm_checksum(false)).decode_zlib())?)?,
+				ChunkFileFormat::Nbt => NbtElement::from_be_file(data)?,
+				ChunkFileFormat::Lz4 => NbtElement::from_be_file(&{
+					let mut vec = vec![];
+					from_result(lz4_java_wrc::Lz4BlockInput::new(data).read_to_end(&mut vec))?;
+					vec
+				})?,
+			})
+		}
+
+		let (data, last_modified) = match get_bytes(decoder, idx)? {
+			Either::Left((bytes, last_modified)) => (bytes, last_modified),
+			Either::Right(chunk) => return ok(chunk),
+		};
+
+		let &[a, b, c, d, compression, ref data @ ..] = data else { return err("Invalid chunk data") };
+		let chunk_len = from_opt((u32::from_be_bytes([a, b, c, d]) as usize).checked_sub(1), "Chunk was inside header.")?;
+		if data.len() < chunk_len {
+			return err("Offset is invalid");
+		}
+		let data = &data[..chunk_len];
+		let compression = match compression {
+			1 => ChunkFileFormat::Gzip,
+			2 => ChunkFileFormat::Zlib,
+			3 => ChunkFileFormat::Nbt,
+			4 => ChunkFileFormat::Lz4,
+			_ => return err("Unknown compression format"),
+		};
+		let element = deserialize_chunk(data, compression)?;
+		ok(NbtChunk::new(from_opt(element.into_compound(), "Chunk was not of type compound")?, pos, compression, last_modified))
 	}
 
 	fn to_be_bytes(&self, writer: &mut UncheckedBufWriter) {

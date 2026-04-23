@@ -90,7 +90,7 @@ macro_rules! array {
 
 				pub type ChildType = $element;
 
-				fn transmute(element: &$crate::elements::element::NbtElement) -> <Self::ChildType as $crate::elements::PrimitiveNbtElementVariant>::InnerType { unsafe { $get_inner_unchecked(element).value } }
+				fn transmute(element: &$crate::elements::element::NbtElement) -> <$element as $crate::elements::PrimitiveNbtElementVariant>::InnerType { unsafe { $get_inner_unchecked(element).value } }
 			}
 
 			impl NbtElementVariant for $name {
@@ -141,7 +141,7 @@ macro_rules! array {
 							))
 						});
 						match vec.push_within_capacity(element) {
-							Ok(()) => {}
+							Ok(_) => {}
 							Err(_) => return err("Vec was longer than originally stated"),
 						}
 					}

@@ -91,10 +91,7 @@ impl WorkbenchAction {
 			Self::Add { indices } => remove_element(root, indices, mi)?.into_action(),
 			Self::Remove { kv, indices } => add_element(root, kv, indices, mi)?.into_action(),
 			Self::Replace { indices, kv: value } => replace_element(root, value, indices, mi)?.into_action(),
-			Self::Rename { indices, key, value } => rename_element(root, indices, key, value, path)
-				.map_failure(UndoWorkbenchActionError::from)
-				.flatten_pass(Err(UndoWorkbenchActionError::Passed))?
-				.into_action(),
+			Self::Rename { indices, key, value } => rename_element(root, indices, key, value, path)?.ok_or(UndoWorkbenchActionError::Passed)?.into_action(),
 			Self::Swap { parent, a, b } => swap_element_same_depth(root, parent, a, b, mi)?.into_action(),
 			Self::Reorder { indices, mapping } => reorder_element(root, indices, mapping, mi)?.into_action(),
 			Self::AddFromHeldEntry { indices, mut indices_history, old_kv } => {

@@ -9,10 +9,10 @@ pub mod selected_text;
 pub mod text;
 pub mod vertical_list;
 
+use std::ops::ControlFlow;
 use winit::dpi::PhysicalSize;
 use winit::event::{ElementState, MouseButton};
 
-use crate::action_result::ActionResult;
 use crate::render::vertex_buffer_builder::VertexBufferBuilder;
 use crate::render::widget::alert::manager::AlertManager;
 use crate::render::widget::notification::manager::NotificationManager;
@@ -79,9 +79,9 @@ pub trait Widget {
 	#[allow(unused_variables)]
 	fn is_valid_mouse_button(&self, button: MouseButton, pos: Vec2u, dims: PhysicalSize<u32>) -> bool { false }
 
-	fn on_mouse_input(&mut self, state: ElementState, button: MouseButton, pos: Vec2u, dims: PhysicalSize<u32>, ctx: &mut WidgetContextMut) -> ActionResult {
+	fn on_mouse_input(&mut self, state: ElementState, button: MouseButton, pos: Vec2u, dims: PhysicalSize<u32>, ctx: &mut WidgetContextMut) -> ControlFlow<()> {
 		if !self.is_valid_mouse_button(button, pos, dims) {
-			return ActionResult::Pass
+			return ControlFlow::Continue(())
 		}
 
 		match state {
@@ -91,10 +91,10 @@ pub trait Widget {
 	}
 
 	#[allow(unused_variables)]
-	fn on_mouse_up(&mut self, button: MouseButton, pos: Vec2u, dims: PhysicalSize<u32>, ctx: &mut WidgetContextMut) -> ActionResult { ActionResult::Pass }
+	fn on_mouse_up(&mut self, button: MouseButton, pos: Vec2u, dims: PhysicalSize<u32>, ctx: &mut WidgetContextMut) -> ControlFlow<()> { ControlFlow::Continue(()) }
 
 	#[allow(unused_variables)]
-	fn on_mouse_down(&mut self, button: MouseButton, pos: Vec2u, dims: PhysicalSize<u32>, ctx: &mut WidgetContextMut) -> ActionResult { ActionResult::Pass }
+	fn on_mouse_down(&mut self, button: MouseButton, pos: Vec2u, dims: PhysicalSize<u32>, ctx: &mut WidgetContextMut) -> ControlFlow<()> { ControlFlow::Continue(()) }
 
 	#[must_use]
 	fn is_currently_hovering(&self) -> bool { false }

@@ -1,34 +1,24 @@
-#![allow(semicolon_in_expressions_from_macros, internal_features, incomplete_features)]
-#![deny(unused_must_use)]
+#![allow(semicolon_in_expressions_from_macros, internal_features, incomplete_features, clippy::cast_lossless, clippy::cast_possible_truncation, clippy::cast_precision_loss, clippy::cast_sign_loss, clippy::cast_possible_wrap)]
 #![warn(clippy::pedantic)]
+#![deny(clippy::too_many_lines, unused_must_use)]
 #![feature(
-	allocator_api,
-	assert_matches,
-	associated_type_defaults,
-	cold_path,
-	duration_millis_float,
-	if_let_guard,
-	inherent_associated_types,
-	let_chains,
-	likely_unlikely,
-	maybe_uninit_array_assume_init,
-	never_type,
-	panic_update_hook,
-	ptr_as_ref_unchecked,
-	try_trait_v2,
-	try_with_capacity,
-	vec_push_within_capacity,
-	array_chunks,
-	box_patterns,
 	iter_array_chunks,
+	duration_millis_float,
+	never_type,
+	associated_type_defaults,
+	box_patterns,
+	allocator_api,
+	likely_unlikely,
+	try_with_capacity,
 	iter_next_chunk,
-	stmt_expr_attributes
+	inherent_associated_types,
+	vec_push_within_capacity,
+	maybe_uninit_array_assume_init,
 )]
 #![windows_subsystem = "windows"]
 
 extern crate core;
 
-pub mod action_result;
 #[cfg(not(target_arch = "wasm32"))] pub mod cli;
 pub mod config;
 pub mod elements;
@@ -42,30 +32,14 @@ pub mod workbench;
 
 #[macro_export]
 macro_rules! flags {
-	() => {
-		0b000_u8
-	};
-	(Ctrl) => {
-		0b001_u8
-	};
-	(Shift) => {
-		0b010_u8
-	};
-	(Ctrl + Shift) => {
-		0b011_u8
-	};
-	(Alt) => {
-		0b100_u8
-	};
-	(Ctrl + Alt) => {
-		0b101_u8
-	};
-	(Shift + Alt) => {
-		0b110_u8
-	};
-	(Ctrl + Shift + Alt) => {
-		0b111_u8
-	};
+	() => { 0b000_u8 };
+	(Ctrl) => { 0b001_u8 };
+	(Shift) => { 0b010_u8 };
+	(Ctrl + Shift) => { 0b011_u8 };
+	(Alt) => { 0b100_u8 };
+	(Ctrl + Alt) => { 0b101_u8 };
+	(Shift + Alt) => { 0b110_u8 };
+	(Ctrl + Shift + Alt) => { 0b111_u8 };
 }
 
 #[macro_export]
@@ -110,8 +84,9 @@ macro_rules! mutable_indices {
 }
 
 pub static mut WORKBENCH: workbench::Workbench = unsafe { workbench::Workbench::uninit() };
-pub fn window_properties() -> parking_lot::MutexGuard<'static, render::window::WindowProperties> {
-	static WINDOW_PROPERTIES: parking_lot::Mutex<render::window::WindowProperties> = parking_lot::Mutex::new(render::window::WindowProperties::Fake);
+
+pub fn mutable_window_properties() -> parking_lot::MutexGuard<'static, render::window::MutableWindowProperties> {
+	static WINDOW_PROPERTIES: parking_lot::Mutex<render::window::MutableWindowProperties> = parking_lot::Mutex::new(render::window::MutableWindowProperties::Fake);
 
 	WINDOW_PROPERTIES.lock()
 }
@@ -124,7 +99,6 @@ pub fn window_properties() -> parking_lot::MutexGuard<'static, render::window::W
 /// * rename `line_number` and `true_line_number` to `y` and `line_number` respectively
 /// * add high-quality Safety rustdoc to **all** created unsafe fns
 /// * if you want to optimize something, optimize [`NbtElement::recache`]
-/// * add HStack and VStack equivelents for rendering
 /// * remove all magic constants
 /// * refactor rendering to use `u32` instead of `usize`
 /// * minimize usage of `anyhow`

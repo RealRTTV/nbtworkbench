@@ -41,6 +41,7 @@ pub struct TraversalInformation<'a> {
 }
 
 impl<'a> TraversalInformation<'a> {
+	#[allow(clippy::redundant_else, reason = "stylistic")]
 	pub fn from(mut element: &'a NbtElement, mut y: usize, mut x: Option<usize>) -> Result<Self, TraversalError> {
 		let mut indices = OwnedIndices::new();
 		let mut depth = 0;
@@ -121,6 +122,7 @@ pub struct TraversalInformationMut<'a> {
 }
 
 impl<'a> TraversalInformationMut<'a> {
+	#[allow(clippy::redundant_else, reason = "stylistic")]
 	pub fn from(mut element: &'a mut NbtElement, mut y: usize, mut x: Option<usize>) -> Result<Self, TraversalError> {
 		let mut indices = OwnedIndices::new();
 		let mut depth = 0;

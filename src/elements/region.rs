@@ -378,15 +378,13 @@ impl ComplexNbtElementVariant for NbtRegion {
 				}
 			});
 		}
-		if let Some(rem) = iter.into_remainder() {
-			scope.spawn(|| {
-				for element in rem {
-					if element.is_open() {
-						unsafe { element.shut(scope) };
-					}
+		scope.spawn(|| {
+			for element in iter.into_remainder() {
+				if element.is_open() {
+					unsafe { element.shut(scope) };
 				}
-			});
-		}
+			}
+		});
 	}
 
 	unsafe fn expand<'a, 'b>(&'b mut self, scope: &'a Scope<'a, 'b>) {
@@ -400,13 +398,11 @@ impl ComplexNbtElementVariant for NbtRegion {
 					}
 				});
 			}
-			if let Some(rem) = iter.into_remainder() {
-				scope.spawn(|| {
-					for element in rem {
-						unsafe { element.expand(scope) };
-					}
-				});
-			}
+			scope.spawn(|| {
+				for element in iter.into_remainder() {
+					unsafe { element.expand(scope) };
+				}
+			});
 		}
 	}
 

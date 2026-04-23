@@ -45,7 +45,7 @@ use crate::tree::navigate::NavigationInformation;
 use crate::util::{AABB, StrExt, Timestamp, Vec2u, drop_on_separate_thread};
 use crate::workbench::marked_line::MarkedLines;
 use crate::workbench::{FileUpdateSubscription, FileUpdateSubscriptionError, FileUpdateSubscriptionType, HeldEntry, NbtHexRawRepresentationError, SortAlgorithm};
-use crate::{config, mutable_indices, window_properties};
+use crate::{config, mutable_indices, mutable_window_properties};
 
 pub mod manager;
 
@@ -169,9 +169,8 @@ impl Tab {
 			self.selected_text
 				.iter_mut()
 				.map(|text| text.save(&mut self.root, &mut self.path))
-				.map(|res| res.map_success(Some).flatten_pass(Ok(None)))
 				.flat_map(|res| match res {
-					Ok(iter) => Either::Left(iter.into_iter().map(|x| Ok(x))),
+					Ok(iter) => Either::Left(iter.into_iter().map(Ok)),
 					Err(e) => Either::Right(std::iter::once(Err(e))),
 				})
 				.collect::<Result<Vec<WorkbenchAction>, SaveSelectedTextError>>()?,
@@ -332,6 +331,10 @@ impl Tab {
 				(16, 16),
 			);
 		}
+	}
+	
+	pub fn width(&self) -> usize {
+		self.path.name().width() + 32 + 6 + 6
 	}
 
 	pub fn draw_icon(&self, builder: &mut VertexBufferBuilder, pos: impl Into<Vec2u>, z: ZOffset) {
@@ -609,7 +612,7 @@ impl Tab {
 			.add_filters(Tab::FILE_TYPE_FILTERS.iter().copied().map(|(a, b)| (a.to_owned(), b.iter().map(|x| x.to_string()).collect::<Vec<_>>())))
 			.open_single_file();
 		let dialog_result = dialog.show();
-		window_properties().ignore_events_for(Duration::from_millis(50));
+		mutable_window_properties().ignore_events_for(Duration::from_millis(50));
 		let path = dialog_result?.ok_or(TabFromFileDialogError::NoSelection)?;
 		let bytes = std::fs::read(&path)?;
 		let tab = Self::new_from_path(&path, &bytes, window_dims)?;

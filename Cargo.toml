@@ -50,27 +50,27 @@ winres = "0.1.12"
 
 [dependencies]
 zune-inflate = { version = "0.2.54", features = ["gzip", "zlib"] }
-flate2 = "1.1.1"
-winit = "0.30.10"
-wgpu = { version = "25.0.0", default-features = false, features = ["webgl", "wgsl", "dx12", "metal", "vulkan"] }
+flate2 = "1.1.9"
+winit = "~0.30"
+wgpu = { version = "~25.0", default-features = false, features = ["webgl", "wgsl", "dx12", "metal", "vulkan"] }
 fxhash = "0.2.1"
-hashbrown = { version = "0.15.3", features = ["inline-more", "nightly"], default-features = false }
-notify = "8.0.0"
-uuid = { version = "1.16.0", features = ["v4"] }
+hashbrown = { version = "0.17.0", features = ["inline-more", "nightly"], default-features = false }
+notify = "~8"
+uuid = { version = "1.23.1", features = ["v4"] }
 compact_str = "0.9.0"
 wgsl-inline = { version = "0.2.1", features = ["minify"] }
 static_assertions = "1.1.0"
-anyhow = "1.0.98"
+anyhow = "1.0.102"
 lz4-java-wrc = "0.2.0"
-regex = "1.11.1"
+regex = "1.12.3"
 glob = "0.3.2"
-zune-png = { version = "0.4.10", features = [] }
-parking_lot = "0.12.3"
+zune-png = { version = "0.5.2", features = [] }
+parking_lot = "0.12.5"
 lazy_static = "1.5.0"
 itertools = "0.14.0"
-toml = "0.8.22"
-serde = { version = "1.0.219", features = ["serde_derive"] }
-thiserror = "2.0.12"
+toml = "1.1.2+spec-1.1.0"
+serde = { version = "1.0.228", features = ["serde_derive"] }
+thiserror = "2.0.18"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 winapi = { version = "0.3.9", features = ["wincon"] }
@@ -78,7 +78,7 @@ winapi = { version = "0.3.9", features = ["wincon"] }
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 cli-clipboard = "0.4.0"
 pollster = "0.4.0"
-native-dialog = "0.9.0"
+native-dialog = "0.9.6"
 dirs = "6.0.0"
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]

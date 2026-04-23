@@ -2,6 +2,7 @@ use std::mem::ManuallyDrop;
 
 pub use ZOffset::*;
 use lazy_static::lazy_static;
+use zune_png::zune_core::bytestream::ZCursor;
 use zune_png::zune_core::options::DecoderOptions;
 
 use crate::render::window::Theme;
@@ -190,8 +191,8 @@ pub enum ZOffset {
 }
 
 lazy_static! {
-	static ref DARK_ATLAS_CELL: Vec<u8> = zune_png::PngDecoder::new_with_options(DARK_ATLAS_ENCODED, DecoderOptions::new_fast().png_set_confirm_crc(false)).decode_raw().unwrap();
-	static ref LIGHT_ATLAS_CELL: Vec<u8> = zune_png::PngDecoder::new_with_options(LIGHT_ATLAS_ENCODED, DecoderOptions::new_fast().png_set_confirm_crc(false)).decode_raw().unwrap();
+	static ref DARK_ATLAS_CELL: Vec<u8> = zune_png::PngDecoder::new_with_options(ZCursor::new(DARK_ATLAS_ENCODED), DecoderOptions::new_fast().png_set_confirm_crc(false)).decode_raw().unwrap();
+	static ref LIGHT_ATLAS_CELL: Vec<u8> = zune_png::PngDecoder::new_with_options(ZCursor::new(LIGHT_ATLAS_ENCODED), DecoderOptions::new_fast().png_set_confirm_crc(false)).decode_raw().unwrap();
 }
 
 pub fn atlas(theme: Theme) -> &'static [u8] {

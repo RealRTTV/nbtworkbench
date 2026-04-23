@@ -1,0 +1,5 @@
+[rules.magic-numbers]
+level = "warn"
+
+[rules.line-length]
+level = "allow"

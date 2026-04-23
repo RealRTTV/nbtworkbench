@@ -1,12 +1,11 @@
 use std::fmt::Write;
-use std::ops::{Deref, DerefMut, Range};
+use std::ops::{ControlFlow, Deref, DerefMut, Range};
 
 use compact_str::ToCompactString;
 use thiserror::Error;
 use uuid::Uuid;
 use winit::keyboard::KeyCode;
 
-use crate::action_result::{ActionResult, IntoFailingActionResult, PassOrFail};
 use crate::elements::element::NbtElement;
 use crate::flags;
 use crate::history::WorkbenchAction;
@@ -94,6 +93,8 @@ pub struct SelectedTextAdditional {
 
 // required so chunk coordinates function with the hardcoded spacing offset
 static_assertions::const_assert_eq!(VertexBufferBuilder::CHAR_WIDTH[b':' as usize], VertexBufferBuilder::CHAR_WIDTH[b',' as usize]);
+
+type ShouldRemove = bool;
 
 impl SelectedText {
 	pub const PREFIXING_SPACE_WIDTH: usize = 4;
@@ -196,7 +197,7 @@ impl SelectedText {
 		mi: &'m1 mut MutableIndices<'m2>,
 		alerts: &mut AlertManager,
 		history: &mut HistoryMananger,
-	) -> ActionResult<bool> {
+	) -> ControlFlow<ShouldRemove> {
 		fn on_key_press0<'m1, 'm2: 'm1>(
 			this: &mut SelectedText,
 			key: KeyCode,
@@ -206,74 +207,66 @@ impl SelectedText {
 			root: &mut NbtElement,
 			path: &mut FilePath,
 			mi: &'m1 mut MutableIndices<'m2>,
-		) -> ActionResult<SelectedTextKeyResult, SelectedTextInputError> {
+		) -> ControlFlow<Result<SelectedTextKeyResult, SelectedTextInputError>> {
 			if key == KeyCode::ArrowUp {
 				if flags & !flags!(Ctrl) == 0 {
-					return this
+					return ControlFlow::Break(this
 						.move_up(consts, flags == flags!(Ctrl), root, path)
 						.map(SelectedTextKeyResult::Action)
-						.map_err(SelectedTextInputError::from)
-						.pass_or_fail(SelectedTextInputError::is_generally_ignored);
+						.map_err(SelectedTextInputError::from))
 				} else if flags == flags!(Ctrl + Shift) {
-					return this
+					return ControlFlow::Break(this
 						.shift_up(consts, root, mi)
 						.map(Some)
 						.map(SelectedTextKeyResult::Action)
-						.map_err(SelectedTextInputError::from)
-						.pass_or_fail(SelectedTextInputError::is_generally_ignored);
+						.map_err(SelectedTextInputError::from));
 				}
 			}
 
 			if key == KeyCode::ArrowDown {
 				if flags & !flags!(Ctrl) == 0 {
-					return this
+					return ControlFlow::Break(this
 						.move_down(consts, flags == flags!(Ctrl), root, path)
 						.map(SelectedTextKeyResult::Action)
-						.map_err(SelectedTextInputError::from)
-						.pass_or_fail(SelectedTextInputError::is_generally_ignored)
+						.map_err(SelectedTextInputError::from))
 				} else if flags == flags!(Ctrl + Shift) {
-					return this
+					return ControlFlow::Break(this
 						.shift_down(consts, root, mi)
 						.map(Some)
 						.map(SelectedTextKeyResult::Action)
-						.map_err(SelectedTextInputError::from)
-						.pass_or_fail(SelectedTextInputError::is_generally_ignored);
+						.map_err(SelectedTextInputError::from));
 				}
 			}
 
 			if key == KeyCode::ArrowLeft {
 				if flags & !flags!(Ctrl) == 0 && this.selection.is_none() && this.cursor == 0 && this.keyfix.as_ref().is_some_and(|keyfix| keyfix.1.is_editable()) {
-					return this
+					return ControlFlow::Break(this
 						.move_to_keyfix(consts, root, path)
 						.map(SelectedTextKeyResult::Action)
-						.map_err(SelectedTextInputError::from)
-						.pass_or_fail(SelectedTextInputError::is_generally_ignored);
+						.map_err(SelectedTextInputError::from));
 				}
 				if flags & !flags!(Shift) == flags!(Alt) {
-					return this
+					return ControlFlow::Break(this
 						.force_close(root, mi)
 						.map(|_| None)
 						.map(SelectedTextKeyResult::Action)
-						.map_err(SelectedTextInputError::from)
-						.pass_or_fail(SelectedTextInputError::is_generally_ignored);
+						.map_err(SelectedTextInputError::from));
 				}
 			}
 
 			if key == KeyCode::ArrowRight {
 				if flags & !flags!(Ctrl) == 0 && this.selection.is_none() && this.cursor == this.value.len() && this.valuefix.as_ref().is_some_and(|valuefix| valuefix.1.is_editable()) {
-					return this
+					return ControlFlow::Break(this
 						.move_to_valuefix(consts, root, path)
 						.map(SelectedTextKeyResult::Action)
-						.map_err(SelectedTextInputError::from)
-						.pass_or_fail(SelectedTextInputError::is_generally_ignored);
+						.map_err(SelectedTextInputError::from));
 				}
 				if (flags) & !flags!(Shift) == flags!(Alt) {
-					return this
+					return ControlFlow::Break(this
 						.force_open((flags & !flags!(Alt)) == flags!(Shift), root, mi)
 						.map(|_| None)
 						.map(SelectedTextKeyResult::Action)
-						.map_err(SelectedTextInputError::from)
-						.pass_or_fail(SelectedTextInputError::is_generally_ignored);
+						.map_err(SelectedTextInputError::from));
 				}
 			}
 
@@ -282,25 +275,27 @@ impl SelectedText {
 			if this.cursor != cursor_before {
 				this.recache_cached_cursor_x(consts);
 			}
-			ActionResult::Success(result)
+			ControlFlow::Break(Ok(result))
 		}
-		match on_key_press0(self, key, ch, flags, consts, root, path, mi).alert_err(alerts) {
-			ActionResult::Pass => ActionResult::Pass,
-			ActionResult::Failure(e) => ActionResult::Failure(e),
-			ActionResult::Success(SelectedTextKeyResult::NoAction) => ActionResult::Pass,
-			ActionResult::Success(SelectedTextKeyResult::Action(action)) => {
+		match on_key_press0(self, key, ch, flags, consts, root, path, mi) {
+			ControlFlow::Break(Err(e)) if !e.is_generally_ignored() => {
+				alerts.alert(e);
+				ControlFlow::Break(true)
+			},
+			ControlFlow::Continue(()) | ControlFlow::Break(Err(_) | Ok(SelectedTextKeyResult::NoAction)) => ControlFlow::Continue(()),
+			ControlFlow::Break(Ok(SelectedTextKeyResult::Action(action))) => {
 				self.post_input();
 				history.append_all(action);
-				ActionResult::Success(false)
+				ControlFlow::Break(false)
 			}
-			ActionResult::Success(SelectedTextKeyResult::Escape) => ActionResult::Success(true),
-			ActionResult::Success(SelectedTextKeyResult::Finish) => {
-				history.append_all(self.save(root, path).map_success(Some).flatten_pass(Ok(None)).alert_err(alerts).failure_on_err()?);
-				ActionResult::Success(true)
+			ControlFlow::Break(Ok(SelectedTextKeyResult::Escape)) => ControlFlow::Break(true),
+			ControlFlow::Break(Ok(SelectedTextKeyResult::Finish)) => {
+				history.append_all(self.save(root, path).alert_err(alerts).flatten());
+				ControlFlow::Break(true)
 			}
-			ActionResult::Success(SelectedTextKeyResult::GenericAction) => {
+			ControlFlow::Break(Ok(SelectedTextKeyResult::GenericAction)) => {
 				self.post_input();
-				ActionResult::Success(false)
+				ControlFlow::Break(false)
 			}
 		}
 	}
@@ -435,14 +430,14 @@ impl SelectedText {
 		SelectedText::from_raw(target_x, mouse_x + horizontal_scroll, y * 16 + HEADER_SIZE, k, v, seperator_color, indices, cached_cursor_x, snap_to_ends)
 	}
 
-	pub fn save(&self, root: &mut NbtElement, path: &mut FilePath) -> ActionResult<WorkbenchAction, SaveSelectedTextError> {
+	pub fn save(&self, root: &mut NbtElement, path: &mut FilePath) -> Result<Option<WorkbenchAction>, SaveSelectedTextError> {
 		if !self.editable {
-			return ActionResult::Failure(SaveSelectedTextError::NonEditable)
+			return Err(SaveSelectedTextError::NonEditable)
 		}
 
 		let key = self.prefix.0.is_empty() && !self.suffix.0.is_empty();
 		let (key, value) = if key { (Some(self.value.to_compact_string()), None) } else { (None, Some(self.value.clone())) };
-		rename_element(root, self.indices.clone(), key, value, path).map_success(RenameElementResult::into_action).map_failure(|e| e.into())
+		Ok(rename_element(root, self.indices.clone(), key, value, path)?.map(RenameElementResult::into_action))
 	}
 	pub fn move_to_keyfix(&mut self, consts: TabConstants, root: &mut NbtElement, path: &mut FilePath) -> Result<Option<WorkbenchAction>, MoveToKeyfixError> {
 		if !self.editable {
@@ -452,7 +447,7 @@ impl SelectedText {
 			return Err(MoveToKeyfixError::AlreadyAtKey)
 		}
 
-		let action = self.save(root, path).map_success(Some).flatten_pass(Ok(None))?;
+		let action = self.save(root, path)?;
 
 		let (keyfix, keyfix_color) = self.keyfix.take().ok_or(MoveToKeyfixError::NoKey)?;
 		let old_prefix = core::mem::take(&mut self.prefix);
@@ -477,7 +472,7 @@ impl SelectedText {
 			return Err(MoveToValuefixError::AlreadyAtValue)
 		}
 
-		let action = self.save(root, path).map_success(Some).flatten_pass(Ok(None))?;
+		let action = self.save(root, path)?;
 
 		let (valuefix, valuefix_color) = self.valuefix.take().ok_or(MoveToValuefixError::NoValue)?;
 		let old_suffix = core::mem::take(&mut self.suffix);
@@ -504,7 +499,7 @@ impl SelectedText {
 
 		let new_selected_text = SelectedText::for_y(consts, root, path, new_y, mouse_x, true, Some(mouse_x))?;
 
-		let action = self.save(root, path).map_success(Some).flatten_pass(Ok(None))?;
+		let action = self.save(root, path)?;
 
 		*self = new_selected_text;
 
@@ -603,9 +598,8 @@ impl MoveSelectedTextError {
 	#[must_use]
 	pub const fn is_generally_ignored(&self) -> bool {
 		match self {
-			Self::Save(_save) => false,
-			Self::Navigation(_navigation) => false,
 			Self::NoNewSelectedText(construction) => construction.is_generally_ignored(),
+			_ => false,
 		}
 	}
 }
@@ -660,12 +654,8 @@ impl SelectedTextInputError {
 	#[must_use]
 	pub const fn is_generally_ignored(&self) -> bool {
 		match self {
-			Self::CloseElement(_e) => false,
-			Self::OpenElement(_e) => false,
-			Self::ShiftSelectedText(_e) => false,
-			Self::MoveToValuefix(_e) => false,
-			Self::MoveToKeyfix(_e) => false,
 			Self::MoveSelectedText(e) => e.is_generally_ignored(),
+			_ => false,
 		}
 	}
 }

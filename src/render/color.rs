@@ -28,6 +28,7 @@ pub enum TextColor {
 
 impl TextColor {
 	#[must_use]
+	#[allow(clippy::unreadable_literal, reason = "hex color codes")]
 	pub fn to_raw(self) -> u32 {
 		match self {
 			Self::Black => 0x000000,

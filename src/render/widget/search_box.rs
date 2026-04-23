@@ -1,5 +1,5 @@
 use std::fmt::{Display, Formatter};
-use std::ops::{Deref, DerefMut};
+use std::ops::{ControlFlow, Deref, DerefMut};
 
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -7,7 +7,6 @@ use winit::dpi::PhysicalSize;
 use winit::event::MouseButton;
 use winit::keyboard::KeyCode;
 
-use crate::action_result::ActionResult;
 use crate::elements::compound::CompoundEntry;
 use crate::elements::element::NbtElement;
 use crate::elements::{Matches, NbtElementAndKey, NbtElementAndKeyRef};
@@ -364,8 +363,8 @@ impl SearchBox {
 			builder.settings(pos + (0, 3), false, SEARCH_BOX_Z);
 			builder.color = TextColor::Gray.to_raw();
 			let _ = write!(builder, "{}", match search_mode {
-				SearchMode::String => r#"Search..."#,
-				SearchMode::Regex => r#"/[Ss]earch\.*/g"#,
+				SearchMode::String => "Search...",
+				SearchMode::Regex => r"/[Ss]earch\.*/g",
 				SearchMode::Snbt => r#"{dialog: "search", ...}"#,
 			});
 		}
@@ -485,7 +484,7 @@ impl SearchBox {
 		self.horizontal_scroll = horizontal_scroll;
 	}
 
-	pub fn on_key_press(&mut self, key: KeyCode, ch: Option<char>, flags: u8, replace_box: &mut ReplaceBox, tab: &mut Tab, _alerts: &mut AlertManager, notifications: &mut NotificationManager, window_dims: PhysicalSize<u32>) -> ActionResult {
+	pub fn on_key_press(&mut self, key: KeyCode, ch: Option<char>, flags: u8, replace_box: &mut ReplaceBox, tab: &mut Tab, _alerts: &mut AlertManager, notifications: &mut NotificationManager, window_dims: PhysicalSize<u32>) -> ControlFlow<()> {
 		#[must_use]
 		fn on_key_press0(this: &mut SearchBox, key: KeyCode, ch: Option<char>, flags: u8) -> SearchBoxKeyResult {
 			if !this.is_selected() {
@@ -513,27 +512,27 @@ impl SearchBox {
 		}
 
 		match on_key_press0(self, key, ch, flags) {
-			SearchBoxKeyResult::NoAction => ActionResult::Pass,
+			SearchBoxKeyResult::NoAction => ControlFlow::Continue(()),
 			SearchBoxKeyResult::GenericAction => {
 				self.post_input(window_dims);
-				ActionResult::Success(())
+				ControlFlow::Break(())
 			}
 			SearchBoxKeyResult::Escape => {
 				self.post_input(window_dims);
 				self.deselect();
-				ActionResult::Success(())
+				ControlFlow::Break(())
 			}
 			SearchBoxKeyResult::MoveToReplaceBox => {
 				self.post_input(window_dims);
 				replace_box.select(self.value.split_at(self.cursor).0.width().saturating_sub(self.horizontal_scroll), MouseButton::Left);
 				self.deselect();
-				ActionResult::Success(())
+				ControlFlow::Break(())
 			}
 			result @ (SearchBoxKeyResult::Search | SearchBoxKeyResult::SearchCountOnly) => {
 				let notification = self.search(&mut tab.bookmarks, &tab.root, result == SearchBoxKeyResult::SearchCountOnly);
 				notifications.notify(notification);
 				self.post_input(window_dims);
-				ActionResult::Success(())
+				ControlFlow::Break(())
 			}
 		}
 	}

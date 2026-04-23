@@ -1,18 +1,20 @@
+use winit::dpi::PhysicalSize;
 use crate::util::Timestamp;
-use crate::window_properties;
+use crate::mutable_window_properties;
 use crate::workbench::tab::Tab;
 
 pub struct TabManager {
 	tabs: Vec<Tab>,
 	active_tab_idx: usize,
+	tab_scroll: usize,
 }
 
 impl TabManager {
 	#[must_use]
-	pub const fn without_tab() -> Self { Self { tabs: Vec::new(), active_tab_idx: 0 } }
-
+	pub const fn without_tab() -> Self { Self { tabs: Vec::new(), active_tab_idx: 0, tab_scroll: 0 } }
+	
 	#[must_use]
-	pub fn from_tab(tab: Tab) -> Self { Self { tabs: vec![tab], active_tab_idx: 0 } }
+	pub fn from_tab(tab: Tab) -> Self { Self { tabs: vec![tab], active_tab_idx: 0, tab_scroll: 0 } }
 
 	#[must_use]
 	pub fn active_tab(&self) -> &Tab { unsafe { self.tabs.get(self.active_tab_idx).unwrap_unchecked() } }
@@ -22,7 +24,7 @@ impl TabManager {
 
 	pub fn set_active_idx(&mut self, idx: usize) {
 		self.active_tab_idx = idx.min(self.tabs.len() - 1);
-		window_properties().set_window_title(format!("{} - NBT Workbench", self.active_tab().path.name()).as_str());
+		mutable_window_properties().set_window_title(format!("{} - NBT Workbench", self.active_tab().path.name()).as_str());
 	}
 
 	pub fn add(&mut self, tab: Tab) {
@@ -58,6 +60,13 @@ impl TabManager {
 
 	#[must_use]
 	pub fn active_tab_idx(&self) -> usize { self.active_tab_idx }
+	
+	#[must_use]
+	pub fn tab_scroll(&self) -> usize { self.tab_scroll }
+	
+	pub fn on_tab_scroll(&mut self, scroll: isize, window_dims: PhysicalSize<u32>) {
+		self.tab_scroll = (self.tab_scroll as isize + scroll).clamp(0, (3_usize + self.iter().map(Tab::width).sum::<usize>()).saturating_sub(window_dims.width as usize) as isize) as usize;
+	}
 }
 
 impl<'a> IntoIterator for &'a TabManager {

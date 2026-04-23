@@ -81,6 +81,7 @@ impl VertexBufferBuilder {
 	}
 
 	#[rustfmt::skip]
+	#[allow(clippy::unreadable_literal, reason = "hex color codes")]
 	fn draw_char(&mut self, c: u16, x: usize, y: usize, z: ZOffset) -> usize {
 		if self.dropshadow {
 			self.draw_unicode_z_color(x + 1, y + 1, z, c, {
@@ -269,6 +270,7 @@ impl VertexBufferBuilder {
 		self.draw_texture_region_z(pos, z, uv, dims, dims);
 	}
 
+	#[allow(clippy::many_single_char_names, reason = "math")]
 	pub fn draw_texture_region_z(&mut self, pos: impl Into<Vec2u>, z: ZOffset, uv: impl Into<Vec2u>, dims: impl Into<Vec2u>, uv_dims: impl Into<Vec2u>) {
 		unsafe {
 			let pos = pos.into();

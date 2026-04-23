@@ -4,12 +4,11 @@ use std::path::PathBuf;
 use compact_str::{CompactString, ToCompactString};
 use thiserror::Error;
 
-use crate::action_result::{ActionResult, IntoFailingActionResult};
 use crate::elements::element::NbtElement;
 use crate::history::WorkbenchAction;
 use crate::tree::indices::OwnedIndices;
 use crate::tree::navigate::{ParentNavigationError, ParentNavigationInformationMut};
-use crate::window_properties;
+use crate::mutable_window_properties;
 use crate::workbench::tab::{FilePath, FilePathError};
 
 #[rustfmt::skip]
@@ -19,9 +18,9 @@ pub fn rename_element(
 	key: Option<CompactString>,
 	value: Option<String>,
 	path: &mut FilePath
-) -> ActionResult<RenameElementResult, RenameElementError> {
+) -> Result<Option<RenameElementResult>, RenameElementError> {
 	if key.is_none() && value.is_none() {
-		return ActionResult::Pass;
+		return Ok(None);
 	}
 
 	match root.navigate_parent_mut(&indices) {
@@ -32,7 +31,7 @@ pub fn rename_element(
 					match result {
 						Some(old_key) if old_key == new_key => None,
 						Some(old_key) => Some(old_key),
-						None => return ActionResult::Failure(RenameElementError::DuplicateKey { idx, indices, key }),
+						None => return Err(RenameElementError::DuplicateKey { idx, indices, key }),
 					}
 				} else {
 					None
@@ -48,35 +47,35 @@ pub fn rename_element(
 				match child.set_value(value) {
 					Ok(old_value) if old_value == new_value => None,
 					Ok(old_value) => Some(old_value),
-					Err(value) => return ActionResult::Failure(RenameElementError::InvalidValue { value, child: child.display_name() }),
+					Err(value) => return Err(RenameElementError::InvalidValue { value, child: child.display_name() }),
 				}
 			} else {
 				None
 			};
 
 			if old_key.is_none() && old_value.is_none() {
-				ActionResult::Pass
+				Ok(None)
 			} else {
-				ActionResult::Success(RenameElementResult { indices, key: old_key, value: old_value })
+				Ok(Some(RenameElementResult { indices, key: old_key, value: old_value }))
 			}
 		}
 		Err(ParentNavigationError::EmptyIndices) => {
 			if let Some(key) = key.clone()
 				&& value.is_none()
 			{
-				if path.path_str() == &key { return ActionResult::Pass }
-				let old_path = path.set_path(key).map_err(RenameElementError::from).failure_on_err()?;
-				window_properties().set_window_title(format!("{name} - NBT Workbench", name = path.name()).as_str());
-				ActionResult::Success(RenameElementResult {
+				if path.path_str() == &key { return Ok(None) }
+				let old_path = path.set_path(key).map_err(RenameElementError::from)?;
+				mutable_window_properties().set_window_title(format!("{name} - NBT Workbench", name = path.name()).as_str());
+				Ok(Some(RenameElementResult {
 					indices,
 					key: Some(old_path.to_string_lossy().into_owned().into()),
 					value
-				})
+				}))
 			} else {
-				ActionResult::Failure(RenameElementError::InvalidRootRenaming { key, value })
+				Err(RenameElementError::InvalidRootRenaming { key, value })
 			}
 		}
-		Err(e) => ActionResult::Failure(e.into()),
+		Err(e) => Err(e.into()),
 	}
 }
 

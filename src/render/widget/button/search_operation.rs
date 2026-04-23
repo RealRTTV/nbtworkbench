@@ -1,7 +1,7 @@
+use std::ops::ControlFlow;
 use winit::dpi::PhysicalSize;
 use winit::event::MouseButton;
 
-use crate::action_result::ActionResult;
 use crate::config;
 use crate::render::assets::{BASE_Z, HOVERED_WIDGET_UV};
 use crate::render::color::TextColor;
@@ -18,10 +18,10 @@ impl Widget for SearchOperationButton {
 	fn alignment(&self) -> WidgetAlignment { WidgetAlignment::new(HorizontalWidgetAlignmentPreference::Static(-(SEARCH_BOX_END_X as i32 + 16 + 16 + 16)), VerticalWidgetAlignmentPreference::Static(26)) }
 
 	fn dimensions(&self, _containment_dims: PhysicalSize<u32>) -> PhysicalSize<u32> { PhysicalSize::new(16, 16) }
-	fn on_mouse_down(&mut self, button: MouseButton, _pos: Vec2u, _dims: PhysicalSize<u32>, ctx: &mut WidgetContextMut) -> ActionResult {
+	fn on_mouse_down(&mut self, button: MouseButton, _pos: Vec2u, _dims: PhysicalSize<u32>, ctx: &mut WidgetContextMut) -> ControlFlow<()> {
 		let reverse = ctx.shift ^ matches!(button, MouseButton::Right);
 		config::set_search_operation(if reverse { config::get_search_operation().rev_cycle() } else { config::get_search_operation().cycle() });
-		ActionResult::Success(())
+		ControlFlow::Break(())
 	}
 
 	fn render_at(&self, pos: Vec2u, dims: PhysicalSize<u32>, builder: &mut VertexBufferBuilder, mouse: &MouseManager, _ctx: &WidgetContext) {

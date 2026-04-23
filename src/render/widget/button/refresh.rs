@@ -1,7 +1,7 @@
+use std::ops::ControlFlow;
 use winit::dpi::PhysicalSize;
 use winit::event::MouseButton;
 
-use crate::action_result::ActionResult;
 use crate::render::assets::{DISABLED_REFRESH_UV, REFRESH_UV, UNSELECTED_WIDGET_UV};
 use crate::render::color::TextColor;
 use crate::render::vertex_buffer_builder::VertexBufferBuilder;
@@ -18,11 +18,11 @@ impl Widget for RefreshButton {
 	fn dimensions(&self, _containment_dims: PhysicalSize<u32>) -> PhysicalSize<u32> { PhysicalSize::new(16, 16) }
 	fn is_valid_mouse_button(&self, button: MouseButton, _pos: Vec2u, _dims: PhysicalSize<u32>) -> bool { matches!(button, MouseButton::Left) }
 	#[cfg(not(target_arch = "wasm32"))]
-	fn on_mouse_down(&mut self, _button: MouseButton, _pos: Vec2u, _dims: PhysicalSize<u32>, ctx: &mut WidgetContextMut) -> ActionResult {
+	fn on_mouse_down(&mut self, _button: MouseButton, _pos: Vec2u, _dims: PhysicalSize<u32>, ctx: &mut WidgetContextMut) -> ControlFlow<()> {
 		if let Err(e) = ctx.tabs.active_tab_mut().refresh() {
 			ctx.alerts.alert(e);
 		}
-		ActionResult::Success(())
+		ControlFlow::Break(())
 	}
 	fn render_at(&self, pos: Vec2u, dims: PhysicalSize<u32>, builder: &mut VertexBufferBuilder, mouse: &MouseManager, ctx: &WidgetContext) {
 		let has_path = ctx.tabs.active_tab().path.path().exists();

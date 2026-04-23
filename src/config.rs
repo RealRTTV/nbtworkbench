@@ -122,58 +122,31 @@ enum StringFromFileError {
 
 fn try_parse_toml(str: &str) -> Result<Config, toml::de::Error> { toml::from_str(str) }
 
+/// For deprecated txt format, no need to update with new fields
 fn try_parse_txt(str: &str) -> Result<Config, TxtParseError> {
 	let map = str.lines().filter_map(|line| line.split_once('=')).map(|(a, b)| (a.to_owned(), b.to_owned())).collect::<FxHashMap<String, String>>();
 
 	let mut config = Config::default();
 
-	if let Some(theme) = map.get("theme").and_then(|s| match s.as_str() {
-		"dark" => Some(Theme::Dark),
-		"light" => Some(Theme::Light),
-		_ => None,
-	}) {
-		config.theme = theme;
+	macro_rules! setting {
+        ($field:ident <= $name:literal {
+	        $($key:literal => $value:expr),* $(,)?
+        }) => {
+	        if let Some(value) = map.get($name).and_then(|s| match s.as_str() {
+		        $($key => Some($value),)*
+				_ => None,
+			}) {
+				config.$field = value;
+			}
+        };
 	}
-	if let Some(sort_algorithm) = map.get("sort_algorithm").and_then(|s| match s.as_str() {
-		"none" => Some(SortAlgorithm::None),
-		"name" => Some(SortAlgorithm::Name),
-		"type" => Some(SortAlgorithm::Type),
-		_ => None,
-	}) {
-		config.sort_algorithm = sort_algorithm;
-	}
-	if let Some(search_mode) = map.get("search_mode").and_then(|s| match s.as_str() {
-		"string" => Some(SearchMode::String),
-		"regex" => Some(SearchMode::Regex),
-		"snbt" => Some(SearchMode::Snbt),
-		_ => None,
-	}) {
-		config.search_mode = search_mode;
-	}
-	if let Some(search_flags) = map.get("search_flags").and_then(|s| match s.as_str() {
-		"key" => Some(SearchFlags::Keys),
-		"value" => Some(SearchFlags::Values),
-		"all" => Some(SearchFlags::KeysValues),
-		_ => None,
-	}) {
-		config.search_flags = search_flags;
-	}
-	if let Some(search_operation) = map.get("search_operation").and_then(|s| match s.as_str() {
-		"and" => Some(SearchOperation::And),
-		"or" => Some(SearchOperation::Or),
-		"xor" => Some(SearchOperation::Xor),
-		"b" => Some(SearchOperation::B),
-		_ => None,
-	}) {
-		config.search_operation = search_operation;
-	}
-	if let Some(replace_by) = map.get("replace_by").and_then(|s| match s.as_str() {
-		"search_hits" => Some(ReplaceBy::SearchHits),
-		"bookmarked_lines" => Some(ReplaceBy::BookmarkedLines),
-		_ => None,
-	}) {
-		config.replace_by = replace_by;
-	}
+
+	setting!(theme <= "theme" { "dark" => Theme::Dark, "light" => Theme::Light });
+	setting!(sort_algorithm <= "sort_algorithm" { "none" => SortAlgorithm::None, "name" => SortAlgorithm::Name, "type" => SortAlgorithm::Type });
+	setting!(search_mode <= "search_mode" { "string" => SearchMode::String, "regex" => SearchMode::Regex, "snbt" => SearchMode::Snbt });
+	setting!(search_flags <= "search_flags" { "key" => SearchFlags::Keys, "value" => SearchFlags::Values, "all" => SearchFlags::KeysValues });
+	setting!(search_operation <= "search_operation" { "and" => SearchOperation::And, "or" => SearchOperation::Or, "xor" => SearchOperation::Xor, "b" => SearchOperation::B });
+	setting!(replace_by <= "replace_by" { "search_hits" => ReplaceBy::SearchHits, "bookmarked_lines" => ReplaceBy::BookmarkedLines });
 	if let Some(search_exact_match) = map.get("search_exact_match").and_then(|s| s.parse::<bool>().ok()) {
 		config.search_exact_match = search_exact_match;
 	}

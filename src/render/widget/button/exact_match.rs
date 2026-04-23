@@ -1,7 +1,7 @@
+use std::ops::ControlFlow;
 use winit::dpi::PhysicalSize;
 use winit::event::MouseButton;
 
-use crate::action_result::ActionResult;
 use crate::config;
 use crate::render::assets::{BASE_Z, EXACT_MATCH_OFF_UV, EXACT_MATCH_ON_UV, HOVERED_WIDGET_UV};
 use crate::render::color::TextColor;
@@ -21,13 +21,13 @@ impl Widget for ExactMatchButton {
 
 	fn is_valid_mouse_button(&self, button: MouseButton, _pos: Vec2u, _dims: PhysicalSize<u32>) -> bool { matches!(button, MouseButton::Left | MouseButton::Right) }
 
-	fn on_mouse_down(&mut self, _button: MouseButton, _pos: Vec2u, _dims: PhysicalSize<u32>, _ctx: &mut WidgetContextMut) -> ActionResult {
+	fn on_mouse_down(&mut self, _button: MouseButton, _pos: Vec2u, _dims: PhysicalSize<u32>, _ctx: &mut WidgetContextMut) -> ControlFlow<()> {
 		if !config::get_search_mode().has_exact_match_mode() {
-			return ActionResult::Pass
+			return ControlFlow::Continue(())
 		}
 
 		config::set_search_exact_match(!config::get_search_exact_match());
-		ActionResult::Success(())
+		ControlFlow::Break(())
 	}
 
 	fn render_at(&self, pos: Vec2u, dims: PhysicalSize<u32>, builder: &mut VertexBufferBuilder, mouse: &MouseManager, _ctx: &WidgetContext) {

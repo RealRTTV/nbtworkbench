@@ -245,8 +245,7 @@ impl ComplexNbtElementVariant for NbtCompound {
 		}
 		self.height += entry.value.height() as u32;
 		self.true_height += entry.value.true_height() as u32;
-		self.map.insert_at(entry, idx);
-		Ok(None)
+		Ok(self.map.insert_at(entry, idx).map(|(k, v)| CompoundEntry::new(k, v)))
 	}
 
 	unsafe fn remove(&mut self, idx: usize) -> Option<Self::Entry> {
@@ -483,14 +482,11 @@ impl CompoundMap {
 					self.entries.as_mut_ptr().add(idx).write(entry);
 					self.entries.set_len(len + 1);
 				}
-				let mut entry = slot.insert(len);
-				(None, len, entry.get_mut() as *mut usize)
+
+				let entry = slot.insert(idx);
+				(None, len, entry.into_mut() as *mut usize)
 			}
 		};
-
-		unsafe {
-			core::ptr::write(ptr, idx);
-		}
 
 		match idx.cmp(&end) {
 			Ordering::Less =>
@@ -508,6 +504,11 @@ impl CompoundMap {
 						*index -= 1;
 					}
 				},
+		}
+
+		// SAFETY: the operations above don't re-allocate so this pointer is still valid.
+		unsafe {
+			core::ptr::write(ptr, idx);
 		}
 
 		prev

@@ -1,5 +1,5 @@
 use std::fmt::{Display, Formatter};
-use std::ops::{Deref, DerefMut};
+use std::ops::{ControlFlow, Deref, DerefMut};
 
 use compact_str::ToCompactString;
 use regex::Regex;
@@ -9,7 +9,6 @@ use winit::dpi::PhysicalSize;
 use winit::event::MouseButton;
 use winit::keyboard::KeyCode;
 
-use crate::action_result::{ActionResult, IntoFailingActionResult};
 use crate::elements::compound::CompoundEntry;
 use crate::elements::element::{NbtElement, SNBTParseError};
 use crate::elements::{Matches, NbtElementAndKey, NbtElementAndKeyRef};
@@ -157,8 +156,8 @@ impl ReplaceBox {
 			builder.settings(pos + (0, 3), false, REPLACE_BOX_Z);
 			builder.color = TextColor::Gray.to_raw();
 			let _ = write!(builder, "{}", match search_mode {
-				SearchMode::String => r#"Replace..."#,
-				SearchMode::Regex => r#"Rep$1ce"#,
+				SearchMode::String => "Replace...",
+				SearchMode::Regex => "Rep$1ce",
 				SearchMode::Snbt => r#"{value: "replace", ...}"#,
 			});
 		}
@@ -220,7 +219,7 @@ impl ReplaceBox {
 		self.horizontal_scroll = horizontal_scroll;
 	}
 
-	pub fn on_key_press(&mut self, key: KeyCode, ch: Option<char>, flags: u8, search_box: &mut SearchBox, tab: &mut Tab, _alerts: &mut AlertManager, notifications: &mut NotificationManager, window_dims: PhysicalSize<u32>) -> ActionResult {
+	pub fn on_key_press(&mut self, key: KeyCode, ch: Option<char>, flags: u8, search_box: &mut SearchBox, tab: &mut Tab, _alerts: &mut AlertManager, notifications: &mut NotificationManager, window_dims: PhysicalSize<u32>) -> ControlFlow<()> {
 		#[must_use]
 		pub fn on_key_press0(this: &mut ReplaceBox, key: KeyCode, ch: Option<char>, flags: u8) -> ReplaceBoxKeyResult {
 			if !this.is_selected() {
@@ -241,21 +240,21 @@ impl ReplaceBox {
 
 		let result = on_key_press0(self, key, ch, flags);
 		match result {
-			ReplaceBoxKeyResult::NoAction => ActionResult::Pass,
+			ReplaceBoxKeyResult::NoAction => ControlFlow::Continue(()),
 			ReplaceBoxKeyResult::GenericAction => {
 				self.post_input(window_dims);
-				ActionResult::Success(())
+				ControlFlow::Break(())
 			}
 			ReplaceBoxKeyResult::Escape => {
 				self.post_input(window_dims);
 				self.deselect();
-				ActionResult::Success(())
+				ControlFlow::Break(())
 			}
 			ReplaceBoxKeyResult::MoveToSearchBox => {
 				self.post_input(window_dims);
 				search_box.select(self.value.split_at(self.cursor).0.width().saturating_sub(self.horizontal_scroll), MouseButton::Left);
 				self.deselect();
-				ActionResult::Success(())
+				ControlFlow::Break(())
 			}
 			ReplaceBoxKeyResult::ReplaceAll => {
 				let (notification, bulk) = self.replace(mutable_indices!(tab), &mut tab.root, search_box);
@@ -264,7 +263,7 @@ impl ReplaceBox {
 				}
 				notifications.notify(notification);
 				self.post_input(window_dims);
-				ActionResult::Success(())
+				ControlFlow::Break(())
 			}
 		}
 	}
@@ -346,12 +345,12 @@ impl ReplaceBox {
 					None
 				};
 				match replacement.replace(alternative_root, key_str, element_str.filter(|&(_, color)| color != TextColor::TreeValueDesc).map(|(x, _)| x), mi, &current_indices) {
-					ActionResult::Success((action, replaced)) => {
+					ControlFlow::Break(Ok((action, replaced))) => {
 						actions.push(action);
 						element_replaced = replaced;
 					}
-					ActionResult::Pass => {}
-					ActionResult::Failure(e) => errors.push(e),
+					ControlFlow::Continue(()) => {}
+					ControlFlow::Break(Err(e)) => errors.push(e),
 				}
 			}
 
@@ -449,9 +448,9 @@ impl ReplaceBox {
 		while let Some(indices) = mutable_indices.temp.pop() {
 			let Some(indices) = indices.take() else { continue };
 			match replacement.replace(root, indices, &mut fake_path, &mut mutable_indices) {
-				ActionResult::Success(action) => actions.push(action),
-				ActionResult::Pass => {}
-				ActionResult::Failure(e) => errors.push(e),
+				ControlFlow::Break(Ok(action)) => actions.push(action),
+				ControlFlow::Continue(()) => {}
+				ControlFlow::Break(Err(e)) => errors.push(e),
 			}
 		}
 
@@ -552,7 +551,7 @@ impl SearchReplacement {
 		(flags & 0b01) > 0 && !matches!(self.inner, SearchReplacementInner::Snbt { .. })
 	}
 
-	pub fn replace<'m1, 'm2: 'm1>(&self, root: &mut NbtElement, key: Option<String>, value: Option<String>, mi: &'m1 mut MutableIndices<'m2>, indices: &Indices) -> ActionResult<(WorkbenchAction, bool), ReplacementError> {
+	pub fn replace<'m1, 'm2: 'm1>(&self, root: &mut NbtElement, key: Option<String>, value: Option<String>, mi: &'m1 mut MutableIndices<'m2>, indices: &Indices) -> ControlFlow<Result<(WorkbenchAction, bool), ReplacementError>> {
 		#[must_use]
 		fn replace_case_sensitivity(value: &str, find: &str, replacement: &str, case_sensitive: bool) -> String { if case_sensitive { value.replace(find, replacement) } else { value.replace_ignore_ascii_case(find, replacement) } }
 
@@ -562,23 +561,29 @@ impl SearchReplacement {
 				let key = key.map(|key| replace_case_sensitivity(&key, find, replacement, *case_sensitive).into());
 				let value = value.map(|value| replace_case_sensitivity(&value, find, replacement, *case_sensitive).into());
 				let action = match rename_element(root, indices.to_owned(), key, value, &mut fake_path) {
-					ActionResult::Success(result) => result.into_action(),
-					ActionResult::Pass => return ActionResult::Pass,
-					ActionResult::Failure(e) => return ActionResult::Failure(e.into()),
+					Ok(Some(result)) => result.into_action(),
+					Ok(None) => return ControlFlow::Continue(()),
+					Err(e) => return ControlFlow::Break(Err(e.into())),
 				};
-				ActionResult::Success((action, false))
+				ControlFlow::Break(Ok((action, false)))
 			}
 			SearchReplacementInner::Regex { regex, replacement } => {
 				let key = key.map(|key| regex.replace_all(&key, replacement).into());
 				let value = value.map(|value| regex.replace_all(&value, replacement).into());
 				let action = match rename_element(root, indices.to_owned(), key, value, &mut fake_path) {
-					ActionResult::Success(result) => result.into_action(),
-					ActionResult::Pass => return ActionResult::Pass,
-					ActionResult::Failure(e) => return ActionResult::Failure(e.into()),
+					Ok(Some(result)) => result.into_action(),
+					Ok(None) => return ControlFlow::Continue(()),
+					Err(e) => return ControlFlow::Break(Err(e.into())),
 				};
-				ActionResult::Success((action, false))
+				ControlFlow::Break(Ok((action, false)))
 			}
-			SearchReplacementInner::Snbt { replacement, .. } => ActionResult::Success((replace_element(root, replacement.clone(), indices.to_owned(), mi).failure_on_err()?.into_action(), true)),
+			SearchReplacementInner::Snbt { replacement, .. } => {
+				let action = match replace_element(root, replacement.clone(), indices.to_owned(), mi) {
+					Ok(result) => result.into_action(),
+					Err(e) => return ControlFlow::Break(Err(e.into())),
+				};
+				ControlFlow::Break(Ok((action, true)))
+			},
 		}
 	}
 }
@@ -607,19 +612,25 @@ impl BookmarkedBasedSearchReplacement {
 		Ok(Self { search_flags, inner })
 	}
 
-	pub fn replace<'m1, 'm2: 'm1>(&self, root: &mut NbtElement, indices: OwnedIndices, path: &mut FilePath, mi: &'m1 mut MutableIndices<'m2>) -> ActionResult<WorkbenchAction, ReplacementError> {
+	pub fn replace<'m1, 'm2: 'm1>(&self, root: &mut NbtElement, indices: OwnedIndices, path: &mut FilePath, mi: &'m1 mut MutableIndices<'m2>) -> ControlFlow<Result<WorkbenchAction, ReplacementError>> {
 		match &self.inner {
 			BookmarkedBasedSearchReplacementInner::String(str) => {
 				let key = self.search_flags.has_key().then(|| str.to_compact_string());
 				let value = self.search_flags.has_value().then(|| str.to_owned());
 				let action = match rename_element(root, indices.to_owned(), key, value, path) {
-					ActionResult::Success(result) => result.into_action(),
-					ActionResult::Pass => return ActionResult::Pass,
-					ActionResult::Failure(e) => return ActionResult::Failure(e.into()),
+					Ok(Some(result)) => result.into_action(),
+					Ok(None) => return ControlFlow::Continue(()),
+					Err(e) => return ControlFlow::Break(Err(e.into())),
 				};
-				ActionResult::Success(action)
+				ControlFlow::Break(Ok(action))
 			}
-			BookmarkedBasedSearchReplacementInner::Snbt(replacement) => ActionResult::Success(replace_element(root, replacement.clone(), indices, mi).failure_on_err()?.into_action()),
+			BookmarkedBasedSearchReplacementInner::Snbt(replacement) => {
+				let action = match replace_element(root, replacement.clone(), indices, mi) {
+					Ok(result) => result.into_action(),
+					Err(e) => return ControlFlow::Break(Err(e.into())),
+				};
+				ControlFlow::Break(Ok(action))
+			},
 		}
 	}
 }

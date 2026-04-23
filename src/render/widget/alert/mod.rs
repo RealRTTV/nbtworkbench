@@ -1,11 +1,11 @@
 use std::error::Error;
 use std::fmt::Display;
+use std::ops::ControlFlow;
 use std::time::Duration;
 
 use winit::dpi::PhysicalSize;
 use winit::event::MouseButton;
 
-use crate::action_result::ActionResult;
 use crate::render::assets::{ALERT_UV, NOTIFICATION_BAR_BACKDROP_UV, NOTIFICATION_BAR_UV, NOTIFICATION_TEXT_Z, NOTIFICATION_Z};
 use crate::render::color::TextColor;
 use crate::render::vertex_buffer_builder::VertexBufferBuilder;
@@ -103,21 +103,21 @@ impl Widget for Alert {
 
 	fn is_valid_mouse_button(&self, button: MouseButton, _pos: Vec2u, _dims: PhysicalSize<u32>) -> bool { matches!(button, MouseButton::Left | MouseButton::Middle | MouseButton::Right) }
 
-	fn on_mouse_down(&mut self, button: MouseButton, pos: Vec2u, dims: PhysicalSize<u32>, ctx: &mut WidgetContextMut) -> ActionResult {
+	fn on_mouse_down(&mut self, button: MouseButton, pos: Vec2u, dims: PhysicalSize<u32>, ctx: &mut WidgetContextMut) -> ControlFlow<()> {
 		if !self.is_actually_within_bounds(pos, dims) {
-			return ActionResult::Pass
+			return ControlFlow::Continue(())
 		}
 
 		if let MouseButton::Left | MouseButton::Middle = button {
 			self.timestamp = Timestamp::UNIX_EPOCH;
 			self.time_elapsed_override = None;
-			ActionResult::Success(())
+			ControlFlow::Break(())
 		} else if let MouseButton::Right = button {
 			set_clipboard(self.original_message.clone());
 			ctx.notifications.notify(Notification::new("Copied alert to clipboard!", TextColor::Yellow, NotificationKind::CopiedToClipboard));
-			ActionResult::Success(())
+			ControlFlow::Break(())
 		} else {
-			ActionResult::Pass
+			ControlFlow::Continue(())
 		}
 	}
 
