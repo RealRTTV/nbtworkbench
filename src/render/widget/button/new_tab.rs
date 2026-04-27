@@ -1,3 +1,4 @@
+use ControlFlow::Break;
 use std::ops::ControlFlow;
 use winit::dpi::PhysicalSize;
 use winit::event::MouseButton;
@@ -21,7 +22,7 @@ impl Widget for NewTabButton {
 		let shift = ctx.shift;
 		let window_dims = ctx.tabs.active_tab().window_dims;
 		ctx.tabs.add(Tab::new_empty_tab(shift, window_dims));
-		ControlFlow::Break(())
+		Break(())
 	}
 
 	fn render_at(&self, pos: Vec2u, dims: PhysicalSize<u32>, builder: &mut VertexBufferBuilder, mouse: &MouseManager, ctx: &WidgetContext) {

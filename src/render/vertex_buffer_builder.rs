@@ -146,7 +146,7 @@ impl VertexBufferBuilder {
 			}
 			self.text_z = TOOLTIP_Z;
 			self.text_coords = (x + 3, y + 3);
-			self.draw_texture_z((x, y), TOOLTIP_Z, TOOLTIP_UV, (3, 3));
+
 			let mut max = x + 3;
 			for line in text.iter() {
 				let _ = write!(self, "{line}");
@@ -154,21 +154,28 @@ impl VertexBufferBuilder {
 				self.text_coords.0 = x + 3;
 				self.text_coords.1 += Self::CHAR_HEIGHT;
 			}
-			let width = max - 3 - x;
-			let height = self.text_coords.1 - 3 - y;
-			self.draw_texture_region_z((x + 3, y), TOOLTIP_Z, TOOLTIP_UV + (3, 0), (width, 3), (10, 3));
-			self.draw_texture_z((x + width + 3, y), TOOLTIP_Z, TOOLTIP_UV + (13, 0), (3, 3));
 
-			self.draw_texture_z((x, y + height + 3), TOOLTIP_Z, TOOLTIP_UV + (0, 13), (3, 3));
-			self.draw_texture_region_z((x + 3, y + height + 3), TOOLTIP_Z, TOOLTIP_UV + (3, 13), (width, 3), (10, 3));
-			self.draw_texture_z((x + width + 3, y + height + 3), TOOLTIP_Z, TOOLTIP_UV + (13, 13), (3, 3));
-			self.draw_texture_region_z((x, y + 3), TOOLTIP_Z, TOOLTIP_UV + (0, 3), (3, height), (3, 10));
-			self.draw_texture_region_z((x + width + 3, y + 3), TOOLTIP_Z, TOOLTIP_UV + (13, 3), (3, height), (3, 10));
-
-			self.draw_texture_region_z((x + 3, y + 3), TOOLTIP_Z, TOOLTIP_UV + (3, 3), (width, height), (10, 10));
+			self.draw_tooltip_backdrop((x, y).into(), (max - 3 - x, self.text_coords.1 - 3 - y).into())
 		}
 	}
 
+	fn draw_tooltip_backdrop(&mut self, pos: Vec2u, dims: Vec2u) {
+		let (x, y) = pos.into();
+		let (width, height) = dims.into();
+		self.draw_texture_z((x, y), TOOLTIP_Z, TOOLTIP_UV, (3, 3));
+		self.draw_texture_region_z((x + 3, y), TOOLTIP_Z, TOOLTIP_UV + (3, 0), (width, 3), (10, 3));
+		self.draw_texture_z((x + width + 3, y), TOOLTIP_Z, TOOLTIP_UV + (13, 0), (3, 3));
+
+		self.draw_texture_z((x, y + height + 3), TOOLTIP_Z, TOOLTIP_UV + (0, 13), (3, 3));
+		self.draw_texture_region_z((x + 3, y + height + 3), TOOLTIP_Z, TOOLTIP_UV + (3, 13), (width, 3), (10, 3));
+		self.draw_texture_z((x + width + 3, y + height + 3), TOOLTIP_Z, TOOLTIP_UV + (13, 13), (3, 3));
+		self.draw_texture_region_z((x, y + 3), TOOLTIP_Z, TOOLTIP_UV + (0, 3), (3, height), (3, 10));
+		self.draw_texture_region_z((x + width + 3, y + 3), TOOLTIP_Z, TOOLTIP_UV + (13, 3), (3, height), (3, 10));
+
+		self.draw_texture_region_z((x + 3, y + 3), TOOLTIP_Z, TOOLTIP_UV + (3, 3), (width, height), (10, 10));
+	}
+
+	#[allow(clippy::too_many_lines, reason = "low-ish cognitive complexity + code is micro-optimized")]
 	pub fn draw_unicode_z_color(&mut self, x: usize, y: usize, z: ZOffset, char: u16, color: u32) {
 		unsafe {
 			if unlikely(self.text_vertices.capacity() - self.text_vertices.len() < 16) {
@@ -263,6 +270,26 @@ impl VertexBufferBuilder {
 	#[must_use]
 	pub fn text_indices_len(&self) -> u32 { self.text_indices.len() as u32 }
 
+	pub fn draw_texture_tiled(&mut self, pos: impl Into<Vec2u>, z: ZOffset, uv: impl Into<Vec2u>, dims: impl Into<Vec2u>, uv_dims: impl Into<Vec2u>) {
+		let mut pos = pos.into();
+		let uv = uv.into();
+		let dims = dims.into();
+		let uv_dims = uv_dims.into();
+		let mut remaining = dims;
+
+		while remaining.y > 0 {
+			let row_height = remaining.y.min(uv_dims.y);
+			while remaining.x > 0 {
+				let col_width = remaining.x.min(uv_dims.x);
+				self.draw_texture_z(pos, z, uv, (col_width, row_height));
+				pos.x += col_width;
+				remaining.x = remaining.x.saturating_sub(uv_dims.x);
+			}
+			pos.y += row_height;
+			remaining.y = remaining.y.saturating_sub(uv_dims.y);
+		}
+	}
+
 	pub fn draw_texture(&mut self, pos: impl Into<Vec2u>, uv: impl Into<Vec2u>, dims: impl Into<Vec2u>) { self.draw_texture_z(pos, BASE_Z, uv, dims); }
 
 	pub fn draw_texture_z(&mut self, pos: impl Into<Vec2u>, z: ZOffset, uv: impl Into<Vec2u>, dims: impl Into<Vec2u>) {
@@ -270,7 +297,7 @@ impl VertexBufferBuilder {
 		self.draw_texture_region_z(pos, z, uv, dims, dims);
 	}
 
-	#[allow(clippy::many_single_char_names, reason = "math")]
+	#[allow(clippy::many_single_char_names, clippy::too_many_lines, reason = "math + micro-optimizations")]
 	pub fn draw_texture_region_z(&mut self, pos: impl Into<Vec2u>, z: ZOffset, uv: impl Into<Vec2u>, dims: impl Into<Vec2u>, uv_dims: impl Into<Vec2u>) {
 		unsafe {
 			let pos = pos.into();

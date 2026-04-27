@@ -5,7 +5,7 @@ use std::hint::likely;
 use std::mem::MaybeUninit;
 use std::slice::{Iter, IterMut};
 #[cfg(not(target_arch = "wasm32"))] use std::thread::{Scope, scope};
-
+use std::thread::ScopedJoinHandle;
 use winit::dpi::PhysicalSize;
 
 use crate::elements::chunk::NbtChunk;
@@ -51,13 +51,16 @@ impl PartialEq for NbtRegion {
 
 impl Clone for NbtRegion {
 	fn clone(&self) -> Self {
-		let mut chunks = [const { MaybeUninit::uninit() }; 32 * 32];
+		let chunks: Box<MaybeUninit<[NbtElement; 32 * 32]>> = unsafe { Box::<[NbtElement; 32 * 32]>::try_new_uninit().unwrap_unchecked() };
+		let mut chunks: Box<[MaybeUninit<NbtElement>; 32 * 32]> = unsafe { core::mem::transmute(chunks) };
 		for (src, dst) in self.chunks.iter().zip(chunks.iter_mut()) {
 			dst.write(src.clone());
 		}
+		let chunks: Box<MaybeUninit<[NbtElement; 32 * 32]>> = unsafe { core::mem::transmute(chunks) };
+		let chunks = unsafe { chunks.assume_init() };
 
 		Self {
-			chunks: unsafe { Box::try_new(MaybeUninit::array_assume_init(chunks)).unwrap_unchecked() },
+			chunks,
 			height: self.height,
 			true_height: self.true_height,
 			end_x: self.end_x,
@@ -146,7 +149,7 @@ impl NbtElementVariant for NbtRegion {
 		s = s.strip_prefix('{').ok_or(s.len())?.trim_start();
 		let mut region = Self::default();
 		while !s.starts_with('}') {
-			let (s2, child) = NbtElement::from_str0(s, NbtElement::parse_int)?;
+			let (s2, child) = NbtElement::from_str0(s, 'i')?;
 			// SAFETY: no caches to outdate
 			if let Some(chunk) = child.as_chunk()
 				&& let Ok(_) = unsafe { region.insert(chunk.pos(), child) }
@@ -182,6 +185,7 @@ impl NbtElementVariant for NbtRegion {
 			let mut threads = Vec::with_capacity(1024);
 
 			for idx in 0..1024 {
+				// SAFETY: decoder is read only in `NbtChunk::from_bytes` impl
 				let d2: &mut D = unsafe { (decoder as *const D).cast_mut().as_mut_unchecked() };
 				threads.push(s.spawn(move || NbtChunk::from_bytes(d2, idx)));
 			}
@@ -200,115 +204,87 @@ impl NbtElementVariant for NbtRegion {
 
 	fn to_be_bytes(&self, writer: &mut UncheckedBufWriter) {
 		scope(move |s| {
-			let mut chunks = Vec::with_capacity(1024);
-			for chunk in self.chunks.iter() {
-				let chunk = unsafe { chunk.as_chunk_unchecked() };
-				chunks.push(s.spawn(move || {
-					if chunk.is_unloaded() {
-						(vec![], 0)
-					} else {
-						let mut writer = UncheckedBufWriter::new();
-						chunk.to_be_bytes(&mut writer);
-						(writer.finish(), chunk.last_modified)
-					}
-				}));
-			}
-			let mut o = 2_u32;
-			let mut offsets = [0; 1024];
-			let mut timestamps = [0; 1024];
-			let mut new_chunks = Vec::with_capacity(chunks.len());
-			for (chunk, (offset, timestamp)) in chunks.into_iter().zip(offsets.iter_mut().zip(timestamps.iter_mut())) {
-				let Ok((chunk, last_modified)) = chunk.join() else {
-					return;
-				};
-				let sectors = (chunk.len() / 4096) as u32;
-				if sectors > 0 {
-					*offset = (o.to_be() >> 8) | (sectors << 24);
-					o += sectors;
-					*timestamp = last_modified;
-					new_chunks.push(chunk);
-				} else {
-					*offset = 0;
-					*timestamp = 0;
-				}
-			}
+			let mut handles = self.chunks.iter().map(|chunk| s.spawn(move || Self::encode_chunk(chunk))).map(Some).collect::<Vec<_>>();
+			let Some((chunk_data, offsets, timestamps)) = Self::join_chunk_encoding_handles(&mut handles) else { return };
 			writer.write(unsafe { core::slice::from_raw_parts(offsets.as_ptr().cast::<u8>(), 4096) });
 			writer.write(unsafe { core::slice::from_raw_parts(timestamps.as_ptr().cast::<u8>(), 4096) });
-			for chunk in new_chunks {
-				writer.write(&chunk);
-			}
+			writer.write(&chunk_data);
 		});
 	}
 
-	fn to_le_bytes(&self, _writer: &mut UncheckedBufWriter) {}
+	fn to_le_bytes(&self, _writer: &mut UncheckedBufWriter) {
+
+	}
 
 	fn render(&self, builder: &mut VertexBufferBuilder, key: Option<&str>, tail: bool, ctx: &mut TreeRenderContext) {
 		ctx.render_complex_head(self, builder, key, |_, _, _, _, _| false);
 
-		if self.is_open() {
-			if self.is_grid_layout() {
-				ctx.pos += (16, 0);
-				let initial_x = ctx.pos.x;
-				for z in 0..32 {
-					if ctx.pos.y > builder.window_height() {
-						break;
-					}
+		if !self.is_open() {
+			return;
+		}
 
-					if ctx.remaining_scroll >= 1 {
-						ctx.remaining_scroll -= 1;
-						for x in 0..32 {
-							ctx.line_number();
-							ctx.skip_line_numbers(self.chunks[z * 32 + x].true_height() - 1);
-						}
-						continue;
-					}
-
-					if ctx.remaining_scroll == 0 {
-						builder.draw_texture(ctx.pos - (16, 0), CONNECTION_UV, (16, (z != 32 - 1 && tail) as usize * 7 + 9));
-					}
-
-					for x in 0..32 {
-						let chunk = self.chunks[z * 32 + x].as_chunk().expect("All region children are chunks");
-
-						ctx.line_number();
-						ctx.skip_line_numbers(chunk.true_height() - 1);
-
-						builder.draw_texture_z(ctx.pos, JUST_OVERLAPPING_BOOKMARK_Z, chunk.uv(), (16, 16));
-
-						if ctx.mouse.x > ctx.left_margin() && ctx.mouse.y > HEADER_SIZE {
-							let mx = ((ctx.mouse.x - ctx.left_margin()) & !15) + ctx.left_margin();
-							let my = ((ctx.mouse.y - HEADER_SIZE) & !15) + HEADER_SIZE;
-							if ctx.pos == (mx, my) {
-								let text = chunk.value();
-								builder.color = TextColor::White.to_raw();
-								builder.draw_tooltip(&[&text], ctx.pos, false);
-							}
-						}
-
-						let pos = ctx.pos;
-						ctx.draw_held_entry_grid_chunk(pos, builder, AABB::from_pos_and_dims(pos, PhysicalSize::new(16, 16)), self);
-
-						ctx.pos += (16, 0);
-					}
-					
-					ctx.pos.x = initial_x;
-					ctx.pos += (0, 16);
-				}
-			} else {
-				ctx.render_complex_body::<Self>(
-					self,
-					builder,
-					tail,
-					|ctx, pos, builder, aabb, region| TreeRenderContext::draw_held_entry_chunk(ctx, pos, builder, AABB::from_pos_and_dims(aabb.low(), PhysicalSize::new(16, 16)), region),
-					|_, _, _, _, _| false,
-				);
-			}
+		if self.is_grid_layout() {
+			ctx.render_grid_layout(self, builder, tail)
+		} else {
+			ctx.render_complex_body::<Self>(
+				self,
+				builder,
+				tail,
+				|ctx, pos, builder, aabb, region| TreeRenderContext::draw_held_entry_chunk(ctx, pos, builder, AABB::from_pos_and_dims(aabb.low(), PhysicalSize::new(16, 16)), region),
+				|_, _, _, _, _| false,
+			)
 		}
 	}
 
 	fn value(&self) -> Cow<'_, str> { Cow::Owned(format!("{} chunk{}", self.loaded_chunks, if self.loaded_chunks == 1 { "" } else { "s" })) }
 
 	fn uv(&self) -> Vec2u { if self.is_grid_layout() { Self::GRID_UV } else { Self::UV } }
+}
+
+impl NbtRegion {
+	type EncodeChunkReturnType = (Vec<u8>, u32);
+
+	fn encode_chunk(chunk: &NbtElement) -> Self::EncodeChunkReturnType {
+		let chunk = unsafe { chunk.as_chunk_unchecked() };
+		if chunk.is_unloaded() {
+			(vec![], 0)
+		} else {
+			let mut writer = UncheckedBufWriter::new();
+			chunk.to_be_bytes(&mut writer);
+			(writer.finish(), chunk.last_modified)
+		}
+	}
+
+	fn join_chunk_encoding_handles(handles: &mut [Option<ScopedJoinHandle<Self::EncodeChunkReturnType>>]) -> Option<(Vec<u8>, [u32; 1024], [u32; 1024])> {
+		let mut o = 2_u32;
+		let mut offsets = [0_u32; 1024];
+		let mut timestamps = [0_u32; 1024];
+		let mut chunk_data_writer = UncheckedBufWriter::new();
+		let mut joined = 0_usize;
+		while joined < 1024 {
+			for (handle, (offset, timestamp)) in handles.iter_mut().zip(offsets.iter_mut().zip(timestamps.iter_mut())) {
+				if let Some(handle) = handle.as_ref() && !handle.is_finished() { continue }
+				let Some(handle) = handle.take() else { continue };
+				let (chunk, last_modified) = handle.join().ok()?;
+				joined += 1;
+				let sectors = (chunk.len() / 4096) as u32;
+				if sectors > 0 {
+					*offset = (o.to_be() >> 8) | (sectors << 24);
+					o += sectors;
+					*timestamp = last_modified;
+					chunk_data_writer.write(&chunk);
+				} else {
+					*offset = 0;
+					*timestamp = 0;
+				}
+			}
+		}
+		Some((chunk_data_writer.finish(), offsets, timestamps))
+	}
+
+	fn render_grid_layout(&self, builder: &mut VertexBufferBuilder, _key: Option<&str>, tail: bool, ctx: &mut TreeRenderContext) {
+
+	}
 }
 
 impl ComplexNbtElementVariant for NbtRegion {

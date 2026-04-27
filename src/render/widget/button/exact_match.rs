@@ -1,3 +1,4 @@
+use ControlFlow::{Break, Continue};
 use std::ops::ControlFlow;
 use winit::dpi::PhysicalSize;
 use winit::event::MouseButton;
@@ -23,11 +24,11 @@ impl Widget for ExactMatchButton {
 
 	fn on_mouse_down(&mut self, _button: MouseButton, _pos: Vec2u, _dims: PhysicalSize<u32>, _ctx: &mut WidgetContextMut) -> ControlFlow<()> {
 		if !config::get_search_mode().has_exact_match_mode() {
-			return ControlFlow::Continue(())
+			return Continue(())
 		}
 
 		config::set_search_exact_match(!config::get_search_exact_match());
-		ControlFlow::Break(())
+		Break(())
 	}
 
 	fn render_at(&self, pos: Vec2u, dims: PhysicalSize<u32>, builder: &mut VertexBufferBuilder, mouse: &MouseManager, _ctx: &WidgetContext) {

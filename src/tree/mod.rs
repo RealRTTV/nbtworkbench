@@ -46,6 +46,8 @@ pub fn indices_for_true(true_line_number: usize, mut root: &NbtElement) -> Optio
 	Some(indices)
 }
 
+/// Describes caches in the tree that require updates on certain interactions
+///
 /// # Shorthands
 /// * `mi`
 pub struct MutableIndices<'m2> {
@@ -106,6 +108,7 @@ impl<'m1, 'm2: 'm1> MutableIndices<'m2> {
 	pub fn as_inner_mut(&'m1 mut self) -> (&'m1 mut &'m2 mut Option<FileUpdateSubscription>, &'m1 mut &'m2 mut Option<SelectedText>, &'m1 mut Vec<&'m2 mut Option<OwnedIndices>>) { (&mut self.subscription, &mut self.selected_text, &mut self.temp) }
 }
 
+// used over return value because it looks cleaner
 mod callback_info {
 	pub struct CallbackInfo {
 		removed: bool,

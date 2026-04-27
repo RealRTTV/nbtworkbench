@@ -32,6 +32,11 @@ pub struct Notification {
 	time_elapsed_override: Option<Duration>,
 }
 
+#[must_use]
+pub fn display_time(len: usize) -> usize {
+	len * 60 + 3000
+}
+
 impl Notification {
 	pub fn new(message: impl Into<String>, text_color: TextColor, kind: NotificationKind) -> Self {
 		let message = message.into();
@@ -53,7 +58,7 @@ impl Notification {
 		let message = notification.raw_message;
 		let text_color = notification.text_color;
 
-		let old_display_time = self.message_len * 60 + 3000;
+		let old_display_time = display_time(self.message_len);
 		let old_width = self.width;
 		let lines = split_lines(message.clone(), 256);
 		self.width = lines.iter().map(|s| s.width()).max().unwrap_or(0) + 10;
@@ -61,6 +66,10 @@ impl Notification {
 		self.lines = lines.into_boxed_slice();
 		self.text_color = text_color;
 		self.raw_message = message;
+		self.update_inset(old_display_time, old_width);
+	}
+
+	fn update_inset(&mut self, old_display_time: usize, old_width: usize) {
 		let elapsed = self.timestamp.elapsed().as_millis();
 		if elapsed <= 250 {
 			// readjust based on amount previously out
@@ -95,7 +104,7 @@ impl Notification {
 	fn get_bar_width(&self) -> usize {
 		let ms = (self.elapsed().as_millis() as usize).saturating_sub(250);
 		let width = self.width - 6;
-		let display_time = self.message_len * 60 + 3000;
+		let display_time = display_time(self.message_len);
 		((1.0 - (ms as f64 / display_time as f64)).clamp(0.0, 1.0) * width as f64).round() as usize
 	}
 
@@ -103,7 +112,7 @@ impl Notification {
 	fn get_inset(&self) -> usize {
 		let mut ms = (self.elapsed().as_millis() as usize).saturating_sub(250);
 		let width = self.width;
-		let display_time = self.message_len * 60 + 3000;
+		let display_time = display_time(self.message_len);
 		if ms < 250 {
 			return (smoothstep((250 - ms) as f64 / 250.0) * width as f64) as usize
 		}
@@ -123,7 +132,7 @@ impl Notification {
 	#[must_use]
 	pub fn is_visible(&self) -> bool {
 		let ms = self.elapsed().as_millis() as usize;
-		let display_time = self.message_len * 60 + 3000 + 500;
+		let display_time = display_time(self.message_len) + 500;
 		ms <= display_time
 	}
 }
@@ -147,48 +156,36 @@ impl Widget for Notification {
 	fn is_visible(&self, _ctx: &WidgetContext) -> bool { self.is_visible() }
 
 	fn render_at(&self, mut pos: Vec2u, dims: PhysicalSize<u32>, builder: &mut VertexBufferBuilder, _mouse: &MouseManager, _ctx: &WidgetContext) {
-		use core::fmt::Write;
-
 		pos.x += self.get_inset();
+		self.render_background(pos, dims, builder);
+		self.render_foreground(pos, dims, builder);
+	}
+}
+
+impl Notification {
+	fn render_background(&self, pos: Vec2u, dims: PhysicalSize<u32>, builder: &mut VertexBufferBuilder) {
+		let bar_width = self.get_bar_width();
 		builder.draw_texture_region_z(pos + (2, 2), NOTIFICATION_Z, NOTIFICATION_UV + (6, 2), (dims.width as usize - 4, dims.height as usize - 4), (12, 16));
 		builder.draw_texture_z(pos + (2, 2), NOTIFICATION_Z, NOTIFICATION_UV + (2, 2), (4, 16));
 		builder.draw_texture_z(pos + (6 + dims.width as usize - 8, 0), NOTIFICATION_Z, NOTIFICATION_UV + (18, 0), (2, 2));
 		builder.draw_texture_z(pos + (6 + dims.width as usize - 8, dims.height as usize - 2), NOTIFICATION_Z, NOTIFICATION_UV + (18, 18), (2, 2));
 		builder.draw_texture_z(pos + (0, dims.height as usize - 2), NOTIFICATION_Z, NOTIFICATION_UV + (0, 18), (2, 2));
 		builder.draw_texture_z(pos + (0, 0), NOTIFICATION_Z, NOTIFICATION_UV, (2, 2));
-		{
-			let mut remaining_width = dims.width as usize - 4;
-			while remaining_width > 0 {
-				builder.draw_texture_z(pos + (6 + dims.width as usize - 8 - remaining_width, 0), NOTIFICATION_Z, NOTIFICATION_UV + (2, 0), (16.min(remaining_width), 2));
-				builder.draw_texture_z(
-					pos + (6 + dims.width as usize - 8 - remaining_width, dims.height as usize - 2),
-					NOTIFICATION_Z,
-					NOTIFICATION_UV + (2, 18),
-					(16.min(remaining_width), 2),
-				);
-				remaining_width = remaining_width.saturating_sub(16);
-			}
-		}
-		{
-			let mut remaining_height = self.height() - 4;
-			while remaining_height > 0 {
-				builder.draw_texture_z(pos + (0, self.height() - 4 - remaining_height + 2), NOTIFICATION_Z, NOTIFICATION_UV + (0, 2), (2, 16.min(remaining_height)));
-				builder.draw_texture_z(
-					pos + (6 + dims.width as usize - 8, self.height() - 4 - remaining_height + 2),
-					NOTIFICATION_Z,
-					NOTIFICATION_UV + (18, 2),
-					(2, 16.min(remaining_height)),
-				);
-				remaining_height = remaining_height.saturating_sub(16);
-			}
-		}
+		builder.draw_texture_tiled(pos + (2, 0), NOTIFICATION_Z, NOTIFICATION_UV + (2, 0), (dims.width as usize - 4, 2), (16, 2));
+		builder.draw_texture_tiled(pos + (2, dims.height as usize - 2), NOTIFICATION_Z, NOTIFICATION_UV + (2, 18), (dims.width as usize - 4, 2), (16, 2));
+		builder.draw_texture_tiled(pos + (0, 2), NOTIFICATION_Z, NOTIFICATION_UV + (0, 2), (2, self.height() - 4), (2, 16));
+		builder.draw_texture_tiled(pos + (dims.width as usize - 2, 2), NOTIFICATION_Z, NOTIFICATION_UV + (0, 2), (2, self.height() - 4), (2, 16));
+		builder.draw_texture_region_z(pos + (3, self.height() - 3), NOTIFICATION_Z, NOTIFICATION_BAR_UV, (bar_width, 1), (20, 1));
+		builder.draw_texture_region_z(pos + (4, self.height() - 2), NOTIFICATION_Z, NOTIFICATION_BAR_BACKDROP_UV, (bar_width, 1), (20, 1));
+	}
+
+	fn render_foreground(&self, pos: Vec2u, _dims: PhysicalSize<u32>, builder: &mut VertexBufferBuilder) {
+		use core::fmt::Write;
+
 		builder.color = self.text_color;
 		for (idx, line) in self.lines.iter().enumerate() {
 			builder.settings(pos + (7, 2 + idx * 16), true, NOTIFICATION_TEXT_Z);
 			let _ = write!(builder, "{line}");
 		}
-		let bar_width = self.get_bar_width();
-		builder.draw_texture_region_z(pos + (3, self.height() - 3), NOTIFICATION_Z, NOTIFICATION_BAR_UV, (bar_width, 1), (20, 1));
-		builder.draw_texture_region_z(pos + (4, self.height() - 2), NOTIFICATION_Z, NOTIFICATION_BAR_BACKDROP_UV, (bar_width, 1), (20, 1));
 	}
 }

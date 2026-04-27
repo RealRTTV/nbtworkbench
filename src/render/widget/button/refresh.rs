@@ -1,3 +1,4 @@
+use ControlFlow::Break;
 use std::ops::ControlFlow;
 use winit::dpi::PhysicalSize;
 use winit::event::MouseButton;
@@ -22,7 +23,7 @@ impl Widget for RefreshButton {
 		if let Err(e) = ctx.tabs.active_tab_mut().refresh() {
 			ctx.alerts.alert(e);
 		}
-		ControlFlow::Break(())
+		Break(())
 	}
 	fn render_at(&self, pos: Vec2u, dims: PhysicalSize<u32>, builder: &mut VertexBufferBuilder, mouse: &MouseManager, ctx: &WidgetContext) {
 		let has_path = ctx.tabs.active_tab().path.path().exists();

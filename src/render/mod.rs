@@ -15,10 +15,8 @@ use winit::dpi::PhysicalSize;
 use crate::elements::compound::CompoundEntry;
 use crate::elements::element::NbtElement;
 use crate::elements::{ComplexNbtElementVariant, NbtElementVariant};
-use crate::render::assets::{
-	BASE_TEXT_Z, BASE_Z, BOOKMARK_UV, BOOKMARK_Z, CONNECTION_UV, END_LINE_NUMBER_SEPARATOR_UV, HEADER_SIZE, HIDDEN_BOOKMARK_UV, INSERTION_CHUNK_UV, INSERTION_UV, INVALID_STRIPE_UV, JUST_OVERLAPPING_BASE_TEXT_Z, LINE_NUMBER_SEPARATOR_UV,
-	LINE_NUMBER_Z, SCROLLBAR_BOOKMARK_Z, SELECTED_TOGGLE_OFF_UV, SELECTED_TOGGLE_ON_UV, TEXT_UNDERLINE_UV, TEXT_UNDERLINE_Z, TOGGLE_Z, UNSELECTED_TOGGLE_OFF_UV, UNSELECTED_TOGGLE_ON_UV,
-};
+use crate::elements::region::NbtRegion;
+use crate::render::assets::{BASE_TEXT_Z, BASE_Z, BOOKMARK_UV, BOOKMARK_Z, CONNECTION_UV, END_LINE_NUMBER_SEPARATOR_UV, HEADER_SIZE, HIDDEN_BOOKMARK_UV, INSERTION_CHUNK_UV, INSERTION_UV, INVALID_STRIPE_UV, JUST_OVERLAPPING_BASE_TEXT_Z, JUST_OVERLAPPING_BOOKMARK_Z, LINE_NUMBER_SEPARATOR_UV, LINE_NUMBER_Z, SCROLLBAR_BOOKMARK_Z, SELECTED_TOGGLE_OFF_UV, SELECTED_TOGGLE_ON_UV, TEXT_UNDERLINE_UV, TEXT_UNDERLINE_Z, TOGGLE_Z, UNSELECTED_TOGGLE_OFF_UV, UNSELECTED_TOGGLE_ON_UV};
 use crate::render::color::TextColor;
 use crate::render::vertex_buffer_builder::VertexBufferBuilder;
 use crate::render::widget::selected_text::{SelectedText, SelectedTextKeyValueError};
@@ -220,51 +218,50 @@ impl<'w> TreeRenderContext<'w> {
 		mut pre_render_draw_held_entry: impl FnMut(&Self, Vec2u, &mut VertexBufferBuilder, AABB, &Nbt) -> bool,
 		mut post_render_draw_held_entry: impl FnMut(&Self, Vec2u, &mut VertexBufferBuilder, AABB, &Nbt) -> bool,
 	) {
-		if element.is_open() {
-			let pos_before = self.pos;
-			self.pos += (16, 0);
-			self.push_index();
-
-			let child_selected_texts = self.take_child_selected_texts();
-
-			for (idx, CompoundEntry { key, value }) in element.children().enumerate() {
-				let pos = self.pos;
-				self.set_last_index(idx);
-
-				self.mark_possible_duplicate_keys(pos, key, &child_selected_texts, builder);
-
-				if pos.y > builder.window_height() {
-					break;
-				}
-
-				let height = value.height();
-				if self.remaining_scroll >= height {
-					self.remaining_scroll -= height;
-					self.skip_line_numbers(value.true_height());
-					continue;
-				}
-
-				pre_render_draw_held_entry(self, pos, builder, AABB::from_pos_and_dims(pos, PhysicalSize::new(16, 8)), element);
-
-				if self.remaining_scroll == 0 {
-					builder.draw_texture(pos - (16, 0), CONNECTION_UV, (16, (idx + 1 != element.len()) as usize * 7 + 9));
-				}
-				value.render(builder, Some(key), idx + 1 == element.len(), self);
-
-				let pos = self.pos;
-				post_render_draw_held_entry(self, pos, builder, AABB::from_pos_and_dims(pos - (0, 8), PhysicalSize::new(16, 8)), element);
-			}
-
-			self.pop_index();
-			self.pos -= (16, 0);
-
-			if !tail {
-				for i in 0..(self.pos.y - pos_before.y) / 16 {
-					builder.draw_texture(pos_before - (16, 0) + (0, i * 16), CONNECTION_UV, (8, 16));
-				}
-			}
-		} else {
+		if !element.is_open() {
 			self.skip_line_numbers(element.true_height() - 1);
+			return
+		}
+		
+		let pos_before = self.pos;
+		self.pos += (16, 0);
+		self.push_index();
+
+		let child_selected_texts = self.take_child_selected_texts();
+
+		for (idx, CompoundEntry { key, value }) in element.children().enumerate() {
+			let pos = self.pos;
+			self.set_last_index(idx);
+
+			self.mark_possible_duplicate_keys(pos, key, &child_selected_texts, builder);
+
+			if pos.y > builder.window_height() {
+				break;
+			}
+
+			let height = value.height();
+			if self.remaining_scroll >= height {
+				self.remaining_scroll -= height;
+				self.skip_line_numbers(value.true_height());
+				continue;
+			}
+
+			pre_render_draw_held_entry(self, pos, builder, AABB::from_pos_and_dims(pos, PhysicalSize::new(16, 8)), element);
+
+			if self.remaining_scroll == 0 {
+				builder.draw_texture(pos - (16, 0), CONNECTION_UV, (16, (idx + 1 != element.len()) as usize * 7 + 9));
+			}
+			value.render(builder, Some(key), idx + 1 == element.len(), self);
+
+			let pos = self.pos;
+			post_render_draw_held_entry(self, pos, builder, AABB::from_pos_and_dims(pos - (0, 8), PhysicalSize::new(16, 8)), element);
+		}
+
+		self.pop_index();
+		self.pos -= (16, 0);
+
+		if !tail {
+			builder.draw_texture_tiled(pos_before - (16, 0), BASE_Z, CONNECTION_UV, (8, self.pos.y - pos_before.y), (8, 16));
 		}
 	}
 
@@ -276,47 +273,96 @@ impl<'w> TreeRenderContext<'w> {
 		mut pre_render_draw_held_entry: impl FnMut(&Self, Vec2u, &mut VertexBufferBuilder, AABB, &Nbt) -> bool,
 		mut post_render_draw_held_entry: impl FnMut(&Self, Vec2u, &mut VertexBufferBuilder, AABB, &Nbt) -> bool,
 	) {
-		if element.is_open() {
-			let pos_before = self.pos;
-			self.pos += (16, 0);
-			self.push_index();
-
-			for (idx, value) in element.children().enumerate() {
-				let pos = self.pos;
-				self.set_last_index(idx);
-
-				if pos.y > builder.window_height() {
-					break;
-				}
-
-				let height = value.height();
-				if self.remaining_scroll >= height {
-					self.remaining_scroll -= height;
-					self.skip_line_numbers(value.true_height());
-					continue;
-				}
-
-				pre_render_draw_held_entry(self, pos, builder, AABB::from_pos_and_dims(pos, PhysicalSize::new(16, 8)), element);
-
-				if self.remaining_scroll == 0 {
-					builder.draw_texture(self.pos - (16, 0), CONNECTION_UV, (16, (idx != element.len() - 1) as usize * 7 + 9));
-				}
-				value.render(builder, None, idx == element.len() - 1, self);
-
-				let pos = self.pos;
-				post_render_draw_held_entry(self, pos, builder, AABB::from_pos_and_dims(pos - (0, 8), PhysicalSize::new(16, 8)), element);
-			}
-
-			self.pop_index();
-			self.pos -= (16, 0);
-
-			if !tail {
-				for i in 0..(self.pos.y - pos_before.y) / 16 {
-					builder.draw_texture(pos_before - (16, 0) + (0, i * 16), CONNECTION_UV, (8, 16));
-				}
-			}
-		} else {
+		if !element.is_open() {
 			self.skip_line_numbers(element.true_height() - 1);
+			return
+		}
+
+		let pos_before = self.pos;
+		self.pos += (16, 0);
+		self.push_index();
+
+		for (idx, value) in element.children().enumerate() {
+			let pos = self.pos;
+			self.set_last_index(idx);
+
+			if pos.y > builder.window_height() {
+				break;
+			}
+
+			let height = value.height();
+			if self.remaining_scroll >= height {
+				self.remaining_scroll -= height;
+				self.skip_line_numbers(value.true_height());
+				continue;
+			}
+
+			pre_render_draw_held_entry(self, pos, builder, AABB::from_pos_and_dims(pos, PhysicalSize::new(16, 8)), element);
+
+			if self.remaining_scroll == 0 {
+				builder.draw_texture(self.pos - (16, 0), CONNECTION_UV, (16, (idx != element.len() - 1) as usize * 7 + 9));
+			}
+			value.render(builder, None, idx == element.len() - 1, self);
+
+			let pos = self.pos;
+			post_render_draw_held_entry(self, pos, builder, AABB::from_pos_and_dims(pos - (0, 8), PhysicalSize::new(16, 8)), element);
+		}
+
+		self.pop_index();
+		self.pos -= (16, 0);
+
+		if !tail {
+			builder.draw_texture_tiled(pos_before - (16, 0), BASE_Z, CONNECTION_UV, (8, self.pos.y - pos_before.y), (8, 16));
+		}
+	}
+	
+	pub fn render_grid_layout(&mut self, region: &NbtRegion, builder: &mut VertexBufferBuilder, tail: bool) {
+		self.pos += (16, 0);
+		let initial_x = self.pos.x;
+		for z in 0..32 {
+			if self.pos.y > builder.window_height() {
+				break;
+			}
+
+			if self.remaining_scroll >= 1 {
+				self.remaining_scroll -= 1;
+				for x in 0..32 {
+					self.line_number();
+					self.skip_line_numbers(region.chunks[z * 32 + x].true_height() - 1);
+				}
+				continue;
+			}
+
+			if self.remaining_scroll == 0 {
+				builder.draw_texture(self.pos - (16, 0), CONNECTION_UV, (16, (z != 32 - 1 && tail) as usize * 7 + 9));
+			}
+
+			for x in 0..32 {
+				let chunk = region.chunks[z * 32 + x].as_chunk().expect("All region children are chunks");
+
+				self.line_number();
+				self.skip_line_numbers(chunk.true_height() - 1);
+
+				builder.draw_texture_z(self.pos, JUST_OVERLAPPING_BOOKMARK_Z, chunk.uv(), (16, 16));
+
+				if self.mouse.x > self.left_margin() && self.mouse.y > HEADER_SIZE {
+					let mx = ((self.mouse.x - self.left_margin()) & !15) + self.left_margin();
+					let my = ((self.mouse.y - HEADER_SIZE) & !15) + HEADER_SIZE;
+					if self.pos == (mx, my) {
+						let text = chunk.value();
+						builder.color = TextColor::White.to_raw();
+						builder.draw_tooltip(&[&text], self.pos, false);
+					}
+				}
+
+				let pos = self.pos;
+				self.draw_held_entry_grid_chunk(pos, builder, AABB::from_pos_and_dims(pos, PhysicalSize::new(16, 16)), region);
+
+				self.pos += (16, 0);
+			}
+
+			self.pos.x = initial_x;
+			self.pos += (0, 16);
 		}
 	}
 

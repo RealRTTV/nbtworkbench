@@ -1,3 +1,4 @@
+use ControlFlow::Continue;
 use std::ops::ControlFlow;
 use winit::dpi::PhysicalSize;
 use winit::event::MouseButton;
@@ -61,7 +62,7 @@ impl<'a> Widget for VerticalList<'a> {
 				widget.on_mouse_up(button, pos, aabb.dims(), ctx)?;
 			}
 		}
-		ControlFlow::Continue(())
+		Continue(())
 	}
 
 	fn on_mouse_down(&mut self, button: MouseButton, pos: Vec2u, dims: PhysicalSize<u32>, ctx: &mut WidgetContextMut) -> ControlFlow<()> {
@@ -71,7 +72,7 @@ impl<'a> Widget for VerticalList<'a> {
 				widget.on_mouse_down(button, pos, aabb.dims(), ctx)?;
 			}
 		}
-		ControlFlow::Continue(())
+		Continue(())
 	}
 
 	fn is_currently_hovering(&self) -> bool { self.widgets.iter().any(|w| w.is_currently_hovering()) }

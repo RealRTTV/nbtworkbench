@@ -1,3 +1,4 @@
+use ControlFlow::{Break, Continue};
 use std::error::Error;
 use std::fmt::Display;
 use std::ops::ControlFlow;
@@ -105,19 +106,19 @@ impl Widget for Alert {
 
 	fn on_mouse_down(&mut self, button: MouseButton, pos: Vec2u, dims: PhysicalSize<u32>, ctx: &mut WidgetContextMut) -> ControlFlow<()> {
 		if !self.is_actually_within_bounds(pos, dims) {
-			return ControlFlow::Continue(())
+			return Continue(())
 		}
 
 		if let MouseButton::Left | MouseButton::Middle = button {
 			self.timestamp = Timestamp::UNIX_EPOCH;
 			self.time_elapsed_override = None;
-			ControlFlow::Break(())
+			Break(())
 		} else if let MouseButton::Right = button {
 			set_clipboard(self.original_message.clone());
 			ctx.notifications.notify(Notification::new("Copied alert to clipboard!", TextColor::Yellow, NotificationKind::CopiedToClipboard));
-			ControlFlow::Break(())
+			Break(())
 		} else {
-			ControlFlow::Continue(())
+			Continue(())
 		}
 	}
 
@@ -144,32 +145,32 @@ impl Widget for Alert {
 	fn is_visible(&self, _ctx: &WidgetContext) -> bool { self.is_visible() }
 
 	fn render_at(&self, mut pos: Vec2u, dims: PhysicalSize<u32>, builder: &mut VertexBufferBuilder, _mouse: &MouseManager, _ctx: &WidgetContext) {
-		use core::fmt::Write;
-
 		pos.x += self.get_inset();
+		self.render_background(pos, dims, builder);
+		self.render_foreground(pos, dims, builder);
+	}
+}
 
+impl Alert {
+	fn render_background(&self, pos: Vec2u, dims: PhysicalSize<u32>, builder: &mut VertexBufferBuilder) {
+		let bar_width = self.get_bar_width();
 		builder.draw_texture_region_z(pos + (4, 4), NOTIFICATION_Z, ALERT_UV + (12, 4), (dims.width as usize - 8, dims.height as usize - 8), (24, 32));
 		builder.draw_texture_z(pos + (4, 4), NOTIFICATION_Z, ALERT_UV + (4, 4), (8, 32));
 		builder.draw_texture_z(pos, NOTIFICATION_Z, ALERT_UV, (4, 4));
 		builder.draw_texture_z(pos + (dims.width as usize - 4, 0), NOTIFICATION_Z, ALERT_UV + (36, 0), (4, 4));
 		builder.draw_texture_z(pos + (0, dims.height as usize - 4), NOTIFICATION_Z, ALERT_UV + (0, 36), (4, 4));
 		builder.draw_texture_z(pos + (dims.width as usize - 4, dims.height as usize - 4), NOTIFICATION_Z, ALERT_UV + (36, 36), (4, 4));
-		{
-			let mut remaining_width = dims.width as usize - 8;
-			while remaining_width > 0 {
-				builder.draw_texture_z(pos + (dims.width as usize - 4 - remaining_width, 0), NOTIFICATION_Z, ALERT_UV + (2, 0), (32.min(remaining_width), 4));
-				builder.draw_texture_z(pos + (dims.width as usize - 4 - remaining_width, dims.height as usize - 4), NOTIFICATION_Z, ALERT_UV + (2, 36), (32.min(remaining_width), 4));
-				remaining_width = remaining_width.saturating_sub(32);
-			}
-		}
-		{
-			let mut remaining_height = dims.height as usize - 8;
-			while remaining_height > 0 {
-				builder.draw_texture_z(pos + (0, dims.height as usize - 4 - remaining_height), NOTIFICATION_Z, ALERT_UV + (0, 4), (4, 32.min(remaining_height)));
-				builder.draw_texture_z(pos + (dims.width as usize - 4, dims.height as usize - 4 - remaining_height), NOTIFICATION_Z, ALERT_UV + (36, 4), (4, 32.min(remaining_height)));
-				remaining_height = remaining_height.saturating_sub(32);
-			}
-		}
+		builder.draw_texture_tiled(pos + (4, 0), NOTIFICATION_Z, ALERT_UV + (2, 0), (dims.width as usize - 8, 4), (32, 4));
+		builder.draw_texture_tiled(pos + (4, dims.height as usize - 4), NOTIFICATION_Z, ALERT_UV + (4, 0), (dims.width as usize - 8, 4), (32, 4));
+		builder.draw_texture_tiled(pos + (0, 4), NOTIFICATION_Z, ALERT_UV + (0, 4), (4, dims.height as usize - 8), (4, 32));
+		builder.draw_texture_tiled(pos + (dims.width as usize - 4, 4), NOTIFICATION_Z, ALERT_UV + (0, 4), (4, dims.height as usize - 8), (4, 32));
+		builder.draw_texture_region_z(pos + (6, dims.height as usize - 8), NOTIFICATION_Z, NOTIFICATION_BAR_UV, (bar_width, 2), (20, 1));
+		builder.draw_texture_region_z(pos + (8, dims.height as usize - 6), NOTIFICATION_Z, NOTIFICATION_BAR_BACKDROP_UV, (bar_width, 2), (20, 1));
+	}
+	
+	fn render_foreground(&self, pos: Vec2u, _dims: PhysicalSize<u32>, builder: &mut VertexBufferBuilder) {
+		use core::fmt::Write;
+		
 		builder.settings(pos + (18, 4), true, NOTIFICATION_TEXT_Z);
 		builder.color = self.title_color;
 		let _ = write!(builder, "{}", self.title);
@@ -178,9 +179,6 @@ impl Widget for Alert {
 			builder.settings(pos + (18, 20 + idx * 16), true, NOTIFICATION_TEXT_Z);
 			let _ = write!(builder, "{line}");
 		}
-		let bar_width = self.get_bar_width();
-		builder.draw_texture_region_z(pos + (6, dims.height as usize - 8), NOTIFICATION_Z, NOTIFICATION_BAR_UV, (bar_width, 2), (20, 1));
-		builder.draw_texture_region_z(pos + (8, dims.height as usize - 6), NOTIFICATION_Z, NOTIFICATION_BAR_BACKDROP_UV, (bar_width, 2), (20, 1));
 	}
 }
 

@@ -2,6 +2,7 @@ use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::fmt::{Display, Formatter};
 use std::hint::likely;
+use std::mem::MaybeUninit;
 use std::ops::Deref;
 use std::slice::{Iter, IterMut};
 #[cfg(not(target_arch = "wasm32"))] use std::thread::{Scope, scope};
@@ -32,6 +33,7 @@ pub struct NbtCompound {
 	true_height: u32,
 	end_x: u32,
 	open: bool,
+	_pad: MaybeUninit<[u8; 2]>,
 	_id: u8,
 }
 
@@ -51,6 +53,7 @@ impl Clone for NbtCompound {
 			true_height: self.true_height,
 			end_x: self.end_x,
 			open: self.open,
+			_pad: self._pad,
 			_id: Self::ID,
 		}
 	}
@@ -64,6 +67,7 @@ impl Default for NbtCompound {
 			open: false,
 			true_height: 1,
 			end_x: 0,
+			_pad: MaybeUninit::uninit(),
 			_id: Self::ID,
 		}
 	}
@@ -132,7 +136,7 @@ impl NbtElementVariant for NbtCompound {
 		while !s.starts_with('}') {
 			let (key, s2) = s.snbt_string_read()?;
 			s = s2.trim_start().strip_prefix(':').ok_or(s2.len())?.trim_start();
-			let (s2, value) = NbtElement::from_str0(s, NbtElement::parse_int)?;
+			let (s2, value) = NbtElement::from_str0(s, 'i')?;
 			compound.map.insert(CompoundEntry::new(key, value));
 			s = s2.trim_start();
 			if let Some(s2) = s.strip_prefix(',') {
@@ -214,6 +218,7 @@ impl ComplexNbtElementVariant for NbtCompound {
 			true_height: 0,
 			end_x: 0,
 			open: false,
+			_pad: MaybeUninit::uninit(),
 			_id: Self::ID,
 		};
 		this.recache();
@@ -461,9 +466,29 @@ impl CompoundMap {
 		}
 	}
 
+	fn update_indices_for_insertion(&mut self, insertion_idx: usize, old_idx: usize) {
+		match insertion_idx.cmp(&old_idx) {
+			Ordering::Less =>
+				for index in self.indices.iter_mut() {
+					let value = *index;
+					if value >= insertion_idx && value <= old_idx {
+						*index += 1;
+					}
+				},
+			Ordering::Equal => {}
+			Ordering::Greater =>
+				for index in self.indices.iter_mut() {
+					let value = *index;
+					if value <= insertion_idx && value >= old_idx {
+						*index -= 1;
+					}
+				},
+		}
+	}
+
 	pub fn insert_at(&mut self, entry: CompoundEntry, idx: usize) -> Option<(CompactString, NbtElement)> {
 		let hash = hash!(entry.key);
-		let (prev, end, ptr) = match self
+		let (prev, old_idx, ptr) = match self
 			.indices
 			.entry(hash, |&idx| unsafe { self.entries.get_unchecked(idx) }.key == entry.key, |&idx| hash!(unsafe { self.entries.get_unchecked(idx) }.key))
 		{
@@ -488,23 +513,7 @@ impl CompoundMap {
 			}
 		};
 
-		match idx.cmp(&end) {
-			Ordering::Less =>
-				for index in self.indices.iter_mut() {
-					let value = *index;
-					if value >= idx && value <= end {
-						*index += 1;
-					}
-				},
-			Ordering::Equal => {}
-			Ordering::Greater =>
-				for index in self.indices.iter_mut() {
-					let value = *index;
-					if value <= idx && value >= end {
-						*index -= 1;
-					}
-				},
-		}
+		self.update_indices_for_insertion(idx, old_idx);
 
 		// SAFETY: the operations above don't re-allocate so this pointer is still valid.
 		unsafe {

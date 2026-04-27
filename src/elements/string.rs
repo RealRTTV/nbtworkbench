@@ -50,7 +50,7 @@ impl NbtElementVariant for NbtString {
 		Ok((s, Self { str: TwentyThree::new(str) }))
 	}
 
-	fn from_bytes<'a, D: Decoder<'a>>(decoder: &mut D, _: Self::ExtraParseInfo) -> NbtParseResult<Self>
+	fn from_bytes<'a, D: Decoder<'a>>(decoder: &mut D, (): Self::ExtraParseInfo) -> NbtParseResult<Self>
 	where Self: Sized {
 		use super::result::*;
 
@@ -137,39 +137,10 @@ impl PartialEq for TwentyThree {
 impl TwentyThree {
 	#[must_use]
 	pub fn new(s: CompactString) -> Self {
-		unsafe {
-			let len = s.len();
-			let res = if len > 23 {
-				let mut owned = s.into_string();
-				let res = Self {
-					heap: ManuallyDrop::new(HeapTwentyThree {
-						ptr: NonNull::new_unchecked(owned.as_mut_ptr()),
-						len,
-						_pad: [const { MaybeUninit::<u8>::uninit() }; 22 - size_of::<usize>() - size_of::<NonNull<u8>>()],
-						variant: 254,
-						_id: NbtString::ID,
-					}),
-				};
-				core::mem::forget(owned);
-				res
-			} else {
-				let ptr = s.as_ptr();
-				let res = Self {
-					stack: ManuallyDrop::new(if len == 23 {
-						StackTwentyThree {
-							data: ptr.cast::<[u8; 23]>().read(),
-							_id: NbtString::ID,
-						}
-					} else {
-						let mut data = array::from_fn::<u8, 23, _>(|idx| s.as_bytes().get(idx).copied().unwrap_or(0));
-						data[22] = 192 + len as u8;
-						StackTwentyThree { data, _id: NbtString::ID }
-					}),
-				};
-				core::mem::forget(s);
-				res
-			};
-			res
+		if s.len() > 23 {
+			Self { heap: HeapTwentyThree::new(s.into_string()) }
+		} else {
+			Self { stack: StackTwentyThree::new(s) }
 		}
 	}
 
@@ -218,6 +189,23 @@ struct HeapTwentyThree {
 	_id: u8,
 }
 
+impl HeapTwentyThree {
+	#[must_use]
+	pub fn new(mut owned: String) -> ManuallyDrop<Self> {
+		debug_assert!(!owned.is_empty(), "ptr is valid");
+
+		let res = ManuallyDrop::new(HeapTwentyThree {
+			ptr: unsafe { NonNull::new_unchecked(owned.as_mut_ptr()) },
+			len: owned.len(),
+			_pad: [const { MaybeUninit::<u8>::uninit() }; 22 - size_of::<usize>() - size_of::<NonNull<u8>>()],
+			variant: 254,
+			_id: NbtString::ID,
+		});
+		core::mem::forget(owned);
+		res
+	}
+}
+
 unsafe impl Send for HeapTwentyThree {}
 unsafe impl Sync for HeapTwentyThree {}
 
@@ -226,4 +214,24 @@ unsafe impl Sync for HeapTwentyThree {}
 struct StackTwentyThree {
 	data: [u8; 23],
 	_id: u8,
+}
+
+impl StackTwentyThree {
+	#[must_use]
+	pub fn new(s: impl AsRef<str>) -> ManuallyDrop<Self> {
+		let str = s.as_ref();
+		let res = ManuallyDrop::new(if str.len() == 23 {
+			Self {
+				// SAFETY: str is exactly 23 bytes long
+				data: unsafe { str.as_ptr().cast::<[u8; 23]>().read() },
+				_id: NbtString::ID,
+			}
+		} else {
+			let mut data = array::from_fn::<u8, 23, _>(|idx| str.as_bytes().get(idx).copied().unwrap_or(0));
+			data[22] = 192 + str.len() as u8;
+			Self { data, _id: NbtString::ID }
+		});
+		core::mem::forget(s);
+		res
+	}
 }

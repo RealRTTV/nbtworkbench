@@ -1,10 +1,11 @@
 macro_rules! array {
-	($module:ident, $name:ident, $id:literal, $element:ty, $get_inner_unchecked:path, $constructor:path, $char:literal, $uv:path, $ghost_uv:path, $default_snbt_integer:path, $try_into_element:path) => {
+	($module:ident, $name:ident, $id:literal, $element:ty, $get_inner_unchecked:path, $constructor:path, $char:literal, $uv:path, $ghost_uv:path, $try_into_element:path) => {
 		mod $module {
 			#[cfg(not(target_arch = "wasm32"))] use ::std::thread::Scope;
 			use $crate::elements::{ComplexNbtElementVariant, NbtElementVariant};
 			#[cfg(target_arch = "wasm32")] use $crate::wasm::FakeScope as Scope;
 
+			// consider refactor to Box<[NbtElement]>
 			#[repr(C)]
 			pub struct $name {
 				pub(in $crate::elements) values: Box<Vec<$crate::elements::element::NbtElement>>,
@@ -109,7 +110,7 @@ macro_rules! array {
 					s = s.strip_prefix(concat!($char, ";")).ok_or(s.len())?.trim_start();
 					let mut array = Self::default();
 					while !s.starts_with(']') {
-						let (s2, element) = $crate::elements::element::NbtElement::from_str0(s, $default_snbt_integer)?;
+						let (s2, element) = $crate::elements::element::NbtElement::from_str0(s, $char)?;
 						let element = $try_into_element(element).ok_or(s.len())?;
 						// SAFETY: there is nothing to update
 						unsafe {
@@ -280,7 +281,6 @@ array!(
 	'B',
 	crate::render::assets::BYTE_ARRAY_UV,
 	crate::render::assets::BYTE_ARRAY_GHOST_UV,
-	crate::elements::element::NbtElement::parse_byte,
 	crate::elements::element::NbtElement::array_try_into_byte
 );
 
@@ -294,7 +294,6 @@ array!(
 	'I',
 	crate::render::assets::INT_ARRAY_UV,
 	crate::render::assets::INT_ARRAY_GHOST_UV,
-	crate::elements::element::NbtElement::parse_int,
 	crate::elements::element::NbtElement::array_try_into_int
 );
 
@@ -308,6 +307,5 @@ array!(
 	'L',
 	crate::render::assets::LONG_ARRAY_UV,
 	crate::render::assets::LONG_ARRAY_GHOST_UV,
-	crate::elements::element::NbtElement::parse_long,
 	crate::elements::element::NbtElement::array_try_into_long
 );

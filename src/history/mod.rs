@@ -18,33 +18,41 @@ use crate::workbench::tab::FilePath;
 pub mod manager;
 
 #[derive(Debug)]
-#[must_use = "Should be added to history immedietly"]
+#[must_use = "Should be added to history immediately"]
 pub enum WorkbenchAction {
+	/// Undo: removes at indices
 	Add {
 		indices: OwnedIndices,
 	},
+	/// Undo: Adds the value back to the tree
 	Remove {
 		kv: NbtElementAndKey,
 		indices: OwnedIndices,
 	},
+	/// Undo: Renames a key or value to its original string version
 	Rename {
 		indices: OwnedIndices,
 		key: Option<CompactString>,
 		value: Option<String>,
 	},
+	/// Undo: swaps again
 	Swap {
 		parent: OwnedIndices,
 		a: usize,
 		b: usize,
 	},
+	/// Undo: swaps kv at indices
 	Replace {
 		indices: OwnedIndices,
 		kv: NbtElementAndKey,
 	},
+	/// Undo: reverses the reordering of indices
 	Reorder {
 		indices: OwnedIndices,
+		/// Mapped from `idx` to `mapping[idx]`
 		mapping: Box<[usize]>,
 	},
+	/// Undo: Removes from indices to add to the held entry
 	AddFromHeldEntry {
 		/// The [Indices](OwnedIndices) for the addition to the [tab](super::Tab)'s value
 		indices: OwnedIndices,
@@ -55,12 +63,15 @@ pub enum WorkbenchAction {
 		/// The value of the [held entry](HeldEntry) before it was added to the [tab](super::Tab)'s value
 		old_kv: Option<NbtElementAndKey>,
 	},
-	/// Uses the [held entry](HeldEntry)'s history to get the indices to insert at
+	/// Undo: Uses the [held entry](HeldEntry)'s history to get the indices to insert at
 	RemoveToHeldEntry,
+	/// Undo: add held entry back -- was discarded
 	DiscardHeldEntry {
 		held_entry: HeldEntry,
 	},
+	/// Undo: discard held entry
 	CreateHeldEntry,
+	/// Undo: do them in reverse
 	Bulk {
 		actions: Box<[Self]>,
 	},
@@ -94,54 +105,16 @@ impl WorkbenchAction {
 			Self::Rename { indices, key, value } => rename_element(root, indices, key, value, path)?.ok_or(UndoWorkbenchActionError::Passed)?.into_action(),
 			Self::Swap { parent, a, b } => swap_element_same_depth(root, parent, a, b, mi)?.into_action(),
 			Self::Reorder { indices, mapping } => reorder_element(root, indices, mapping, mi)?.into_action(),
-			Self::AddFromHeldEntry { indices, mut indices_history, old_kv } => {
-				if held_entry.is_some() {
-					return Err(UndoWorkbenchActionError::AddFromHeldEntry(AddFromHeldEntryError::HasHeldEntry))
-				}
-
-				let (indices, kv) = if let Some(old_kv) = old_kv {
-					let ReplaceElementResult { indices, kv } = replace_element(root, old_kv, indices, mi)?;
-					(indices, kv)
-				} else {
-					let RemoveElementResult { indices, kv, replaces } = remove_element(root, indices, mi)?;
-					if replaces {
-						return Err(UndoWorkbenchActionError::AddFromHeldEntry(AddFromHeldEntryError::ExpectedOldKVPair))
-					}
-					(indices, kv)
-				};
-				indices_history.push(indices);
-				*held_entry = Some(HeldEntry { kv, indices_history });
-				Self::RemoveToHeldEntry
-			}
-			Self::RemoveToHeldEntry => {
-				let HeldEntry { kv, mut indices_history } = held_entry.take().ok_or(UndoWorkbenchActionError::RemoveToHeldEntry(RemoveToHeldEntryError::ExpectedHeldEntry))?;
-				if let Some(indices) = indices_history.pop() {
-					let AddElementResult { indices, old_kv } = add_element(root, kv, indices, mi)?;
-					Self::AddFromHeldEntry { indices, indices_history, old_kv }
-				} else {
-					Self::DiscardHeldEntry { held_entry: HeldEntry::from_aether(kv) }
-				}
-			}
+			Self::AddFromHeldEntry { indices, indices_history, old_kv } => Self::undo_add_from_held_entry(root, mi, held_entry, indices, indices_history, old_kv)?,
+			Self::RemoveToHeldEntry => Self::undo_remove_to_held_entry(root, mi, held_entry)?,
 			Self::DiscardHeldEntry { held_entry: new_held_entry } => {
-				if held_entry.is_some() {
+				if held_entry.replace(new_held_entry).is_some() {
 					return Err(UndoWorkbenchActionError::DiscardHeldEntry(DiscardHeldEntryError::HasHeldEntry))
 				}
-				*held_entry = Some(new_held_entry);
 				Self::RemoveToHeldEntry
 			}
-			Self::CreateHeldEntry => {
-				let held_entry = held_entry.take().ok_or(UndoWorkbenchActionError::CreateHeldEntry(CreateHeldEntryError::ExpectedHeldEntry))?;
-				Self::DiscardHeldEntry { held_entry }
-			}
-			Self::Bulk { actions } => Self::Bulk {
-				actions: actions
-					.into_vec()
-					.into_iter()
-					.rev()
-					.map(|action| action.undo(root, mi, path, held_entry))
-					.collect::<Result<Vec<_>, UndoWorkbenchActionError>>()?
-					.into_boxed_slice(),
-			},
+			Self::CreateHeldEntry => Self::DiscardHeldEntry { held_entry: held_entry.take().ok_or(UndoWorkbenchActionError::CreateHeldEntry(CreateHeldEntryError::ExpectedHeldEntry))? },
+			Self::Bulk { actions } => Self::undo_bulk(actions.into_vec(), root, mi, path, held_entry)?,
 		})
 	}
 
@@ -156,6 +129,50 @@ impl WorkbenchAction {
 		}
 
 		Some(Self::Bulk { actions })
+	}
+
+	fn undo_add_from_held_entry<'m1, 'm2: 'm1>(root: &mut NbtElement, mi: &'m1 mut MutableIndices<'m2>, held_entry: &mut Option<HeldEntry>, indices: OwnedIndices, mut indices_history: LinkedQueue<OwnedIndices>, old_kv: Option<NbtElementAndKey>) -> Result<Self, UndoWorkbenchActionError> {
+		if held_entry.is_some() {
+			return Err(UndoWorkbenchActionError::AddFromHeldEntry(AddFromHeldEntryError::HasHeldEntry))
+		}
+
+		let (indices, kv) = if let Some(old_kv) = old_kv {
+			let ReplaceElementResult { indices, kv } = replace_element(root, old_kv, indices, mi)?;
+			(indices, kv)
+		} else {
+			let RemoveElementResult { indices, kv, replaces } = remove_element(root, indices, mi)?;
+			if replaces {
+				return Err(UndoWorkbenchActionError::AddFromHeldEntry(AddFromHeldEntryError::ExpectedOldKVPair))
+			}
+			(indices, kv)
+		};
+		indices_history.push(indices);
+		*held_entry = Some(HeldEntry { kv, indices_history });
+		Ok(Self::RemoveToHeldEntry)
+	}
+
+	fn undo_remove_to_held_entry<'m1, 'm2: 'm1>(root: &mut NbtElement, mi: &'m1 mut MutableIndices<'m2>, held_entry: &mut Option<HeldEntry>) -> Result<Self, UndoWorkbenchActionError> {
+		let HeldEntry { kv, mut indices_history } = held_entry.take().ok_or(UndoWorkbenchActionError::RemoveToHeldEntry(RemoveToHeldEntryError::ExpectedHeldEntry))?;
+		if let Some(indices) = indices_history.pop() {
+			let AddElementResult { indices, old_kv } = add_element(root, kv, indices, mi)?;
+			Ok(Self::AddFromHeldEntry { indices, indices_history, old_kv })
+		} else {
+			Ok(Self::DiscardHeldEntry { held_entry: HeldEntry::from_aether(kv) })
+		}
+	}
+
+	fn undo_bulk<'m1, 'm2: 'm1, I: IntoIterator<Item=WorkbenchAction>>(actions: I, root: &mut NbtElement, mi: &'m1 mut MutableIndices<'m2>, path: &mut FilePath, held_entry: &mut Option<HeldEntry>) -> Result<Self, UndoWorkbenchActionError>
+	where
+		I::IntoIter: DoubleEndedIterator
+	{
+		Ok(Self::Bulk {
+			actions: actions
+				.into_iter()
+				.rev()
+				.map(|action| action.undo(root, mi, path, held_entry))
+				.collect::<Result<Vec<_>, UndoWorkbenchActionError>>()?
+				.into_boxed_slice(),
+		})
 	}
 }
 

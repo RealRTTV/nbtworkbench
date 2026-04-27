@@ -1,3 +1,4 @@
+use ControlFlow::Break;
 use std::ops::ControlFlow;
 use winit::dpi::PhysicalSize;
 use winit::event::MouseButton;
@@ -23,7 +24,7 @@ impl Widget for SortAlgorithmButton {
 		let sort_algorithm = config::get_sort_algorithm();
 		let reverse = matches!(button, MouseButton::Right) ^ ctx.shift;
 		config::set_sort_algorithm(if reverse { sort_algorithm.rev_cycle() } else { sort_algorithm.cycle() });
-		ControlFlow::Break(())
+		Break(())
 	}
 
 	fn render_at(&self, pos: Vec2u, dims: PhysicalSize<u32>, builder: &mut VertexBufferBuilder, mouse: &MouseManager, _ctx: &WidgetContext) {

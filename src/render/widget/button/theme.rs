@@ -1,3 +1,4 @@
+use ControlFlow::Break;
 use std::ops::ControlFlow;
 use winit::dpi::PhysicalSize;
 use winit::event::MouseButton;
@@ -26,7 +27,7 @@ impl Widget for ThemeButton {
 			Theme::Light => Theme::Dark,
 			Theme::Dark => Theme::Light,
 		});
-		ControlFlow::Break(())
+		Break(())
 	}
 
 	fn render_at(&self, pos: Vec2u, dims: PhysicalSize<u32>, builder: &mut VertexBufferBuilder, mouse: &MouseManager, _ctx: &WidgetContext) {

@@ -1,6 +1,7 @@
+use ControlFlow::{Break, Continue};
 use std::fmt::{Display, Formatter};
 use std::ops::{ControlFlow, Deref, DerefMut};
-
+use itertools::Either::{Left, Right};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use winit::dpi::PhysicalSize;
@@ -453,11 +454,11 @@ impl SearchBox {
 			}
 
 			match value.children() {
-				Some(Ok(iter)) =>
+				Some(Left(iter)) =>
 					for child in iter.rev() {
 						queue.push(((None, child), value.is_open()))
 					},
-				Some(Err(iter)) =>
+				Some(Right(iter)) =>
 					for CompoundEntry { key, value: child } in iter.rev() {
 						queue.push(((Some(key), child), value.is_open()))
 					},
@@ -512,27 +513,27 @@ impl SearchBox {
 		}
 
 		match on_key_press0(self, key, ch, flags) {
-			SearchBoxKeyResult::NoAction => ControlFlow::Continue(()),
+			SearchBoxKeyResult::NoAction => Continue(()),
 			SearchBoxKeyResult::GenericAction => {
 				self.post_input(window_dims);
-				ControlFlow::Break(())
+				Break(())
 			}
 			SearchBoxKeyResult::Escape => {
 				self.post_input(window_dims);
 				self.deselect();
-				ControlFlow::Break(())
+				Break(())
 			}
 			SearchBoxKeyResult::MoveToReplaceBox => {
 				self.post_input(window_dims);
 				replace_box.select(self.value.split_at(self.cursor).0.width().saturating_sub(self.horizontal_scroll), MouseButton::Left);
 				self.deselect();
-				ControlFlow::Break(())
+				Break(())
 			}
 			result @ (SearchBoxKeyResult::Search | SearchBoxKeyResult::SearchCountOnly) => {
 				let notification = self.search(&mut tab.bookmarks, &tab.root, result == SearchBoxKeyResult::SearchCountOnly);
 				notifications.notify(notification);
 				self.post_input(window_dims);
-				ControlFlow::Break(())
+				Break(())
 			}
 		}
 	}

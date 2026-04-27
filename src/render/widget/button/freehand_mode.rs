@@ -1,3 +1,4 @@
+use ControlFlow::Break;
 use std::ops::ControlFlow;
 use winit::dpi::PhysicalSize;
 use winit::event::MouseButton;
@@ -20,7 +21,7 @@ impl Widget for FreehandModeButton {
 	fn on_mouse_down(&mut self, _button: MouseButton, _pos: Vec2u, _dims: PhysicalSize<u32>, ctx: &mut WidgetContextMut) -> ControlFlow<()> {
 		let tab = ctx.tabs.active_tab_mut();
 		tab.freehand_mode = !tab.freehand_mode;
-		ControlFlow::Break(())
+		Break(())
 	}
 
 	fn render_at(&self, pos: Vec2u, dims: PhysicalSize<u32>, builder: &mut VertexBufferBuilder, mouse: &MouseManager, ctx: &WidgetContext) {

@@ -103,6 +103,37 @@ impl DerefMut for NbtChunk {
 	fn deref_mut(&mut self) -> &mut Self::Target { &mut self.inner }
 }
 
+fn get_bytes<'a, 'b>(decoder: &'a mut impl Decoder<'b>, idx: usize) -> NbtParseResult<Either<(&'a [u8], u32), NbtChunk>> {
+	let bytes = decoder.rest();
+	let (offsets, bytes) = from_opt(bytes.split_first_chunk::<4096>(), "header wasn't big enough")?;
+	let (last_modifieds, bytes) = from_opt(bytes.split_first_chunk::<4096>(), "header wasn't big enough")?;
+	let last_modified = u32::from_be_bytes(unsafe { last_modifieds[idx * 4..=idx * 4 + 3].as_ptr().cast::<[u8; 4]>().read() });
+	let offset = u32::from_be_bytes(unsafe { offsets[idx * 4..=idx * 4 + 3].as_ptr().cast::<[u8; 4]>().read() });
+	if offset < 512 {
+		return ok(Either::Right(NbtChunk::unloaded_from_pos(idx)));
+	}
+	let len = (offset as usize & 0xFF) * 4096;
+	// value does include header so we must offset against that
+	let offset = ((offset >> 8) - 2) as usize * 4096;
+	if bytes.len() < offset + len {
+		return err("Offset goes outside bytes");
+	}
+	ok(Either::Left((&bytes[offset..offset + len], last_modified)))
+}
+
+fn deserialize_chunk(data: &[u8], compression: ChunkFileFormat) -> NbtParseResult<NbtElement> {
+	ok(match compression {
+		ChunkFileFormat::Gzip => NbtElement::from_be_file(&from_result(DeflateDecoder::new_with_options(data, DeflateOptions::default().set_confirm_checksum(false)).decode_gzip())?)?,
+		ChunkFileFormat::Zlib => NbtElement::from_be_file(&from_result(DeflateDecoder::new_with_options(data, DeflateOptions::default().set_confirm_checksum(false)).decode_zlib())?)?,
+		ChunkFileFormat::Nbt => NbtElement::from_be_file(data)?,
+		ChunkFileFormat::Lz4 => NbtElement::from_be_file(&{
+			let mut vec = vec![];
+			from_result(lz4_java_wrc::Lz4BlockInput::new(data).read_to_end(&mut vec))?;
+			vec
+		})?,
+	})
+}
+
 impl NbtElementVariant for NbtChunk {
 	type ExtraParseInfo = usize;
 
@@ -132,38 +163,6 @@ impl NbtElementVariant for NbtChunk {
 
 	fn from_bytes<'a, D: Decoder<'a>>(decoder: &mut D, idx: usize) -> NbtParseResult<Self>
 	where Self: Sized {
-		fn get_bytes<'a, 'b>(decoder: &'a mut impl Decoder<'b>, idx: usize) -> NbtParseResult<Either<(&'a [u8], u32), NbtChunk>> {
-			let bytes = decoder.rest();
-			let (offsets, bytes) = from_opt(bytes.split_first_chunk::<4096>(), "header wasn't big enough")?;
-			let (last_modifieds, bytes) = from_opt(bytes.split_first_chunk::<4096>(), "header wasn't big enough")?;
-			let last_modified = u32::from_be_bytes(unsafe { last_modifieds[idx * 4..=idx * 4 + 3].as_ptr().cast::<[u8; 4]>().read() });
-			let offset = u32::from_be_bytes(unsafe { offsets[idx * 4..=idx * 4 + 3].as_ptr().cast::<[u8; 4]>().read() });
-			if offset < 512 {
-				return ok(Either::Right(NbtChunk::unloaded_from_pos(idx)));
-			}
-			let pos = ((idx % 16) as u8, (idx / 16) as u8);
-			let len = (offset as usize & 0xFF) * 4096;
-			// value does include header so we must offset against that
-			let offset = ((offset >> 8) - 2) as usize * 4096;
-			if bytes.len() < offset + len {
-				return err("Offset goes outside bytes");
-			}
-			ok(Either::Left((&bytes[offset..offset + len], last_modified)))
-		}
-
-		fn deserialize_chunk(data: &[u8], compression: ChunkFileFormat) -> NbtParseResult<NbtElement> {
-			ok(match compression {
-				ChunkFileFormat::Gzip => NbtElement::from_be_file(&from_result(DeflateDecoder::new_with_options(data, DeflateOptions::default().set_confirm_checksum(false)).decode_gzip())?)?,
-				ChunkFileFormat::Zlib => NbtElement::from_be_file(&from_result(DeflateDecoder::new_with_options(data, DeflateOptions::default().set_confirm_checksum(false)).decode_zlib())?)?,
-				ChunkFileFormat::Nbt => NbtElement::from_be_file(data)?,
-				ChunkFileFormat::Lz4 => NbtElement::from_be_file(&{
-					let mut vec = vec![];
-					from_result(lz4_java_wrc::Lz4BlockInput::new(data).read_to_end(&mut vec))?;
-					vec
-				})?,
-			})
-		}
-
 		let (data, last_modified) = match get_bytes(decoder, idx)? {
 			Either::Left((bytes, last_modified)) => (bytes, last_modified),
 			Either::Right(chunk) => return ok(chunk),
@@ -182,6 +181,7 @@ impl NbtElementVariant for NbtChunk {
 			4 => ChunkFileFormat::Lz4,
 			_ => return err("Unknown compression format"),
 		};
+		let pos = ((idx % 16) as u8, (idx / 16) as u8);
 		let element = deserialize_chunk(data, compression)?;
 		ok(NbtChunk::new(from_opt(element.into_compound(), "Chunk was not of type compound")?, pos, compression, last_modified))
 	}

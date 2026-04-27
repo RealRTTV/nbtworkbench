@@ -1,3 +1,4 @@
+use ControlFlow::{Break, Continue};
 use std::fmt::Write;
 use std::ops::{ControlFlow, Deref, DerefMut, Range};
 
@@ -210,12 +211,12 @@ impl SelectedText {
 		) -> ControlFlow<Result<SelectedTextKeyResult, SelectedTextInputError>> {
 			if key == KeyCode::ArrowUp {
 				if flags & !flags!(Ctrl) == 0 {
-					return ControlFlow::Break(this
+					return Break(this
 						.move_up(consts, flags == flags!(Ctrl), root, path)
 						.map(SelectedTextKeyResult::Action)
 						.map_err(SelectedTextInputError::from))
 				} else if flags == flags!(Ctrl + Shift) {
-					return ControlFlow::Break(this
+					return Break(this
 						.shift_up(consts, root, mi)
 						.map(Some)
 						.map(SelectedTextKeyResult::Action)
@@ -225,12 +226,12 @@ impl SelectedText {
 
 			if key == KeyCode::ArrowDown {
 				if flags & !flags!(Ctrl) == 0 {
-					return ControlFlow::Break(this
+					return Break(this
 						.move_down(consts, flags == flags!(Ctrl), root, path)
 						.map(SelectedTextKeyResult::Action)
 						.map_err(SelectedTextInputError::from))
 				} else if flags == flags!(Ctrl + Shift) {
-					return ControlFlow::Break(this
+					return Break(this
 						.shift_down(consts, root, mi)
 						.map(Some)
 						.map(SelectedTextKeyResult::Action)
@@ -240,13 +241,13 @@ impl SelectedText {
 
 			if key == KeyCode::ArrowLeft {
 				if flags & !flags!(Ctrl) == 0 && this.selection.is_none() && this.cursor == 0 && this.keyfix.as_ref().is_some_and(|keyfix| keyfix.1.is_editable()) {
-					return ControlFlow::Break(this
+					return Break(this
 						.move_to_keyfix(consts, root, path)
 						.map(SelectedTextKeyResult::Action)
 						.map_err(SelectedTextInputError::from));
 				}
 				if flags & !flags!(Shift) == flags!(Alt) {
-					return ControlFlow::Break(this
+					return Break(this
 						.force_close(root, mi)
 						.map(|_| None)
 						.map(SelectedTextKeyResult::Action)
@@ -256,13 +257,13 @@ impl SelectedText {
 
 			if key == KeyCode::ArrowRight {
 				if flags & !flags!(Ctrl) == 0 && this.selection.is_none() && this.cursor == this.value.len() && this.valuefix.as_ref().is_some_and(|valuefix| valuefix.1.is_editable()) {
-					return ControlFlow::Break(this
+					return Break(this
 						.move_to_valuefix(consts, root, path)
 						.map(SelectedTextKeyResult::Action)
 						.map_err(SelectedTextInputError::from));
 				}
 				if (flags) & !flags!(Shift) == flags!(Alt) {
-					return ControlFlow::Break(this
+					return Break(this
 						.force_open((flags & !flags!(Alt)) == flags!(Shift), root, mi)
 						.map(|_| None)
 						.map(SelectedTextKeyResult::Action)
@@ -275,27 +276,27 @@ impl SelectedText {
 			if this.cursor != cursor_before {
 				this.recache_cached_cursor_x(consts);
 			}
-			ControlFlow::Break(Ok(result))
+			Break(Ok(result))
 		}
 		match on_key_press0(self, key, ch, flags, consts, root, path, mi) {
-			ControlFlow::Break(Err(e)) if !e.is_generally_ignored() => {
+			Break(Err(e)) if !e.is_generally_ignored() => {
 				alerts.alert(e);
-				ControlFlow::Break(true)
+				Break(true)
 			},
-			ControlFlow::Continue(()) | ControlFlow::Break(Err(_) | Ok(SelectedTextKeyResult::NoAction)) => ControlFlow::Continue(()),
-			ControlFlow::Break(Ok(SelectedTextKeyResult::Action(action))) => {
+			Continue(()) | Break(Err(_) | Ok(SelectedTextKeyResult::NoAction)) => Continue(()),
+			Break(Ok(SelectedTextKeyResult::Action(action))) => {
 				self.post_input();
 				history.append_all(action);
-				ControlFlow::Break(false)
+				Break(false)
 			}
-			ControlFlow::Break(Ok(SelectedTextKeyResult::Escape)) => ControlFlow::Break(true),
-			ControlFlow::Break(Ok(SelectedTextKeyResult::Finish)) => {
+			Break(Ok(SelectedTextKeyResult::Escape)) => Break(true),
+			Break(Ok(SelectedTextKeyResult::Finish)) => {
 				history.append_all(self.save(root, path).alert_err(alerts).flatten());
-				ControlFlow::Break(true)
+				Break(true)
 			}
-			ControlFlow::Break(Ok(SelectedTextKeyResult::GenericAction)) => {
+			Break(Ok(SelectedTextKeyResult::GenericAction)) => {
 				self.post_input();
-				ControlFlow::Break(false)
+				Break(false)
 			}
 		}
 	}

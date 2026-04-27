@@ -1,3 +1,4 @@
+use ControlFlow::{Break, Continue};
 use std::ops::ControlFlow;
 use winit::dpi::PhysicalSize;
 use winit::event::MouseButton;
@@ -21,12 +22,12 @@ impl Widget for ReplaceByButton {
 	fn is_valid_mouse_button(&self, button: MouseButton, _pos: Vec2u, _dims: PhysicalSize<u32>) -> bool { matches!(button, MouseButton::Left | MouseButton::Right) }
 	fn on_mouse_down(&mut self, button: MouseButton, _pos: Vec2u, _dims: PhysicalSize<u32>, ctx: &mut WidgetContextMut) -> ControlFlow<()> {
 		if !(ctx.search_box.is_selected() || ctx.replace_box.is_selected()) {
-			return ControlFlow::Continue(());
+			return Continue(());
 		}
 
 		let reverse = matches!(button, MouseButton::Right) ^ ctx.shift;
 		config::set_replace_by(if reverse { config::get_replace_by().rev_cycle() } else { config::get_replace_by().cycle() });
-		ControlFlow::Break(())
+		Break(())
 	}
 	fn is_visible(&self, ctx: &WidgetContext) -> bool { ctx.search_box.is_selected() || ctx.replace_box.is_selected() }
 

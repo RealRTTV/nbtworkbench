@@ -1,7 +1,9 @@
+use ControlFlow::{Break, Continue};
 use std::fmt::{Display, Formatter};
 use std::ops::{ControlFlow, Deref, DerefMut};
 
 use compact_str::ToCompactString;
+use itertools::Either::{Left, Right};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -11,7 +13,7 @@ use winit::keyboard::KeyCode;
 
 use crate::elements::compound::CompoundEntry;
 use crate::elements::element::{NbtElement, SNBTParseError};
-use crate::elements::{Matches, NbtElementAndKey, NbtElementAndKeyRef};
+use crate::elements::{Matches, NbtElementAndKey, NbtElementAndKeyRef, NbtElementAndKeyRefMut};
 use crate::history::WorkbenchAction;
 use crate::render::assets::{DARK_STRIPE_UV, REPLACE_BOX_SELECTION_Z, REPLACE_BOX_Z, REPLACE_BY_BOOKMARKED_LINES, REPLACE_BY_SEARCH_HITS};
 use crate::render::color::TextColor;
@@ -219,42 +221,41 @@ impl ReplaceBox {
 		self.horizontal_scroll = horizontal_scroll;
 	}
 
-	pub fn on_key_press(&mut self, key: KeyCode, ch: Option<char>, flags: u8, search_box: &mut SearchBox, tab: &mut Tab, _alerts: &mut AlertManager, notifications: &mut NotificationManager, window_dims: PhysicalSize<u32>) -> ControlFlow<()> {
-		#[must_use]
-		pub fn on_key_press0(this: &mut ReplaceBox, key: KeyCode, ch: Option<char>, flags: u8) -> ReplaceBoxKeyResult {
-			if !this.is_selected() {
-				return ReplaceBoxKeyResult::NoAction
-			}
-			if let KeyCode::Enter | KeyCode::NumpadEnter = key
-				&& flags == flags!()
-			{
-				return ReplaceBoxKeyResult::ReplaceAll;
-			}
-			if let KeyCode::ArrowUp | KeyCode::Tab = key
-				&& flags == flags!()
-			{
-				return ReplaceBoxKeyResult::MoveToSearchBox;
-			}
-			this.0.on_key_press(key, ch, flags).into()
+	#[must_use]
+	fn get_action_on_key_press(&mut self, key: KeyCode, ch: Option<char>, flags: u8) -> ReplaceBoxKeyResult {
+		if !self.is_selected() {
+			return ReplaceBoxKeyResult::NoAction
 		}
+		if let KeyCode::Enter | KeyCode::NumpadEnter = key
+			&& flags == flags!()
+		{
+			return ReplaceBoxKeyResult::ReplaceAll;
+		}
+		if let KeyCode::ArrowUp | KeyCode::Tab = key
+			&& flags == flags!()
+		{
+			return ReplaceBoxKeyResult::MoveToSearchBox;
+		}
+		self.0.on_key_press(key, ch, flags).into()
+	}
 
-		let result = on_key_press0(self, key, ch, flags);
-		match result {
-			ReplaceBoxKeyResult::NoAction => ControlFlow::Continue(()),
+	pub fn on_key_press(&mut self, key: KeyCode, ch: Option<char>, flags: u8, search_box: &mut SearchBox, tab: &mut Tab, _alerts: &mut AlertManager, notifications: &mut NotificationManager, window_dims: PhysicalSize<u32>) -> ControlFlow<()> {
+		match self.get_action_on_key_press(key, ch, flags) {
+			ReplaceBoxKeyResult::NoAction => Continue(()),
 			ReplaceBoxKeyResult::GenericAction => {
 				self.post_input(window_dims);
-				ControlFlow::Break(())
+				Break(())
 			}
 			ReplaceBoxKeyResult::Escape => {
 				self.post_input(window_dims);
 				self.deselect();
-				ControlFlow::Break(())
+				Break(())
 			}
 			ReplaceBoxKeyResult::MoveToSearchBox => {
 				self.post_input(window_dims);
 				search_box.select(self.value.split_at(self.cursor).0.width().saturating_sub(self.horizontal_scroll), MouseButton::Left);
 				self.deselect();
-				ControlFlow::Break(())
+				Break(())
 			}
 			ReplaceBoxKeyResult::ReplaceAll => {
 				let (notification, bulk) = self.replace(mutable_indices!(tab), &mut tab.root, search_box);
@@ -263,7 +264,7 @@ impl ReplaceBox {
 				}
 				notifications.notify(notification);
 				self.post_input(window_dims);
-				ControlFlow::Break(())
+				Break(())
 			}
 		}
 	}
@@ -311,8 +312,31 @@ impl ReplaceBox {
 		)
 	}
 
+	fn try_replace<'m1, 'm2: 'm1>((key, element): NbtElementAndKeyRef, replacement: &SearchReplacement, mi: &'m1 mut MutableIndices<'m2>, current_indices: &Indices, root: &mut NbtElement, actions: &mut Vec<WorkbenchAction>, errors: &mut Vec<ReplacementError>) -> Result<(), ()> {
+		let mut element_replaced = false;
+		if replacement.matches((key, element)) {
+			let key_str = key.filter(|_| replacement.needs_key()).map(|s| s.to_owned());
+			let element_str = if replacement.needs_element_snbt() {
+				Some((element.to_string(), TextColor::White))
+			} else if replacement.needs_element_value() {
+				Some(element.value()).map(|(a, b)| (a.into_owned(), b))
+			} else {
+				None
+			};
+			match replacement.replace(root, key_str, element_str.filter(|&(_, color)| color != TextColor::TreeValueDesc).map(|(x, _)| x), mi, current_indices) {
+				Break(Ok((action, replaced))) => {
+					actions.push(action);
+					element_replaced = replaced;
+				}
+				Continue(()) => {}
+				Break(Err(e)) => errors.push(e),
+			}
+		}
+		if element_replaced { Ok(()) } else { Err(()) }
+	}
+
 	#[must_use]
-	pub fn replace_by_search_box0<'root, 'root2: 'root, 'm1, 'm2: 'm1>(mi: &'m1 mut MutableIndices<'m2>, root: &'root mut NbtElement, replacement: &SearchReplacement) -> (WorkbenchAction, Vec<ReplacementError>) {
+	pub(crate) fn replace_by_search_box0<'root, 'root2: 'root, 'm1, 'm2: 'm1>(mi: &'m1 mut MutableIndices<'m2>, root: &'root mut NbtElement, replacement: &SearchReplacement) -> (WorkbenchAction, Vec<ReplacementError>) {
 		// SAFETY: the `alternative_root` ptr is used for writes in 2 different ways within `SearchReplacement::replace`:
 		// `rename_element`
 		// and `replace_element`
@@ -334,73 +358,156 @@ impl ReplaceBox {
 		let mut errors = Vec::new();
 
 		while let Some((key, element)) = queue.pop() {
-			let mut element_replaced = false;
-			if replacement.matches((key, element)) {
-				let key_str = key.filter(|_| replacement.needs_key()).map(|s| s.to_owned());
-				let element_str = if replacement.needs_element_snbt() {
-					Some((element.to_string(), TextColor::White))
-				} else if replacement.needs_element_value() {
-					Some(element.value()).map(|(a, b)| (a.into_owned(), b))
-				} else {
-					None
-				};
-				match replacement.replace(alternative_root, key_str, element_str.filter(|&(_, color)| color != TextColor::TreeValueDesc).map(|(x, _)| x), mi, &current_indices) {
-					ControlFlow::Break(Ok((action, replaced))) => {
-						actions.push(action);
-						element_replaced = replaced;
-					}
-					ControlFlow::Continue(()) => {}
-					ControlFlow::Break(Err(e)) => errors.push(e),
-				}
-			}
-
-			if element_replaced {
-				while let Some(idx) = current_indices.last_mut()
-					&& let Some(len) = indices_max.last().copied()
-				{
-					if *idx + 1 == len {
-						indices_max.pop();
-						current_indices.pop();
-					} else {
-						*idx += 1;
-					}
-				}
-			} else {
-				match element.children() {
-					Some(Ok(iter)) => {
-						let mut len = 0_usize;
-						for value in iter.rev() {
-							queue.push((None, value));
-							len += 1;
-						}
-						indices_max.push(len);
-						current_indices.push(0_usize);
-					}
-					Some(Err(iter)) => {
-						let mut len = 0_usize;
-						for CompoundEntry { key, value } in iter.rev() {
-							queue.push((Some(key), value));
-							len += 1;
-						}
-						indices_max.push(len);
-						current_indices.push(0_usize);
-					}
-					None => {
-						while let Some(idx) = current_indices.last_mut()
-							&& let Some(len) = indices_max.last().copied()
-						{
-							if *idx + 1 == len {
-								indices_max.pop();
-								current_indices.pop();
-							} else {
-								*idx += 1;
-							}
-						}
-					}
-				}
+			let replacement = ReplaceBox::try_replace((key, element), replacement, mi, &current_indices, alternative_root, &mut actions, &mut errors);
+			match replacement {
+				Ok(()) => Self::next_line_contracted(&mut current_indices, &mut indices_max),
+				Err(()) => Self::next_line_expanded(&mut current_indices, &mut indices_max, &mut queue, element),
 			}
 		}
 		(WorkbenchAction::Bulk { actions: actions.into_boxed_slice() }, errors)
+	}
+
+	/// Moves to the sibling node, if not present, then parent's sibling, if not present, grandparent's sibling, etc.
+	///
+	/// Will not go inside current node
+	///
+	/// ## Examples
+	/// ```json
+	/// {
+	///     "people": [
+	///         {
+	///             "name": "Alice", // current line
+	///             "initial": "A", // next line
+	///         },
+	///         {
+	///             "name": "Bob",
+	///             "initial": "B",
+	///         }
+	///     ]
+	/// }
+	/// ```
+	/// ```json
+	/// {
+	///     "people": [
+	///         {
+	///             "name": "Alice",
+	///             "initial": "A", // current line
+	///         },
+	///         {
+	///             "name": "Bob", // next line
+	///             "initial": "B",
+	///         }
+	///     ]
+	/// }
+	/// ```
+	/// ```json
+	/// {
+	///     "people": [
+	///         {
+	///             "name": "Alice",
+	///             "initial": "A",
+	///         },
+	///         {
+	///             "bonus_data": { // current line
+	///                 "crush": "Alice",
+	///             },
+	///             "name": "Bob", // next line
+	///             "initial": "B",
+	///         }
+	///     ],
+	/// }
+	/// ```
+	fn next_line_contracted(current_indices: &mut OwnedIndices, indices_max: &mut Vec<usize>) {
+		while let Some(idx) = current_indices.last_mut() && let Some(len) = indices_max.last().copied() {
+			if *idx + 1 == len {
+				indices_max.pop();
+				current_indices.pop();
+			} else {
+				*idx += 1;
+			}
+		}
+	}
+
+	/// Moves the queue and indices into the current element's children nodes, setting up iteration through those.
+	///
+	/// Will go inside current node
+	///
+	/// Two cases:
+	///
+	/// 1. Has children:\
+	/// 1a. Adds all children to the queue -- making the first thing in the queue the next child.\
+	/// 1b. Adds `indices_max` value of length of current depth
+	///
+	/// 2. Has no children: [`Self::next_line_contracted`]
+	///
+	/// ## Examples
+	/// ```json
+	/// {
+	///     "people": [
+	///         {
+	///             "name": "Alice", // current line
+	///             "initial": "A", // next line
+	///         },
+	///         {
+	///             "name": "Bob",
+	///             "initial": "B",
+	///         }
+	///     ]
+	/// }
+	/// ```
+	/// ```json
+	/// {
+	///     "people": [
+	///         {
+	///             "name": "Alice",
+	///             "initial": "A", // current line
+	///         },
+	///         {
+	///             "name": "Bob", // next line
+	///             "initial": "B",
+	///         }
+	///     ]
+	/// }
+	/// ```
+	/// ```json
+	/// {
+	///     "people": [
+	///         {
+	///             "name": "Alice",
+	///             "initial": "A",
+	///         },
+	///         {
+	///             "bonus_data": { // current line
+	///                 "crush": "Alice", // next line
+	///             },
+	///             "name": "Bob",
+	///             "initial": "B",
+	///         }
+	///     ],
+	/// }
+	/// ```
+	fn next_line_expanded<'root>(current_indices: &mut OwnedIndices, indices_max: &mut Vec<usize>, queue: &mut Vec<NbtElementAndKeyRef<'root>>, element: &'root NbtElement) {
+		match element.children() {
+			Some(Left(iter)) => {
+				let mut len = 0_usize;
+				for value in iter.rev() {
+					queue.push((None, value));
+					len += 1;
+				}
+				indices_max.push(len);
+				current_indices.push(0_usize);
+			}
+			Some(Right(iter)) => {
+				let mut len = 0_usize;
+				for CompoundEntry { key, value } in iter.rev() {
+					queue.push((Some(key), value));
+					len += 1;
+				}
+				indices_max.push(len);
+				current_indices.push(0_usize);
+			}
+			None => Self::next_line_contracted(current_indices, indices_max),
+		}
 	}
 
 	#[must_use]
@@ -448,9 +555,9 @@ impl ReplaceBox {
 		while let Some(indices) = mutable_indices.temp.pop() {
 			let Some(indices) = indices.take() else { continue };
 			match replacement.replace(root, indices, &mut fake_path, &mut mutable_indices) {
-				ControlFlow::Break(Ok(action)) => actions.push(action),
-				ControlFlow::Continue(()) => {}
-				ControlFlow::Break(Err(e)) => errors.push(e),
+				Break(Ok(action)) => actions.push(action),
+				Continue(()) => {}
+				Break(Err(e)) => errors.push(e),
 			}
 		}
 
@@ -474,39 +581,23 @@ impl SearchReplacement {
 		let search_mode = config::get_search_mode();
 		let search_flags = config::get_search_flags();
 		let exact_match = config::get_search_exact_match();
-		Some(match search_mode {
-			SearchMode::String => Self {
-				inner: SearchReplacementInner::Substring {
-					find: if exact_match { find } else { find.to_lowercase() },
-					replacement,
-					case_sensitive: exact_match,
-				},
-				search_flags,
-			},
-			SearchMode::Regex =>
-				if let Some(regex) = create_regex(find, exact_match) {
-					Self {
-						inner: SearchReplacementInner::Regex { regex, replacement },
-						search_flags,
-					}
-				} else {
-					return None
-				},
-			SearchMode::Snbt =>
-				if let Ok((find, replacement)) = {
-					let sort = config::set_sort_algorithm(SortAlgorithm::None);
-					let find = NbtElement::from_str(&find);
-					config::set_sort_algorithm(sort);
-					let replacement = NbtElement::from_str(&replacement);
-					find.and_then(|find| replacement.map(|replacement| (find, replacement)))
-				} {
-					Self {
-						inner: SearchReplacementInner::Snbt { find, replacement, exact_match },
-						search_flags,
-					}
-				} else {
-					return None
-				},
+
+		let inner = match search_mode {
+			SearchMode::String => SearchReplacementInner::Substring { find: if exact_match { find.clone() } else { find.to_lowercase() }, replacement, case_sensitive: exact_match },
+			SearchMode::Regex if let Some(regex) = create_regex(find.clone(), exact_match) => SearchReplacementInner::Regex { regex, replacement },
+			SearchMode::Snbt if let Ok((find, replacement)) = {
+				let sort = config::set_sort_algorithm(SortAlgorithm::None);
+				let find = NbtElement::from_str(&find);
+				config::set_sort_algorithm(sort);
+				let replacement = NbtElement::from_str(&replacement);
+				find.and_then(|find| replacement.map(|replacement| (find, replacement)))
+			} => SearchReplacementInner::Snbt { find, replacement, exact_match },
+			_ => return None,
+		};
+
+		Some(Self {
+			inner,
+			search_flags
 		})
 	}
 
@@ -559,30 +650,30 @@ impl SearchReplacement {
 		match &self.inner {
 			SearchReplacementInner::Substring { find, replacement, case_sensitive } => {
 				let key = key.map(|key| replace_case_sensitivity(&key, find, replacement, *case_sensitive).into());
-				let value = value.map(|value| replace_case_sensitivity(&value, find, replacement, *case_sensitive).into());
+				let value = value.map(|value| replace_case_sensitivity(&value, find, replacement, *case_sensitive));
 				let action = match rename_element(root, indices.to_owned(), key, value, &mut fake_path) {
 					Ok(Some(result)) => result.into_action(),
-					Ok(None) => return ControlFlow::Continue(()),
-					Err(e) => return ControlFlow::Break(Err(e.into())),
+					Ok(None) => return Continue(()),
+					Err(e) => return Break(Err(e.into())),
 				};
-				ControlFlow::Break(Ok((action, false)))
+				Break(Ok((action, false)))
 			}
 			SearchReplacementInner::Regex { regex, replacement } => {
 				let key = key.map(|key| regex.replace_all(&key, replacement).into());
 				let value = value.map(|value| regex.replace_all(&value, replacement).into());
 				let action = match rename_element(root, indices.to_owned(), key, value, &mut fake_path) {
 					Ok(Some(result)) => result.into_action(),
-					Ok(None) => return ControlFlow::Continue(()),
-					Err(e) => return ControlFlow::Break(Err(e.into())),
+					Ok(None) => return Continue(()),
+					Err(e) => return Break(Err(e.into())),
 				};
-				ControlFlow::Break(Ok((action, false)))
+				Break(Ok((action, false)))
 			}
 			SearchReplacementInner::Snbt { replacement, .. } => {
 				let action = match replace_element(root, replacement.clone(), indices.to_owned(), mi) {
 					Ok(result) => result.into_action(),
-					Err(e) => return ControlFlow::Break(Err(e.into())),
+					Err(e) => return Break(Err(e.into())),
 				};
-				ControlFlow::Break(Ok((action, true)))
+				Break(Ok((action, true)))
 			},
 		}
 	}
@@ -619,17 +710,17 @@ impl BookmarkedBasedSearchReplacement {
 				let value = self.search_flags.has_value().then(|| str.to_owned());
 				let action = match rename_element(root, indices.to_owned(), key, value, path) {
 					Ok(Some(result)) => result.into_action(),
-					Ok(None) => return ControlFlow::Continue(()),
-					Err(e) => return ControlFlow::Break(Err(e.into())),
+					Ok(None) => return Continue(()),
+					Err(e) => return Break(Err(e.into())),
 				};
-				ControlFlow::Break(Ok(action))
+				Break(Ok(action))
 			}
 			BookmarkedBasedSearchReplacementInner::Snbt(replacement) => {
 				let action = match replace_element(root, replacement.clone(), indices, mi) {
 					Ok(result) => result.into_action(),
-					Err(e) => return ControlFlow::Break(Err(e.into())),
+					Err(e) => return Break(Err(e.into())),
 				};
-				ControlFlow::Break(Ok(action))
+				Break(Ok(action))
 			},
 		}
 	}

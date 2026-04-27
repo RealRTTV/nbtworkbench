@@ -20,9 +20,10 @@ use crate::util::Vec2u;
 #[cfg(target_arch = "wasm32")]
 use crate::wasm::{FakeScope as Scope, fake_scope as scope};
 
+// consider refactor to make open the high bit of the element bitset, end_x to become 24 bytes long and inline `elements` to a Box<[NbtElement]>
 #[repr(C)]
 pub struct NbtList {
-	pub elements: Box<Vec<NbtElement>>,
+	elements: Box<Vec<NbtElement>>,
 	height: u32,
 	true_height: u32,
 	end_x: u32,
@@ -92,7 +93,7 @@ impl Display for NbtList {
 impl PrettyDisplay for NbtList {
 	fn pretty_fmt(&self, f: &mut PrettyFormatter) {
 		if self.is_empty() {
-			f.write_str("[]")
+			f.write_str("[]");
 		} else {
 			let len = self.len();
 			let heterogeneous = self.is_heterogeneous();
@@ -151,7 +152,7 @@ impl NbtElementVariant for NbtList {
 		s = s.strip_prefix('[').ok_or(s.len())?.trim_start();
 		let mut list = Self::new(vec![]);
 		while !s.starts_with(']') {
-			let (s2, mut element) = NbtElement::from_str0(s, NbtElement::parse_int)?;
+			let (s2, mut element) = NbtElement::from_str0(s, 'i')?;
 			// SAFETY: no caches have been made
 			element = unsafe { element.try_compound_singleton_into_inner().unwrap_or_else(|element| element) };
 			unsafe { list.insert(list.len(), element) }.map_err(|_| s.len())?;

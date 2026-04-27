@@ -9,6 +9,7 @@ pub mod selected_text;
 pub mod text;
 pub mod vertical_list;
 
+use ControlFlow::Continue;
 use std::ops::ControlFlow;
 use winit::dpi::PhysicalSize;
 use winit::event::{ElementState, MouseButton};
@@ -81,7 +82,7 @@ pub trait Widget {
 
 	fn on_mouse_input(&mut self, state: ElementState, button: MouseButton, pos: Vec2u, dims: PhysicalSize<u32>, ctx: &mut WidgetContextMut) -> ControlFlow<()> {
 		if !self.is_valid_mouse_button(button, pos, dims) {
-			return ControlFlow::Continue(())
+			return Continue(())
 		}
 
 		match state {
@@ -91,10 +92,10 @@ pub trait Widget {
 	}
 
 	#[allow(unused_variables)]
-	fn on_mouse_up(&mut self, button: MouseButton, pos: Vec2u, dims: PhysicalSize<u32>, ctx: &mut WidgetContextMut) -> ControlFlow<()> { ControlFlow::Continue(()) }
+	fn on_mouse_up(&mut self, button: MouseButton, pos: Vec2u, dims: PhysicalSize<u32>, ctx: &mut WidgetContextMut) -> ControlFlow<()> { Continue(()) }
 
 	#[allow(unused_variables)]
-	fn on_mouse_down(&mut self, button: MouseButton, pos: Vec2u, dims: PhysicalSize<u32>, ctx: &mut WidgetContextMut) -> ControlFlow<()> { ControlFlow::Continue(()) }
+	fn on_mouse_down(&mut self, button: MouseButton, pos: Vec2u, dims: PhysicalSize<u32>, ctx: &mut WidgetContextMut) -> ControlFlow<()> { Continue(()) }
 
 	#[must_use]
 	fn is_currently_hovering(&self) -> bool { false }

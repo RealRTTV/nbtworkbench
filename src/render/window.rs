@@ -1,3 +1,4 @@
+use ControlFlow::{Break, Continue};
 use std::borrow::Cow;
 use std::ops::{ControlFlow, DerefMut};
 use std::sync::Arc;
@@ -538,7 +539,7 @@ impl<'window> State<'window> {
 		match event {
 			WindowEvent::DroppedFile(file) if let Some(data) = std::fs::read(&file).alert_err(&mut workbench.alerts) => {
 				workbench.on_open_file(&file, &data).alert_err(&mut workbench.alerts);
-				ControlFlow::Break(())
+				Break(())
 			}
 			WindowEvent::KeyboardInput { event, .. } => workbench.on_key_input(event),
 			WindowEvent::CursorMoved { position, .. } => workbench.on_mouse_move(position),
@@ -556,7 +557,7 @@ impl<'window> State<'window> {
 					workbench.on_mouse_input(ElementState::Released, MouseButton::Left)
 				}
 			},
-			_ => ControlFlow::Continue(()),
+			_ => Continue(()),
 		}
 	}
 

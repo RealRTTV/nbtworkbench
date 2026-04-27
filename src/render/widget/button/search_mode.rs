@@ -1,3 +1,4 @@
+use ControlFlow::Break;
 use std::ops::ControlFlow;
 use winit::dpi::PhysicalSize;
 use winit::event::MouseButton;
@@ -22,7 +23,7 @@ impl Widget for SearchModeButton {
 	fn on_mouse_down(&mut self, button: MouseButton, _pos: Vec2u, _dims: PhysicalSize<u32>, ctx: &mut WidgetContextMut) -> ControlFlow<()> {
 		let reverse = ctx.shift ^ matches!(button, MouseButton::Right);
 		config::set_search_mode(if reverse { config::get_search_mode().rev_cycle() } else { config::get_search_mode().cycle() });
-		ControlFlow::Break(())
+		Break(())
 	}
 
 	fn render_at(&self, pos: Vec2u, dims: PhysicalSize<u32>, builder: &mut VertexBufferBuilder, mouse: &MouseManager, _ctx: &WidgetContext) {

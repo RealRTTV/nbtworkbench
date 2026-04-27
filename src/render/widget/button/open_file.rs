@@ -1,4 +1,6 @@
+use ControlFlow::Break;
 use std::ops::ControlFlow;
+use option_into_controlflow::OptionExt;
 use winit::dpi::PhysicalSize;
 use winit::event::MouseButton;
 
@@ -8,7 +10,6 @@ use crate::render::widget::alert::manager::Alertable;
 use crate::render::widget::{HorizontalWidgetAlignmentPreference, VerticalWidgetAlignmentPreference, Widget, WidgetAlignment, WidgetContext, WidgetContextMut};
 use crate::render::window::{WINDOW_HEIGHT, WINDOW_WIDTH};
 use crate::util::{AABB, Vec2u};
-use crate::workbench::BreakOnNone;
 use crate::workbench::mouse::MouseManager;
 use crate::workbench::tab::Tab;
 
@@ -23,9 +24,9 @@ impl Widget for OpenFileButton {
 	fn on_mouse_down(&mut self, _button: MouseButton, _pos: Vec2u, _dims: PhysicalSize<u32>, ctx: &mut WidgetContextMut) -> ControlFlow<()> {
 		let tab = Tab::from_file_dialog(ctx.tabs.iter().map(|tab| tab.window_dims).next().unwrap_or(PhysicalSize::new(WINDOW_WIDTH, WINDOW_HEIGHT)))
 			.alert_err(ctx.alerts)
-			.break_on_none()?;
+			.continue_or_default()?;
 		ctx.tabs.add(tab);
-		ControlFlow::Break(())
+		Break(())
 	}
 
 	fn render_at(&self, pos: Vec2u, dims: PhysicalSize<u32>, builder: &mut VertexBufferBuilder, mouse: &MouseManager, _ctx: &WidgetContext) {
