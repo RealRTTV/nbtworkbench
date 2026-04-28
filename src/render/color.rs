@@ -1,3 +1,5 @@
+use std::ops::{Deref, DerefMut};
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Default)]
 pub enum TextColor {
 	Black,
@@ -66,4 +68,31 @@ impl TextColor {
 
 impl Into<u32> for TextColor {
 	fn into(self) -> u32 { self.to_raw() }
+}
+
+#[derive(Clone, Default, Debug)]
+pub struct TextWithColor {
+	pub text: String,
+	pub color: TextColor,
+}
+
+impl TextWithColor {
+	#[must_use]
+	pub const fn new(text: String, color: TextColor) -> Self {
+		Self { text, color }
+	}
+}
+
+impl Deref for TextWithColor {
+	type Target = String;
+
+	fn deref(&self) -> &Self::Target {
+		&self.text
+	}
+}
+
+impl DerefMut for TextWithColor {
+	fn deref_mut(&mut self) -> &mut Self::Target {
+		&mut self.text
+	}
 }

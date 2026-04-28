@@ -2,7 +2,7 @@ use ControlFlow::{Break, Continue};
 use std::fmt::{Display, Formatter};
 use std::ops::{ControlFlow, Deref, DerefMut};
 
-use compact_str::ToCompactString;
+use compact_str::{CompactString, ToCompactString};
 use itertools::Either::{Left, Right};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -22,7 +22,7 @@ use crate::render::widget::alert::manager::AlertManager;
 use crate::render::widget::notification::manager::NotificationManager;
 use crate::render::widget::notification::{Notification, NotificationKind};
 use crate::render::widget::search_box::{SEARCH_BOX_END_X, SEARCH_BOX_START_X, SearchBox, SearchFlags, SearchMode};
-use crate::render::widget::text::{Cachelike, ReplaceBoxKeyResult, Text, get_cursor_idx};
+use crate::render::widget::text::{Cache, ReplaceBoxKeyResult, Text, get_cursor_idx, KeyResult};
 use crate::render::window::Theme;
 use crate::tree::actions::rename::{RenameElementError, rename_element};
 use crate::tree::actions::replace::{ReplaceElementError, replace_element};
@@ -113,7 +113,7 @@ impl PartialEq for ReplaceBoxCache {
 	fn eq(&self, other: &Self) -> bool { self.value == other.value }
 }
 
-impl Cachelike<ReplaceBoxAdditional> for ReplaceBoxCache {
+impl Cache<ReplaceBoxAdditional> for ReplaceBoxCache {
 	fn new(text: &Text<ReplaceBoxAdditional, Self>) -> Self
 	where Self: Sized {
 		Self {
@@ -155,7 +155,7 @@ impl ReplaceBox {
 		builder.horizontal_scroll = self.horizontal_scroll;
 
 		if self.value.is_empty() {
-			builder.settings(pos + (0, 3), false, REPLACE_BOX_Z);
+			builder.text_settings(pos + (0, 3), false, REPLACE_BOX_Z);
 			builder.color = TextColor::Gray.to_raw();
 			let _ = write!(builder, "{}", match search_mode {
 				SearchMode::String => "Replace...",
@@ -170,7 +170,7 @@ impl ReplaceBox {
 		if self.is_selected() {
 			self.0.render(builder, color, pos + (0, 3), REPLACE_BOX_Z, REPLACE_BOX_SELECTION_Z);
 		} else {
-			builder.settings(pos + (0, 3), false, REPLACE_BOX_Z);
+			builder.text_settings(pos + (0, 3), false, REPLACE_BOX_Z);
 			builder.color = color.to_raw();
 			let _ = write!(builder, "{}", self.value);
 		}
@@ -221,32 +221,45 @@ impl ReplaceBox {
 		self.horizontal_scroll = horizontal_scroll;
 	}
 
-	#[must_use]
-	fn get_action_on_key_press(&mut self, key: KeyCode, ch: Option<char>, flags: u8) -> ReplaceBoxKeyResult {
+	fn on_key_press(&mut self, key: KeyCode, ch: Option<char>, flags: u8) -> ControlFlow<ReplaceBoxKeyResult> {
 		if !self.is_selected() {
-			return ReplaceBoxKeyResult::NoAction
+			return Continue(())
 		}
+
+		self.try_replace_all(key, ch, flags)?;
+		self.try_move_search_box(key, ch, flags)?;
+
+		self.0.on_key_press(key, ch, flags).map_break(Into::into)
+	}
+
+	fn try_replace_all(&mut self, key: KeyCode, _ch: Option<char>, flags: u8) -> ControlFlow<ReplaceBoxKeyResult> {
 		if let KeyCode::Enter | KeyCode::NumpadEnter = key
 			&& flags == flags!()
 		{
-			return ReplaceBoxKeyResult::ReplaceAll;
+			return Break(ReplaceBoxKeyResult::ReplaceAll);
 		}
+
+		Continue(())
+	}
+
+	fn try_move_search_box(&mut self, key: KeyCode, _ch: Option<char>, flags: u8) -> ControlFlow<ReplaceBoxKeyResult> {
 		if let KeyCode::ArrowUp | KeyCode::Tab = key
 			&& flags == flags!()
 		{
-			return ReplaceBoxKeyResult::MoveToSearchBox;
+			return Break(ReplaceBoxKeyResult::MoveToSearchBox);
 		}
-		self.0.on_key_press(key, ch, flags).into()
+
+		Continue(())
 	}
 
-	pub fn on_key_press(&mut self, key: KeyCode, ch: Option<char>, flags: u8, search_box: &mut SearchBox, tab: &mut Tab, _alerts: &mut AlertManager, notifications: &mut NotificationManager, window_dims: PhysicalSize<u32>) -> ControlFlow<()> {
-		match self.get_action_on_key_press(key, ch, flags) {
-			ReplaceBoxKeyResult::NoAction => Continue(()),
-			ReplaceBoxKeyResult::GenericAction => {
+	pub fn handle_key_press(&mut self, key: KeyCode, ch: Option<char>, flags: u8, search_box: &mut SearchBox, tab: &mut Tab, _alerts: &mut AlertManager, notifications: &mut NotificationManager, window_dims: PhysicalSize<u32>) -> ControlFlow<()> {
+		let Break(result) = self.on_key_press(key, ch, flags) else { return Continue(()) };
+		match result {
+			ReplaceBoxKeyResult::Generic(KeyResult::GenericAction) => {
 				self.post_input(window_dims);
 				Break(())
 			}
-			ReplaceBoxKeyResult::Escape => {
+			ReplaceBoxKeyResult::Generic(KeyResult::Escape | KeyResult::Finish) => {
 				self.post_input(window_dims);
 				self.deselect();
 				Break(())
@@ -643,37 +656,33 @@ impl SearchReplacement {
 	}
 
 	pub fn replace<'m1, 'm2: 'm1>(&self, root: &mut NbtElement, key: Option<String>, value: Option<String>, mi: &'m1 mut MutableIndices<'m2>, indices: &Indices) -> ControlFlow<Result<(WorkbenchAction, bool), ReplacementError>> {
+		fn rename(root: &mut NbtElement, indices: &Indices, path: &mut FilePath, key: Option<CompactString>, value: Option<String>) -> ControlFlow<Result<(WorkbenchAction, bool), ReplacementError>> {
+			match rename_element(root, indices.to_owned(), key, value, path) {
+				Ok(Some(result)) => Break(Ok((result.into_action(), false))),
+				Ok(None) => Continue(()),
+				Err(e) => Break(Err(e.into())),
+			}
+		}
+
 		#[must_use]
 		fn replace_case_sensitivity(value: &str, find: &str, replacement: &str, case_sensitive: bool) -> String { if case_sensitive { value.replace(find, replacement) } else { value.replace_ignore_ascii_case(find, replacement) } }
 
+		// we don't use the real path because aren't able to modify it
 		let mut fake_path = FilePath::new("dummy.nbt").expect("Expected dummy value to be valid");
 		match &self.inner {
-			SearchReplacementInner::Substring { find, replacement, case_sensitive } => {
-				let key = key.map(|key| replace_case_sensitivity(&key, find, replacement, *case_sensitive).into());
-				let value = value.map(|value| replace_case_sensitivity(&value, find, replacement, *case_sensitive));
-				let action = match rename_element(root, indices.to_owned(), key, value, &mut fake_path) {
-					Ok(Some(result)) => result.into_action(),
-					Ok(None) => return Continue(()),
-					Err(e) => return Break(Err(e.into())),
-				};
-				Break(Ok((action, false)))
-			}
-			SearchReplacementInner::Regex { regex, replacement } => {
-				let key = key.map(|key| regex.replace_all(&key, replacement).into());
-				let value = value.map(|value| regex.replace_all(&value, replacement).into());
-				let action = match rename_element(root, indices.to_owned(), key, value, &mut fake_path) {
-					Ok(Some(result)) => result.into_action(),
-					Ok(None) => return Continue(()),
-					Err(e) => return Break(Err(e.into())),
-				};
-				Break(Ok((action, false)))
-			}
-			SearchReplacementInner::Snbt { replacement, .. } => {
-				let action = match replace_element(root, replacement.clone(), indices.to_owned(), mi) {
-					Ok(result) => result.into_action(),
-					Err(e) => return Break(Err(e.into())),
-				};
-				Break(Ok((action, true)))
+			SearchReplacementInner::Substring { find, replacement, case_sensitive } => rename(
+				root, indices, &mut fake_path,
+				key.map(|key| replace_case_sensitivity(&key, find, replacement, *case_sensitive).into()),
+				value.map(|value| replace_case_sensitivity(&value, find, replacement, *case_sensitive)),
+			),
+			SearchReplacementInner::Regex { regex, replacement } => rename(
+				root, indices, &mut fake_path,
+				key.map(|key| regex.replace_all(&key, replacement).into()),
+				value.map(|value| regex.replace_all(&value, replacement).into()),
+			),
+			SearchReplacementInner::Snbt { replacement, .. } => match replace_element(root, replacement.clone(), indices.to_owned(), mi) {
+				Ok(result) => Break(Ok((result.into_action(), true))),
+				Err(e) => Break(Err(e.into())),
 			},
 		}
 	}

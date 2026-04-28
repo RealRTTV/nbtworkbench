@@ -171,12 +171,12 @@ impl Alert {
 	fn render_foreground(&self, pos: Vec2u, _dims: PhysicalSize<u32>, builder: &mut VertexBufferBuilder) {
 		use core::fmt::Write;
 		
-		builder.settings(pos + (18, 4), true, NOTIFICATION_TEXT_Z);
+		builder.text_settings(pos + (18, 4), true, NOTIFICATION_TEXT_Z);
 		builder.color = self.title_color;
 		let _ = write!(builder, "{}", self.title);
 		builder.color = TextColor::White.to_raw();
 		for (idx, line) in self.lines.iter().enumerate() {
-			builder.settings(pos + (18, 20 + idx * 16), true, NOTIFICATION_TEXT_Z);
+			builder.text_settings(pos + (18, 20 + idx * 16), true, NOTIFICATION_TEXT_Z);
 			let _ = write!(builder, "{line}");
 		}
 	}

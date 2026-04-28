@@ -21,7 +21,7 @@ use crate::render::widget::alert::manager::AlertManager;
 use crate::render::widget::notification::manager::NotificationManager;
 use crate::render::widget::notification::{Notification, NotificationKind};
 use crate::render::widget::replace_box::ReplaceBox;
-use crate::render::widget::text::{Cachelike, SearchBoxKeyResult, Text, get_cursor_idx};
+use crate::render::widget::text::{Cache, SearchBoxKeyResult, Text, get_cursor_idx, KeyResult};
 use crate::render::window::Theme;
 use crate::util::{StrExt, Timestamp, Vec2u, create_regex};
 use crate::workbench::SortAlgorithm;
@@ -230,41 +230,26 @@ impl SearchMode {
 impl SearchPredicate {
 	#[must_use]
 	fn new(value: String) -> Option<Self> {
+		use SearchPredicateInner as Inner;
+
 		let search_mode = config::get_search_mode();
 		let search_flags = config::get_search_flags();
 		let exact_match = config::get_search_exact_match();
-		Some(match search_mode {
-			SearchMode::String => Self {
-				inner: if exact_match {
-					SearchPredicateInner::String(value)
-				} else {
-					SearchPredicateInner::StringCaseInsensitive(value.to_lowercase())
-				},
-				search_flags,
-			},
-			SearchMode::Regex =>
-				if let Some(regex) = create_regex(value, exact_match) {
-					Self {
-						inner: SearchPredicateInner::Regex(regex),
-						search_flags,
-					}
-				} else {
-					return None
-				},
-			SearchMode::Snbt =>
-				if let Ok((key, value)) = {
-					let sort = config::set_sort_algorithm(SortAlgorithm::None);
-					let result = NbtElement::from_str(&value);
-					config::set_sort_algorithm(sort);
-					result
-				} {
-					Self {
-						inner: if exact_match { SearchPredicateInner::SnbtExactMatch((key, value)) } else { SearchPredicateInner::Snbt((key, value)) },
-						search_flags,
-					}
-				} else {
-					return None
-				},
+		let inner = match (search_mode, exact_match) {
+			(SearchMode::String, true) => Inner::String(value),
+			(SearchMode::String, false) => Inner::StringCaseInsensitive(value.to_lowercase()),
+			(SearchMode::Regex, exact_match) => Inner::Regex(create_regex(value, exact_match)?),
+			(SearchMode::Snbt, exact_match) => {
+				let old_sort = config::set_sort_algorithm(SortAlgorithm::None);
+				let result = NbtElement::from_str(&value);
+				config::set_sort_algorithm(old_sort);
+				let kv = result.ok()?;
+				if exact_match { Inner::SnbtExactMatch(kv) } else { Inner::Snbt(kv) }
+			}
+		};
+		Some(Self {
+			search_flags,
+			inner,
 		})
 	}
 
@@ -301,7 +286,7 @@ impl PartialEq for SearchBoxCache {
 	fn eq(&self, other: &Self) -> bool { self.value == other.value }
 }
 
-impl Cachelike<SearchBoxAdditional> for SearchBoxCache {
+impl Cache<SearchBoxAdditional> for SearchBoxCache {
 	fn new(text: &Text<SearchBoxAdditional, Self>) -> Self
 	where Self: Sized {
 		Self {
@@ -361,7 +346,7 @@ impl SearchBox {
 		builder.horizontal_scroll = self.horizontal_scroll;
 
 		if self.value.is_empty() {
-			builder.settings(pos + (0, 3), false, SEARCH_BOX_Z);
+			builder.text_settings(pos + (0, 3), false, SEARCH_BOX_Z);
 			builder.color = TextColor::Gray.to_raw();
 			let _ = write!(builder, "{}", match search_mode {
 				SearchMode::String => "Search...",
@@ -376,7 +361,7 @@ impl SearchBox {
 		if self.is_selected() {
 			self.0.render(builder, color, pos + (0, 3), SEARCH_BOX_Z, SEARCH_BOX_SELECTION_Z);
 		} else {
-			builder.settings(pos + (0, 3), false, SEARCH_BOX_Z);
+			builder.text_settings(pos + (0, 3), false, SEARCH_BOX_Z);
 			builder.color = color.to_raw();
 			let _ = write!(builder, "{}", self.value);
 		}
@@ -485,40 +470,56 @@ impl SearchBox {
 		self.horizontal_scroll = horizontal_scroll;
 	}
 
-	pub fn on_key_press(&mut self, key: KeyCode, ch: Option<char>, flags: u8, replace_box: &mut ReplaceBox, tab: &mut Tab, _alerts: &mut AlertManager, notifications: &mut NotificationManager, window_dims: PhysicalSize<u32>) -> ControlFlow<()> {
-		#[must_use]
-		fn on_key_press0(this: &mut SearchBox, key: KeyCode, ch: Option<char>, flags: u8) -> SearchBoxKeyResult {
-			if !this.is_selected() {
-				return SearchBoxKeyResult::NoAction
-			}
-			if let KeyCode::ArrowDown | KeyCode::Tab = key
-				&& flags == flags!()
-			{
-				return SearchBoxKeyResult::MoveToReplaceBox;
-			}
-
-			if let KeyCode::Enter | KeyCode::NumpadEnter = key
-				&& flags == flags!(Shift)
-			{
-				return SearchBoxKeyResult::Search;
-			}
-
-			if let KeyCode::Enter | KeyCode::NumpadEnter = key
-				&& flags == flags!(Alt)
-			{
-				return SearchBoxKeyResult::SearchCountOnly;
-			}
-
-			this.0.on_key_press(key, ch, flags).into()
+	fn key_press_action(&mut self, key: KeyCode, ch: Option<char>, flags: u8) -> ControlFlow<SearchBoxKeyResult> {
+		if !self.is_selected() {
+			return Continue(())
 		}
+		
+		self.try_move_replace_box(key, ch, flags)?;
+		self.try_search(key, ch, flags)?;
+		self.try_search_count_only(key, ch, flags)?;
 
-		match on_key_press0(self, key, ch, flags) {
-			SearchBoxKeyResult::NoAction => Continue(()),
-			SearchBoxKeyResult::GenericAction => {
+		self.0.on_key_press(key, ch, flags).map_break(Into::into)
+	}
+	
+	fn try_move_replace_box(&mut self, key: KeyCode, _ch: Option<char>, flags: u8) -> ControlFlow<SearchBoxKeyResult> {
+		if let KeyCode::ArrowDown | KeyCode::Tab = key
+			&& flags == flags!()
+		{
+			return Break(SearchBoxKeyResult::MoveToReplaceBox);
+		}
+		
+		Continue(())
+	}
+	
+	fn try_search(&mut self, key: KeyCode, _ch: Option<char>, flags: u8) -> ControlFlow<SearchBoxKeyResult> {
+		if let KeyCode::Enter | KeyCode::NumpadEnter = key
+			&& flags == flags!(Shift)
+		{
+			return Break(SearchBoxKeyResult::Search);
+		}
+		
+		Continue(())
+	}
+	
+	fn try_search_count_only(&mut self, key: KeyCode, _ch: Option<char>, flags: u8) -> ControlFlow<SearchBoxKeyResult> {
+		if let KeyCode::Enter | KeyCode::NumpadEnter = key
+			&& flags == flags!(Alt)
+		{
+			return Break(SearchBoxKeyResult::SearchCountOnly);
+		}
+		
+		Continue(())
+	}
+
+	pub fn on_key_press(&mut self, key: KeyCode, ch: Option<char>, flags: u8, replace_box: &mut ReplaceBox, tab: &mut Tab, _alerts: &mut AlertManager, notifications: &mut NotificationManager, window_dims: PhysicalSize<u32>) -> ControlFlow<()> {
+		let Break(result) = self.key_press_action(key, ch, flags) else { return Continue(()) };
+		match result {
+			SearchBoxKeyResult::Generic(KeyResult::GenericAction) => {
 				self.post_input(window_dims);
 				Break(())
 			}
-			SearchBoxKeyResult::Escape => {
+			SearchBoxKeyResult::Generic(KeyResult::Escape | KeyResult::Finish) => {
 				self.post_input(window_dims);
 				self.deselect();
 				Break(())

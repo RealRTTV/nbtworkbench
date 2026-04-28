@@ -184,7 +184,7 @@ impl Notification {
 
 		builder.color = self.text_color;
 		for (idx, line) in self.lines.iter().enumerate() {
-			builder.settings(pos + (7, 2 + idx * 16), true, NOTIFICATION_TEXT_Z);
+			builder.text_settings(pos + (7, 2 + idx * 16), true, NOTIFICATION_TEXT_Z);
 			let _ = write!(builder, "{line}");
 		}
 	}

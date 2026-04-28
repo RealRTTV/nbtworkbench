@@ -238,10 +238,11 @@ impl Tab {
 		}
 		// println!("Tree Only: {}ms", start.elapsed().as_millis_f64());
 		builder.color = TextColor::White.to_raw();
-		if self.root.as_region().is_some_and(|region| region.is_grid_layout()) {
-			ctx.render_grid_line_numbers(builder, &self.bookmarks);
+		if self.root.as_region().is_some_and(NbtRegion::is_grid_layout) {
+			ctx.render_grid_line_numbers(builder);
+			ctx.render_grid_bookmarks(builder, &self.bookmarks);
 		} else {
-			ctx.render_line_numbers(builder, &self.bookmarks);
+			ctx.render_line_numbers_and_bookmarks(builder, &self.bookmarks);
 		}
 		builder.horizontal_scroll = horizontal_scroll_before;
 
@@ -390,8 +391,8 @@ impl Tab {
 			let pos = left_margin
 				+ selected_text.indices.len() * 16
 				+ 32 + SelectedText::PREFIXING_SPACE_WIDTH
-				+ selected_text.prefix.0.width()
-				+ selected_text.keyfix.as_ref().map_or(0, |x| x.0.width())
+				+ selected_text.prefix.text.width()
+				+ selected_text.keyfix.as_ref().map_or(0, |x| x.text.width())
 				+ selected_text.value.split_at(selected_text.cursor).0.width();
 			if pos + free_space < self.window_dims.width as usize {
 				self.horizontal_scroll = 0;

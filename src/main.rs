@@ -1,6 +1,6 @@
 #![allow(semicolon_in_expressions_from_macros, internal_features, incomplete_features, clippy::cast_lossless, clippy::cast_possible_truncation, clippy::cast_precision_loss, clippy::cast_sign_loss, clippy::cast_possible_wrap)]
 #![warn(clippy::pedantic)]
-#![deny(clippy::too_many_lines, unused_must_use)]
+#![deny(clippy::too_many_lines, clippy::excessive_nesting, unused_must_use)]
 #![feature(
 	iter_array_chunks,
 	duration_millis_float,
@@ -102,6 +102,7 @@ pub fn mutable_window_properties() -> parking_lot::MutexGuard<'static, render::w
 /// * remove all magic constants
 /// * refactor rendering to use `u32` instead of `usize`
 /// * minimize usage of `anyhow`
+/// * remove 'm1 and 'm2, unnecessary
 /// # Long-Term Goals
 /// * smart screen
 /// * add multi-cursor

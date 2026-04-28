@@ -194,7 +194,7 @@ pub const fn valid_unescaped_char(byte: u8) -> bool { matches!(byte, b'0'..=b'9'
 pub const fn valid_starting_char(byte: u8) -> bool { matches!(byte, b'A'..=b'Z' | b'a'..=b'z' | b'_') }
 
 /// # Safety
-/// `a` or `b` must not contain values repeated (such that `Ord::cmp()` returns Ordering::Equal) between elements within their own set
+/// `a` or `b` must not contain values repeated (such that `Ord::cmp()` returns `Ordering::Equal`) between elements within their own set
 #[must_use]
 pub unsafe fn union_two_sorted_no_duplicates<T: Ord>(a: Vec<T>, b: Vec<T>) -> Vec<T> {
 	let (a_root_ptr, a_len, a_cap, a_alloc) = a.into_parts_with_alloc();
@@ -452,7 +452,7 @@ impl<'a, T> Iterator for LinkedQueueIter<'a, T> {
 }
 
 pub trait StrExt {
-	fn snbt_string_read(&self) -> Result<(CompactString, &str), usize>;
+	fn bite_escaped_string(&self) -> Result<(CompactString, &str), usize>;
 
 	#[must_use]
 	fn needs_escape(&self) -> bool;
@@ -468,7 +468,8 @@ pub trait StrExt {
 }
 
 impl StrExt for str {
-	fn snbt_string_read(mut self: &Self) -> Result<(CompactString, &Self), usize> {
+	#[allow(clippy::too_many_lines, clippy::excessive_nesting, reason = "todo: performance integral code, should optimize greatly in refactor")]
+	fn bite_escaped_string(mut self: &Self) -> Result<(CompactString, &Self), usize> {
 		const MAPPING: [Option<u8>; 256] = {
 			let mut mapping = [Option::<u8>::None; 256];
 			mapping[b'0' as usize] = Some(0);
@@ -688,6 +689,7 @@ impl StrExt for str {
 
 	fn needs_escape(&self) -> bool { self.as_bytes().first().copied().is_some_and(valid_starting_char) || !self.bytes().all(valid_unescaped_char) }
 
+	/// make const
 	fn width(&self) -> usize { self.chars().map(CharExt::width).sum() }
 
 	fn contains_ignore_ascii_case(&self, other: &Self) -> bool {
@@ -811,7 +813,7 @@ pub fn invert_mapping(mapping: &[usize]) -> Result<Box<[usize]>, InvertMappingEr
 		if reference.is_some() {
 			return Err(InvertMappingError::DuplicateNumber)
 		}
-		
+
 		*reference = Some(new_idx);
 	}
 	new_mapping.into_iter().collect::<Option<Box<[usize]>>>().ok_or_else(|| InvertMappingError::MissingNumber)

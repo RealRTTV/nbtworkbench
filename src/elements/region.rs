@@ -347,49 +347,48 @@ impl ComplexNbtElementVariant for NbtRegion {
 		let mut iter = self.children_mut().array_chunks::<{ Self::CHUNK_BANDWIDTH }>();
 		for elements in iter.by_ref() {
 			scope.spawn(|| {
-				for element in elements {
-					if element.is_open() {
-						unsafe { element.shut(scope) };
-					}
+				for element in elements.into_iter().filter(|element| element.is_open()) {
+					unsafe { element.shut(scope) };
 				}
 			});
 		}
 		scope.spawn(|| {
-			for element in iter.into_remainder() {
-				if element.is_open() {
-					unsafe { element.shut(scope) };
-				}
+			for element in iter.into_remainder().filter(|element| element.is_open()) {
+				unsafe { element.shut(scope) };
 			}
 		});
 	}
 
 	unsafe fn expand<'a, 'b>(&'b mut self, scope: &'a Scope<'a, 'b>) {
 		self.set_open(!self.is_empty());
-		if !self.is_grid_layout() {
-			let mut iter = self.children_mut().array_chunks::<{ Self::CHUNK_BANDWIDTH }>();
-			for elements in iter.by_ref() {
-				scope.spawn(|| {
-					for element in elements {
-						unsafe { element.expand(scope) };
-					}
-				});
-			}
+
+		if self.is_grid_layout() {
+			return
+		}
+
+		let mut iter = self.children_mut().array_chunks::<{ Self::CHUNK_BANDWIDTH }>();
+		for elements in iter.by_ref() {
 			scope.spawn(|| {
-				for element in iter.into_remainder() {
+				for element in elements {
 					unsafe { element.expand(scope) };
 				}
 			});
 		}
+		scope.spawn(|| {
+			for element in iter.into_remainder() {
+				unsafe { element.expand(scope) };
+			}
+		});
 	}
 
 	fn recache(&mut self) {
 		let mut true_height = 1;
 		let mut height = 1;
-		let mut loaded_chunks = 0_usize;
-		let mut end_x = 0;
+		let mut loaded_chunks = 0_u16;
+		let mut end_x = 0_usize;
 
 		for child in self.children() {
-			if child.as_chunk().is_some_and(|chunk| chunk.is_loaded()) {
+			if child.as_chunk().is_some_and(NbtChunk::is_loaded) {
 				loaded_chunks += 1;
 			}
 			true_height += child.true_height() as u32;
@@ -403,26 +402,28 @@ impl ComplexNbtElementVariant for NbtRegion {
 
 		self.true_height = true_height;
 		self.height = if self.is_open() { height } else { 1 };
-		self.loaded_chunks = loaded_chunks as u16;
+		self.loaded_chunks = loaded_chunks;
 		self.end_x = if self.is_open() { end_x as u32 } else { 0 };
 	}
 
 	fn on_style_change(&mut self, bookmarks: &mut MarkedLines) -> bool {
 		scope(|scope| {
 			self.flags ^= 0b10;
-			if self.is_grid_layout() {
-				// one for the region + one for the chunk head
-				let mut true_line_number = 2_usize;
-				for (idx, chunk) in self.children_mut().enumerate() {
-					let true_height = chunk.true_height();
-					// SAFETY: the bookmarks are updated
-					unsafe { chunk.shut(scope) };
-					// skip the head because that shouldn't be hidden
-					for bookmark in &mut bookmarks[true_line_number + 1..=true_line_number + true_height] {
-						*bookmark = bookmark.hidden(idx + 1);
-					}
-					true_line_number += true_height;
+			if !self.is_grid_layout() {
+				return
+			}
+
+			// one for the region + one for the chunk head
+			let mut true_line_number = 2_usize;
+			for (idx, chunk) in self.children_mut().enumerate() {
+				let true_height = chunk.true_height();
+				// SAFETY: the bookmarks are updated
+				unsafe { chunk.shut(scope) };
+				// skip the head because that shouldn't be hidden
+				for bookmark in &mut bookmarks[true_line_number + 1..=true_line_number + true_height] {
+					*bookmark = bookmark.hidden(idx + 1);
 				}
+				true_line_number += true_height;
 			}
 		});
 		true

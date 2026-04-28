@@ -16,6 +16,7 @@ pub struct VertexBufferBuilder {
 	text_vertices_len: u32,
 	window_dims: PhysicalSize<f32>,
 	scroll: usize,
+	// todo: make `set_horizontal_scroll` fn
 	pub horizontal_scroll: usize,
 	pub text_coords: (usize, usize),
 	dropshadow: bool,
@@ -74,7 +75,7 @@ impl VertexBufferBuilder {
 
 	pub const fn scroll(&self) -> usize { self.scroll }
 
-	pub fn settings(&mut self, pos: impl Into<(usize, usize)>, dropshadow: bool, z: ZOffset) {
+	pub fn text_settings(&mut self, pos: impl Into<(usize, usize)>, dropshadow: bool, z: ZOffset) {
 		self.text_coords = pos.into();
 		self.dropshadow = dropshadow;
 		self.text_z = z;

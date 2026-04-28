@@ -134,7 +134,7 @@ impl NbtElementVariant for NbtCompound {
 		s = s.strip_prefix('{').ok_or(s.len())?.trim_start();
 		let mut compound = Self::default();
 		while !s.starts_with('}') {
-			let (key, s2) = s.snbt_string_read()?;
+			let (key, s2) = s.bite_escaped_string()?;
 			s = s2.trim_start().strip_prefix(':').ok_or(s2.len())?.trim_start();
 			let (s2, value) = NbtElement::from_str0(s, 'i')?;
 			compound.map.insert(CompoundEntry::new(key, value));

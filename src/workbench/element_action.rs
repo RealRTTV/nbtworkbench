@@ -138,21 +138,83 @@ impl ElementAction {
 		ORDERING[a.value.id() as usize].cmp(&ORDERING[b.value.id() as usize]).then_with(|| a.key.cmp(&b.key))
 	}
 
-	pub fn apply<'m1, 'm2: 'm1>(self, root: &mut NbtElement, mut indices: OwnedIndices, mi: &'m1 mut MutableIndices<'m2>) -> Result<Option<WorkbenchAction>, ElementActionError> {
-		match self {
-			action @ (Self::CopyRaw | Self::CopyFormatted) => {
-				use core::fmt::Write;
+	fn copy(formatted: bool, root: &mut NbtElement, indices: OwnedIndices, mi: &mut MutableIndices<'_>) -> Result<Option<WorkbenchAction>, ElementActionError> {
+		use core::fmt::Write;
 
-				let NavigationInformation { key, element, .. } = root.navigate(&indices).map_err(CopyError::from)?;
+		let NavigationInformation { key, element, .. } = root.navigate(&indices).map_err(CopyError::from)?;
 
-				let mut buffer = String::new();
+		let mut buffer = String::new();
+		if let Some(key) = key {
+			if key.needs_escape() {
+				let _ = write!(&mut buffer, "{key:?}");
+			} else {
+				let _ = write!(&mut buffer, "{key}");
+			}
+			let _ = write!(&mut buffer, ":");
+		}
+
+		if formatted {
+			let _ = write!(&mut buffer, "{element:#?}");
+		} else {
+			let _ = write!(&mut buffer, "{element}");
+		}
+
+		set_clipboard(buffer);
+
+		Ok(None)
+	}
+
+	#[cfg(not(target_arch = "wasm32"))]
+	fn open(action: Self, root: &mut NbtElement, indices: OwnedIndices, mi: &mut MutableIndices<'_>) -> Result<Option<WorkbenchAction>, ElementActionError> {
+		use std::io::Write;
+
+		use NbtPattern as Nbt;
+
+		let NavigationInformation { key, element, .. } = root.navigate(&indices).map_err(OpenInFileError::from)?;
+
+		let hash = (Timestamp::now().elapsed().as_millis() as usize).wrapping_mul(element as *const NbtElement as usize);
+		let path = std::env::temp_dir().join(format!("nbtworkbench-{hash:0width$x}.{ext}", width = usize::BITS as usize / 8, ext = if action == Self::OpenArrayInHex { "bin" } else { "txt" }));
+		let (tx, rx) = std::sync::mpsc::channel();
+		let mut watcher = PollWatcher::new(
+			move |event| {
+				if let Ok(notify::Event { kind: EventKind::Modify(_), paths, .. }) = event {
+					for path in paths {
+						if let Ok(data) = std::fs::read(&path) {
+							let _ = tx.send(data);
+						}
+					}
+				}
+			},
+			notify::Config::default().with_manual_polling().with_compare_contents(true),
+		)
+			.map_err(OpenInFileError::PollWatcher)?;
+		let subscription_type = {
+			let mut file = OpenOptions::new().write(true).create(true).open(&path).map_err(OpenInFileError::from)?;
+			if action == Self::OpenArrayInHex {
+				let mut buffer = UncheckedBufWriter::new();
+				element.to_le_bytes(&mut buffer);
+				let contents = buffer.finish();
+				let (subscription_type, bytes) = match (element.as_pattern(), contents.as_slice()) {
+					(Nbt::ByteArray(_), [_, _, _, _, bytes @ ..]) => (FileUpdateSubscriptionType::ByteArray, bytes),
+					(Nbt::IntArray(_), [_, _, _, _, bytes @ ..]) => (FileUpdateSubscriptionType::IntArray, bytes),
+					(Nbt::LongArray(_), [_, _, _, _, bytes @ ..]) => (FileUpdateSubscriptionType::LongArray, bytes),
+					(Nbt::List(_), [NbtByte::ID, _, _, _, _, bytes @ ..]) => (FileUpdateSubscriptionType::ByteList, bytes),
+					(Nbt::List(_), [NbtInt::ID, _, _, _, _, bytes @ ..]) => (FileUpdateSubscriptionType::IntList, bytes),
+					(Nbt::List(_), [NbtShort::ID, _, _, _, _, bytes @ ..]) => (FileUpdateSubscriptionType::ShortList, bytes),
+					(Nbt::List(_), [NbtLong::ID, _, _, _, _, bytes @ ..]) => (FileUpdateSubscriptionType::LongList, bytes),
+					_ => return Ok(None),
+				};
+				file.write_all(bytes).map_err(OpenInFileError::from)?;
+				subscription_type
+			} else {
+				let mut buffer = UncheckedBufWriter::new();
 				if let Some(key) = key {
 					if key.needs_escape() {
 						let _ = write!(&mut buffer, "{key:?}");
 					} else {
 						let _ = write!(&mut buffer, "{key}");
 					}
-					let _ = write!(&mut buffer, ":");
+					let _ = write!(&mut buffer, ": ");
 				}
 
 				if action == Self::CopyRaw {
@@ -161,122 +223,70 @@ impl ElementAction {
 					let _ = write!(&mut buffer, "{element:#?}");
 				}
 
-				set_clipboard(buffer);
-
-				Ok(None)
+				let contents = buffer.finish();
+				file.write_all(&contents).map_err(OpenInFileError::from)?;
+				FileUpdateSubscriptionType::Snbt
 			}
-			#[cfg(not(target_arch = "wasm32"))]
-			action @ (Self::OpenArrayInHex | Self::OpenInTxt) => {
-				use std::io::Write;
+		};
+		watcher.watch(&path, RecursiveMode::NonRecursive).map_err(OpenInFileError::Watch)?;
+		crate::util::open_file(&path.display().to_string()).map_err(OpenInFileError::from)?;
+		*mi.subscription = Some(FileUpdateSubscription::new(subscription_type, indices, rx, watcher));
+		Ok(None)
+	}
 
-				use NbtPattern as Nbt;
+	fn sort_compound(action: Self, root: &mut NbtElement, indices: OwnedIndices, mi: &mut MutableIndices<'_>) -> Result<Option<WorkbenchAction>, ElementActionError> {
+		let NavigationInformation { element, .. } = root.navigate(&indices).map_err(SortElementByError::from)?;
 
-				let NavigationInformation { key, element, .. } = root.navigate(&indices).map_err(OpenInFileError::from)?;
+		let mapping = match element.as_pattern() {
+			NbtPattern::Compound(compound) => compound.map.create_sort_mapping(if action == Self::SortCompoundByName { Self::by_name } else { Self::by_type }),
+			NbtPattern::Chunk(chunk) => chunk.map.create_sort_mapping(if action == Self::SortCompoundByName { Self::by_name } else { Self::by_type }),
+			_ => return Err(ElementActionError::SortElementBy(SortElementByError::NonKVMapType)),
+		};
 
-				let hash = (Timestamp::now().elapsed().as_millis() as usize).wrapping_mul(element as *const NbtElement as usize);
-				let path = std::env::temp_dir().join(format!("nbtworkbench-{hash:0width$x}.{ext}", width = usize::BITS as usize / 8, ext = if action == Self::OpenArrayInHex { "bin" } else { "txt" }));
-				let (tx, rx) = std::sync::mpsc::channel();
-				let mut watcher = PollWatcher::new(
-					move |event| {
-						if let Ok(notify::Event { kind: EventKind::Modify(_), paths, .. }) = event {
-							for path in paths {
-								if let Ok(data) = std::fs::read(&path) {
-									let _ = tx.send(data);
-								}
-							}
-						}
-					},
-					notify::Config::default().with_manual_polling().with_compare_contents(true),
-				)
-				.map_err(OpenInFileError::PollWatcher)?;
-				let subscription_type = {
-					let mut file = OpenOptions::new().write(true).create(true).open(&path).map_err(OpenInFileError::from)?;
-					if action == Self::OpenArrayInHex {
-						let mut buffer = UncheckedBufWriter::new();
-						element.to_le_bytes(&mut buffer);
-						let contents = buffer.finish();
-						let (subscription_type, bytes) = match (element.as_pattern(), contents.as_slice()) {
-							(Nbt::ByteArray(_), [_, _, _, _, bytes @ ..]) => (FileUpdateSubscriptionType::ByteArray, bytes),
-							(Nbt::IntArray(_), [_, _, _, _, bytes @ ..]) => (FileUpdateSubscriptionType::IntArray, bytes),
-							(Nbt::LongArray(_), [_, _, _, _, bytes @ ..]) => (FileUpdateSubscriptionType::LongArray, bytes),
-							(Nbt::List(_), [NbtByte::ID, _, _, _, _, bytes @ ..]) => (FileUpdateSubscriptionType::ByteList, bytes),
-							(Nbt::List(_), [NbtInt::ID, _, _, _, _, bytes @ ..]) => (FileUpdateSubscriptionType::IntList, bytes),
-							(Nbt::List(_), [NbtShort::ID, _, _, _, _, bytes @ ..]) => (FileUpdateSubscriptionType::ShortList, bytes),
-							(Nbt::List(_), [NbtLong::ID, _, _, _, _, bytes @ ..]) => (FileUpdateSubscriptionType::LongList, bytes),
-							_ => return Ok(None),
-						};
-						file.write_all(bytes).map_err(OpenInFileError::from)?;
-						subscription_type
-					} else {
-						let mut buffer = UncheckedBufWriter::new();
-						if let Some(key) = key {
-							if key.needs_escape() {
-								let _ = write!(&mut buffer, "{key:?}");
-							} else {
-								let _ = write!(&mut buffer, "{key}");
-							}
-							let _ = write!(&mut buffer, ": ");
-						}
+		Ok(Some(reorder_element(root, indices, mapping, mi).map_err(SortElementByError::from)?.into_action()))
+	}
 
-						if action == Self::CopyRaw {
-							let _ = write!(&mut buffer, "{element}");
-						} else {
-							let _ = write!(&mut buffer, "{element:#?}");
-						}
+	fn insert_from_clipboard(root: &mut NbtElement, mut indices: OwnedIndices, mi: &mut MutableIndices<'_>) -> Result<Option<WorkbenchAction>, ElementActionError> {
+		let clipboard = get_clipboard().map_err(InsertFromClipboardError::from)?;
+		let kv = NbtElement::from_str(&clipboard).map_err(InsertFromClipboardError::from)?;
+		indices.push(0);
+		Ok(Some(add_element(root, kv, indices, mi).map_err(InsertFromClipboardError::from)?.into_action()))
+	}
 
-						let contents = buffer.finish();
-						file.write_all(&contents).map_err(OpenInFileError::from)?;
-						FileUpdateSubscriptionType::Snbt
+	fn invert_bookmarks(root: &mut NbtElement, indices: OwnedIndices, mi: &mut MutableIndices<'_>) -> Result<Option<WorkbenchAction>, ElementActionError> {
+		let NavigationInformation {
+			element,
+			mut line_number,
+			mut true_line_number,
+			..
+		} = root.navigate(&indices).map_err(InvertBookmarksError::from)?;
+		let mut queue = Vec::new();
+		queue.push(element);
+		while let Some(element) = queue.pop() {
+			let _ = mi.bookmarks.toggle(MarkedLine::new(true_line_number, line_number));
+
+			if element.is_open() {
+				if let Some(iter) = element.values() {
+					for child in iter.rev() {
+						queue.push(child);
 					}
-				};
-				watcher.watch(&path, RecursiveMode::NonRecursive).map_err(OpenInFileError::Watch)?;
-				crate::util::open_file(&path.display().to_string()).map_err(OpenInFileError::from)?;
-				*mi.subscription = Some(FileUpdateSubscription::new(subscription_type, indices, rx, watcher));
-				Ok(None)
-			}
-			action @ (Self::SortCompoundByName | Self::SortCompoundByType) => {
-				let NavigationInformation { element, .. } = root.navigate(&indices).map_err(SortElementByError::from)?;
-
-				let mapping = match element.as_pattern() {
-					NbtPattern::Compound(compound) => compound.map.create_sort_mapping(if action == Self::SortCompoundByName { Self::by_name } else { Self::by_type }),
-					NbtPattern::Chunk(chunk) => chunk.map.create_sort_mapping(if action == Self::SortCompoundByName { Self::by_name } else { Self::by_type }),
-					_ => return Err(ElementActionError::SortElementBy(SortElementByError::NonKVMapType)),
-				};
-
-				Ok(Some(reorder_element(root, indices, mapping, mi).map_err(SortElementByError::from)?.into_action()))
-			}
-			Self::InsertFromClipboard => {
-				let clipboard = get_clipboard().map_err(InsertFromClipboardError::from)?;
-				let kv = NbtElement::from_str(&clipboard).map_err(InsertFromClipboardError::from)?;
-				indices.push(0);
-				Ok(Some(add_element(root, kv, indices, mi).map_err(InsertFromClipboardError::from)?.into_action()))
-			}
-			Self::InvertBookmarks => {
-				let NavigationInformation {
-					element,
-					mut line_number,
-					mut true_line_number,
-					..
-				} = root.navigate(&indices).map_err(InvertBookmarksError::from)?;
-				let mut queue = Vec::new();
-				queue.push(element);
-				while let Some(element) = queue.pop() {
-					let _ = mi.bookmarks.toggle(MarkedLine::new(true_line_number, line_number));
-
-					if element.is_open() {
-						if let Some(iter) = element.values() {
-							for child in iter.rev() {
-								queue.push(child);
-							}
-						}
-						true_line_number += 1;
-					} else {
-						true_line_number += element.true_height();
-					}
-					line_number += element.height();
 				}
-				Ok(None)
+				true_line_number += 1;
+			} else {
+				true_line_number += element.true_height();
 			}
+			line_number += element.height();
+		}
+		Ok(None)
+	}
+
+	pub fn apply<'m1, 'm2: 'm1>(self, root: &mut NbtElement, indices: OwnedIndices, mi: &'m1 mut MutableIndices<'m2>) -> Result<Option<WorkbenchAction>, ElementActionError> {
+		match self {
+			Self::CopyRaw | Self::CopyFormatted => Self::copy(self == Self::CopyRaw, root, indices, mi),
+			#[cfg(not(target_arch = "wasm32"))] Self::OpenArrayInHex | Self::OpenInTxt => Self::open(self, root, indices, mi),
+			Self::SortCompoundByName | Self::SortCompoundByType => Self::sort_compound(self, root, indices, mi),
+			Self::InsertFromClipboard => Self::insert_from_clipboard(root, indices, mi),
+			Self::InvertBookmarks => Self::invert_bookmarks(root, indices, mi),
 		}
 	}
 }

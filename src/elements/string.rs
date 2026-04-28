@@ -46,7 +46,7 @@ impl NbtElementVariant for NbtString {
 
 	fn from_str0(s: &str) -> Result<(&str, Self), usize>
 	where Self: Sized {
-		let (str, s) = s.snbt_string_read()?;
+		let (str, s) = s.bite_escaped_string()?;
 		Ok((s, Self { str: TwentyThree::new(str) }))
 	}
 

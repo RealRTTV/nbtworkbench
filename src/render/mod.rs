@@ -151,7 +151,7 @@ impl<'w> TreeRenderContext<'w> {
 
 		let pos = self.pos;
 		if self.can_render_text() {
-			builder.settings(pos + (20, 0), false, JUST_OVERLAPPING_BASE_TEXT_Z);
+			builder.text_settings(pos + (20, 0), false, JUST_OVERLAPPING_BASE_TEXT_Z);
 			if let Some(key) = key {
 				builder.color = TextColor::TreeKey.to_raw();
 				let _ = write!(builder, "{key}");
@@ -222,7 +222,7 @@ impl<'w> TreeRenderContext<'w> {
 			self.skip_line_numbers(element.true_height() - 1);
 			return
 		}
-		
+
 		let pos_before = self.pos;
 		self.pos += (16, 0);
 		self.push_index();
@@ -315,7 +315,7 @@ impl<'w> TreeRenderContext<'w> {
 			builder.draw_texture_tiled(pos_before - (16, 0), BASE_Z, CONNECTION_UV, (8, self.pos.y - pos_before.y), (8, 16));
 		}
 	}
-	
+
 	pub fn render_grid_layout(&mut self, region: &NbtRegion, builder: &mut VertexBufferBuilder, tail: bool) {
 		self.pos += (16, 0);
 		let initial_x = self.pos.x;
@@ -345,14 +345,14 @@ impl<'w> TreeRenderContext<'w> {
 
 				builder.draw_texture_z(self.pos, JUST_OVERLAPPING_BOOKMARK_Z, chunk.uv(), (16, 16));
 
-				if self.mouse.x > self.left_margin() && self.mouse.y > HEADER_SIZE {
-					let mx = ((self.mouse.x - self.left_margin()) & !15) + self.left_margin();
-					let my = ((self.mouse.y - HEADER_SIZE) & !15) + HEADER_SIZE;
-					if self.pos == (mx, my) {
-						let text = chunk.value();
-						builder.color = TextColor::White.to_raw();
-						builder.draw_tooltip(&[&text], self.pos, false);
-					}
+				if self.mouse.x > self.left_margin() && self.mouse.y > HEADER_SIZE
+					&& let mx = ((self.mouse.x - self.left_margin()) & !15) + self.left_margin()
+					&& let my = ((self.mouse.y - HEADER_SIZE) & !15) + HEADER_SIZE
+					&& self.pos == (mx, my)
+				{
+					let text = chunk.value();
+					builder.color = TextColor::White.to_raw();
+					builder.draw_tooltip(&[&text], self.pos, false);
 				}
 
 				let pos = self.pos;
@@ -374,7 +374,7 @@ impl<'w> TreeRenderContext<'w> {
 	}
 
 	#[allow(clippy::unreadable_literal, reason = "hex codes")]
-	pub fn render_line_numbers(&self, builder: &mut VertexBufferBuilder, mut bookmarks: &MarkedLineSlice) {
+	pub fn render_line_numbers_and_bookmarks(&self, builder: &mut VertexBufferBuilder, mut bookmarks: &MarkedLineSlice) {
 		use std::fmt::Write as _;
 
 		let start = self.line_numbers.first();
@@ -395,7 +395,7 @@ impl<'w> TreeRenderContext<'w> {
 				if idx % 2 == 0 { 0x777777 } else { TextColor::Gray.to_raw() }
 			};
 			let color = core::mem::replace(&mut builder.color, color);
-			builder.settings((self.left_margin - line_number.ilog10() as usize * 8 - 16, y), false, BASE_TEXT_Z);
+			builder.text_settings((self.left_margin - line_number.ilog10() as usize * 8 - 16, y), false, BASE_TEXT_Z);
 			let _ = write!(builder, "{line_number}");
 			builder.color = color;
 
@@ -423,7 +423,7 @@ impl<'w> TreeRenderContext<'w> {
 	}
 
 	#[allow(clippy::unreadable_literal, reason = "hex codes")]
-	pub fn render_grid_line_numbers(&self, builder: &mut VertexBufferBuilder, mut bookmarks: &MarkedLineSlice) {
+	pub fn render_grid_line_numbers(&self, builder: &mut VertexBufferBuilder) {
 		use std::fmt::Write as _;
 
 		let scroll = builder.scroll();
@@ -434,12 +434,17 @@ impl<'w> TreeRenderContext<'w> {
 			if 16 * line_number >= scroll + 16 {
 				let color = if line_number % 2 == 1 { 0x777777 } else { TextColor::Gray.to_raw() };
 				let color = core::mem::replace(&mut builder.color, color);
-				builder.settings((self.left_margin - line_number.ilog10() as usize * 8 - 16, HEADER_SIZE + 16 * line_number - 16 - scroll), false, BASE_TEXT_Z);
+				builder.text_settings((self.left_margin - line_number.ilog10() as usize * 8 - 16, HEADER_SIZE + 16 * line_number - 16 - scroll), false, BASE_TEXT_Z);
 				let _ = write!(builder, "{line_number}");
 				builder.color = color;
 				builder.draw_texture_z((builder.text_coords.0 + 4, HEADER_SIZE + 16 * line_number - 16 - scroll), LINE_NUMBER_Z, uv, (2, 16));
 			}
 		}
+	}
+
+	#[allow(clippy::unreadable_literal, reason = "hex codes")]
+	pub fn render_grid_bookmarks(&self, builder: &mut VertexBufferBuilder, mut bookmarks: &MarkedLineSlice) {
+		let scroll = builder.scroll();
 
 		if let Some((first, rest)) = bookmarks.split_first()
 			&& first.true_line_number() == 1
@@ -468,10 +473,8 @@ impl<'w> TreeRenderContext<'w> {
 				&& next_line_number.is_none_or(|next_line_number| line_number <= first.true_line_number() && first.true_line_number() < next_line_number)
 			{
 				bookmarks = rest;
-				if hidden_bookmarks < 5 {
-					if pos.y >= scroll + HEADER_SIZE {
-						builder.draw_texture_region_z(pos + (0, 14) - (0, scroll), BOOKMARK_Z, first.uv(), (16, 2), (16, 16));
-					}
+				if hidden_bookmarks < 5 && pos.y >= scroll + HEADER_SIZE {
+					builder.draw_texture_region_z(pos + (0, 14) - (0, scroll), BOOKMARK_Z, first.uv(), (16, 2), (16, 16));
 				}
 				hidden_bookmarks += 1;
 			}

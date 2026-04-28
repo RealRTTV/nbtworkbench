@@ -49,12 +49,8 @@ impl<'a> TraversalInformation<'a> {
 		let mut true_line_number = 1;
 		let mut key = None;
 
-		{
-			let height = element.height();
-
-			if y >= height {
-				return Err(TraversalError::BeyondFullHeight { y, height });
-			}
+		if let height = element.height() && y >= height {
+			return Err(TraversalError::BeyondFullHeight { y, height });
 		}
 
 		while y > 0 {
@@ -63,28 +59,25 @@ impl<'a> TraversalInformation<'a> {
 				&& region.is_grid_layout()
 				&& let Some(x) = &mut x
 			{
-				if (2..=31 + 2).contains(x) {
-					*x -= 2;
-					y -= 1;
-					let idx = y * 16 + *x;
-					depth += *x;
-					for child in (0..idx).filter_map(|idx| region.get(idx)) {
-						let (height, true_height) = child.heights();
-						line_number += height;
-						true_line_number += true_height;
-					}
-					let child = match region.get(idx) {
-						Some(x) => x,
-						None => return Err(TraversalError::IndexOutOfBounds { indices, idx, parent: display_name }),
-					};
-					line_number += 1;
-					true_line_number += 1;
-					indices.push(idx);
-					element = child;
-					break;
-				} else {
+				if !(2..=31 + 2).contains(x) {
 					return Err(TraversalError::OutsideDepthRegion { depth: *x });
 				}
+
+				*x -= 2;
+				y -= 1;
+				let idx = y * 16 + *x;
+				depth += *x;
+				for child in (0..idx).filter_map(|idx| region.get(idx)) {
+					let (height, true_height) = child.heights();
+					line_number += height;
+					true_line_number += true_height;
+				}
+				let Some(child) = region.get(idx) else { return Err(TraversalError::IndexOutOfBounds { indices, idx, parent: display_name }) };
+				line_number += 1;
+				true_line_number += 1;
+				indices.push(idx);
+				element = child;
+				break;
 			} else {
 				let idx = find_traversal_child_idx(element, &indices, &mut y, &mut line_number, &mut true_line_number)?;
 				y -= 1;
@@ -92,10 +85,7 @@ impl<'a> TraversalInformation<'a> {
 				true_line_number += 1;
 				indices.push(idx);
 				depth += 1;
-				let kv = match element.get(idx) {
-					Some(x) => x,
-					None => return Err(TraversalError::IndexOutOfBounds { indices, idx, parent: display_name }),
-				};
+				let Some(kv) = element.get(idx) else { return Err(TraversalError::IndexOutOfBounds { indices, idx, parent: display_name }) };
 				key = kv.0;
 				element = kv.1;
 			}
@@ -146,34 +136,27 @@ impl<'a> TraversalInformationMut<'a> {
 			{
 				// SAFETY: confirmed above to be of correct variant
 				let region = unsafe { element.as_region_unchecked_mut() };
-				if (2..=31 + 2).contains(x) {
-					*x -= 2;
-					y -= 1;
-					let idx = y * 16 + *x;
-					depth += *x;
-					for child in (0..idx).filter_map(|idx| region.get(idx)) {
-						let (height, true_height) = child.heights();
-						line_number += height;
-						true_line_number += true_height;
-					}
-					let child = match region.get_mut(idx) {
-						Some(x) => x,
-						None => return Err(TraversalError::IndexOutOfBounds { indices, idx, parent: display_name }),
-					};
-					line_number += 1;
-					true_line_number += 1;
-					indices.push(idx);
-					element = child;
-					break;
-				} else {
+				if !(2..=31 + 2).contains(x) {
 					return Err(TraversalError::OutsideDepthRegion { depth: *x });
 				}
+				*x -= 2;
+				y -= 1;
+				let idx = y * 16 + *x;
+				depth += *x;
+				for child in (0..idx).filter_map(|idx| region.get(idx)) {
+					let (height, true_height) = child.heights();
+					line_number += height;
+					true_line_number += true_height;
+				}
+				let Some(child) = region.get_mut(idx) else { return Err(TraversalError::IndexOutOfBounds { indices, idx, parent: display_name }) };
+				line_number += 1;
+				true_line_number += 1;
+				indices.push(idx);
+				element = child;
+				break;
 			} else {
 				let idx = find_traversal_child_idx(element, &indices, &mut y, &mut line_number, &mut true_line_number)?;
-				let kv = match element.get_mut(idx) {
-					Some(x) => x,
-					None => return Err(TraversalError::IndexOutOfBounds { indices, idx, parent: display_name }),
-				};
+				let Some(kv) = element.get_mut(idx) else { return Err(TraversalError::IndexOutOfBounds { indices, idx, parent: display_name }) };
 				y -= 1;
 				line_number += 1;
 				true_line_number += 1;

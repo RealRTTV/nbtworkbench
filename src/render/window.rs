@@ -541,7 +541,7 @@ impl<'window> State<'window> {
 				workbench.on_open_file(&file, &data).alert_err(&mut workbench.alerts);
 				Break(())
 			}
-			WindowEvent::KeyboardInput { event, .. } => workbench.on_key_input(event),
+			WindowEvent::KeyboardInput { event, .. } => workbench.on_key_input(&event),
 			WindowEvent::CursorMoved { position, .. } => workbench.on_mouse_move(position),
 			WindowEvent::CursorLeft { .. } => workbench.on_mouse_move(PhysicalPosition::new(0.0, 0.0)),
 			WindowEvent::MouseWheel { delta, .. } => workbench.on_scroll(delta),

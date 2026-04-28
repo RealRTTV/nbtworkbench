@@ -157,17 +157,17 @@ impl Workbench {
 			replace_box: ReplaceBox::uninit(),
 			debug_menu: false,
 
-			search_flags_button: unsafe { core::mem::zeroed() },
-			search_mode_button: unsafe { core::mem::zeroed() },
-			search_operation_button: unsafe { core::mem::zeroed() },
-			exact_match_button: unsafe { core::mem::zeroed() },
-			sort_algorithm_button: unsafe { core::mem::zeroed() },
-			theme_button: unsafe { core::mem::zeroed() },
-			freehand_mode_button: unsafe { core::mem::zeroed() },
-			refresh_button: unsafe { core::mem::zeroed() },
-			new_tab_button: unsafe { core::mem::zeroed() },
-			open_file_button: unsafe { core::mem::zeroed() },
-			replace_by_button: unsafe { core::mem::zeroed() },
+			search_flags_button: unsafe { core::mem::transmute(()) },
+			search_mode_button: unsafe { core::mem::transmute(()) },
+			search_operation_button: unsafe { core::mem::transmute(()) },
+			exact_match_button: unsafe { core::mem::transmute(()) },
+			sort_algorithm_button: unsafe { core::mem::transmute(()) },
+			theme_button: unsafe { core::mem::transmute(()) },
+			freehand_mode_button: unsafe { core::mem::transmute(()) },
+			refresh_button: unsafe { core::mem::transmute(()) },
+			new_tab_button: unsafe { core::mem::transmute(()) },
+			open_file_button: unsafe { core::mem::transmute(()) },
+			replace_by_button: unsafe { core::mem::transmute(()) },
 		}
 	}
 
@@ -737,7 +737,7 @@ impl Workbench {
 	}
 
 	#[must_use]
-	pub fn get_interaction_information_raw(consts: TabConstants, mouse: Vec2u, root: &mut NbtElement) -> InteractionInformation {
+	pub fn get_interaction_information_raw(consts: TabConstants, mouse: Vec2u, root: &mut NbtElement) -> InteractionInformation<'_> {
 		let TabConstants { left_margin, scroll, horizontal_scroll } = consts;
 
 		if mouse.y < HEADER_SIZE {
@@ -911,8 +911,8 @@ impl Workbench {
 		}
 	}
 
-	#[allow(clippy::collapsible_if, clippy::too_many_lines, clippy::cognitive_complexity)]
-	pub fn on_key_input(&mut self, key: KeyEvent) -> ControlFlow<()> {
+	#[allow(clippy::collapsible_if, clippy::too_many_lines, clippy::cognitive_complexity, irrefutable_let_patterns)]
+	pub fn on_key_input(&mut self, key: &KeyEvent) -> ControlFlow<()> {
 		self.tabs.active_tab_mut().last_interaction = Timestamp::now();
 		let consts = self.tabs.active_tab().consts();
 		if key.state == ElementState::Pressed {
@@ -923,12 +923,11 @@ impl Workbench {
 				self.search_box
 					.on_key_press(key, char, flags, &mut self.replace_box, self.tabs.active_tab_mut(), &mut self.alerts, &mut self.notifications, self.window_dims)?;
 				self.replace_box
-					.on_key_press(key, char, flags, &mut self.search_box, self.tabs.active_tab_mut(), &mut self.alerts, &mut self.notifications, self.window_dims)?;
-				#[allow(irrefutable_let_patterns)]
+					.handle_key_press(key, char, flags, &mut self.search_box, self.tabs.active_tab_mut(), &mut self.alerts, &mut self.notifications, self.window_dims)?;
 				if let tab = self.tabs.active_tab_mut()
 					&& let Some(mut selected_text) = tab.selected_text.take()
 				{
-					let result = selected_text.on_key_press(key, char, flags, consts, &mut tab.root, &mut tab.path, mutable_indices!(tab), &mut self.alerts, &mut tab.history);
+					let result = selected_text.handle_key_press(key, char, flags, consts, &mut tab.root, &mut tab.path, mutable_indices!(tab), &mut self.alerts, &mut tab.history);
 					tab.selected_text = Some(selected_text);
 					match result {
 						Break(remove) => {
@@ -1165,8 +1164,8 @@ impl Workbench {
 					&selected_text.value,
 					(self.mouse.coords.x + horizontal_scroll) as isize
 						- (selected_text.indices.end_x(left_margin) + SelectedText::PREFIXING_SPACE_WIDTH) as isize
-						- selected_text.keyfix.as_ref().map_or(0, |k| k.0.width()) as isize
-						- selected_text.prefix.0.width() as isize,
+						- selected_text.keyfix.as_ref().map_or(0, |k| k.text.width()) as isize
+						- selected_text.prefix.text.width() as isize,
 				);
 				selected_text.cursor = selection;
 				selected_text.selection = Some(cursor).filter(|cursor| *cursor != selected_text.cursor);
@@ -1461,11 +1460,11 @@ impl Workbench {
 						"y={}, cursor={}, pre={}, key={:?}, txt={}, val={:?}, suf={}, ccx={:?}",
 						txt.y,
 						txt.cursor,
-						txt.prefix.0,
-						txt.keyfix.as_ref().map(|x| &x.0),
+						txt.prefix.text,
+						txt.keyfix.as_ref().map(|x| &x.text),
 						txt.value,
-						txt.valuefix.as_ref().map(|x| &x.0),
-						txt.suffix.0,
+						txt.valuefix.as_ref().map(|x| &x.text),
+						txt.suffix.text,
 						txt.cached_cursor_x
 					)
 				} else {
@@ -1498,7 +1497,7 @@ impl Workbench {
 			if builder.window_height() < (idx + 1) * VertexBufferBuilder::CHAR_HEIGHT {
 				continue
 			}
-			builder.settings(
+			builder.text_settings(
 				(builder.window_width().saturating_sub(line.width()), builder.window_height() - (idx + 1) * VertexBufferBuilder::CHAR_HEIGHT),
 				false,
 				ZOffset::DEBUG_TEXT_Z,
@@ -1530,7 +1529,7 @@ impl Workbench {
 			tab.draw_icon(builder, (offset, 2), JUST_OVERLAPPING_BASE_TEXT_Z);
 			offset += 1;
 			builder.draw_texture_region_z((offset, 3), BASE_Z, uv + (3, 0), (remaining_width, 16), (10, 16));
-			builder.settings((offset + 16, 3), false, BASE_TEXT_Z);
+			builder.text_settings((offset + 16, 3), false, BASE_TEXT_Z);
 			builder.color = match config::get_theme() {
 				Theme::Light => TextColor::DarkGray,
 				Theme::Dark => TextColor::White,

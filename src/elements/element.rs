@@ -195,7 +195,7 @@ impl NbtElement {
 			return Err(SNBTParseError::Index(total_len - s.len()))
 		}
 
-		let prefix = s.snbt_string_read().ok().and_then(|(prefix, s2)| {
+		let prefix = s.bite_escaped_string().ok().and_then(|(prefix, s2)| {
 			s2.trim_start().strip_prefix(':').filter(|s| !s.is_empty()).map(|s2| {
 				s = s2.trim_start();
 				prefix
@@ -934,7 +934,7 @@ impl NbtElement {
 	}
 
 	#[must_use]
-	pub fn seperator_color(&self) -> TextColor {
+	pub fn separator_color(&self) -> TextColor {
 		use NbtPattern as Nbt;
 
 		match self.as_pattern() {

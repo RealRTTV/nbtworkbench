@@ -3,6 +3,7 @@ use std::fmt::Write;
 use std::ops::{ControlFlow, Deref, DerefMut, Range};
 
 use compact_str::ToCompactString;
+use option_into_controlflow::OptionExt;
 use thiserror::Error;
 use uuid::Uuid;
 use winit::keyboard::KeyCode;
@@ -12,10 +13,10 @@ use crate::flags;
 use crate::history::WorkbenchAction;
 use crate::history::manager::HistoryMananger;
 use crate::render::assets::{BASE_TEXT_Z, HEADER_SIZE, SELECTED_TEXT_SELECTION_Z, SELECTED_TEXT_Z, SELECTION_UV};
-use crate::render::color::TextColor;
+use crate::render::color::{TextColor, TextWithColor};
 use crate::render::vertex_buffer_builder::VertexBufferBuilder;
 use crate::render::widget::alert::manager::{AlertManager, Alertable};
-use crate::render::widget::text::{Cachelike, SelectedTextKeyResult, Text, get_cursor_idx};
+use crate::render::widget::text::{Cache, SelectedTextKeyResult, Text, get_cursor_idx, KeyResult};
 use crate::tree::actions::AmbiguiousOpenElementError;
 use crate::tree::actions::close::{CloseElementError, close_element};
 use crate::tree::actions::expand::expand_element;
@@ -43,12 +44,12 @@ impl PartialEq for SelectedTextCache {
 	fn eq(&self, other: &Self) -> bool { self.keyfix == other.keyfix && self.value == other.value && self.valuefix == other.valuefix }
 }
 
-impl Cachelike<SelectedTextAdditional> for SelectedTextCache {
+impl Cache<SelectedTextAdditional> for SelectedTextCache {
 	fn new(text: &Text<SelectedTextAdditional, Self>) -> Self
 	where Self: Sized {
 		Self {
-			keyfix: text.additional.keyfix.clone().map(|(a, b)| (a.into_boxed_str(), b)),
-			valuefix: text.additional.valuefix.clone().map(|(a, b)| (a.into_boxed_str(), b)),
+			keyfix: text.additional.keyfix.clone().map(|x| (x.text.into_boxed_str(), x.color)),
+			valuefix: text.additional.valuefix.clone().map(|x| (x.text.into_boxed_str(), x.color)),
 			value: text.value.clone().into_boxed_str(),
 			cursor: text.cursor,
 			selection: text.selection,
@@ -58,8 +59,8 @@ impl Cachelike<SelectedTextAdditional> for SelectedTextCache {
 	fn revert(self, text: &mut Text<SelectedTextAdditional, Self>)
 	where Self: Sized {
 		let Self { keyfix, value, valuefix, cursor, selection } = self;
-		text.additional.keyfix = keyfix.map(|(a, b)| (a.into_string(), b));
-		text.additional.valuefix = valuefix.map(|(a, b)| (a.into_string(), b));
+		text.additional.keyfix = keyfix.map(|(a, b)| TextWithColor::new(a.into_string(), b));
+		text.additional.valuefix = valuefix.map(|(a, b)| TextWithColor::new(a.into_string(), b));
 		text.value = value.into_string();
 		text.cursor = cursor;
 		text.selection = selection;
@@ -84,10 +85,10 @@ pub struct SelectedTextAdditional {
 	pub y: usize,
 	pub indices: OwnedIndices,
 	pub value_color: TextColor,
-	pub keyfix: Option<(String, TextColor)>,
-	pub prefix: (String, TextColor),
-	pub suffix: (String, TextColor),
-	pub valuefix: Option<(String, TextColor)>,
+	pub keyfix: Option<TextWithColor>,
+	pub prefix: TextWithColor,
+	pub suffix: TextWithColor,
+	pub valuefix: Option<TextWithColor>,
 	pub cached_cursor_x: Option<usize>,
 	pub uuid: Uuid,
 }
@@ -97,212 +98,135 @@ static_assertions::const_assert_eq!(VertexBufferBuilder::CHAR_WIDTH[b':' as usiz
 
 type ShouldRemove = bool;
 
+fn width(text: &Option<TextWithColor>) -> usize {
+	text.as_deref().map(String::as_str).map_or(0, str::width)
+}
+
 impl SelectedText {
 	pub const PREFIXING_SPACE_WIDTH: usize = 4;
 	pub const POSTFIXING_SPACE_WIDTH: usize = 4;
+
+	fn try_select_key(
+		base_x: usize,
+		mouse_x: usize,
+		y: usize,
+		key: Option<TextWithColor>,
+		value: Option<TextWithColor>,
+		separator: Option<TextWithColor>,
+		indices: OwnedIndices,
+		cached_cursor_x: Option<usize>,
+		snap_to_ends: bool,
+	) -> ControlFlow<Self> {
+		let Some(key) = key else { return Continue(()) };
+		if key.color.is_non_editable() { return Continue(()) };
+
+		// relative to start of key
+		let x = mouse_x as isize - base_x as isize;
+
+		let hitbox_suffix_width = separator.as_ref().map_or(Self::PREFIXING_SPACE_WIDTH, |sep| sep.text.width() / 2);
+		let hitbox_lhs = -(Self::PREFIXING_SPACE_WIDTH as isize);
+		let hitbox_rhs = key.text.width() + hitbox_suffix_width;
+		let hitbox = hitbox_lhs..hitbox_rhs as _;
+		let is_in_hitbox = hitbox.contains(&x);
+		let is_within_bounds = is_in_hitbox || snap_to_ends;
+
+		if !is_within_bounds {
+			return Continue(());
+		}
+
+		let idx = get_cursor_idx(&key.text, x);
+		Break(Self(Text::new(key.text, idx, true, SelectedTextAdditional {
+			y,
+			indices,
+			value_color: key.color,
+			keyfix: None,
+			prefix: TextWithColor::default(),
+			suffix: separator.unwrap_or_default(),
+			valuefix: value,
+			cached_cursor_x,
+			uuid: Uuid::new_v4(),
+		})))
+	}
+
+	fn try_select_value(
+		base_x: usize,
+		mouse_x: usize,
+		y: usize,
+		key: Option<TextWithColor>,
+		value: Option<TextWithColor>,
+		separator: Option<TextWithColor>,
+		indices: OwnedIndices,
+		cached_cursor_x: Option<usize>,
+		snap_to_ends: bool,
+	) -> ControlFlow<Self> {
+		let Some(value) = value else { return Continue(()) };
+		if value.color.is_non_editable() { return Continue(()) }
+
+		// relative to start of value
+		let x = mouse_x as isize - base_x as isize - width(&key) as isize - width(&separator) as isize;
+
+		let hitbox_lhs = -(separator.as_ref().map_or(Self::PREFIXING_SPACE_WIDTH, |sep| sep.text.width() / 2) as isize);
+		let hitbox_rhs = value.text.width() + Self::POSTFIXING_SPACE_WIDTH;
+		let hitbox = hitbox_lhs..hitbox_rhs as _;
+		let is_in_hitbox = hitbox.contains(&x);
+		let is_within_bounds = is_in_hitbox || snap_to_ends;
+
+		if !is_within_bounds {
+			return Continue(());
+		}
+
+		let idx = get_cursor_idx(&value.text, x);
+		Break(Self(Text::new(value.text, idx, true, SelectedTextAdditional {
+			y,
+			indices,
+			value_color: value.color,
+			prefix: separator.unwrap_or_default(),
+			keyfix: key,
+			suffix: TextWithColor::default(),
+			valuefix: None,
+			cached_cursor_x,
+			uuid: Uuid::new_v4(),
+		})))
+	}
 
 	pub fn from_raw(
 		base_x: usize,
 		mouse_x: usize,
 		y: usize,
-		key: Option<(String, TextColor)>,
-		value: Option<(String, TextColor)>,
-		seperator_color: TextColor,
+		key: Option<TextWithColor>,
+		value: Option<TextWithColor>,
+		separator: TextWithColor,
 		indices: OwnedIndices,
 		cached_cursor_x: Option<usize>,
 		snap_to_ends: bool,
 	) -> Result<Self, SelectedTextConstructionError> {
-		let key_width = key.as_ref().map_or(0, |k| k.0.width());
-		let value_width = value.as_ref().map_or(0, |v| v.0.width());
-		let has_key_and_value = key.as_ref().is_some_and(|k| k.1.is_editable()) && value.as_ref().is_some_and(|v| v.1.is_editable());
-		let intersection_width = has_key_and_value as usize * ": ".width();
-		let full_width = key_width + intersection_width + value_width;
+		let has_key_and_value = key.as_ref().is_some_and(|key| key.color.is_editable()) && value.as_ref().is_some_and(|value| value.color.is_editable());
+		let separator = has_key_and_value.then_some(separator);
+		let full_width = [&key, &separator, &value].map(Option::as_ref).into_iter().flatten().map(|x| x.text.width()).sum::<usize>();
 
-		let (keyfix, prefix) = if let Some((key, key_color)) = key.clone() {
-			(Some((key, key_color)), (": ".to_owned(), seperator_color))
-		} else {
-			(None, (String::new(), TextColor::White))
-		};
-
-		let (suffix, valuefix) = if let Some((value, value_color)) = value.clone() {
-			((": ".to_owned(), seperator_color), Some((value, value_color)))
-		} else {
-			((String::new(), TextColor::White), None)
-		};
-
-		if let Some((key, key_color)) = key
-			&& key_color.is_editable()
-		{
-			let x = mouse_x as isize - base_x as isize;
-			if (-(Self::PREFIXING_SPACE_WIDTH as isize) <= x || snap_to_ends)
-				&& (x.try_into().unwrap_or(0_usize) < key_width + if has_key_and_value { intersection_width / 2 } else { Self::POSTFIXING_SPACE_WIDTH } || !has_key_and_value && snap_to_ends)
-			{
-				let idx = get_cursor_idx(&key, x);
-				return Ok(Self(Text::new(key, idx, true, SelectedTextAdditional {
-					y,
-					indices,
-					value_color: key_color,
-					keyfix: None,
-					prefix: (String::new(), TextColor::White),
-					suffix,
-					valuefix,
-					cached_cursor_x,
-					uuid: Uuid::new_v4(),
-				})))
-			}
+		if let Break(result) = Self::try_select_key(base_x, mouse_x, y, key.clone(), value.clone(), separator.clone(), indices.clone(), cached_cursor_x, snap_to_ends) {
+			return Ok(result)
 		}
 
-		if let Some((value, value_color)) = value
-			&& value_color.is_editable()
-		{
-			let x = mouse_x as isize - base_x as isize - key_width as isize - intersection_width as isize;
-			if (-(if has_key_and_value { (intersection_width + 1) / 2 } else { Self::PREFIXING_SPACE_WIDTH } as isize) <= x || !has_key_and_value && snap_to_ends)
-				&& (x.try_into().unwrap_or(0_usize) < value_width + Self::POSTFIXING_SPACE_WIDTH || snap_to_ends)
-			{
-				let idx = get_cursor_idx(&value, x);
-				return Ok(Self(Text::new(value, idx, true, SelectedTextAdditional {
-					y,
-					indices,
-					value_color,
-					keyfix,
-					prefix,
-					suffix: (String::new(), TextColor::White),
-					valuefix: None,
-					cached_cursor_x,
-					uuid: Uuid::new_v4(),
-				})))
-			}
+		if let Break(result) = Self::try_select_value(base_x, mouse_x, y, key, value, separator, indices, cached_cursor_x, snap_to_ends) {
+			return Ok(result)
 		}
 
 		Err(SelectedTextConstructionError::OutOfBounds {
-			min_x: base_x,
-			max_x: base_x + full_width,
+			min_x: base_x.saturating_sub(Self::PREFIXING_SPACE_WIDTH),
+			max_x: base_x + full_width + Self::POSTFIXING_SPACE_WIDTH,
 			mouse_x,
 		})
 	}
 
 	#[must_use]
-	pub fn width(&self) -> usize { self.prefix.0.width() + self.keyfix.as_ref().map(|x| x.0.width()).unwrap_or(0) + self.value.width() + self.valuefix.as_ref().map(|x| x.0.width()).unwrap_or(0) + self.suffix.0.width() }
+	pub fn width(&self) -> usize { width(&self.keyfix) + self.prefix.text.width() + self.value.width() + self.suffix.width() + width(&self.valuefix) }
 
 	#[must_use]
 	pub fn end_x(&self, left_margin: usize) -> usize { self.indices.end_x(left_margin) + Self::PREFIXING_SPACE_WIDTH + self.width() }
 
-	pub fn on_key_press<'m1, 'm2: 'm1>(
-		&mut self,
-		key: KeyCode,
-		ch: Option<char>,
-		flags: u8,
-		consts: TabConstants,
-		root: &mut NbtElement,
-		path: &mut FilePath,
-		mi: &'m1 mut MutableIndices<'m2>,
-		alerts: &mut AlertManager,
-		history: &mut HistoryMananger,
-	) -> ControlFlow<ShouldRemove> {
-		fn on_key_press0<'m1, 'm2: 'm1>(
-			this: &mut SelectedText,
-			key: KeyCode,
-			ch: Option<char>,
-			flags: u8,
-			consts: TabConstants,
-			root: &mut NbtElement,
-			path: &mut FilePath,
-			mi: &'m1 mut MutableIndices<'m2>,
-		) -> ControlFlow<Result<SelectedTextKeyResult, SelectedTextInputError>> {
-			if key == KeyCode::ArrowUp {
-				if flags & !flags!(Ctrl) == 0 {
-					return Break(this
-						.move_up(consts, flags == flags!(Ctrl), root, path)
-						.map(SelectedTextKeyResult::Action)
-						.map_err(SelectedTextInputError::from))
-				} else if flags == flags!(Ctrl + Shift) {
-					return Break(this
-						.shift_up(consts, root, mi)
-						.map(Some)
-						.map(SelectedTextKeyResult::Action)
-						.map_err(SelectedTextInputError::from));
-				}
-			}
-
-			if key == KeyCode::ArrowDown {
-				if flags & !flags!(Ctrl) == 0 {
-					return Break(this
-						.move_down(consts, flags == flags!(Ctrl), root, path)
-						.map(SelectedTextKeyResult::Action)
-						.map_err(SelectedTextInputError::from))
-				} else if flags == flags!(Ctrl + Shift) {
-					return Break(this
-						.shift_down(consts, root, mi)
-						.map(Some)
-						.map(SelectedTextKeyResult::Action)
-						.map_err(SelectedTextInputError::from));
-				}
-			}
-
-			if key == KeyCode::ArrowLeft {
-				if flags & !flags!(Ctrl) == 0 && this.selection.is_none() && this.cursor == 0 && this.keyfix.as_ref().is_some_and(|keyfix| keyfix.1.is_editable()) {
-					return Break(this
-						.move_to_keyfix(consts, root, path)
-						.map(SelectedTextKeyResult::Action)
-						.map_err(SelectedTextInputError::from));
-				}
-				if flags & !flags!(Shift) == flags!(Alt) {
-					return Break(this
-						.force_close(root, mi)
-						.map(|_| None)
-						.map(SelectedTextKeyResult::Action)
-						.map_err(SelectedTextInputError::from));
-				}
-			}
-
-			if key == KeyCode::ArrowRight {
-				if flags & !flags!(Ctrl) == 0 && this.selection.is_none() && this.cursor == this.value.len() && this.valuefix.as_ref().is_some_and(|valuefix| valuefix.1.is_editable()) {
-					return Break(this
-						.move_to_valuefix(consts, root, path)
-						.map(SelectedTextKeyResult::Action)
-						.map_err(SelectedTextInputError::from));
-				}
-				if (flags) & !flags!(Shift) == flags!(Alt) {
-					return Break(this
-						.force_open((flags & !flags!(Alt)) == flags!(Shift), root, mi)
-						.map(|_| None)
-						.map(SelectedTextKeyResult::Action)
-						.map_err(SelectedTextInputError::from));
-				}
-			}
-
-			let cursor_before = this.cursor;
-			let result = this.0.on_key_press(key, ch, flags).into();
-			if this.cursor != cursor_before {
-				this.recache_cached_cursor_x(consts);
-			}
-			Break(Ok(result))
-		}
-		match on_key_press0(self, key, ch, flags, consts, root, path, mi) {
-			Break(Err(e)) if !e.is_generally_ignored() => {
-				alerts.alert(e);
-				Break(true)
-			},
-			Continue(()) | Break(Err(_) | Ok(SelectedTextKeyResult::NoAction)) => Continue(()),
-			Break(Ok(SelectedTextKeyResult::Action(action))) => {
-				self.post_input();
-				history.append_all(action);
-				Break(false)
-			}
-			Break(Ok(SelectedTextKeyResult::Escape)) => Break(true),
-			Break(Ok(SelectedTextKeyResult::Finish)) => {
-				history.append_all(self.save(root, path).alert_err(alerts).flatten());
-				Break(true)
-			}
-			Break(Ok(SelectedTextKeyResult::GenericAction)) => {
-				self.post_input();
-				Break(false)
-			}
-		}
-	}
-
 	#[must_use]
-	pub fn cursor_x(&self, left_margin: usize) -> usize { self.indices.end_x(left_margin) + Self::PREFIXING_SPACE_WIDTH + self.prefix.0.width() + self.keyfix.as_ref().map_or(0, |x| x.0.width()) + self.value.split_at(self.cursor).0.width() }
+	pub fn cursor_x(&self, left_margin: usize) -> usize { self.indices.end_x(left_margin) + Self::PREFIXING_SPACE_WIDTH + self.prefix.text.width() + self.keyfix.as_ref().map_or(0, |x| x.text.width()) + self.value.split_at(self.cursor).0.width() }
 
 	pub fn post_input(&mut self) { self.0.post_input() }
 
@@ -323,11 +247,11 @@ impl SelectedText {
 	}
 
 	#[must_use]
-	pub fn is_editing_key(&self) -> bool { self.keyfix.is_none() && self.prefix.0.is_empty() && !self.suffix.0.is_empty() && self.valuefix.is_some() }
+	pub fn is_editing_key(&self) -> bool { self.keyfix.is_none() && self.prefix.text.is_empty() && !self.suffix.text.is_empty() && self.valuefix.is_some() }
 
 	#[must_use]
 	pub fn key_span(&self, left_margin: usize) -> Option<Range<usize>> {
-		self.keyfix.as_ref().map(|keyfix| &*keyfix.0).or(Some(&*self.value).filter(|_| self.is_editing_key())).map(|key| {
+		self.keyfix.as_ref().map(|keyfix| &*keyfix.text).or(Some(&*self.value).filter(|_| self.is_editing_key())).map(|key| {
 			let start = self.indices.end_x(left_margin) + Self::PREFIXING_SPACE_WIDTH;
 			let width = key.width();
 			start..start + width
@@ -335,17 +259,17 @@ impl SelectedText {
 	}
 
 	#[must_use]
-	pub fn is_editing_value(&self) -> bool { self.keyfix.is_some() && !self.prefix.0.is_empty() && self.suffix.0.is_empty() && self.valuefix.is_none() }
+	pub fn is_editing_value(&self) -> bool { self.keyfix.is_some() && !self.prefix.text.is_empty() && self.suffix.text.is_empty() && self.valuefix.is_none() }
 
 	#[must_use]
 	pub fn value_span(&self, left_margin: usize) -> Option<Range<usize>> {
 		self.valuefix
 			.as_ref()
-			.map(|valuefix| &*valuefix.0)
+			.map(|valuefix| &*valuefix.text)
 			.map(|valuefix| (self.indices.end_x(left_margin) + Self::PREFIXING_SPACE_WIDTH, valuefix))
 			.or_else(|| {
 				Some((
-					self.indices.end_x(left_margin) + Self::PREFIXING_SPACE_WIDTH + self.keyfix.as_ref().map_or(0, |keyfix| keyfix.0.width()) + self.prefix.0.width(),
+					self.indices.end_x(left_margin) + Self::PREFIXING_SPACE_WIDTH + self.keyfix.as_ref().map_or(0, |keyfix| keyfix.text.width()) + self.prefix.text.width(),
 					&*self.value,
 				))
 			})
@@ -363,52 +287,52 @@ impl SelectedText {
 			return
 		}
 
-		let prefix_width = self.prefix.0.as_str().width() + self.keyfix.as_ref().map_or(0, |x| x.0.width());
+		let prefix_width = self.prefix.text.as_str().width() + self.keyfix.as_ref().map_or(0, |x| x.text.width());
 		self.0.render(builder, self.value_color, (x + prefix_width, y).into(), SELECTED_TEXT_Z, SELECTED_TEXT_SELECTION_Z);
 
 		builder.draw_texture_z((x - Self::PREFIXING_SPACE_WIDTH - NbtElement::DEPTH_INCREMENT_WIDTH, y), SELECTED_TEXT_Z, SELECTION_UV, (16, 16));
-		builder.settings((x, y), false, BASE_TEXT_Z);
-		if let Some((keyfix, keyfix_color)) = self.keyfix.as_ref() {
-			builder.color = keyfix_color.to_raw();
-			let _ = write!(builder, "{keyfix}");
+		builder.text_settings((x, y), false, BASE_TEXT_Z);
+		if let Some(keyfix) = self.keyfix.as_ref() {
+			builder.color = keyfix.color.to_raw();
+			let _ = write!(builder, "{}", keyfix.text);
 		}
 
-		builder.color = self.prefix.1.to_raw();
-		let _ = write!(builder, "{}", self.prefix.0);
+		builder.color = self.prefix.color.to_raw();
+		let _ = write!(builder, "{}", self.prefix.text);
 
-		builder.settings((x + prefix_width + self.value.width(), y), false, BASE_TEXT_Z);
+		builder.text_settings((x + prefix_width + self.value.width(), y), false, BASE_TEXT_Z);
 
-		builder.color = self.suffix.1.to_raw();
-		let _ = write!(builder, "{}", self.suffix.0);
+		builder.color = self.suffix.color.to_raw();
+		let _ = write!(builder, "{}", self.suffix.text);
 
-		if let Some((valuefix, valuefix_color)) = self.valuefix.as_ref() {
-			builder.color = valuefix_color.to_raw();
-			let _ = write!(builder, "{valuefix}");
+		if let Some(valuefix) = self.valuefix.as_ref() {
+			builder.color = valuefix.color.to_raw();
+			let _ = write!(builder, "{}", valuefix.text);
 		}
 	}
 
-	pub fn for_y(consts: TabConstants, root: &NbtElement, path: &FilePath, y: usize, mouse_x: usize, snap_to_ends: bool, cached_cursor_x: Option<usize>) -> Result<SelectedText, SelectedTextConstructionError> {
-		fn header(consts: TabConstants, root: &NbtElement, path: &FilePath, offset: usize, cached_cursor_x: Option<usize>, snap_to_ends: bool) -> Result<SelectedText, SelectedTextConstructionError> {
-			let TabConstants { left_margin, .. } = consts;
-			let name = path.name();
-			let path_minus_name_width = path.path_str().width() - name.width();
-			SelectedText::from_raw(
-				left_margin + NbtElement::INITIAL_DEPTH_WIDTH + SelectedText::PREFIXING_SPACE_WIDTH,
-				offset + path_minus_name_width,
-				HEADER_SIZE,
-				Some((path.path_str().to_string(), TextColor::TreeKey)),
-				Some((root.value().0.into_owned(), TextColor::TreeValueDesc)),
-				TextColor::TreeValueDesc,
-				OwnedIndices::new(),
-				cached_cursor_x,
-				snap_to_ends,
-			)
-		}
+	pub fn for_header(consts: TabConstants, root: &NbtElement, path: &FilePath, offset: usize, cached_cursor_x: Option<usize>, snap_to_ends: bool) -> Result<SelectedText, SelectedTextConstructionError> {
+		let TabConstants { left_margin, .. } = consts;
+		let name = path.name();
+		let path_minus_name_width = path.path_str().width() - name.width();
+		SelectedText::from_raw(
+			left_margin + NbtElement::INITIAL_DEPTH_WIDTH + SelectedText::PREFIXING_SPACE_WIDTH,
+			offset + path_minus_name_width,
+			HEADER_SIZE,
+			Some(TextWithColor::new(path.path_str().to_string(), TextColor::TreeKey)),
+			Some(TextWithColor::new(root.value().0.into_owned(), TextColor::TreeValueDesc)),
+			TextWithColor::new(": ".to_owned(), TextColor::TreeValueDesc),
+			OwnedIndices::new(),
+			cached_cursor_x,
+			snap_to_ends,
+		)
+	}
 
+	pub fn for_y(consts: TabConstants, root: &NbtElement, path: &FilePath, y: usize, mouse_x: usize, snap_to_ends: bool, cached_cursor_x: Option<usize>) -> Result<SelectedText, SelectedTextConstructionError> {
 		let TabConstants { left_margin, horizontal_scroll, .. } = consts;
 
 		if y == 0 {
-			return header(consts, root, path, mouse_x, cached_cursor_x, snap_to_ends)
+			return Self::for_header(consts, root, path, mouse_x, cached_cursor_x, snap_to_ends)
 		}
 
 		if root.as_region().is_some_and(|region| region.is_grid_layout()) {
@@ -424,11 +348,11 @@ impl SelectedText {
 				mouse_x,
 			})
 		}
-		let k = key.map(|x| (x.to_owned(), TextColor::TreeKey));
-		let v = Some(element.value()).map(|(a, c)| (a.into_owned(), c));
-		let seperator_color = element.seperator_color();
+		let k = key.map(|x| TextWithColor::new(x.to_owned(), TextColor::TreeKey));
+		let v = Some(element.value()).map(|(a, c)| TextWithColor::new(a.into_owned(), c));
+		let separator = TextWithColor::new(": ".to_owned(), element.separator_color());
 
-		SelectedText::from_raw(target_x, mouse_x + horizontal_scroll, y * 16 + HEADER_SIZE, k, v, seperator_color, indices, cached_cursor_x, snap_to_ends)
+		SelectedText::from_raw(target_x, mouse_x + horizontal_scroll, y * 16 + HEADER_SIZE, k, v, separator, indices, cached_cursor_x, snap_to_ends)
 	}
 
 	pub fn save(&self, root: &mut NbtElement, path: &mut FilePath) -> Result<Option<WorkbenchAction>, SaveSelectedTextError> {
@@ -436,7 +360,7 @@ impl SelectedText {
 			return Err(SaveSelectedTextError::NonEditable)
 		}
 
-		let key = self.prefix.0.is_empty() && !self.suffix.0.is_empty();
+		let key = self.prefix.text.is_empty() && !self.suffix.text.is_empty();
 		let (key, value) = if key { (Some(self.value.to_compact_string()), None) } else { (None, Some(self.value.clone())) };
 		Ok(rename_element(root, self.indices.clone(), key, value, path)?.map(RenameElementResult::into_action))
 	}
@@ -444,21 +368,21 @@ impl SelectedText {
 		if !self.editable {
 			return Err(MoveToKeyfixError::Save(SaveSelectedTextError::NonEditable))
 		}
-		if self.valuefix.as_ref().is_some_and(|valuefix| valuefix.1.is_editable()) || !self.suffix.0.is_empty() {
+		if self.valuefix.as_ref().is_some_and(|valuefix| valuefix.color.is_editable()) || !self.suffix.text.is_empty() {
 			return Err(MoveToKeyfixError::AlreadyAtKey)
 		}
 
 		let action = self.save(root, path)?;
 
-		let (keyfix, keyfix_color) = self.keyfix.take().ok_or(MoveToKeyfixError::NoKey)?;
+		let keyfix = self.keyfix.take().ok_or(MoveToKeyfixError::NoKey)?;
 		let old_prefix = core::mem::take(&mut self.prefix);
 
 		self.cursor = keyfix.len();
-		let old_value = core::mem::replace(&mut self.value, keyfix);
-		let old_value_color = core::mem::replace(&mut self.value_color, keyfix_color);
+		let old_value = core::mem::replace(&mut self.value, keyfix.text);
+		let old_value_color = core::mem::replace(&mut self.value_color, keyfix.color);
 
 		self.suffix = old_prefix;
-		self.valuefix = Some((old_value, old_value_color));
+		self.valuefix = Some(TextWithColor::new(old_value, old_value_color));
 
 		self.recache_cached_cursor_x(consts);
 
@@ -469,21 +393,21 @@ impl SelectedText {
 		if !self.editable {
 			return Err(MoveToValuefixError::Save(SaveSelectedTextError::NonEditable))
 		}
-		if self.keyfix.as_ref().is_some_and(|keyfix| keyfix.1.is_editable()) || !self.prefix.0.is_empty() {
+		if self.keyfix.as_ref().is_some_and(|keyfix| keyfix.color.is_editable()) || !self.prefix.text.is_empty() {
 			return Err(MoveToValuefixError::AlreadyAtValue)
 		}
 
 		let action = self.save(root, path)?;
 
-		let (valuefix, valuefix_color) = self.valuefix.take().ok_or(MoveToValuefixError::NoValue)?;
+		let valuefix = self.valuefix.take().ok_or(MoveToValuefixError::NoValue)?;
 		let old_suffix = core::mem::take(&mut self.suffix);
 
 		self.cursor = 0;
-		let old_value = core::mem::replace(&mut self.value, valuefix);
-		let old_value_color = core::mem::replace(&mut self.value_color, valuefix_color);
+		let old_value = core::mem::replace(&mut self.value, valuefix.text);
+		let old_value_color = core::mem::replace(&mut self.value_color, valuefix.color);
 
 		self.prefix = old_suffix;
-		self.keyfix = Some((old_value, old_value_color));
+		self.keyfix = Some(TextWithColor::new(old_value, old_value_color));
 
 		self.recache_cached_cursor_x(consts);
 
@@ -553,6 +477,181 @@ impl SelectedText {
 
 	pub fn force_open<'m1, 'm2: 'm1>(&self, expand: bool, root: &mut NbtElement, mi: &'m1 mut MutableIndices<'m2>) -> Result<(), AmbiguiousOpenElementError> {
 		if expand { Ok(expand_element(root, &self.indices, mi)?) } else { Ok(open_element(root, &self.indices, mi)?) }
+	}
+}
+
+impl SelectedText {
+	fn try_move_up(
+		&mut self,
+		key: KeyCode,
+		_ch: Option<char>,
+		flags: u8,
+		consts: TabConstants,
+		root: &mut NbtElement,
+		path: &mut FilePath,
+		mi: &mut MutableIndices<'_>
+	) -> ControlFlow<Result<SelectedTextKeyResult, SelectedTextInputError>> {
+		if key == KeyCode::ArrowUp {
+			if flags & !flags!(Ctrl) == 0 {
+				return Break(self
+					.move_up(consts, flags == flags!(Ctrl), root, path)
+					.map(SelectedTextKeyResult::WorkbenchAction)
+					.map_err(SelectedTextInputError::from))
+			} else if flags == flags!(Ctrl + Shift) {
+				return Break(self
+					.shift_up(consts, root, mi)
+					.map(Some)
+					.map(SelectedTextKeyResult::WorkbenchAction)
+					.map_err(SelectedTextInputError::from));
+			}
+		}
+
+		Continue(())
+	}
+
+	fn try_move_down(
+		&mut self,
+		key: KeyCode,
+		_ch: Option<char>,
+		flags: u8,
+		consts: TabConstants,
+		root: &mut NbtElement,
+		path: &mut FilePath,
+		mi: &mut MutableIndices<'_>
+	) -> ControlFlow<Result<SelectedTextKeyResult, SelectedTextInputError>> {
+		if key == KeyCode::ArrowDown {
+			if flags & !flags!(Ctrl) == 0 {
+				return Break(self
+					.move_down(consts, flags == flags!(Ctrl), root, path)
+					.map(SelectedTextKeyResult::WorkbenchAction)
+					.map_err(SelectedTextInputError::from))
+			} else if flags == flags!(Ctrl + Shift) {
+				return Break(self
+					.shift_down(consts, root, mi)
+					.map(Some)
+					.map(SelectedTextKeyResult::WorkbenchAction)
+					.map_err(SelectedTextInputError::from));
+			}
+		}
+
+		Continue(())
+	}
+
+	fn try_move_left(
+		&mut self,
+		key: KeyCode,
+		_ch: Option<char>,
+		flags: u8,
+		consts: TabConstants,
+		root: &mut NbtElement,
+		path: &mut FilePath,
+		mi: &mut MutableIndices<'_>
+	) -> ControlFlow<Result<SelectedTextKeyResult, SelectedTextInputError>> {
+		if key == KeyCode::ArrowLeft {
+			if flags & !flags!(Ctrl) == 0 && self.selection.is_none() && self.cursor == 0 && self.keyfix.as_ref().is_some_and(|keyfix| keyfix.color.is_editable()) {
+				return Break(self
+					.move_to_keyfix(consts, root, path)
+					.map(SelectedTextKeyResult::WorkbenchAction)
+					.map_err(SelectedTextInputError::from));
+			}
+			if flags & !flags!(Shift) == flags!(Alt) {
+				return Break(self
+					.force_close(root, mi)
+					.map(|_| None)
+					.map(SelectedTextKeyResult::WorkbenchAction)
+					.map_err(SelectedTextInputError::from));
+			}
+		}
+
+		Continue(())
+	}
+
+	fn try_move_right(
+		&mut self,
+		key: KeyCode,
+		_ch: Option<char>,
+		flags: u8,
+		consts: TabConstants,
+		root: &mut NbtElement,
+		path: &mut FilePath,
+		mi: &mut MutableIndices<'_>
+	) -> ControlFlow<Result<SelectedTextKeyResult, SelectedTextInputError>> {
+		if key == KeyCode::ArrowRight {
+			if flags & !flags!(Ctrl) == 0 && self.selection.is_none() && self.cursor == self.value.len() && self.valuefix.as_ref().is_some_and(|valuefix| valuefix.color.is_editable()) {
+				return Break(self
+					.move_to_valuefix(consts, root, path)
+					.map(SelectedTextKeyResult::WorkbenchAction)
+					.map_err(SelectedTextInputError::from));
+			}
+			if (flags) & !flags!(Shift) == flags!(Alt) {
+				return Break(self
+					.force_open((flags & !flags!(Alt)) == flags!(Shift), root, mi)
+					.map(|_| None)
+					.map(SelectedTextKeyResult::WorkbenchAction)
+					.map_err(SelectedTextInputError::from));
+			}
+		}
+
+		Continue(())
+	}
+
+	fn on_key_press<'m1, 'm2: 'm1>(
+		&mut self,
+		key: KeyCode,
+		ch: Option<char>,
+		flags: u8,
+		consts: TabConstants,
+		root: &mut NbtElement,
+		path: &mut FilePath,
+		mi: &'m1 mut MutableIndices<'m2>,
+	) -> ControlFlow<Result<SelectedTextKeyResult, SelectedTextInputError>> {
+		self.try_move_up(key, ch, flags, consts, root, path, mi)?;
+		self.try_move_down(key, ch, flags, consts, root, path, mi)?;
+		self.try_move_left(key, ch, flags, consts, root, path, mi)?;
+		self.try_move_right(key, ch, flags, consts, root, path, mi)?;
+
+		let cursor_before = self.cursor;
+		let Break(result) = self.0.on_key_press(key, ch, flags).map_break(SelectedTextKeyResult::from) else { return Continue(()) };
+		if self.cursor != cursor_before {
+			self.recache_cached_cursor_x(consts);
+		}
+		Break(Ok(result))
+	}
+
+	pub fn handle_key_press<'m1, 'm2: 'm1>(
+		&mut self,
+		key: KeyCode,
+		ch: Option<char>,
+		flags: u8,
+		consts: TabConstants,
+		root: &mut NbtElement,
+		path: &mut FilePath,
+		mi: &'m1 mut MutableIndices<'m2>,
+		alerts: &mut AlertManager,
+		history: &mut HistoryMananger,
+	) -> ControlFlow<ShouldRemove> {
+		let Break(result) = self.on_key_press(key, ch, flags, consts, root, path, mi) else { return Continue(()) };
+		match result {
+			Err(e) if !e.is_generally_ignored() => {
+				alerts.alert(e);
+				Break(true)
+			},
+			Err(_) => Continue(()),
+			Ok(SelectedTextKeyResult::WorkbenchAction(action)) => {
+				self.post_input();
+				history.append_all(action);
+				Break(false)
+			}
+			Ok(SelectedTextKeyResult::Generic(KeyResult::Escape)) => Break(true),
+			Ok(SelectedTextKeyResult::Generic(KeyResult::Finish)) => {
+				history.append_all(self.save(root, path).alert_err(alerts).flatten());
+				Break(true)
+			}
+			Ok(SelectedTextKeyResult::Generic(KeyResult::GenericAction)) => {
+				self.post_input();
+				Break(false)
+			}
+		}
 	}
 }
 
