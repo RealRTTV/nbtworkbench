@@ -3,7 +3,6 @@ use std::fmt::Write;
 use std::ops::{ControlFlow, Deref, DerefMut, Range};
 
 use compact_str::ToCompactString;
-use option_into_controlflow::OptionExt;
 use thiserror::Error;
 use uuid::Uuid;
 use winit::keyboard::KeyCode;

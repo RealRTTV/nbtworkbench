@@ -127,7 +127,7 @@ impl NbtElementVariant for NbtCompound {
 	const UV: Vec2u = COMPOUND_UV;
 	const GHOST_UV: Vec2u = COMPOUND_GHOST_UV;
 	const VALUE_COLOR: TextColor = TextColor::TreeValueDesc;
-	const SEPERATOR_COLOR: TextColor = Self::VALUE_COLOR;
+	const SEPARATOR_COLOR: TextColor = Self::VALUE_COLOR;
 
 	fn from_str0(mut s: &str) -> Result<(&str, Self), usize>
 	where Self: Sized {

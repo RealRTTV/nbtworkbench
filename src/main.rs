@@ -1,4 +1,4 @@
-#![allow(semicolon_in_expressions_from_macros, internal_features, incomplete_features, clippy::cast_lossless, clippy::cast_possible_truncation, clippy::cast_precision_loss, clippy::cast_sign_loss, clippy::cast_possible_wrap)]
+#![allow(semicolon_in_expressions_from_macros, internal_features, incomplete_features, clippy::cast_lossless, clippy::cast_possible_truncation, clippy::cast_precision_loss, clippy::cast_sign_loss, clippy::cast_possible_wrap, clippy::semicolon_if_nothing_returned)]
 #![warn(clippy::pedantic)]
 #![deny(clippy::too_many_lines, clippy::excessive_nesting, unused_must_use)]
 #![feature(

@@ -12,7 +12,7 @@ use crate::elements::chunk::NbtChunk;
 use crate::elements::result::NbtParseResult;
 use crate::elements::{ComplexNbtElementVariant, Matches, NbtElement, NbtElementVariant};
 use crate::render::TreeRenderContext;
-use crate::render::assets::{CONNECTION_UV, HEADER_SIZE, JUST_OVERLAPPING_BOOKMARK_Z, REGION_GRID_UV, REGION_UV};
+use crate::render::assets::{REGION_GRID_UV, REGION_UV};
 use crate::render::color::TextColor;
 use crate::render::vertex_buffer_builder::VertexBufferBuilder;
 use crate::serialization::decoder::Decoder;
@@ -102,7 +102,7 @@ impl Display for NbtRegion {
 impl PrettyDisplay for NbtRegion {
 	fn pretty_fmt(&self, f: &mut PrettyFormatter) {
 		if self.is_empty() {
-			f.write_str("Region {}")
+			f.write_str("Region {}");
 		} else {
 			f.write_str("Region {\n");
 			f.increase();
@@ -127,7 +127,7 @@ impl NbtRegion {
 	pub const CHUNK_BANDWIDTH: usize = 32;
 	pub const GRID_UV: Vec2u = REGION_GRID_UV;
 
-	pub fn set_open(&mut self, open: bool) { self.flags = (self.flags & !0b1) | open as u8 }
+	pub fn set_open(&mut self, open: bool) { self.flags = (self.flags & !0b1) | u8::from(open) }
 
 	#[must_use]
 	pub fn is_grid_layout(&self) -> bool { (self.flags & 0b10) > 0 }
@@ -137,11 +137,12 @@ impl NbtRegion {
 }
 
 impl NbtElementVariant for NbtRegion {
-	const ID: u8 = 64 | 0;
+	#[allow(clippy::identity_op, reason = "intentional for documentation")]
+	const ID: u8 = 0x40 | 0;
 	const UV: Vec2u = REGION_UV;
 	const GHOST_UV: Vec2u = REGION_UV;
 	const VALUE_COLOR: TextColor = TextColor::TreeValueDesc;
-	const SEPERATOR_COLOR: TextColor = Self::VALUE_COLOR;
+	const SEPARATOR_COLOR: TextColor = Self::VALUE_COLOR;
 
 	fn from_str0(mut s: &str) -> Result<(&str, Self), usize>
 	where Self: Sized {
@@ -174,7 +175,7 @@ impl NbtElementVariant for NbtRegion {
 
 	fn from_bytes<'a, D: Decoder<'a>>(decoder: &mut D, _: Self::ExtraParseInfo) -> NbtParseResult<Self>
 	where Self: Sized {
-		use super::result::*;
+		use super::result::{from_opt, ok};
 
 		decoder.assert_len(8192)?;
 
@@ -185,9 +186,7 @@ impl NbtElementVariant for NbtRegion {
 			let mut threads = Vec::with_capacity(1024);
 
 			for idx in 0..1024 {
-				// SAFETY: decoder is read only in `NbtChunk::from_bytes` impl
-				let d2: &mut D = unsafe { (decoder as *const D).cast_mut().as_mut_unchecked() };
-				threads.push(s.spawn(move || NbtChunk::from_bytes(d2, idx)));
+				threads.push(s.spawn(|| NbtChunk::from_bytes(decoder, idx)));
 			}
 
 			for (idx, thread) in threads.into_iter().enumerate() {
@@ -280,10 +279,6 @@ impl NbtRegion {
 			}
 		}
 		Some((chunk_data_writer.finish(), offsets, timestamps))
-	}
-
-	fn render_grid_layout(&self, builder: &mut VertexBufferBuilder, _key: Option<&str>, tail: bool, ctx: &mut TreeRenderContext) {
-
 	}
 }
 

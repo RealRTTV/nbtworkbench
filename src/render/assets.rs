@@ -12,8 +12,8 @@ pub const HEADER_SIZE: usize = 48;
 
 pub const DARK_ATLAS_ENCODED: &[u8] = include_bytes!("../assets/dark_atlas.png");
 pub const LIGHT_ATLAS_ENCODED: &[u8] = include_bytes!("../assets/light_atlas.png");
-pub const ATLAS_WIDTH: usize = 256;
-pub const ATLAS_HEIGHT: usize = 256;
+pub const ATLAS_WIDTH: u32 = 256;
+pub const ATLAS_HEIGHT: u32 = 256;
 pub const UNICODE_LEN: usize = 1_818_624;
 
 pub const ICON_WIDTH: usize = 64;

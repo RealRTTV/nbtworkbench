@@ -145,7 +145,7 @@ impl NbtElementVariant for NbtList {
 	const UV: Vec2u = LIST_UV;
 	const GHOST_UV: Vec2u = LIST_GHOST_UV;
 	const VALUE_COLOR: TextColor = TextColor::TreeValueDesc;
-	const SEPERATOR_COLOR: TextColor = Self::VALUE_COLOR;
+	const SEPARATOR_COLOR: TextColor = Self::VALUE_COLOR;
 
 	fn from_str0(mut s: &str) -> Result<(&str, Self), usize>
 	where Self: Sized {

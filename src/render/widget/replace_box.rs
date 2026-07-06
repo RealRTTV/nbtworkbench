@@ -13,7 +13,7 @@ use winit::keyboard::KeyCode;
 
 use crate::elements::compound::CompoundEntry;
 use crate::elements::element::{NbtElement, SNBTParseError};
-use crate::elements::{Matches, NbtElementAndKey, NbtElementAndKeyRef, NbtElementAndKeyRefMut};
+use crate::elements::{Matches, NbtElementAndKey, NbtElementAndKeyRef};
 use crate::history::WorkbenchAction;
 use crate::render::assets::{DARK_STRIPE_UV, REPLACE_BOX_SELECTION_Z, REPLACE_BOX_Z, REPLACE_BY_BOOKMARKED_LINES, REPLACE_BY_SEARCH_HITS};
 use crate::render::color::TextColor;

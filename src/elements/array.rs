@@ -103,7 +103,7 @@ macro_rules! array {
 
 				const VALUE_COLOR: $crate::render::color::TextColor = $crate::render::color::TextColor::TreeValueDesc;
 
-				const SEPERATOR_COLOR: $crate::render::color::TextColor = <Self as $crate::elements::NbtElementVariant>::VALUE_COLOR;
+				const SEPARATOR_COLOR: $crate::render::color::TextColor = <Self as $crate::elements::NbtElementVariant>::VALUE_COLOR;
 
 				fn from_str0(mut s: &str) -> Result<(&str, Self), usize> {
 					s = s.strip_prefix('[').ok_or(s.len())?.trim_start();

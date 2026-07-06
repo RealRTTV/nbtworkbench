@@ -36,7 +36,7 @@ pub type NbtElementAndKey = (Option<compact_str::CompactString>, NbtElement);
 pub type NbtElementAndKeyRef<'a> = (Option<&'a str>, &'a NbtElement);
 
 /// # Shorthands
-/// * `kv`
+/// * `kv`+
 pub type NbtElementAndKeyRefMut<'a> = (Option<&'a str>, &'a mut NbtElement);
 
 impl From<NbtElement> for NbtElementAndKey {
@@ -51,6 +51,7 @@ impl<'a> From<&'a mut NbtElement> for NbtElementAndKeyRefMut<'a> {
 	fn from(value: &'a mut NbtElement) -> Self { (None, value) }
 }
 
+#[allow(clippy::missing_errors_doc)]
 pub mod result {
 	use std::error::Error;
 
@@ -61,7 +62,6 @@ pub mod result {
 	#[must_use]
 	pub type NbtParseResult<T> = Option<T>;
 
-	#[must_use]
 	#[cfg_attr(not(debug_assertions), inline(always))]
 	pub fn ok<T>(nbt: T) -> NbtParseResult<T> {
 		#[cfg(debug_assertions)]
@@ -70,7 +70,6 @@ pub mod result {
 		return Some(nbt);
 	}
 
-	#[must_use]
 	#[cfg_attr(not(debug_assertions), inline(always))]
 	#[cfg_attr(not(debug_assertions), allow(unused_variables))]
 	pub fn err<T>(msg: &'static str) -> NbtParseResult<T> {
@@ -98,7 +97,6 @@ pub mod result {
 		return result.is_none();
 	}
 
-	#[must_use]
 	#[cfg_attr(not(debug_assertions), inline(always))]
 	#[cfg_attr(not(debug_assertions), allow(unused_variables))]
 	pub fn from_opt<T>(opt: Option<T>, msg: &'static str) -> NbtParseResult<T> {
@@ -108,7 +106,6 @@ pub mod result {
 		return opt;
 	}
 
-	#[must_use]
 	#[cfg_attr(not(debug_assertions), inline(always))]
 	pub fn from_result<T, E>(result: Result<T, E>) -> NbtParseResult<T>
 	where E: Error + Send + Sync + 'static {
@@ -127,7 +124,6 @@ pub mod result {
 		return result;
 	}
 
-	#[must_use]
 	#[cfg_attr(not(debug_assertions), inline(always))]
 	pub fn into_result<T, E>(result: NbtParseResult<T>, f: impl FnOnce(Option<anyhow::Error>) -> E) -> Result<T, E> {
 		#[cfg(debug_assertions)]
@@ -136,7 +132,6 @@ pub mod result {
 		return result.ok_or_else(|| f(None));
 	}
 
-	#[must_use]
 	#[cfg_attr(not(debug_assertions), inline(always))]
 	pub fn map<T, U>(result: NbtParseResult<T>, f: impl FnOnce(T) -> U) -> NbtParseResult<U> {
 		#[cfg(debug_assertions)]
@@ -158,7 +153,7 @@ pub trait NbtElementVariant: Clone + PartialEq + Display + Matches + Default + P
 	const UV: Vec2u;
 	const GHOST_UV: Vec2u;
 	const VALUE_COLOR: TextColor;
-	const SEPERATOR_COLOR: TextColor;
+	const SEPARATOR_COLOR: TextColor;
 
 	fn from_str0(s: &str) -> Result<(&str, Self), usize>
 	where Self: Sized;

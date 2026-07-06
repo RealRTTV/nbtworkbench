@@ -103,7 +103,7 @@ impl DerefMut for NbtChunk {
 	fn deref_mut(&mut self) -> &mut Self::Target { &mut self.inner }
 }
 
-fn get_bytes<'a, 'b>(decoder: &'a mut impl Decoder<'b>, idx: usize) -> NbtParseResult<Either<(&'a [u8], u32), NbtChunk>> {
+fn get_bytes<'a, 'b>(decoder: &'a impl Decoder<'b>, idx: usize) -> NbtParseResult<Either<(&'a [u8], u32), NbtChunk>> {
 	let bytes = decoder.rest();
 	let (offsets, bytes) = from_opt(bytes.split_first_chunk::<4096>(), "header wasn't big enough")?;
 	let (last_modifieds, bytes) = from_opt(bytes.split_first_chunk::<4096>(), "header wasn't big enough")?;
@@ -141,18 +141,18 @@ impl NbtElementVariant for NbtChunk {
 	const UV: Vec2u = CHUNK_UV;
 	const GHOST_UV: Vec2u = CHUNK_GHOST_UV;
 	const VALUE_COLOR: TextColor = TextColor::TreePrimitive;
-	const SEPERATOR_COLOR: TextColor = TextColor::TreeValueDesc;
+	const SEPARATOR_COLOR: TextColor = TextColor::TreeValueDesc;
 
 	fn from_str0(mut s: &str) -> Result<(&str, Self), usize>
 	where Self: Sized {
-		let digits = s.bytes().take_while(|b| b.is_ascii_digit()).count();
+		let digits = s.bytes().take_while(u8::is_ascii_digit).count();
 		let (digits, s2) = s.split_at(digits);
 		let Ok(x @ 0..=31) = digits.parse::<u8>() else { return Err(s.len()) };
 		s = s2.trim_start();
 
 		s = s.strip_prefix('|').ok_or(s.len())?.trim_start();
 
-		let digits = s.bytes().take_while(|b| b.is_ascii_digit()).count();
+		let digits = s.bytes().take_while(u8::is_ascii_digit).count();
 		let (digits, s2) = s.split_at(digits);
 		let Ok(z @ 0..=31) = digits.parse::<u8>() else { return Err(s.len()) };
 		s = s2.trim_start();
@@ -163,27 +163,7 @@ impl NbtElementVariant for NbtChunk {
 
 	fn from_bytes<'a, D: Decoder<'a>>(decoder: &mut D, idx: usize) -> NbtParseResult<Self>
 	where Self: Sized {
-		let (data, last_modified) = match get_bytes(decoder, idx)? {
-			Either::Left((bytes, last_modified)) => (bytes, last_modified),
-			Either::Right(chunk) => return ok(chunk),
-		};
-
-		let &[a, b, c, d, compression, ref data @ ..] = data else { return err("Invalid chunk data") };
-		let chunk_len = from_opt((u32::from_be_bytes([a, b, c, d]) as usize).checked_sub(1), "Chunk was inside header.")?;
-		if data.len() < chunk_len {
-			return err("Offset is invalid");
-		}
-		let data = &data[..chunk_len];
-		let compression = match compression {
-			1 => ChunkFileFormat::Gzip,
-			2 => ChunkFileFormat::Zlib,
-			3 => ChunkFileFormat::Nbt,
-			4 => ChunkFileFormat::Lz4,
-			_ => return err("Unknown compression format"),
-		};
-		let pos = ((idx % 16) as u8, (idx / 16) as u8);
-		let element = deserialize_chunk(data, compression)?;
-		ok(NbtChunk::new(from_opt(element.into_compound(), "Chunk was not of type compound")?, pos, compression, last_modified))
+		
 	}
 
 	fn to_be_bytes(&self, writer: &mut UncheckedBufWriter) {
@@ -270,6 +250,31 @@ impl NbtChunk {
 
 	#[must_use]
 	pub fn uv(&self) -> Vec2u { if self.is_unloaded() { Self::GHOST_UV } else { Self::UV } }
+
+	pub fn from_bytes<'a, D: Decoder<'a>>(decoder: &D, idx: usize) -> NbtParseResult<Self>
+	where Self: Sized {
+		let (data, last_modified) = match get_bytes(decoder, idx)? {
+			Either::Left((bytes, last_modified)) => (bytes, last_modified),
+			Either::Right(chunk) => return ok(chunk),
+		};
+
+		let &[a, b, c, d, compression, ref data @ ..] = data else { return err("Invalid chunk data") };
+		let chunk_len = from_opt((u32::from_be_bytes([a, b, c, d]) as usize).checked_sub(1), "Chunk was inside header.")?;
+		if data.len() < chunk_len {
+			return err("Offset is invalid");
+		}
+		let data = &data[..chunk_len];
+		let compression = match compression {
+			1 => ChunkFileFormat::Gzip,
+			2 => ChunkFileFormat::Zlib,
+			3 => ChunkFileFormat::Nbt,
+			4 => ChunkFileFormat::Lz4,
+			_ => return err("Unknown compression format"),
+		};
+		let pos = ((idx % 16) as u8, (idx / 16) as u8);
+		let element = deserialize_chunk(data, compression)?;
+		ok(NbtChunk::new(from_opt(element.into_compound(), "Chunk was not of type compound")?, pos, compression, last_modified))
+	}
 }
 
 impl ComplexNbtElementVariant for NbtChunk {

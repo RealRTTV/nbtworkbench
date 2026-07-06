@@ -42,7 +42,7 @@ impl NbtElementVariant for NbtString {
 	const UV: Vec2u = STRING_UV;
 	const GHOST_UV: Vec2u = STRING_GHOST_UV;
 	const VALUE_COLOR: TextColor = TextColor::TreeString;
-	const SEPERATOR_COLOR: TextColor = TextColor::TreeKey;
+	const SEPARATOR_COLOR: TextColor = TextColor::TreeKey;
 
 	fn from_str0(s: &str) -> Result<(&str, Self), usize>
 	where Self: Sized {

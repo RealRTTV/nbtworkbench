@@ -178,10 +178,8 @@ impl ElementAction {
 		let mut watcher = PollWatcher::new(
 			move |event| {
 				if let Ok(notify::Event { kind: EventKind::Modify(_), paths, .. }) = event {
-					for path in paths {
-						if let Ok(data) = std::fs::read(&path) {
-							let _ = tx.send(data);
-						}
+					for data in paths.into_iter().map(std::fs::read).filter_map(Result::ok) {
+						let _ = tx.send(data);
 					}
 				}
 			},

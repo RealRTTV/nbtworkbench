@@ -34,7 +34,7 @@ macro_rules! primitive {
 
 				const VALUE_COLOR: $crate::render::color::TextColor = $crate::render::color::TextColor::TreePrimitive;
 
-				const SEPERATOR_COLOR: $crate::render::color::TextColor = $crate::render::color::TextColor::TreeKey;
+				const SEPARATOR_COLOR: $crate::render::color::TextColor = $crate::render::color::TextColor::TreeKey;
 
 				fn from_str0(s: &str) -> Result<(&str, Self), usize>
 				where Self: Sized {

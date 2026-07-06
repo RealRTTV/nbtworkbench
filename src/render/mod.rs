@@ -155,7 +155,7 @@ impl<'w> TreeRenderContext<'w> {
 			if let Some(key) = key {
 				builder.color = TextColor::TreeKey.to_raw();
 				let _ = write!(builder, "{key}");
-				builder.color = Nbt::SEPERATOR_COLOR.to_raw();
+				builder.color = Nbt::SEPARATOR_COLOR.to_raw();
 				let _ = write!(builder, ": ");
 			}
 

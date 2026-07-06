@@ -245,8 +245,8 @@ impl<'window> State<'window> {
 		};
 		surface.configure(&device, &config);
 		let diffuse_texture_size = Extent3d {
-			width: ATLAS_WIDTH as u32,
-			height: ATLAS_HEIGHT as u32,
+			width: ATLAS_WIDTH,
+			height: ATLAS_HEIGHT,
 			depth_or_array_layers: 1,
 		};
 		let diffuse_texture = device.create_texture(&TextureDescriptor {
@@ -578,12 +578,12 @@ impl<'window> State<'window> {
 				atlas(get_theme()),
 				TexelCopyBufferLayout {
 					offset: 0,
-					bytes_per_row: Some(4 * ATLAS_WIDTH as u32),
-					rows_per_image: Some(ATLAS_HEIGHT as u32),
+					bytes_per_row: Some(4 * ATLAS_WIDTH),
+					rows_per_image: Some(ATLAS_HEIGHT),
 				},
 				Extent3d {
-					width: ATLAS_WIDTH as u32,
-					height: ATLAS_HEIGHT as u32,
+					width: ATLAS_WIDTH,
+					height: ATLAS_HEIGHT,
 					depth_or_array_layers: 1,
 				},
 			);
