@@ -640,7 +640,7 @@ impl Workbench {
 		if self.mouse.coords.y <= HEADER_SIZE {
 			return ActionResult::Pass
 		}
-		if self.mouse.coords.x + horizontal_scroll + 16 < left_margin {
+		if self.mouse.coords.x + horizontal_scroll < left_margin + 16 {
 			return ActionResult::Pass
 		}
 		let y = self.mouse.coords.y - HEADER_SIZE + scroll;
@@ -734,7 +734,7 @@ impl Workbench {
 				}
 			}
 
-			x -= width;
+			x = x.saturating_sub(width);
 
 			if x < 6 {
 				return ActionResult::Pass;
