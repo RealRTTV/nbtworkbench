@@ -138,7 +138,7 @@ impl ElementAction {
 		ORDERING[a.value.id() as usize].cmp(&ORDERING[b.value.id() as usize]).then_with(|| a.key.cmp(&b.key))
 	}
 
-	fn copy(formatted: bool, root: &mut NbtElement, indices: OwnedIndices, mi: &mut MutableIndices<'_>) -> Result<Option<WorkbenchAction>, ElementActionError> {
+	fn copy(formatted: bool, root: &mut NbtElement, indices: OwnedIndices, _mi: &mut MutableIndices<'_>) -> Result<Option<WorkbenchAction>, ElementActionError> {
 		use core::fmt::Write;
 
 		let NavigationInformation { key, element, .. } = root.navigate(&indices).map_err(CopyError::from)?;

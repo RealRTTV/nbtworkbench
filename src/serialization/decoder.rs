@@ -7,7 +7,7 @@ use crate::config;
 use crate::elements::compound::CompoundMap;
 use crate::elements::result::NbtParseResult;
 
-pub trait Decoder<'a>: Send {
+pub trait Decoder<'a>: Send + Sync {
 	fn new(data: &'a [u8]) -> Self
 	where Self: Sized;
 
@@ -53,6 +53,8 @@ pub struct BigEndianDecoder<'a> {
 }
 
 unsafe impl Send for BigEndianDecoder<'_> {}
+
+unsafe impl Sync for BigEndianDecoder<'_> {}
 
 impl<'a> Decoder<'a> for BigEndianDecoder<'a> {
 	fn new(data: &'a [u8]) -> Self {
@@ -137,6 +139,8 @@ pub struct LittleEndianDecoder<'a> {
 }
 
 unsafe impl Send for LittleEndianDecoder<'_> {}
+
+unsafe impl Sync for LittleEndianDecoder<'_> {}
 
 impl<'a> LittleEndianDecoder<'a> {
 	#[must_use]

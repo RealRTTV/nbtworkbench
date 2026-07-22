@@ -24,7 +24,6 @@ codegen-units = 1
 strip = true
 debug = false
 lto = "fat"
-panic = "abort"
 
 [profile.release.build-override]
 opt-level = 3

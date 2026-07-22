@@ -179,14 +179,14 @@ impl NbtElementVariant for NbtRegion {
 
 		decoder.assert_len(8192)?;
 
-		scope(|s| {
+		let region = scope(|s| {
 			let mut region = Self::default();
 
-			let bytes = decoder.rest();
 			let mut threads = Vec::with_capacity(1024);
 
 			for idx in 0..1024 {
-				threads.push(s.spawn(|| NbtChunk::from_bytes(decoder, idx)));
+				let decoder: &D = decoder;
+				threads.push(s.spawn(move || NbtChunk::from_bytes(decoder, idx)));
 			}
 
 			for (idx, thread) in threads.into_iter().enumerate() {
@@ -194,10 +194,13 @@ impl NbtElementVariant for NbtRegion {
 				region.chunks[idx] = NbtElement::Chunk(child);
 			}
 
-			decoder.skip(bytes.len());
-			region.recache();
-
 			ok(region)
+		});
+
+		decoder.skip(decoder.rest().len());
+		region.map(|mut region| {
+			region.recache();
+			region
 		})
 	}
 

@@ -118,12 +118,16 @@ however, it would not come to be without the lovely projects below inspiring it.
 
 # Compiling
 ### For Windows
-* You must have [Rust](https://rustup.rs) 1.85.0+ \[Nightly\] (target: x86_64-pc-windows-msvc)
+* You must have [Cargo](https://rustup.rs)
 * Uncomment the windows-only section of your `Cargo.toml` file and make sure the other sections are commented out.
 * Run the following command to make a release build in `./target/x86_64-pc-windows-msvc/release`:\
-`cargo +nightly build --release --target x86_64-pc-windows-msvc -Zbuild-std=std,panic_abort -Zbuild-std-features=panic_immediate_abort`
+`cargo build --release`
+### For Linux & Mac
+* Comment out both the windows-only and wasm-only section of your `Cargo.toml` file.
+* Run the following command to make a release build in `./target/release`:\
+`cargo build --release`
 ### For Wasm
-* You must have [Rust](https://rustup.rs) 1.85.0+ \[Nightly\]
+* You must have [Cargo](https://rustup.rs)
 * You must have [wasm-pack](https://crates.io/crates/wasm-pack) installed using cargo
 * Uncomment the wasm-only section of your `Cargo.toml` file and make sure the other sections are commented out.
 * Run the following command to compile for web assembly in `./web`:\

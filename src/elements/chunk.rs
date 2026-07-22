@@ -163,7 +163,7 @@ impl NbtElementVariant for NbtChunk {
 
 	fn from_bytes<'a, D: Decoder<'a>>(decoder: &mut D, idx: usize) -> NbtParseResult<Self>
 	where Self: Sized {
-		
+		NbtChunk::from_bytes(decoder, idx)
 	}
 
 	fn to_be_bytes(&self, writer: &mut UncheckedBufWriter) {
