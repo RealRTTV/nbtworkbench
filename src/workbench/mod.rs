@@ -4,7 +4,7 @@ pub mod marked_line;
 pub mod mouse;
 pub mod tab;
 
-use std::assert_matches::debug_assert_matches;
+use std::debug_assert_matches;
 use std::fmt::{Display, Formatter, Write};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;

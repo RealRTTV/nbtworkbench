@@ -290,7 +290,7 @@ impl NbtElementVariant for NbtRegion {
 
 						ctx.pos += (16, 0);
 					}
-					
+
 					ctx.pos.x = initial_x;
 					ctx.pos += (0, 16);
 				}
@@ -378,15 +378,14 @@ impl ComplexNbtElementVariant for NbtRegion {
 				}
 			});
 		}
-		if let Some(rem) = iter.into_remainder() {
-			scope.spawn(|| {
-				for element in rem {
-					if element.is_open() {
-						unsafe { element.shut(scope) };
-					}
+		let rem = iter.into_remainder();
+		scope.spawn(|| {
+			for element in rem {
+				if element.is_open() {
+					unsafe { element.shut(scope) };
 				}
-			});
-		}
+			}
+		});
 	}
 
 	unsafe fn expand<'a, 'b>(&'b mut self, scope: &'a Scope<'a, 'b>) {
@@ -400,13 +399,12 @@ impl ComplexNbtElementVariant for NbtRegion {
 					}
 				});
 			}
-			if let Some(rem) = iter.into_remainder() {
-				scope.spawn(|| {
-					for element in rem {
-						unsafe { element.expand(scope) };
-					}
-				});
-			}
+			let rem = iter.into_remainder();
+			scope.spawn(|| {
+				for element in rem {
+					unsafe { element.expand(scope) };
+				}
+			});
 		}
 	}
 

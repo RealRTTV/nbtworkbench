@@ -54,7 +54,7 @@ flate2 = "1.1.1"
 winit = "0.30.10"
 wgpu = { version = "25.0.0", default-features = false, features = ["webgl", "wgsl", "dx12", "metal", "vulkan"] }
 fxhash = "0.2.1"
-hashbrown = { version = "0.15.3", features = ["inline-more", "nightly"], default-features = false }
+hashbrown = { version = "0.17.1", features = ["inline-more", "nightly"], default-features = false }
 notify = "8.0.0"
 uuid = { version = "1.16.0", features = ["v4"] }
 compact_str = "0.9.0"

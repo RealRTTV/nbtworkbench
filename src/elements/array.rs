@@ -141,7 +141,7 @@ macro_rules! array {
 							))
 						});
 						match vec.push_within_capacity(element) {
-							Ok(()) => {}
+							Ok(_) => {}
 							Err(_) => return err("Vec was longer than originally stated"),
 						}
 					}
