@@ -4,7 +4,7 @@ pub mod marked_line;
 pub mod mouse;
 pub mod tab;
 
-use std::assert_matches::debug_assert_matches;
+use std::debug_assert_matches;
 use std::fmt::{Display, Formatter, Write};
 use std::path::{Path, PathBuf};
 use std::str::FromStr;
@@ -640,7 +640,7 @@ impl Workbench {
 		if self.mouse.coords.y <= HEADER_SIZE {
 			return ActionResult::Pass
 		}
-		if self.mouse.coords.x + horizontal_scroll + 16 < left_margin {
+		if self.mouse.coords.x + horizontal_scroll < left_margin + 16 {
 			return ActionResult::Pass
 		}
 		let y = self.mouse.coords.y - HEADER_SIZE + scroll;
@@ -734,7 +734,7 @@ impl Workbench {
 				}
 			}
 
-			x -= width;
+			x = x.saturating_sub(width);
 
 			if x < 6 {
 				return ActionResult::Pass;

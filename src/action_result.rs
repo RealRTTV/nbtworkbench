@@ -1,9 +1,10 @@
-use std::ops::{ControlFlow, FromResidual, Try};
+use std::ops::{ControlFlow, FromResidual, Residual, Try};
 
 // todo: add `FailureOnlyActionResult` which has `Try` that only breaks on failure
-/// This should be used for "actions" and in-place of result when there are three distinict return values.
+/// This should be used for "actions" and in place of Result when there are three distinct return values.
+/// ActionResult::Success(S) and ActionResult::Failure(E) short-circuit with `?`, while ActionResult::Pass continues.
 ///
-/// Note: unlike [`Option`]s and [`Result`]s. These two examples have different sematics:
+/// Note: unlike [`Option`]s and [`Result`]s. These two examples have different semantics:
 /// # Example 1a
 /// ```rs
 /// if should_do_specific_action() {
@@ -26,7 +27,7 @@ use std::ops::{ControlFlow, FromResidual, Try};
 ///     let action: ActionResult = do_specific_action();
 ///     match action {
 ///         ActionResult::Success(()) => return ActionResult::Success(()),
-///         ActionResult::Pass => {}, // returns ActionResult::Success(())
+///         ActionResult::Pass => {}, // continue execution
 ///         ActionResult::Failure(()) => return ActionResult::Failure(()),
 ///     }
 ///     ActionResult::Success(())
@@ -217,4 +218,12 @@ impl<E> Try for ActionResult<(), E> {
 			action => ControlFlow::Break(action),
 		}
 	}
+}
+
+impl<S, E> Residual<S> for ActionResult<!, E> {
+	type TryType = FailingActionResult<S, E>;
+}
+
+impl<E> Residual<()> for ActionResult<(), E> {
+	type TryType = ActionResult<(), E>;
 }

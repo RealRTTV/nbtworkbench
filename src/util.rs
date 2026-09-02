@@ -197,11 +197,11 @@ pub const fn valid_starting_char(byte: u8) -> bool { matches!(byte, b'A'..=b'Z' 
 /// `a` or `b` must not contain values repeated (such that `Ord::cmp()` returns Ordering::Equal) between elements within their own set
 #[must_use]
 pub unsafe fn union_two_sorted_no_duplicates<T: Ord>(a: Vec<T>, b: Vec<T>) -> Vec<T> {
-	let (a_root_ptr, a_len, a_cap, a_alloc) = a.into_parts_with_alloc();
+	let (a_root_ptr, a_len, a_cap, a_alloc) = a.into_parts_with_allocator();
 	let mut a_ptr = a_root_ptr.as_ptr();
 	let a_end_ptr = unsafe { a_ptr.add(a_len) };
 
-	let (b_root_ptr, b_len, b_cap, b_alloc) = b.into_parts_with_alloc();
+	let (b_root_ptr, b_len, b_cap, b_alloc) = b.into_parts_with_allocator();
 	let mut b_ptr = b_root_ptr.as_ptr();
 	let b_end_ptr = unsafe { b_ptr.add(b_len) };
 
@@ -251,11 +251,11 @@ pub unsafe fn union_two_sorted_no_duplicates<T: Ord>(a: Vec<T>, b: Vec<T>) -> Ve
 /// `a` or `b` must not contain values repeated (such that `Ord::cmp()` returns Ordering::Equal) between elements within their own set
 #[must_use]
 pub unsafe fn intersection_two_sorted_no_duplicates<T: Ord>(a: Vec<T>, b: Vec<T>) -> Vec<T> {
-	let (a_root_ptr, a_len, a_cap, a_alloc) = a.into_parts_with_alloc();
+	let (a_root_ptr, a_len, a_cap, a_alloc) = a.into_parts_with_allocator();
 	let mut a_ptr = a_root_ptr.as_ptr();
 	let a_end_ptr = unsafe { a_ptr.add(a_len) };
 
-	let (b_root_ptr, b_len, b_cap, b_alloc) = b.into_parts_with_alloc();
+	let (b_root_ptr, b_len, b_cap, b_alloc) = b.into_parts_with_allocator();
 	let mut b_ptr = b_root_ptr.as_ptr();
 	let b_end_ptr = unsafe { b_ptr.add(b_len) };
 
@@ -295,11 +295,11 @@ pub unsafe fn intersection_two_sorted_no_duplicates<T: Ord>(a: Vec<T>, b: Vec<T>
 /// `a` or `b` must not contain values repeated (such that `Ord::cmp()` returns Ordering::Equal) between elements within their own set
 #[must_use]
 pub unsafe fn symmetric_difference_two_sorted_no_duplicates<T: Ord>(a: Vec<T>, b: Vec<T>) -> Vec<T> {
-	let (a_root_ptr, a_len, a_cap, a_alloc) = a.into_parts_with_alloc();
+	let (a_root_ptr, a_len, a_cap, a_alloc) = a.into_parts_with_allocator();
 	let mut a_ptr = a_root_ptr.as_ptr();
 	let a_end_ptr = unsafe { a_ptr.add(a_len) };
 
-	let (b_root_ptr, b_len, b_cap, b_alloc) = b.into_parts_with_alloc();
+	let (b_root_ptr, b_len, b_cap, b_alloc) = b.into_parts_with_allocator();
 	let mut b_ptr = b_root_ptr.as_ptr();
 	let b_end_ptr = unsafe { b_ptr.add(b_len) };
 
@@ -373,7 +373,7 @@ impl<T: Debug> Debug for LinkedQueue<T> {
 // perf enhancement
 impl<T> Drop for LinkedQueue<T> {
 	fn drop(&mut self) {
-		while let Some(box SinglyLinkedNode { value: _, mut prev }) = self.tail.take() {
+		while let Some(SinglyLinkedNode { value: _, mut prev }) = self.tail.take() {
 			// take is not required, but then intellij gets upset.
 			self.tail = prev.take();
 		}
@@ -401,7 +401,7 @@ impl<T> LinkedQueue<T> {
 
 	#[must_use]
 	pub fn pop(&mut self) -> Option<T> {
-		if let Some(box SinglyLinkedNode { value, prev: tail }) = self.tail.take() {
+		if let Some(SinglyLinkedNode { value, prev: tail }) = self.tail.take() {
 			self.tail = tail;
 			self.len -= 1;
 			Some(value)
@@ -423,7 +423,7 @@ impl<T> LinkedQueue<T> {
 	pub const fn len(&self) -> usize { self.len }
 
 	pub fn clear(&mut self) {
-		while let Some(box SinglyLinkedNode { value: _, mut prev }) = self.tail.take() {
+		while let Some(SinglyLinkedNode { value: _, mut prev }) = self.tail.take() {
 			// take is not required, but then intellij gets upset.
 			self.tail = prev.take();
 		}
@@ -1234,7 +1234,7 @@ impl AABB {
 
 #[cfg(test)]
 mod tests {
-	use std::assert_matches::assert_matches;
+	use std::assert_matches;
 
 	#[test]
 	fn test_reorder() {

@@ -24,7 +24,7 @@ fn main() {
 			} as u8);
 		}
 		// SAFETY: all values are written to
-		write(r"src\assets\char_widths.hex", unsafe { MaybeUninit::array_assume_init(char_widths) }).unwrap();
+		write(r"src/assets/char_widths.hex", unsafe { MaybeUninit::array_assume_init(char_widths) }).unwrap();
 	}
 
 	{
